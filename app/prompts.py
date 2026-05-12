@@ -67,7 +67,7 @@ Reglas:
 - En caso de duda entre "repuestos" y "orvo", elegí "orvo"
 - En caso de duda entre cualquier ruta y "human", elegí "human"
 
-Mensaje del usuario: {message}
+Analizá el último mensaje del usuario en el historial de conversación y devolvé solo la ruta.
 """.strip()
 
 REPUESTOS_SYSTEM = f"""{ORVO_KNOWLEDGE}
