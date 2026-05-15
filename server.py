@@ -1,6 +1,8 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import hashlib
+import hmac
 import os
 import threading
 import requests
@@ -12,12 +14,24 @@ from db import init_db, load_messages, save_messages, load_lead, save_lead, is_j
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "orvo")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 
 _timers: dict[str, threading.Timer] = {}
 _buffers: dict[str, list[str]] = {}
+_lock = threading.Lock()
+
+
+def _verify_meta_signature(body: bytes) -> bool:
+    secret = os.environ.get("WHATSAPP_APP_SECRET", "")
+    if not secret:
+        return True  # skip validation if secret not configured
+    sig_header = request.headers.get("X-Hub-Signature-256", "")
+    if not sig_header.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig_header, expected)
 
 
 @app.get("/health")
@@ -37,6 +51,9 @@ def verify():
 
 @app.post("/webhook")
 def webhook():
+    raw_body = request.get_data()
+    if not _verify_meta_signature(raw_body):
+        return "Unauthorized", 401
     data = request.get_json(silent=True) or {}
     try:
         value = data["entry"][0]["changes"][0]["value"]
@@ -49,20 +66,22 @@ def webhook():
             _send(phone, "Por ahora solo puedo responder mensajes de texto.")
             return "ok", 200
         text = msg["text"]["body"]
-        if phone in _timers:
-            _timers[phone].cancel()
-        _buffers.setdefault(phone, []).append(text)
-        timer = threading.Timer(10.0, _process, args=[phone])
-        _timers[phone] = timer
-        timer.start()
-    except (KeyError, IndexError, TypeError):
-        pass
+        with _lock:
+            if phone in _timers:
+                _timers[phone].cancel()
+            _buffers.setdefault(phone, []).append(text)
+            timer = threading.Timer(10.0, _process, args=[phone])
+            _timers[phone] = timer
+            timer.start()
+    except (KeyError, IndexError, TypeError) as e:
+        print(f"[webhook] Unexpected payload shape: {e}")
     return "ok", 200
 
 
 def _process(phone: str) -> None:
-    pending = _buffers.pop(phone, [])
-    _timers.pop(phone, None)
+    with _lock:
+        pending = _buffers.pop(phone, [])
+        _timers.pop(phone, None)
     if not pending:
         return
     try:
