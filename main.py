@@ -9,7 +9,16 @@ print("Orvo Agent — Local REPL")
 print("Escribí 'salir' para terminar.")
 print("=" * 50 + "\n")
 
-state: OrvoState = {"messages": [], "route": "", "needs_human": False}
+state: OrvoState = {
+    "messages": [],
+    "route": "",
+    "needs_human": False,
+    "lead_profile": {},
+    "hot_lead": False,
+    "juan_notified": False,
+    "hot_reason": "",
+    "phone": "repl_local",
+}
 
 while True:
     try:
@@ -28,11 +37,16 @@ while True:
 
     respuesta = state["messages"][-1].content
     route = state.get("route", "?")
-    needs_human = state.get("needs_human", False)
+    hot = state.get("hot_lead", False)
+    profile = state.get("lead_profile", {})
 
     tag = f"[{route}]"
-    if needs_human:
-        tag += " ⚠ HUMAN NEEDED"
+    if hot:
+        tag += " 🔥 LEAD CALIENTE"
+    if profile:
+        captured = ", ".join(f"{k}={v}" for k, v in profile.items() if v)
+        if captured:
+            tag += f" | perfil: {captured}"
 
     print(f"{tag}")
     print(f"Orvo: {respuesta}\n")
