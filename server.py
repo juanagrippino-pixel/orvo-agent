@@ -1,0 +1,121 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+import os
+import threading
+import requests
+from flask import Flask, request, jsonify
+from langchain_core.messages import HumanMessage, AIMessage
+
+from app.graph import orvo_app, OrvoState
+from db import init_db, load_messages, save_messages, load_lead, save_lead, is_juan_notified, mark_juan_notified
+
+app = Flask(__name__)
+
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "orvo")
+WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
+
+_timers: dict[str, threading.Timer] = {}
+_buffers: dict[str, list[str]] = {}
+
+
+@app.get("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
+@app.get("/webhook")
+def verify():
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return challenge, 200
+    return "Forbidden", 403
+
+
+@app.post("/webhook")
+def webhook():
+    data = request.get_json(silent=True) or {}
+    try:
+        value = data["entry"][0]["changes"][0]["value"]
+        messages = value.get("messages")
+        if not messages:
+            return "ok", 200
+        msg = messages[0]
+        phone = msg["from"]
+        if msg.get("type") != "text":
+            _send(phone, "Por ahora solo puedo responder mensajes de texto.")
+            return "ok", 200
+        text = msg["text"]["body"]
+        if phone in _timers:
+            _timers[phone].cancel()
+        _buffers.setdefault(phone, []).append(text)
+        timer = threading.Timer(10.0, _process, args=[phone])
+        _timers[phone] = timer
+        timer.start()
+    except (KeyError, IndexError, TypeError):
+        pass
+    return "ok", 200
+
+
+def _process(phone: str) -> None:
+    pending = _buffers.pop(phone, [])
+    _timers.pop(phone, None)
+    if not pending:
+        return
+    try:
+        history = load_messages(phone)
+        lead_profile = load_lead(phone)
+        juan_already_notified = is_juan_notified(phone)
+        state: OrvoState = {
+            "messages": history + [HumanMessage(content=t) for t in pending],
+            "route": "",
+            "needs_human": False,
+            "lead_profile": lead_profile,
+            "hot_lead": False,
+            "juan_notified": juan_already_notified,
+            "hot_reason": "",
+            "phone": phone,
+        }
+        result = orvo_app.invoke(state)
+        ai_msgs = [m for m in result["messages"] if isinstance(m, AIMessage)]
+        response_text = ai_msgs[-1].content if ai_msgs else "Tuve un problema técnico. Escribile directamente a Juan: +54 9 11 5038 0097"
+        profile_update = dict(result.get("lead_profile") or {})
+        if result.get("hot_lead"):
+            profile_update["is_hot"] = True
+            profile_update["hot_reason"] = result.get("hot_reason") or ""
+        save_lead(phone, profile_update)
+        if result.get("hot_lead") and not juan_already_notified:
+            mark_juan_notified(phone)
+        save_messages(phone, result["messages"])
+        _send(phone, response_text)
+    except Exception as e:
+        print(f"[_process] Error for {phone}: {e}")
+        _send(phone, "Tuve un problema técnico. Escribile directamente a Juan: +54 9 11 5038 0097")
+
+
+def _send(phone: str, text: str) -> None:
+    if not WHATSAPP_PHONE_ID or not WHATSAPP_TOKEN:
+        print(f"[_send] No credentials. Would send to {phone}: {text[:80]}")
+        return
+    url = f"https://graph.facebook.com/v21.0/{WHATSAPP_PHONE_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "text",
+        "text": {"body": text},
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"[_send] Error {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[_send] Exception: {e}")
+
+
+if __name__ == "__main__":
+    init_db()
+    app.run(host="0.0.0.0", port=8000)
