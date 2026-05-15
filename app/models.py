@@ -1,14 +1,12 @@
 import os
-from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 
-MODEL = "deepseek-ai/deepseek-v3.2"
-NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+MODEL = "claude-haiku-4-5-20251001"
 
 
-def get_llm() -> ChatOpenAI:
-    return ChatOpenAI(
+def get_llm() -> ChatAnthropic:
+    return ChatAnthropic(
         model=MODEL,
-        base_url=NVIDIA_BASE_URL,
-        api_key=os.environ["NVIDIA_API_KEY"],
+        api_key=os.environ["ANTHROPIC_API_KEY"],
         temperature=0.3,
     )
