@@ -16,6 +16,7 @@ def test_orvo_knowledge_tiene_precio_y_links():
     assert "calendly" in ORVO_KNOWLEDGE.lower()
     assert "orvo.space" in ORVO_KNOWLEDGE
     assert "demo-repuestos.html" in ORVO_KNOWLEDGE
+    assert "Oli" in ORVO_KNOWLEDGE
 
 
 def test_classify_prompt_define_las_tres_rutas():
