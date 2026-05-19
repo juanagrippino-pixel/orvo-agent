@@ -18,6 +18,7 @@ from app.brain.dispatch import InMemoryIdempotencyStore
 from app.brain.pipeline import (
     run_csv_daily_report_pipeline,
     run_google_sheets_daily_report_pipeline,
+    run_mercadolibre_daily_report_pipeline,
     run_tiendanube_daily_report_pipeline,
 )
 from app.brain.runner import run_due_daily_reports
@@ -55,6 +56,7 @@ def run_forced_report(
     idempotency_store,
     sheets_service_factory=get_sheets_service,
     tiendanube_http_client=None,
+    mercadolibre_http_client=None,
 ):
     connector_type = _first_enabled_connector_type(business)
     if connector_type == "google_sheets":
@@ -72,6 +74,14 @@ def run_forced_report(
             delivery_client=delivery_client,
             idempotency_store=idempotency_store,
             http_client=tiendanube_http_client,
+        )
+    if connector_type == "mercadolibre":
+        return run_mercadolibre_daily_report_pipeline(
+            business=business,
+            report_date=report_date,
+            delivery_client=delivery_client,
+            idempotency_store=idempotency_store,
+            http_client=mercadolibre_http_client,
         )
     if connector_type == "csv":
         return run_csv_daily_report_pipeline(

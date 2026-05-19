@@ -12,6 +12,7 @@ from app.brain.dispatch import IdempotencyStore
 from app.brain.pipeline import (
     PipelineResult,
     run_google_sheets_daily_report_pipeline,
+    run_mercadolibre_daily_report_pipeline,
     run_tiendanube_daily_report_pipeline,
 )
 from app.brain.scheduler import due_schedules
@@ -42,6 +43,7 @@ def run_due_daily_reports(
     delivery_client: WhatsAppDeliveryClient,
     sheets_service=None,
     tiendanube_http_client=None,
+    mercadolibre_http_client=None,
     now: datetime | None = None,
 ) -> list[ScheduledPipelineResult]:
     """Run every due daily report from the config store."""
@@ -74,6 +76,14 @@ def run_due_daily_reports(
                 delivery_client=delivery_client,
                 idempotency_store=idempotency_store,
                 http_client=tiendanube_http_client,
+            )
+        elif "mercadolibre" in connector_types:
+            pipeline = run_mercadolibre_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                http_client=mercadolibre_http_client,
             )
         else:
             continue

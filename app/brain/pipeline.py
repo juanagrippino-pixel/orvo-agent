@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.brain.adapters.csv_file import build_daily_report_from_csv_file
 from app.brain.adapters.google_sheets import build_daily_report_from_sheet
+from app.brain.adapters.mercadolibre import build_daily_report_from_mercadolibre
 from app.brain.adapters.tiendanube import build_daily_report_from_tiendanube
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.delivery import WhatsAppDeliveryClient
@@ -39,6 +40,13 @@ def _find_csv_connector(business: BusinessConfig) -> ConnectorConfig:
         if connector.enabled and connector.connector_type == "csv":
             return connector
     raise ValueError(f"Business {business.business_id} has no enabled csv connector")
+
+
+def _find_mercadolibre_connector(business: BusinessConfig) -> ConnectorConfig:
+    for connector in business.connectors:
+        if connector.enabled and connector.connector_type == "mercadolibre":
+            return connector
+    raise ValueError(f"Business {business.business_id} has no enabled mercadolibre connector")
 
 
 def run_google_sheets_daily_report_pipeline(
@@ -127,6 +135,40 @@ def run_csv_daily_report_pipeline(
         report_date=report_date,
         csv_path=csv_path,
         source_label=connector.params.get("source_label") or connector.label,
+    )
+    dispatch = dispatch_daily_report(
+        report=report,
+        business=business,
+        delivery_client=delivery_client,
+        idempotency_store=idempotency_store,
+    )
+    return PipelineResult(report=report, dispatch=dispatch)
+
+
+def run_mercadolibre_daily_report_pipeline(
+    *,
+    business: BusinessConfig,
+    report_date: date,
+    delivery_client: WhatsAppDeliveryClient,
+    idempotency_store: IdempotencyStore,
+    http_client=None,
+) -> PipelineResult:
+    """Build a daily report from MercadoLibre and dispatch it to WhatsApp."""
+
+    connector = _find_mercadolibre_connector(business)
+    seller_id = connector.params.get("seller_id")
+    access_token = connector.params.get("access_token")
+    if not seller_id or not access_token:
+        raise ValueError("mercadolibre connector params must include seller_id and access_token")
+
+    report = build_daily_report_from_mercadolibre(
+        business_name=business.business_name,
+        report_date=report_date,
+        seller_id=seller_id,
+        access_token=access_token,
+        site_id=connector.params.get("site_id", "MLA"),
+        source_label=connector.params.get("source_label") or connector.label,
+        http_client=http_client,
     )
     dispatch = dispatch_daily_report(
         report=report,

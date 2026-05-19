@@ -26,6 +26,21 @@ class FakeTiendanubeHTTPClient:
         return response
 
 
+class FakeMercadoLibreHTTPClient:
+    def get(self, url, headers=None, params=None):
+        response = MagicMock()
+        response.status_code = 200
+        response.headers = {}
+        response.json.return_value = {
+            "results": [
+                {"id": 1, "status": "paid", "total_amount": 5000.0},
+                {"id": 2, "status": "cancelled", "total_amount": 999.0},
+            ],
+            "paging": {"total": 2, "offset": 0, "limit": 50},
+        }
+        return response
+
+
 def make_tiendanube_business():
     return BusinessConfig(
         business_id="demo-shop",
@@ -60,6 +75,45 @@ def test_force_report_uses_tiendanube_pipeline_without_loading_sheets():
 
     assert result.report.business_name == "Demo Shop"
     assert {metric.key: metric.value for metric in result.report.metrics}["revenue_today"] == 1000.0
+    assert result.dispatch.status == "sent"
+    sheets_service_factory.assert_not_called()
+
+
+def make_mercadolibre_business():
+    return BusinessConfig(
+        business_id="demo-ml",
+        business_name="Demo ML",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-mercadolibre",
+                connector_type="mercadolibre",
+                label="MercadoLibre Demo",
+                params={"seller_id": "123", "access_token": "ml_test_token", "site_id": "MLA"},
+            )
+        ],
+    )
+
+
+def test_force_report_uses_mercadolibre_pipeline_without_loading_sheets_or_tiendanube():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for mercadolibre"))
+
+    result = reports_script.run_forced_report(
+        business=make_mercadolibre_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube must not be called for mercadolibre")),
+        mercadolibre_http_client=FakeMercadoLibreHTTPClient(),
+    )
+
+    assert result.report.business_name == "Demo ML"
+    assert {metric.key: metric.value for metric in result.report.metrics}["revenue_today"] == 5000.0
     assert result.dispatch.status == "sent"
     sheets_service_factory.assert_not_called()
 
