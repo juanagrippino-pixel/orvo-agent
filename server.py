@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import os
 import threading
+from datetime import date
 import requests
 from flask import Flask, request, jsonify
 from langchain_core.messages import HumanMessage, AIMessage
@@ -12,6 +13,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from app.graph import orvo_app, OrvoState
 from db import init_db, load_messages, save_messages, load_lead, save_lead, is_juan_notified, mark_juan_notified
 from app.brain.adapters.sample import build_daily_report_from_payload
+from app.brain.adapters.google_sheets import build_daily_report_from_sheet
 from app.brain.reporting import compose_daily_report_text
 
 app = Flask(__name__)
@@ -47,6 +49,36 @@ def brain_daily_report():
     if not payload.get("business_name") or not payload.get("metrics"):
         return jsonify({"error": "business_name and metrics are required"}), 400
     report = build_daily_report_from_payload(payload)
+    return jsonify({
+        "text": compose_daily_report_text(report),
+        "report": report.model_dump(mode="json"),
+    })
+
+
+@app.post("/brain/reports/daily/google-sheets")
+def brain_daily_report_google_sheets():
+    payload = request.get_json(silent=True) or {}
+    required = ["business_name", "spreadsheet_id", "range_name"]
+    missing = [key for key in required if not payload.get(key)]
+    if missing:
+        return jsonify({"error": f"missing required fields: {', '.join(missing)}"}), 400
+
+    try:
+        report_date = date.fromisoformat(payload["report_date"]) if payload.get("report_date") else date.today()
+    except ValueError:
+        return jsonify({"error": "report_date must use YYYY-MM-DD format"}), 400
+
+    try:
+        report = build_daily_report_from_sheet(
+            business_name=payload["business_name"],
+            report_date=report_date,
+            spreadsheet_id=payload["spreadsheet_id"],
+            range_name=payload["range_name"],
+            source_label=payload.get("source_label"),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
     return jsonify({
         "text": compose_daily_report_text(report),
         "report": report.model_dump(mode="json"),
