@@ -15,6 +15,11 @@ from db import init_db, load_messages, save_messages, load_lead, save_lead, is_j
 from app.brain.adapters.sample import build_daily_report_from_payload
 from app.brain.adapters.google_sheets import build_daily_report_from_sheet
 from app.brain.adapters.csv_file import build_daily_report_from_csv_file
+from app.brain.adapters.tiendanube import (
+    TiendanubeAuthError,
+    TiendanubeConnectionError,
+    build_daily_report_from_tiendanube,
+)
 from app.brain.reporting import compose_daily_report_text
 
 app = Flask(__name__)
@@ -108,6 +113,39 @@ def brain_daily_report_csv():
         )
     except (FileNotFoundError, ValueError) as e:
         return jsonify({"error": str(e)}), 400
+
+    return jsonify({
+        "text": compose_daily_report_text(report),
+        "report": report.model_dump(mode="json"),
+    })
+
+
+@app.post("/brain/reports/daily/tiendanube")
+def brain_daily_report_tiendanube():
+    payload = request.get_json(silent=True) or {}
+    required = ["business_name", "store_id", "access_token"]
+    missing = [key for key in required if not payload.get(key)]
+    if missing:
+        return jsonify({"error": f"missing required fields: {', '.join(missing)}"}), 400
+
+    try:
+        report_date = date.fromisoformat(payload["report_date"]) if payload.get("report_date") else date.today()
+    except ValueError:
+        return jsonify({"error": "report_date must use YYYY-MM-DD format"}), 400
+
+    try:
+        report = build_daily_report_from_tiendanube(
+            business_name=payload["business_name"],
+            store_id=payload["store_id"],
+            access_token=payload["access_token"],
+            report_date=report_date,
+            include_stock=bool(payload.get("include_stock", False)),
+            source_label=payload.get("source_label") or "Tiendanube",
+        )
+    except TiendanubeAuthError as e:
+        return jsonify({"error": str(e)}), 401
+    except TiendanubeConnectionError as e:
+        return jsonify({"error": str(e)}), 502
 
     return jsonify({
         "text": compose_daily_report_text(report),
