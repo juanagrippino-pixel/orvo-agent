@@ -11,6 +11,8 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from app.graph import orvo_app, OrvoState
 from db import init_db, load_messages, save_messages, load_lead, save_lead, is_juan_notified, mark_juan_notified
+from app.brain.adapters.sample import build_daily_report_from_payload
+from app.brain.reporting import compose_daily_report_text
 
 app = Flask(__name__)
 
@@ -37,6 +39,18 @@ def _verify_meta_signature(body: bytes) -> bool:
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.post("/brain/reports/daily")
+def brain_daily_report():
+    payload = request.get_json(silent=True) or {}
+    if not payload.get("business_name") or not payload.get("metrics"):
+        return jsonify({"error": "business_name and metrics are required"}), 400
+    report = build_daily_report_from_payload(payload)
+    return jsonify({
+        "text": compose_daily_report_text(report),
+        "report": report.model_dump(mode="json"),
+    })
 
 
 @app.get("/webhook")
