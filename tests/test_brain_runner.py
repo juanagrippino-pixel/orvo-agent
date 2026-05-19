@@ -224,3 +224,60 @@ def test_run_due_daily_reports_dispatches_due_mercadolibre_report():
     assert results[0].dispatch.status == "sent"
     assert any(metric.key == "revenue_today" and metric.value == 99000 for metric in results[0].pipeline.report.metrics)
     delivery.send_text.assert_called_once()
+
+
+def make_csv_store(tmp_path):
+    csv_path = tmp_path / "daily.csv"
+    csv_path.write_text(
+        "fecha,ventas,ordenes,stock,conversaciones_sin_responder\n"
+        "2026-05-19,70000,12,3,8\n"
+        "2026-05-18,100000,10,10,1\n",
+        encoding="utf-8",
+    )
+    store = InMemoryConfigStore()
+    store.save_business_config(
+        BusinessConfig(
+            business_id="csv-biz",
+            business_name="CSV Biz",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="csv-main",
+                    connector_type="csv",
+                    label="CSV Daily",
+                    params={"csv_path": str(csv_path), "source_label": "CSV Biz"},
+                )
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="csv-biz-daily-report",
+            business_id="csv-biz",
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+    return store
+
+
+def test_run_due_daily_reports_dispatches_due_csv_report(tmp_path):
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.csv", error=None)
+
+    results = run_due_daily_reports(
+        config_store=make_csv_store(tmp_path),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 1
+    assert results[0].business_id == "csv-biz"
+    assert results[0].dispatch.status == "sent"
+    assert any(metric.key == "revenue_today" and metric.value == 70000 for metric in results[0].pipeline.report.metrics)
+    delivery.send_text.assert_called_once()

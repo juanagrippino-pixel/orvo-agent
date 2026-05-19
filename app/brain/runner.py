@@ -11,6 +11,7 @@ from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore
 from app.brain.pipeline import (
     PipelineResult,
+    run_csv_daily_report_pipeline,
     run_google_sheets_daily_report_pipeline,
     run_mercadolibre_daily_report_pipeline,
     run_tiendanube_daily_report_pipeline,
@@ -84,6 +85,13 @@ def run_due_daily_reports(
                 delivery_client=delivery_client,
                 idempotency_store=idempotency_store,
                 http_client=mercadolibre_http_client,
+            )
+        elif "csv" in connector_types:
+            pipeline = run_csv_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
             )
         else:
             continue
