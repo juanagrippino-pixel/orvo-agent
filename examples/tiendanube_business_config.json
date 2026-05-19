@@ -1,0 +1,20 @@
+{
+  "business_id": "demo-shop",
+  "business_name": "Demo Shop",
+  "owner_phone": "+5491150380097",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "demo-tiendanube",
+      "connector_type": "tiendanube",
+      "label": "Tiendanube - Demo Shop",
+      "params": {
+        "store_id": "4828037",
+        "access_token": "[REDACTED]",
+        "include_stock": false
+      },
+      "enabled": true
+    }
+  ]
+}
