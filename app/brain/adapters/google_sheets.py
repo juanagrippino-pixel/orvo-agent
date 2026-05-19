@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import unicodedata
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 from app.brain.adapters.sample import METRIC_LABELS
@@ -92,17 +94,52 @@ def rows_to_records(values: list[list[str]]) -> list[dict[str, str]]:
     return records
 
 
+def _default_oauth_client_secret_path() -> str:
+    return str(Path.home() / ".hermes" / "google_client_secret.json")
+
+
+def _default_oauth_token_path() -> str:
+    return str(Path.home() / ".hermes" / "google_token.json")
+
+
+def _load_user_oauth_credentials(*, client_secret_file: str, token_file: str):
+    from google.oauth2.credentials import Credentials
+
+    client_secret = json.loads(Path(client_secret_file).read_text())
+    client_info = client_secret.get("installed") or client_secret.get("web") or client_secret
+    token = json.loads(Path(token_file).read_text())
+    return Credentials(
+        token=token.get("token"),
+        refresh_token=token.get("refresh_token"),
+        token_uri=token.get("token_uri") or client_info.get("token_uri") or "https://oauth2.googleapis.com/token",
+        client_id=client_info["client_id"],
+        client_secret=client_info["client_secret"],
+        scopes=token.get("scopes"),
+    )
+
+
 def get_sheets_service(*, credentials_file: str | None = None, scopes: list[str] | None = None):
     credentials_path = credentials_file or os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE")
-    if not credentials_path:
-        raise ValueError("GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE is required")
     scopes = scopes or [os.environ.get("GOOGLE_SHEETS_SCOPES", "https://www.googleapis.com/auth/spreadsheets.readonly")]
 
-    from google.oauth2.service_account import Credentials
     from googleapiclient.discovery import build
 
-    credentials = Credentials.from_service_account_file(credentials_path, scopes=scopes)
-    return build("sheets", "v4", credentials=credentials)
+    if credentials_path:
+        from google.oauth2.service_account import Credentials
+
+        credentials = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+        return build("sheets", "v4", credentials=credentials)
+
+    client_secret_file = os.environ.get("GOOGLE_CLIENT_SECRET_FILE", _default_oauth_client_secret_path())
+    token_file = os.environ.get("GOOGLE_OAUTH_TOKEN_FILE", _default_oauth_token_path())
+    if Path(client_secret_file).exists() and Path(token_file).exists():
+        credentials = _load_user_oauth_credentials(client_secret_file=client_secret_file, token_file=token_file)
+        return build("sheets", "v4", credentials=credentials)
+
+    raise ValueError(
+        "Google Sheets credentials are required: set GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE "
+        "or provide GOOGLE_CLIENT_SECRET_FILE plus GOOGLE_OAUTH_TOKEN_FILE"
+    )
 
 
 def fetch_sheet_values(spreadsheet_id: str, range_name: str, *, service=None) -> list[list[str]]:
