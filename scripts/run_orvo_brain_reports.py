@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.brain.adapters.google_sheets import get_sheets_service
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient
 from app.brain.dispatch import InMemoryIdempotencyStore
-from app.brain.pipeline import run_google_sheets_daily_report_pipeline
+from app.brain.pipeline import run_google_sheets_daily_report_pipeline, run_tiendanube_daily_report_pipeline
 from app.brain.runner import run_due_daily_reports
 from app.brain.storage import SQLiteConfigStore, SQLiteIdempotencyStore, init_schema
 
@@ -36,6 +36,42 @@ def open_runtime(db_path: str):
     return conn, SQLiteConfigStore(conn), SQLiteIdempotencyStore(conn)
 
 
+def _first_enabled_connector_type(business) -> str | None:
+    for connector in business.connectors:
+        if connector.enabled:
+            return connector.connector_type
+    return None
+
+
+def run_forced_report(
+    *,
+    business,
+    report_date: date,
+    delivery_client,
+    idempotency_store,
+    sheets_service_factory=get_sheets_service,
+    tiendanube_http_client=None,
+):
+    connector_type = _first_enabled_connector_type(business)
+    if connector_type == "google_sheets":
+        return run_google_sheets_daily_report_pipeline(
+            business=business,
+            report_date=report_date,
+            delivery_client=delivery_client,
+            idempotency_store=idempotency_store,
+            sheets_service=sheets_service_factory(),
+        )
+    if connector_type == "tiendanube":
+        return run_tiendanube_daily_report_pipeline(
+            business=business,
+            report_date=report_date,
+            delivery_client=delivery_client,
+            idempotency_store=idempotency_store,
+            http_client=tiendanube_http_client,
+        )
+    raise ValueError(f"Business {business.business_id} has no supported enabled connector")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Orvo Brain report pipelines")
     parser.add_argument("--db", default=os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3"))
@@ -47,19 +83,17 @@ def main() -> None:
 
     conn, config_store, idempotency_store = open_runtime(args.db)
     try:
-        sheets_service = get_sheets_service()
         delivery_client = DryRunDeliveryClient() if args.dry_run else WhatsAppDeliveryClient.from_env()
         runtime_idempotency_store = InMemoryIdempotencyStore() if args.dry_run else idempotency_store
         if args.force:
             business = config_store.load_business_config(args.business_id)
             if business is None:
                 raise SystemExit(f"Business not found: {args.business_id}")
-            result = run_google_sheets_daily_report_pipeline(
+            result = run_forced_report(
                 business=business,
                 report_date=date.fromisoformat(args.report_date),
                 delivery_client=delivery_client,
                 idempotency_store=runtime_idempotency_store,
-                sheets_service=sheets_service,
             )
             output = [{"business_id": business.business_id, "dispatch": result.dispatch.model_dump(mode="json"), "report": result.report.model_dump(mode="json")}]
         else:
@@ -67,7 +101,7 @@ def main() -> None:
                 config_store=config_store,
                 idempotency_store=runtime_idempotency_store,
                 delivery_client=delivery_client,
-                sheets_service=sheets_service,
+                sheets_service=get_sheets_service(),
                 now=datetime.now(tz=timezone.utc),
             )
             output = [
