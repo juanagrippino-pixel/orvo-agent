@@ -15,7 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.brain.adapters.google_sheets import get_sheets_service
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient
 from app.brain.dispatch import InMemoryIdempotencyStore
-from app.brain.pipeline import run_google_sheets_daily_report_pipeline, run_tiendanube_daily_report_pipeline
+from app.brain.pipeline import (
+    run_csv_daily_report_pipeline,
+    run_google_sheets_daily_report_pipeline,
+    run_tiendanube_daily_report_pipeline,
+)
 from app.brain.runner import run_due_daily_reports
 from app.brain.storage import SQLiteConfigStore, SQLiteIdempotencyStore, init_schema
 
@@ -68,6 +72,13 @@ def run_forced_report(
             delivery_client=delivery_client,
             idempotency_store=idempotency_store,
             http_client=tiendanube_http_client,
+        )
+    if connector_type == "csv":
+        return run_csv_daily_report_pipeline(
+            business=business,
+            report_date=report_date,
+            delivery_client=delivery_client,
+            idempotency_store=idempotency_store,
         )
     raise ValueError(f"Business {business.business_id} has no supported enabled connector")
 

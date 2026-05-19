@@ -73,15 +73,87 @@ def test_force_report_rejects_unsupported_connector_type():
         currency="ARS",
         connectors=[
             ConnectorConfig(
-                connector_id="unknown-csv",
-                connector_type="csv",
-                label="CSV",
-                params={"csv_path": "examples/artemea_daily.csv"},
+                connector_id="unknown-conn",
+                connector_type="shopify",
+                label="Shopify",
+                params={},
             )
         ],
     )
 
     with pytest.raises(ValueError, match="no supported enabled connector"):
+        reports_script.run_forced_report(
+            business=business,
+            report_date=date(2026, 5, 19),
+            delivery_client=MagicMock(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            sheets_service_factory=MagicMock(),
+        )
+
+
+def make_csv_business(csv_path: str, *, label: str = "CSV Demo") -> BusinessConfig:
+    return BusinessConfig(
+        business_id="demo-csv",
+        business_name="Demo CSV",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-csv-conn",
+                connector_type="csv",
+                label=label,
+                params={"csv_path": csv_path},
+            )
+        ],
+    )
+
+
+def test_force_report_uses_csv_pipeline_without_loading_sheets():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for csv"))
+
+    result = reports_script.run_forced_report(
+        business=make_csv_business("examples/artemea_daily.csv"),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube must not be called for csv")),
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    assert result.report.business_name == "Demo CSV"
+    assert metrics["revenue_today"] == 260000.0
+    assert result.dispatch.status == "sent"
+    sheets_service_factory.assert_not_called()
+    delivery.send_text.assert_called_once()
+    assert any(
+        ev.source == "csv" and "CSV Demo" in ev.label
+        for metric in result.report.metrics
+        for ev in metric.evidence
+    )
+
+
+def test_force_report_csv_requires_csv_path():
+    business = BusinessConfig(
+        business_id="bad-csv",
+        business_name="Bad CSV",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="bad-csv-conn",
+                connector_type="csv",
+                label="Bad CSV",
+                params={},
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="csv_path"):
         reports_script.run_forced_report(
             business=business,
             report_date=date(2026, 5, 19),
