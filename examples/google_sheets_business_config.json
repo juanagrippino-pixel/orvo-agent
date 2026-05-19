@@ -1,0 +1,19 @@
+{
+  "business_id": "artemea",
+  "business_name": "Artemea",
+  "owner_phone": "+5491149724933",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "artemea-google-sheets",
+      "connector_type": "google_sheets",
+      "label": "Orvo Brain - Artemea Control Plane",
+      "params": {
+        "spreadsheet_id": "1OO5fEVKraXKkiofZ0EtHpEOUPgHMxym-Y82VPwtRtG0",
+        "range_name": "Daily!A1:G1000"
+      },
+      "enabled": true
+    }
+  ]
+}
