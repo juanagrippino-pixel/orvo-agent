@@ -17,6 +17,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.brain.models import InsightThresholds
+
 
 # ---------------------------------------------------------------------------
 # ConnectorConfig
@@ -47,6 +49,7 @@ class BusinessConfig(BaseModel):
     timezone: str = Field(..., min_length=1)
     currency: str = Field(..., min_length=1)
     connectors: list[ConnectorConfig] = Field(default_factory=list)
+    insight_thresholds: InsightThresholds = Field(default_factory=InsightThresholds)
 
     @field_validator("owner_phone")
     @classmethod

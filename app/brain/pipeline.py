@@ -9,11 +9,12 @@ from pydantic import BaseModel
 from app.brain.adapters.csv_file import build_daily_report_from_csv_file
 from app.brain.adapters.google_sheets import build_daily_report_from_sheet
 from app.brain.adapters.mercadolibre import build_daily_report_from_mercadolibre
+from app.brain.adapters.meta_ads import build_daily_report_from_meta_ads
 from app.brain.adapters.tiendanube import build_daily_report_from_tiendanube
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore, ReportDispatchResult, dispatch_daily_report
-from app.brain.models import DailyReport
+from app.brain.models import DailyReport, Metric
 
 
 class PipelineResult(BaseModel):
@@ -42,11 +43,77 @@ def _find_csv_connector(business: BusinessConfig) -> ConnectorConfig:
     raise ValueError(f"Business {business.business_id} has no enabled csv connector")
 
 
+def _find_meta_ads_connector(business: BusinessConfig) -> ConnectorConfig:
+    for connector in business.connectors:
+        if connector.enabled and connector.connector_type == "meta_ads":
+            return connector
+    raise ValueError(f"Business {business.business_id} has no enabled meta_ads connector")
+
+
 def _find_mercadolibre_connector(business: BusinessConfig) -> ConnectorConfig:
     for connector in business.connectors:
         if connector.enabled and connector.connector_type == "mercadolibre":
             return connector
     raise ValueError(f"Business {business.business_id} has no enabled mercadolibre connector")
+
+
+def merge_daily_reports(reports: list[DailyReport]) -> DailyReport:
+    """Merge metrics from multiple DailyReport objects into one.
+
+    Merging strategy:
+    - If a metric key appears in only one report it is kept as-is.
+    - If the same key appears across multiple reports, each is namespaced as
+      ``<connector_label>.<key>`` derived from the evidence source label on
+      the metric (first evidence entry).  This makes duplicates distinct while
+      preserving the original key for single-source metrics.
+    - Insights are concatenated in order (first report's insights first).
+    - business_name and report_date are taken from the first report.
+
+    Callers must pass at least one report.
+    """
+    if not reports:
+        raise ValueError("merge_daily_reports requires at least one report")
+    if len(reports) == 1:
+        return reports[0]
+
+    # Count how many reports contribute each key
+    from collections import Counter
+
+    key_count: Counter[str] = Counter()
+    for report in reports:
+        for metric in report.metrics:
+            key_count[metric.key] += 1
+
+    merged_metrics: list[Metric] = []
+    for report in reports:
+        for metric in report.metrics:
+            if key_count[metric.key] > 1:
+                # Namespace by the evidence source label (e.g. "tiendanube" -> "tiendanube.revenue_today")
+                source_label = metric.evidence[0].source if metric.evidence else "unknown"
+                namespaced_key = f"{source_label}.{metric.key}"
+                namespaced_label = f"[{source_label}] {metric.label}"
+                merged_metrics.append(
+                    Metric(
+                        key=namespaced_key,
+                        label=namespaced_label,
+                        value=metric.value,
+                        unit=metric.unit,
+                        evidence=metric.evidence,
+                    )
+                )
+            else:
+                merged_metrics.append(metric)
+
+    merged_insights = []
+    for report in reports:
+        merged_insights.extend(report.insights)
+
+    return DailyReport(
+        business_name=reports[0].business_name,
+        report_date=reports[0].report_date,
+        metrics=merged_metrics,
+        insights=merged_insights,
+    )
 
 
 def run_google_sheets_daily_report_pipeline(

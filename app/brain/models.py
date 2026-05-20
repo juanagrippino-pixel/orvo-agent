@@ -41,6 +41,16 @@ class Insight(BaseModel):
         return value
 
 
+class InsightThresholds(BaseModel):
+    """Per-business tunable thresholds for the insight engine."""
+
+    revenue_drop_threshold: float = 0.15
+    stock_threshold: int = 5
+    unanswered_threshold: int = 5
+    roas_warning_threshold: float = 3.0
+    channel_mix_imbalance_threshold: float = 0.40
+
+
 class DailyReport(BaseModel):
     """WhatsApp-ready operational report payload."""
 

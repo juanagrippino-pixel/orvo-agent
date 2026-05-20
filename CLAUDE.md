@@ -8,6 +8,7 @@ Build Orvo Brain: a deterministic control plane for Argentine/LatAm PyMEs. It in
 - LLMs may help explain/copy, but must not invent metrics.
 - Main branch for current work: `feat/orvo-brain-control-plane`.
 - Use isolated branches/worktrees for all worker tasks.
+- Never create worktrees inside this repo. Use `/root/orvo-agent-worktrees/<task-slug>` or another external path so the parent repo stays clean.
 
 ## Current capabilities
 - Google Sheets adapter + pipeline + scheduled runner.
@@ -23,6 +24,7 @@ Build Orvo Brain: a deterministic control plane for Argentine/LatAm PyMEs. It in
 - Use placeholders such as `[REDACTED]` or `tn_test_token` in docs/examples.
 - Keep tasks small and isolated.
 - Preserve existing Google Sheets, CSV, Tiendanube, dispatch, storage, and scheduler behavior.
+- Before finishing, run tests, commit your changes, and verify `git status --short` is clean in the worktree you edited.
 
 ## Quality bar
 - Use TDD for code changes: write/adjust tests first, then implement.
