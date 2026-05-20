@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.brain.adapters.google_sheets import build_metrics_from_sheet_records, normalize_header
 from app.brain.insights import generate_insights
-from app.brain.models import DailyReport, Evidence, Metric
+from app.brain.models import DailyReport, Evidence, InsightThresholds, Metric
 
 
 def _read_csv_records(csv_path: str) -> list[dict[str, str]]:
@@ -38,6 +38,7 @@ def build_daily_report_from_csv_file(
     report_date: date,
     csv_path: str,
     source_label: str | None = None,
+    insight_thresholds: InsightThresholds | None = None,
 ) -> DailyReport:
     """Build a cited daily report from a local CSV export."""
 
@@ -56,5 +57,5 @@ def build_daily_report_from_csv_file(
         business_name=business_name,
         report_date=report_date,
         metrics=metrics,
-        insights=generate_insights(metrics),
+        insights=generate_insights(metrics, thresholds=insight_thresholds),
     )

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
+from app.brain.models import InsightThresholds
 
 
 def make_business():
@@ -64,6 +65,49 @@ def test_run_google_sheets_daily_report_pipeline_builds_and_dispatches(monkeypat
     assert result.report.business_name == "Artemea"
     assert len(result.report.insights) == 3
     delivery_client.send_text.assert_called_once()
+
+
+def test_google_sheets_pipeline_uses_business_insight_thresholds():
+    from app.brain.pipeline import run_google_sheets_daily_report_pipeline
+
+    class FakeExecute:
+        def execute(self):
+            return {
+                "values": [
+                    ["fecha", "ventas"],
+                    ["2026-05-19", "90000"],
+                    ["2026-05-18", "100000"],
+                ]
+            }
+
+    class FakeValues:
+        def get(self, spreadsheetId, range):
+            return FakeExecute()
+
+    class FakeSpreadsheets:
+        def values(self):
+            return FakeValues()
+
+    class FakeService:
+        def spreadsheets(self):
+            return FakeSpreadsheets()
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.1", error=None)
+    business = make_business().model_copy(
+        update={"insight_thresholds": InsightThresholds(revenue_drop_threshold=0.05)}
+    )
+
+    result = run_google_sheets_daily_report_pipeline(
+        business=business,
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service=FakeService(),
+    )
+
+    assert len(result.report.insights) == 1
+    assert "ventas" in result.report.insights[0].title.lower()
 
 
 def test_pipeline_fails_if_google_sheets_connector_missing():

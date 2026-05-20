@@ -139,6 +139,7 @@ def run_google_sheets_daily_report_pipeline(
         range_name=range_name,
         source_label=connector.label,
         service=sheets_service,
+        insight_thresholds=business.insight_thresholds,
     )
     dispatch = dispatch_daily_report(
         report=report,
@@ -202,6 +203,7 @@ def run_csv_daily_report_pipeline(
         report_date=report_date,
         csv_path=csv_path,
         source_label=connector.params.get("source_label") or connector.label,
+        insight_thresholds=business.insight_thresholds,
     )
     dispatch = dispatch_daily_report(
         report=report,

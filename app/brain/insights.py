@@ -4,7 +4,7 @@ LLMs may later explain these findings, but the business logic and citations
 must stay deterministic.
 """
 
-from app.brain.models import Evidence, Insight, Metric
+from app.brain.models import Evidence, Insight, InsightThresholds, Metric
 
 
 def _metric_map(metrics: list[Metric]) -> dict[str, Metric]:
@@ -37,14 +37,19 @@ def _merge_evidence(*metrics: Metric | None) -> list[Evidence]:
 def generate_insights(
     metrics: list[Metric],
     *,
-    revenue_drop_threshold: float = 0.15,
-    stock_threshold: int = 5,
-    unanswered_threshold: int = 5,
-    # Cross-channel / attribution thresholds (Argentine ecommerce rule-of-thumb defaults)
-    channel_mix_threshold: float = 0.40,  # ML revenue > TN revenue by this fraction
-    roas_threshold: float = 3.0,           # Minimum acceptable ROAS (revenue / ad_spend)
+    thresholds: InsightThresholds | None = None,
+    revenue_drop_threshold: float | None = None,
+    stock_threshold: int | None = None,
+    unanswered_threshold: int | None = None,
+    channel_mix_threshold: float | None = None,
+    roas_threshold: float | None = None,
 ) -> list[Insight]:
     """Generate operational insights from cited canonical metrics.
+
+    Thresholds can be supplied three ways, in order of precedence:
+      1. Explicit keyword arguments (e.g. ``roas_threshold=2.0``).
+      2. An :class:`InsightThresholds` instance via ``thresholds=...``.
+      3. The defaults baked into :class:`InsightThresholds`.
 
     Cross-channel rules require metrics keyed as:
       - revenue_today_tn   : Tiendanube revenue today
@@ -52,11 +57,22 @@ def generate_insights(
       - orders_today_tn    : Tiendanube orders today
       - orders_today_ml    : MercadoLibre orders today
       - ad_spend_today     : Meta Ads (or any ad platform) spend today
-
-    All thresholds are configurable via keyword arguments.
-    ROAS threshold default of 3.0 is a common Argentine ecommerce benchmark;
-    adjust per business via roas_threshold kwarg.
     """
+
+    base = thresholds or InsightThresholds()
+    revenue_drop_threshold = (
+        revenue_drop_threshold if revenue_drop_threshold is not None else base.revenue_drop_threshold
+    )
+    stock_threshold = stock_threshold if stock_threshold is not None else base.stock_threshold
+    unanswered_threshold = (
+        unanswered_threshold if unanswered_threshold is not None else base.unanswered_threshold
+    )
+    channel_mix_threshold = (
+        channel_mix_threshold
+        if channel_mix_threshold is not None
+        else base.channel_mix_imbalance_threshold
+    )
+    roas_threshold = roas_threshold if roas_threshold is not None else base.roas_warning_threshold
 
     by_key = _metric_map(metrics)
     insights: list[Insight] = []

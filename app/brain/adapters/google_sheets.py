@@ -12,7 +12,7 @@ from typing import Any
 
 from app.brain.adapters.sample import METRIC_LABELS
 from app.brain.insights import generate_insights
-from app.brain.models import DailyReport, Evidence, Metric
+from app.brain.models import DailyReport, Evidence, InsightThresholds, Metric
 
 HEADER_ALIASES = {
     "fecha": "date",
@@ -236,6 +236,7 @@ def build_daily_report_from_sheet(
     range_name: str,
     source_label: str | None = None,
     service=None,
+    insight_thresholds: InsightThresholds | None = None,
 ) -> DailyReport:
     values = fetch_sheet_values(spreadsheet_id, range_name, service=service)
     records = rows_to_records(values)
@@ -251,5 +252,5 @@ def build_daily_report_from_sheet(
         business_name=business_name,
         report_date=report_date,
         metrics=metrics,
-        insights=generate_insights(metrics),
+        insights=generate_insights(metrics, thresholds=insight_thresholds),
     )
