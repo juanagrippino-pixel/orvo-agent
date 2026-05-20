@@ -288,3 +288,71 @@ def test_run_due_daily_reports_merges_tiendanube_and_mercadolibre_metrics_once()
     assert metrics_by_key["avg_order_value"].value == 99000
     assert {item.source for item in metrics_by_key["revenue_today"].evidence} == {"tiendanube", "mercadolibre"}
     delivery.send_text.assert_called_once()
+
+
+def make_meta_ads_store():
+    store = InMemoryConfigStore()
+    store.save_business_config(
+        BusinessConfig(
+            business_id="artemea-meta",
+            business_name="Artemea Meta",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="meta",
+                    connector_type="meta_ads",
+                    label="Meta Ads Artemea",
+                    params={"ad_account_id": "act_12345", "access_token": "meta_test_token"},
+                )
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="artemea-meta-ads-daily-report",
+            business_id="artemea-meta",
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+    return store
+
+
+class FakeMetaAdsClient:
+    def __init__(self):
+        self.params = None
+
+    def get(self, url, params=None):
+        self.params = params
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "data": [{"spend": "12000", "impressions": "5000", "clicks": "120", "purchase_roas": []}]
+        }
+        return response
+
+
+def test_run_due_daily_reports_dispatches_due_meta_ads_report_with_scheduled_date():
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.meta", error=None)
+    http_client = FakeMetaAdsClient()
+
+    results = run_due_daily_reports(
+        config_store=make_meta_ads_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        meta_ads_http_client=http_client,
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 1
+    assert results[0].business_id == "artemea-meta"
+    assert results[0].dispatch.status == "sent"
+    assert any(metric.key == "ad_spend_today" and metric.value == 12000 for metric in results[0].pipeline.report.metrics)
+    assert http_client.params is not None
+    assert http_client.params["time_range"] == {"since": "2026-05-19", "until": "2026-05-19"}
+    delivery.send_text.assert_called_once()

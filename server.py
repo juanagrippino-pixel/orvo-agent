@@ -26,6 +26,12 @@ from app.brain.adapters.mercadolibre import (
     MercadoLibreConnectionError,
     build_daily_report_from_mercadolibre,
 )
+from app.brain.adapters.meta_ads import (
+    MetaAdsAPIError,
+    MetaAdsAuthError,
+    MetaAdsConnectionError,
+    build_daily_report_from_meta_ads,
+)
 from app.brain.reporting import compose_daily_report_text
 
 app = Flask(__name__)
@@ -185,6 +191,40 @@ def brain_daily_report_mercadolibre():
         return jsonify({"error": "mercadolibre_auth_error", "message": str(e)}), 401
     except (MercadoLibreAPIError, MercadoLibreConnectionError) as e:
         return jsonify({"error": "mercadolibre_api_error", "message": str(e)}), 502
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify({
+        "text": compose_daily_report_text(report),
+        "report": report.model_dump(mode="json"),
+    })
+
+
+@app.post("/brain/reports/daily/meta-ads")
+def brain_daily_report_meta_ads():
+    payload = request.get_json(silent=True) or {}
+    required = ["business_name", "ad_account_id", "access_token"]
+    missing = [key for key in required if not payload.get(key)]
+    if missing:
+        return jsonify({"error": "missing_fields", "missing": missing}), 400
+
+    try:
+        report_date = date.fromisoformat(payload["report_date"]) if payload.get("report_date") else date.today()
+    except ValueError:
+        return jsonify({"error": "invalid_report_date"}), 400
+
+    try:
+        report = build_daily_report_from_meta_ads(
+            business_name=payload["business_name"],
+            report_date=report_date,
+            ad_account_id=payload["ad_account_id"],
+            access_token=payload["access_token"],
+            source_label=payload.get("source_label") or "Meta Ads",
+        )
+    except MetaAdsAuthError as e:
+        return jsonify({"error": "meta_ads_auth_error", "message": str(e)}), 401
+    except (MetaAdsAPIError, MetaAdsConnectionError) as e:
+        return jsonify({"error": "meta_ads_api_error", "message": str(e)}), 502
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 

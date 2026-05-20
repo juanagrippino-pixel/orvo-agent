@@ -41,6 +41,18 @@ class FakeMercadoLibreHTTPClient:
         return response
 
 
+class FakeMetaAdsHTTPClient:
+    def get(self, url, params=None):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "data": [
+                {"spend": "725.25", "impressions": "9000", "clicks": "210", "purchase_roas": []}
+            ]
+        }
+        return response
+
+
 def make_tiendanube_business():
     return BusinessConfig(
         business_id="demo-shop",
@@ -114,6 +126,47 @@ def test_force_report_uses_mercadolibre_pipeline_without_loading_sheets_or_tiend
 
     assert result.report.business_name == "Demo ML"
     assert {metric.key: metric.value for metric in result.report.metrics}["revenue_today"] == 5000.0
+    assert result.dispatch.status == "sent"
+    sheets_service_factory.assert_not_called()
+
+
+def make_meta_ads_business():
+    return BusinessConfig(
+        business_id="demo-meta",
+        business_name="Demo Meta",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-meta",
+                connector_type="meta_ads",
+                label="Meta Ads Demo",
+                params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
+            )
+        ],
+    )
+
+
+def test_force_report_uses_meta_ads_pipeline_without_loading_other_clients():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for meta_ads"))
+
+    result = reports_script.run_forced_report(
+        business=make_meta_ads_business(),
+        report_date=date(2026, 5, 17),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube must not be called for meta_ads")),
+        mercadolibre_http_client=MagicMock(side_effect=AssertionError("mercadolibre must not be called for meta_ads")),
+        meta_ads_http_client=FakeMetaAdsHTTPClient(),
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    assert result.report.business_name == "Demo Meta"
+    assert metrics["ad_spend_today"] == pytest.approx(725.25)
     assert result.dispatch.status == "sent"
     sheets_service_factory.assert_not_called()
 

@@ -426,14 +426,16 @@ def test_access_token_in_request_params():
     assert params.get("access_token") == "mytoken"
 
 
-def test_date_preset_today_in_params():
+def test_request_uses_report_date_time_range_not_today_preset():
+    requested_date = date(2026, 5, 17)
     client = _client(_response(SINGLE_ROW))
     build_daily_report_from_meta_ads(
-        "T", REPORT_DATE, "123456789", "tok",
+        "T", requested_date, "123456789", "tok",
         http_client=client,
     )
     params = client.get.call_args_list[0].kwargs.get("params", {})
-    assert params.get("date_preset") == "today"
+    assert params.get("time_range") == {"since": "2026-05-17", "until": "2026-05-17"}
+    assert "date_preset" not in params
 
 
 def test_required_fields_in_params():

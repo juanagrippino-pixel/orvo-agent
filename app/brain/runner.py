@@ -32,7 +32,7 @@ def _list_all_schedules(config_store, businesses: list[BusinessConfig]) -> list[
 
 
 def _enabled_daily_connector_types(business: BusinessConfig) -> list[str]:
-    supported = {"csv", "google_sheets", "mercadolibre", "tiendanube"}
+    supported = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube"}
     connector_types: list[str] = []
     for connector in business.connectors:
         if not connector.enabled or connector.connector_type not in supported:
@@ -50,6 +50,7 @@ def run_due_daily_reports(
     sheets_service=None,
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
+    meta_ads_http_client=None,
     now: datetime | None = None,
 ) -> list[ScheduledPipelineResult]:
     """Run every due daily report from the config store."""
@@ -78,6 +79,7 @@ def run_due_daily_reports(
             sheets_service=sheets_service,
             tiendanube_http_client=tiendanube_http_client,
             mercadolibre_http_client=mercadolibre_http_client,
+            meta_ads_http_client=meta_ads_http_client,
         )
         results.append(
             ScheduledPipelineResult(

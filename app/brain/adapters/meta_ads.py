@@ -178,7 +178,7 @@ def build_daily_report_from_meta_ads(
 
     url = _insights_url(ad_account_id)
     params = {
-        "date_preset": "today",
+        "time_range": {"since": report_date.isoformat(), "until": report_date.isoformat()},
         "fields": "spend,impressions,clicks,purchase_roas",
         "level": "account",
         "access_token": access_token,

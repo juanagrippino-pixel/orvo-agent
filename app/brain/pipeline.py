@@ -204,6 +204,39 @@ def run_csv_daily_report_pipeline(
     return PipelineResult(report=report, dispatch=dispatch)
 
 
+def run_meta_ads_daily_report_pipeline(
+    *,
+    business: BusinessConfig,
+    report_date: date,
+    delivery_client: WhatsAppDeliveryClient,
+    idempotency_store: IdempotencyStore,
+    http_client=None,
+) -> PipelineResult:
+    """Build a daily report from Meta Ads and dispatch it to WhatsApp."""
+
+    connector = _find_meta_ads_connector(business)
+    ad_account_id = connector.params.get("ad_account_id")
+    access_token = connector.params.get("access_token")
+    if not ad_account_id or not access_token:
+        raise ValueError("meta_ads connector params must include ad_account_id and access_token")
+
+    report = build_daily_report_from_meta_ads(
+        business_name=business.business_name,
+        report_date=report_date,
+        ad_account_id=ad_account_id,
+        access_token=access_token,
+        source_label=connector.params.get("source_label") or connector.label,
+        http_client=http_client,
+    )
+    dispatch = dispatch_daily_report(
+        report=report,
+        business=business,
+        delivery_client=delivery_client,
+        idempotency_store=idempotency_store,
+    )
+    return PipelineResult(report=report, dispatch=dispatch)
+
+
 def run_mercadolibre_daily_report_pipeline(
     *,
     business: BusinessConfig,
@@ -246,6 +279,7 @@ def _build_daily_report_for_connector_type(
     sheets_service=None,
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
+    meta_ads_http_client=None,
 ) -> DailyReport:
     if connector_type == "google_sheets":
         connector = _find_google_sheets_connector(business)
@@ -260,6 +294,7 @@ def _build_daily_report_for_connector_type(
             range_name=range_name,
             source_label=connector.label,
             service=sheets_service,
+            insight_thresholds=business.insight_thresholds,
         )
 
     if connector_type == "tiendanube":
@@ -294,6 +329,21 @@ def _build_daily_report_for_connector_type(
             http_client=mercadolibre_http_client,
         )
 
+    if connector_type == "meta_ads":
+        connector = _find_meta_ads_connector(business)
+        ad_account_id = connector.params.get("ad_account_id")
+        access_token = connector.params.get("access_token")
+        if not ad_account_id or not access_token:
+            raise ValueError("meta_ads connector params must include ad_account_id and access_token")
+        return build_daily_report_from_meta_ads(
+            business_name=business.business_name,
+            report_date=report_date,
+            ad_account_id=ad_account_id,
+            access_token=access_token,
+            source_label=connector.params.get("source_label") or connector.label,
+            http_client=meta_ads_http_client,
+        )
+
     if connector_type == "csv":
         connector = _find_csv_connector(business)
         csv_path = connector.params.get("csv_path")
@@ -304,6 +354,7 @@ def _build_daily_report_for_connector_type(
             report_date=report_date,
             csv_path=csv_path,
             source_label=connector.params.get("source_label") or connector.label,
+            insight_thresholds=business.insight_thresholds,
         )
 
     raise ValueError(f"Unsupported connector type for daily report: {connector_type}")
@@ -319,6 +370,7 @@ def run_enabled_connectors_daily_report_pipeline(
     sheets_service=None,
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
+    meta_ads_http_client=None,
 ) -> PipelineResult:
     """Build all enabled connector reports, merge metrics, then dispatch once."""
 
@@ -330,6 +382,7 @@ def run_enabled_connectors_daily_report_pipeline(
             sheets_service=sheets_service,
             tiendanube_http_client=tiendanube_http_client,
             mercadolibre_http_client=mercadolibre_http_client,
+            meta_ads_http_client=meta_ads_http_client,
         )
         for connector_type in connector_types
     ]

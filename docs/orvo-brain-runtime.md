@@ -256,7 +256,63 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/tiendanube \
 
 ---
 
-## 6. Configure a CSV connector
+## 6. Configure a Meta Ads connector
+
+Example: [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json).
+
+`connector_type` must be `meta_ads`. Required connector params:
+
+- `ad_account_id`: Meta ad account ID, with or without the `act_` prefix.
+- `access_token`: Meta Marketing API user/system-user access token.
+
+Use placeholders in docs and examples; never commit a real ad account token.
+
+```json
+{
+  "business_id": "demo-meta",
+  "business_name": "Demo Meta",
+  "owner_phone": "+5491150380097",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "demo-meta-ads",
+      "connector_type": "meta_ads",
+      "label": "Meta Ads - Demo Meta",
+      "params": {
+        "ad_account_id": "act_1234567890",
+        "access_token": "[REDACTED]"
+      },
+      "enabled": true
+    }
+  ]
+}
+```
+
+Meta Ads is wired in the runtime layer:
+
+- HTTP preview endpoint: `POST /brain/reports/daily/meta-ads` returns composed text and report payload without dispatching.
+- Pipeline: `run_meta_ads_daily_report_pipeline(...)` builds the report and dispatches through the idempotent dispatcher.
+- Scheduled runner: `run_due_daily_reports(...)` chooses the Meta Ads pipeline when a business config has an enabled `meta_ads` connector.
+- Forced runner: `scripts/run_orvo_brain_reports.py --force` selects it for businesses whose first enabled connector is `meta_ads`.
+
+HTTP preview example:
+
+```bash
+curl -s -X POST http://localhost:5000/brain/reports/daily/meta-ads \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "business_name": "Demo Meta",
+    "ad_account_id": "act_1234567890",
+    "access_token": "meta_test_token",
+    "report_date": "2026-05-19"
+  }'
+```
+
+---
+
+## 7. Configure a CSV connector
+
 
 The CSV adapter is the simplest path — useful for back-fills or when a client
 exports their POS data daily.

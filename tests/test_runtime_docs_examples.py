@@ -30,6 +30,7 @@ DOCS_FILE = Path(__file__).resolve().parents[1] / "docs" / "orvo-brain-runtime.m
     [
         ("google_sheets_business_config.json", "google_sheets"),
         ("tiendanube_business_config.json", "tiendanube"),
+        ("meta_ads_business_config.json", "meta_ads"),
     ],
 )
 def test_business_config_example_parses(filename: str, expected_connector_type: str) -> None:
@@ -51,6 +52,20 @@ def test_tiendanube_example_uses_placeholder_token() -> None:
     token = payload["connectors"][0]["params"]["access_token"]
     assert token in {"[REDACTED]", "tn_test_token"}, (
         "tiendanube example must use a placeholder token, not a real one"
+    )
+
+
+def test_meta_ads_example_uses_placeholder_token() -> None:
+    """Guard against accidentally committing real Meta Ads tokens."""
+    raw = (EXAMPLES_DIR / "meta_ads_business_config.json").read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    token = payload["connectors"][0]["params"]["access_token"]
+    ad_account_id = payload["connectors"][0]["params"]["ad_account_id"]
+    assert token in {"[REDACTED]", "meta_test_token"}, (
+        "meta_ads example must use a placeholder token, not a real one"
+    )
+    assert ad_account_id in {"[REDACTED]", "act_1234567890"}, (
+        "meta_ads example must use a placeholder ad account id, not a real one"
     )
 
 
