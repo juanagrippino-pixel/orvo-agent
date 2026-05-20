@@ -13,6 +13,11 @@ METRIC_LABELS = {
     "unanswered_conversations": ("Conversaciones sin responder", None),
     "orders_today": ("Órdenes", None),
     "ad_spend_today": ("Gasto en anuncios", "ARS"),
+    # Cross-channel keys for multi-canal demo (Tiendanube + MercadoLibre)
+    "revenue_today_tn": ("Ventas Tiendanube hoy", "ARS"),
+    "revenue_today_ml": ("Ventas MercadoLibre hoy", "ARS"),
+    "orders_today_tn": ("Pedidos Tiendanube hoy", None),
+    "orders_today_ml": ("Pedidos MercadoLibre hoy", None),
 }
 
 

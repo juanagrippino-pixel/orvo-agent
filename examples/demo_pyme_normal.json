@@ -1,0 +1,13 @@
+{
+  "business_name": "Artemea — Flores",
+  "report_date": "2026-05-20",
+  "source_label": "Tiendanube + Meta Ads",
+  "metrics": {
+    "revenue_today": 285000,
+    "revenue_baseline": 240000,
+    "orders_today": 19,
+    "stock_units": 180,
+    "unanswered_conversations": 2,
+    "ad_spend_today": 18500
+  }
+}
