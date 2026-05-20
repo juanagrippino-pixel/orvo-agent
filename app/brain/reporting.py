@@ -14,26 +14,75 @@ def _format_value(metric: Metric) -> str:
     return str(value)
 
 
-def _evidence_lines(report: DailyReport) -> list[str]:
-    seen: set[tuple[str, str]] = set()
-    sources: list[Evidence] = []
+def _metrics_by_key(report: DailyReport) -> dict:
+    return {m.key: m for m in report.metrics}
+
+
+def _format_ars(value: float) -> str:
+    return f"ARS {value:,.0f}".replace(",", ".")
+
+
+def _canales_section(metrics: dict) -> list[str]:
+    tn = metrics.get("tn_revenue_today")
+    ml = metrics.get("ml_revenue_today")
+    if not (tn and ml):
+        return []
+    tn_val = float(tn.value)
+    ml_val = float(ml.value)
+    total = tn_val + ml_val
+    return [
+        "",
+        "📦 Canales",
+        f"- Tiendanube: {_format_ars(tn_val)}",
+        f"- MercadoLibre: {_format_ars(ml_val)}",
+        f"- Total: {_format_ars(total)}",
+    ]
+
+
+def _ads_section(metrics: dict) -> list[str]:
+    ad = metrics.get("ad_spend_today")
+    if not ad:
+        return []
+    spend = float(ad.value)
+    # Compute ROAS from tn + ml revenue if available
+    tn = metrics.get("tn_revenue_today")
+    ml = metrics.get("ml_revenue_today")
+    revenue = 0.0
+    if tn:
+        revenue += float(tn.value)
+    if ml:
+        revenue += float(ml.value)
+    roas_line = f"- ROAS estimado: {revenue / spend:.1f}x" if spend > 0 else "- ROAS estimado: N/A"
+    return [
+        "",
+        "📣 Publicidad",
+        f"- Gasto del día: {_format_ars(spend)}",
+        roas_line,
+    ]
+
+
+def _compact_sources(report: DailyReport) -> str:
+    seen: set[str] = set()
+    labels: list[str] = []
     for metric in report.metrics:
         for evidence in metric.evidence:
-            key = (evidence.source, evidence.label)
-            if key not in seen:
-                sources.append(evidence)
-                seen.add(key)
+            if evidence.source not in seen:
+                labels.append(evidence.label)
+                seen.add(evidence.source)
     for insight in report.insights:
         for evidence in insight.evidence:
-            key = (evidence.source, evidence.label)
-            if key not in seen:
-                sources.append(evidence)
-                seen.add(key)
-    return [f"- {source.label} ({source.source})" for source in sources]
+            if evidence.source not in seen:
+                labels.append(evidence.label)
+                seen.add(evidence.source)
+    if not labels:
+        return "🔗 Fuentes: Sin fuentes"
+    return "🔗 Fuentes: " + " · ".join(labels)
 
 
 def compose_daily_report_text(report: DailyReport) -> str:
     """Compose a short, cited Spanish daily report for a business owner."""
+
+    mkeys = _metrics_by_key(report)
 
     lines = [
         f"🧠 Orvo Brain — {report.business_name}",
@@ -48,17 +97,42 @@ def compose_daily_report_text(report: DailyReport) -> str:
     else:
         lines.append("- Sin métricas cargadas todavía")
 
+    # Cross-channel section (only when both TN + ML present)
+    lines.extend(_canales_section(mkeys))
+
+    # Ads section (only when ad_spend_today present)
+    lines.extend(_ads_section(mkeys))
+
     lines.extend(["", "🚨 Alertas"])
     if report.insights:
         for insight in report.insights:
-            prefix = "🔴" if insight.severity == "critical" else "🟡" if insight.severity == "warning" else "ℹ️"
+            if insight.severity == "critical":
+                prefix = "🔴"
+                urgency = "Acción urgente:"
+            elif insight.severity == "warning":
+                prefix = "🟡"
+                urgency = "Acción:"
+            else:
+                prefix = "ℹ️"
+                urgency = "Acción:"
             lines.append(f"{prefix} {insight.title}: {insight.explanation}")
-            lines.append(f"   Acción: {insight.recommended_action}")
+            lines.append(f"   {urgency} {insight.recommended_action}")
     else:
         lines.append("✅ Sin alertas críticas por ahora.")
 
-    source_lines = _evidence_lines(report)
-    lines.extend(["", "📌 Fuentes"])
-    lines.extend(source_lines or ["- Sin fuentes cargadas"])
+    # Compact footer
+    lines.extend(["", _compact_sources(report)])
 
     return "\n".join(lines)
+
+
+def truncate_for_whatsapp(text: str, max_chars: int = 1000) -> str:
+    """Trim a report to fit WhatsApp's practical reading budget.
+
+    Keeps the text unchanged if under max_chars. Otherwise trims and appends
+    '... (ver reporte completo)'.
+    """
+    if len(text) <= max_chars:
+        return text
+    suffix = "... (ver reporte completo)"
+    return text[: max_chars - len(suffix)] + suffix
