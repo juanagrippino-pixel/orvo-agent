@@ -1,0 +1,14 @@
+{
+  "business_name": "ModaSud — Buenos Aires",
+  "report_date": "2026-05-20",
+  "source_label": "Multi-canal: Tiendanube + MercadoLibre + Meta Ads",
+  "metrics": {
+    "revenue_today_tn": 320000,
+    "revenue_today_ml": 510000,
+    "orders_today_tn": 22,
+    "orders_today_ml": 35,
+    "stock_units": 95,
+    "unanswered_conversations": 4,
+    "ad_spend_today": 42000
+  }
+}
