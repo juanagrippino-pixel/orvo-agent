@@ -14,6 +14,7 @@ from app.brain.adapters.tiendanube import build_daily_report_from_tiendanube
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore, ReportDispatchResult, dispatch_daily_report
+from app.brain.insights import generate_insights
 from app.brain.models import DailyReport, Metric
 
 
@@ -57,62 +58,51 @@ def _find_mercadolibre_connector(business: BusinessConfig) -> ConnectorConfig:
     raise ValueError(f"Business {business.business_id} has no enabled mercadolibre connector")
 
 
-def merge_daily_reports(reports: list[DailyReport]) -> DailyReport:
-    """Merge metrics from multiple DailyReport objects into one.
+def _is_number(value: float | int | str) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
-    Merging strategy:
-    - If a metric key appears in only one report it is kept as-is.
-    - If the same key appears across multiple reports, each is namespaced as
-      ``<connector_label>.<key>`` derived from the evidence source label on
-      the metric (first evidence entry).  This makes duplicates distinct while
-      preserving the original key for single-source metrics.
-    - Insights are concatenated in order (first report's insights first).
-    - business_name and report_date are taken from the first report.
 
-    Callers must pass at least one report.
+def merge_daily_reports(reports: list[DailyReport], *, business: BusinessConfig | None = None) -> DailyReport:
+    """Merge adapter reports into one DailyReport.
+
+    Duplicate metric keys are collapsed so downstream insight/report code sees a
+    single canonical key. Numeric duplicates with the same unit are summed and
+    their evidence is combined; non-numeric or unit-mismatched duplicates use
+    last-wins to keep the key unique and deterministic.
     """
     if not reports:
-        raise ValueError("merge_daily_reports requires at least one report")
-    if len(reports) == 1:
+        raise ValueError("at least one report is required to merge daily reports")
+    if len(reports) == 1 and business is None:
         return reports[0]
 
-    # Count how many reports contribute each key
-    from collections import Counter
-
-    key_count: Counter[str] = Counter()
+    merged_by_key = {}
     for report in reports:
         for metric in report.metrics:
-            key_count[metric.key] += 1
+            existing = merged_by_key.get(metric.key)
+            if existing is None:
+                merged_by_key[metric.key] = metric
+                continue
 
-    merged_metrics: list[Metric] = []
-    for report in reports:
-        for metric in report.metrics:
-            if key_count[metric.key] > 1:
-                # Namespace by the evidence source label (e.g. "tiendanube" -> "tiendanube.revenue_today")
-                source_label = metric.evidence[0].source if metric.evidence else "unknown"
-                namespaced_key = f"{source_label}.{metric.key}"
-                namespaced_label = f"[{source_label}] {metric.label}"
-                merged_metrics.append(
-                    Metric(
-                        key=namespaced_key,
-                        label=namespaced_label,
-                        value=metric.value,
-                        unit=metric.unit,
-                        evidence=metric.evidence,
-                    )
+            if _is_number(existing.value) and _is_number(metric.value) and existing.unit == metric.unit:
+                evidence = [*existing.evidence]
+                seen = {(item.source, item.label) for item in evidence}
+                for item in metric.evidence:
+                    key = (item.source, item.label)
+                    if key not in seen:
+                        evidence.append(item)
+                        seen.add(key)
+                merged_by_key[metric.key] = existing.model_copy(
+                    update={"value": existing.value + metric.value, "evidence": evidence}
                 )
             else:
-                merged_metrics.append(metric)
+                merged_by_key[metric.key] = metric
 
-    merged_insights = []
-    for report in reports:
-        merged_insights.extend(report.insights)
-
+    metrics = list(merged_by_key.values())
     return DailyReport(
         business_name=reports[0].business_name,
         report_date=reports[0].report_date,
-        metrics=merged_metrics,
-        insights=merged_insights,
+        metrics=metrics,
+        insights=generate_insights(metrics, thresholds=business.insight_thresholds if business else None),
     )
 
 
@@ -239,6 +229,111 @@ def run_mercadolibre_daily_report_pipeline(
         source_label=connector.params.get("source_label") or connector.label,
         http_client=http_client,
     )
+    dispatch = dispatch_daily_report(
+        report=report,
+        business=business,
+        delivery_client=delivery_client,
+        idempotency_store=idempotency_store,
+    )
+    return PipelineResult(report=report, dispatch=dispatch)
+
+
+def _build_daily_report_for_connector_type(
+    *,
+    connector_type: str,
+    business: BusinessConfig,
+    report_date: date,
+    sheets_service=None,
+    tiendanube_http_client=None,
+    mercadolibre_http_client=None,
+) -> DailyReport:
+    if connector_type == "google_sheets":
+        connector = _find_google_sheets_connector(business)
+        spreadsheet_id = connector.params.get("spreadsheet_id")
+        range_name = connector.params.get("range_name")
+        if not spreadsheet_id or not range_name:
+            raise ValueError("google_sheets connector params must include spreadsheet_id and range_name")
+        return build_daily_report_from_sheet(
+            business_name=business.business_name,
+            report_date=report_date,
+            spreadsheet_id=spreadsheet_id,
+            range_name=range_name,
+            source_label=connector.label,
+            service=sheets_service,
+        )
+
+    if connector_type == "tiendanube":
+        connector = _find_tiendanube_connector(business)
+        store_id = connector.params.get("store_id")
+        access_token = connector.params.get("access_token")
+        if not store_id or not access_token:
+            raise ValueError("tiendanube connector params must include store_id and access_token")
+        return build_daily_report_from_tiendanube(
+            business_name=business.business_name,
+            report_date=report_date,
+            store_id=store_id,
+            access_token=access_token,
+            include_stock=bool(connector.params.get("include_stock", False)),
+            source_label=connector.label,
+            http_client=tiendanube_http_client,
+        )
+
+    if connector_type == "mercadolibre":
+        connector = _find_mercadolibre_connector(business)
+        seller_id = connector.params.get("seller_id")
+        access_token = connector.params.get("access_token")
+        if not seller_id or not access_token:
+            raise ValueError("mercadolibre connector params must include seller_id and access_token")
+        return build_daily_report_from_mercadolibre(
+            business_name=business.business_name,
+            report_date=report_date,
+            seller_id=seller_id,
+            access_token=access_token,
+            site_id=connector.params.get("site_id", "MLA"),
+            source_label=connector.params.get("source_label") or connector.label,
+            http_client=mercadolibre_http_client,
+        )
+
+    if connector_type == "csv":
+        connector = _find_csv_connector(business)
+        csv_path = connector.params.get("csv_path")
+        if not csv_path:
+            raise ValueError("csv connector params must include csv_path")
+        return build_daily_report_from_csv_file(
+            business_name=business.business_name,
+            report_date=report_date,
+            csv_path=csv_path,
+            source_label=connector.params.get("source_label") or connector.label,
+        )
+
+    raise ValueError(f"Unsupported connector type for daily report: {connector_type}")
+
+
+def run_enabled_connectors_daily_report_pipeline(
+    *,
+    business: BusinessConfig,
+    report_date: date,
+    connector_types: list[str],
+    delivery_client: WhatsAppDeliveryClient,
+    idempotency_store: IdempotencyStore,
+    sheets_service=None,
+    tiendanube_http_client=None,
+    mercadolibre_http_client=None,
+) -> PipelineResult:
+    """Build all enabled connector reports, merge metrics, then dispatch once."""
+
+    reports = [
+        _build_daily_report_for_connector_type(
+            connector_type=connector_type,
+            business=business,
+            report_date=report_date,
+            sheets_service=sheets_service,
+            tiendanube_http_client=tiendanube_http_client,
+            mercadolibre_http_client=mercadolibre_http_client,
+        )
+        for connector_type in connector_types
+    ]
+    report = merge_daily_reports(reports, business=business)
     dispatch = dispatch_daily_report(
         report=report,
         business=business,

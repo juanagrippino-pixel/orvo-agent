@@ -224,3 +224,67 @@ def test_run_due_daily_reports_dispatches_due_mercadolibre_report():
     assert results[0].dispatch.status == "sent"
     assert any(metric.key == "revenue_today" and metric.value == 99000 for metric in results[0].pipeline.report.metrics)
     delivery.send_text.assert_called_once()
+
+
+def make_tiendanube_mercadolibre_store():
+    store = InMemoryConfigStore()
+    store.save_business_config(
+        BusinessConfig(
+            business_id="artemea-multi",
+            business_name="Artemea Multi",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn",
+                    connector_type="tiendanube",
+                    label="Tiendanube Artemea",
+                    params={"store_id": "12345", "access_token": "tn_token", "include_stock": False},
+                ),
+                ConnectorConfig(
+                    connector_id="ml",
+                    connector_type="mercadolibre",
+                    label="MercadoLibre Artemea",
+                    params={"seller_id": "12345", "access_token": "ml_token", "site_id": "MLA"},
+                ),
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="artemea-multi-daily-report",
+            business_id="artemea-multi",
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+    return store
+
+
+def test_run_due_daily_reports_merges_tiendanube_and_mercadolibre_metrics_once():
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.multi", error=None)
+
+    results = run_due_daily_reports(
+        config_store=make_tiendanube_mercadolibre_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        tiendanube_http_client=FakeTiendanubeClient(),
+        mercadolibre_http_client=FakeMercadoLibreClient(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 1
+    assert results[0].business_id == "artemea-multi"
+    assert results[0].dispatch.status == "sent"
+
+    metrics_by_key = {metric.key: metric for metric in results[0].pipeline.report.metrics}
+    assert len(metrics_by_key) == len(results[0].pipeline.report.metrics)
+    assert metrics_by_key["revenue_today"].value == 141000
+    assert metrics_by_key["orders_today"].value == 2
+    assert metrics_by_key["avg_order_value"].value == 99000
+    assert {item.source for item in metrics_by_key["revenue_today"].evidence} == {"tiendanube", "mercadolibre"}
+    delivery.send_text.assert_called_once()
