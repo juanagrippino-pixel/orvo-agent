@@ -2,7 +2,7 @@ from datetime import date
 from unittest.mock import MagicMock
 
 from app.brain.config import BusinessConfig
-from app.brain.models import DailyReport, Evidence, Metric
+from app.brain.models import DailyReport, Evidence, Insight, Metric
 
 
 def make_report():
@@ -47,6 +47,50 @@ def test_dispatch_daily_report_sends_composed_text_once():
     assert phone == "+5491112345678"
     assert "Orvo Brain" in text
     assert idempotency.has(result.idempotency_key)
+
+
+def test_dispatch_daily_report_sends_whatsapp_budgeted_text_for_long_report():
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_daily_report
+
+    source = Evidence(source="manual", label="Manual")
+    long_report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 19),
+        metrics=[
+            Metric(
+                key=f"metric_{i}",
+                label=f"Métrica larga {i}",
+                value=i * 1000,
+                unit="ARS",
+                evidence=[source],
+            )
+            for i in range(80)
+        ],
+        insights=[
+            Insight(
+                severity="warning",
+                title="Reporte muy largo",
+                explanation="Detalle " * 80,
+                recommended_action="Revisar el reporte completo.",
+                evidence=[source],
+            )
+        ],
+    )
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.1", error=None)
+
+    result = dispatch_daily_report(
+        report=long_report,
+        business=make_business(),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+
+    assert result.status == "sent"
+    _phone, text = delivery_client.send_text.call_args.args
+    assert len(text) <= 1000
+    assert text.endswith("... (ver reporte completo)")
 
 
 def test_dispatch_daily_report_skips_duplicate_key():

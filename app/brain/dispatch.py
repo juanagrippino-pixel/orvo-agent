@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.brain.config import BusinessConfig
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient, make_idempotency_key
 from app.brain.models import DailyReport
-from app.brain.reporting import compose_daily_report_text
+from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
 
 
 class IdempotencyStore(Protocol):
@@ -49,7 +49,7 @@ def dispatch_daily_report(
     if idempotency_store.has(key):
         return ReportDispatchResult(status="skipped_duplicate", idempotency_key=key)
 
-    text = compose_daily_report_text(report)
+    text = truncate_for_whatsapp(compose_daily_report_text(report))
     delivery = delivery_client.send_text(business.owner_phone, text)
     if not delivery.success:
         return ReportDispatchResult(
