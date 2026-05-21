@@ -102,3 +102,33 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_sales_packet_markdown_summarizes_saved_demo_assets():
+    from scripts.demo_report import build_sales_packet_markdown
+
+    markdown = build_sales_packet_markdown(["pyme-stock-crisis", "pyme-multi-canal"])
+
+    assert markdown.startswith("# Orvo Brain — Demo PyME sales packet")
+    assert "## Stock crítico + ads activos" in markdown
+    assert "## Multi-canal" in markdown
+    assert "pyme-stock-crisis.txt" in markdown
+    assert "pyme-multi-canal.json" in markdown
+    assert "WhatsApp" in markdown
+    assert "Acciones detectadas" in markdown
+    assert "Café de Barrio" in markdown
+
+
+def test_demo_report_save_dir_writes_sales_packet(tmp_path):
+    from scripts.demo_report import print_scenario, write_sales_packet
+
+    print_scenario("pyme-stock-crisis", save_dir=tmp_path)
+    write_sales_packet(["pyme-stock-crisis"], tmp_path)
+
+    packet = tmp_path / "README.md"
+    assert packet.exists()
+    text = packet.read_text(encoding="utf-8")
+    assert "Demo PyME sales packet" in text
+    assert "pyme-stock-crisis.txt" in text
+    assert (tmp_path / "pyme-stock-crisis.txt").exists()
+    assert (tmp_path / "pyme-stock-crisis.json").exists()

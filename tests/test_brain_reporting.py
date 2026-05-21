@@ -165,6 +165,23 @@ def test_ads_block_shown_when_ad_spend_present():
     assert "ROAS estimado:" in text
 
 
+def test_ads_block_roas_uses_single_channel_revenue_today():
+    """ROAS should not show 0.0x for a single-channel demo with revenue_today."""
+    from app.brain.reporting import compose_daily_report_text
+
+    report = DailyReport(
+        business_name="Café de Barrio",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(key="revenue_today", label="Ventas", value=95000, unit="ARS", evidence=[_tn_source()]),
+            Metric(key="ad_spend_today", label="Gasto ads", value=25000, unit="ARS", evidence=[_meta_source()]),
+        ],
+        insights=[],
+    )
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 3.8x" in text
+
+
 def test_ads_block_roas_uses_current_canonical_revenue_keys():
     """ROAS should use current TN/ML canonical metric keys, not only legacy keys."""
     from app.brain.reporting import compose_daily_report_text
