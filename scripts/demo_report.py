@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.brain.demo_sales import build_demo_sales_onepager
 from app.brain.demo_scenarios import SCENARIOS, build_demo_report
 from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
 
@@ -85,9 +86,22 @@ def main() -> None:
         default=None,
         help="Directory to save text/JSON outputs",
     )
+    parser.add_argument(
+        "--sales-onepager",
+        action="store_true",
+        help="Print a concise sales one-pager derived from the seeded demos",
+    )
     args = parser.parse_args()
 
     save_dir = Path(args.save_dir) if args.save_dir else None
+
+    if args.sales_onepager:
+        text = build_demo_sales_onepager()
+        print(text)
+        if save_dir:
+            save_dir.mkdir(parents=True, exist_ok=True)
+            (save_dir / "sales-onepager.md").write_text(text, encoding="utf-8")
+        return
 
     if args.scenario:
         print_scenario(args.scenario, save_dir=save_dir)

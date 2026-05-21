@@ -558,3 +558,26 @@ All examples are validated by
 > **Never commit real access tokens, phone numbers, or service-account
 > private keys.** Replace with `[REDACTED]` or `tn_test_token` placeholders
 > when sharing.
+---
+
+## Demo comercial para prospects
+
+Para mostrar Orvo Brain sin credenciales ni servicios externos:
+
+```bash
+python scripts/demo_report.py
+```
+
+El comando imprime tres reportes WhatsApp determinísticos para casos PyME: día
+normal, crisis de stock con ads activos y operación multi-canal. Para una hoja
+comercial breve que conecte la demo con ROI y próximos pasos del piloto:
+
+```bash
+python scripts/demo_report.py --sales-onepager
+python scripts/demo_report.py --sales-onepager --save-dir examples/demo_output/
+```
+
+La one-pager se genera desde los mismos datos sembrados que los mensajes de
+WhatsApp, por lo que el discurso comercial siempre queda alineado con el
+producto real y no incluye secretos ni credenciales.
+
