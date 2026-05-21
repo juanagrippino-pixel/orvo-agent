@@ -31,7 +31,43 @@ source (`google_sheets`, `csv`, `tiendanube`, …).
 
 ---
 
-## 2. Required environment variables
+## 2. Fast sales demo: WhatsApp output + ROI hook
+
+Use the seeded demo before any live credentials exist. It prints realistic
+WhatsApp-ready reports for Argentine/LatAm PyMEs and can add a concise sales
+summary that quantifies what Orvo Brain caught.
+
+```bash
+# All seeded scenarios: normal day, stock crisis, and multi-channel
+python scripts/demo_report.py --sales-summary
+
+# Best prospect demo: urgent stock + ads collision with pesos-at-risk hook
+python scripts/demo_report.py --scenario pyme-stock-crisis --sales-summary
+```
+
+The `--sales-summary` block is intended for demo decks, founder-led sales DMs,
+and follow-up emails. It uses only seeded report metrics; no API keys or live
+connectors are required.
+
+```text
+💰 Gancho comercial — Café de Barrio — Colegiales
+Detecta ARS 110.000 de impacto operativo accionable en 1 reporte.
+
+Prueba:
+- ARS 85.000 de ventas vs promedio reciente detectadas antes del cierre.
+- ARS 25.000 en ads activos con stock crítico (3 unidades).
+- 12 conversaciones sin responder priorizadas para recuperar ventas.
+```
+
+To save the WhatsApp text and JSON payloads for a prospect-specific walkthrough:
+
+```bash
+python scripts/demo_report.py --sales-summary --save-dir examples/demo_output/
+```
+
+---
+
+## 3. Required environment variables
 
 Only set what you actually need — adapters can be invoked independently.
 
@@ -87,7 +123,7 @@ the caller:
 
 ---
 
-## 3. Bootstrap the SQLite database
+## 4. Bootstrap the SQLite database
 
 The control-plane state lives in a single SQLite file. The schema is created
 on first connection.
@@ -127,7 +163,7 @@ finally:
 
 ---
 
-## 4. Configure a Google Sheets connector
+## 5. Configure a Google Sheets connector
 
 A `BusinessConfig` may carry one or more `ConnectorConfig` entries. For Google
 Sheets the `params` block must contain `spreadsheet_id` and `range_name`.
@@ -192,7 +228,7 @@ emitted when at least one row provides a value for it.
 
 ---
 
-## 5. Configure a Tiendanube connector
+## 6. Configure a Tiendanube connector
 
 Example: [`examples/tiendanube_business_config.json`](../examples/tiendanube_business_config.json).
 
@@ -256,7 +292,7 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/tiendanube \
 
 ---
 
-## 6. Configure a Meta Ads connector
+## 7. Configure a Meta Ads connector
 
 Example: [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json).
 
@@ -311,7 +347,7 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/meta-ads \
 
 ---
 
-## 7. Configure a CSV connector
+## 8. Configure a CSV connector
 
 
 The CSV adapter is the simplest path — useful for back-fills or when a client
@@ -362,7 +398,7 @@ report = build_daily_report_from_csv_file(
 
 ---
 
-## 7. Run a dry-run report
+## 9. Run a dry-run report
 
 A dry-run builds the report and composes the WhatsApp text *without* sending
 anything to Meta — safe to run repeatedly in CI or on a laptop.
@@ -405,7 +441,7 @@ report payload.
 
 ---
 
-## 8. Run a real WhatsApp dispatch
+## 10. Run a real WhatsApp dispatch
 
 ```bash
 export WHATSAPP_PHONE_ID="..."
@@ -441,7 +477,7 @@ idempotency keys ensure no duplicate messages.
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
 ### 9.1 Google OAuth expired or revoked
 
@@ -540,7 +576,7 @@ Recovery / behaviour rules:
 
 ---
 
-## 10. Examples bundled with this repo
+## 12. Examples bundled with this repo
 
 | File | Purpose |
 |------|---------|

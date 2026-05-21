@@ -96,3 +96,102 @@ def build_demo_report(scenario_id: str):
 def build_all_demo_reports():
     """Build DailyReports for every scenario, preserving order."""
     return [(sid, build_demo_report(sid)) for sid in SCENARIOS]
+
+
+def _format_ars(value: float | int) -> str:
+    """Format Argentine pesos compactly for prospect-facing demo copy."""
+    return f"ARS {value:,.0f}".replace(",", ".")
+
+
+def _metric_values(report) -> dict[str, float | int | str]:
+    return {metric.key: metric.value for metric in report.metrics}
+
+
+def build_demo_sales_summary(scenario_id: str) -> dict:
+    """Build a prospect-facing sales summary for a demo scenario.
+
+    The daily WhatsApp report proves the product output; this summary gives a
+    seller or founder a concise ROI hook for demos, DMs, and follow-up notes.
+    It stays deterministic and only uses metrics already present in the seeded
+    scenario report.
+    """
+
+    scenario = SCENARIOS[scenario_id]
+    report = build_demo_report(scenario_id)
+    metrics = _metric_values(report)
+
+    impact_estimate = 0.0
+    proof_points: list[str] = []
+
+    revenue_today = metrics.get("revenue_today")
+    revenue_baseline = metrics.get("revenue_baseline")
+    if isinstance(revenue_today, (int, float)) and isinstance(revenue_baseline, (int, float)):
+        revenue_gap = max(float(revenue_baseline) - float(revenue_today), 0.0)
+        if revenue_gap > 0:
+            impact_estimate += revenue_gap
+            proof_points.append(
+                f"{_format_ars(revenue_gap)} de ventas vs promedio reciente detectadas antes del cierre."
+            )
+        else:
+            proof_points.append(
+                f"Ventas {_format_ars(revenue_today)}: por encima del promedio reciente."
+            )
+
+    stock_units = metrics.get("stock_units")
+    ad_spend = metrics.get("ad_spend_today")
+    if isinstance(stock_units, (int, float)) and isinstance(ad_spend, (int, float)):
+        if stock_units <= 5 and ad_spend > 0:
+            impact_estimate += float(ad_spend)
+            proof_points.append(
+                f"{_format_ars(ad_spend)} en ads activos con stock crítico ({int(stock_units)} unidades)."
+            )
+        elif ad_spend > 0:
+            proof_points.append(f"Ads monitoreados: {_format_ars(ad_spend)} de gasto diario bajo control.")
+
+    unanswered = metrics.get("unanswered_conversations")
+    if isinstance(unanswered, (int, float)) and unanswered > 0:
+        proof_points.append(f"{int(unanswered)} conversaciones sin responder priorizadas para recuperar ventas.")
+
+    tn_revenue = metrics.get("revenue_today_tn")
+    ml_revenue = metrics.get("revenue_today_ml")
+    if isinstance(tn_revenue, (int, float)) and isinstance(ml_revenue, (int, float)):
+        total = float(tn_revenue) + float(ml_revenue)
+        proof_points.append(
+            f"Visión multi-canal: Tiendanube + MercadoLibre suman {_format_ars(total)} en el día."
+        )
+
+    if not proof_points:
+        proof_points.append("Reporte diario listo para mostrar control operativo sin planillas manuales.")
+
+    formatted_impact = _format_ars(impact_estimate)
+    if impact_estimate > 0:
+        headline = f"Detecta {formatted_impact} de impacto operativo accionable en 1 reporte."
+    else:
+        headline = "Muestra control diario y evidencia confiable sin integraciones manuales."
+
+    return {
+        "scenario_id": scenario_id,
+        "business_name": report.business_name,
+        "title": scenario["title"],
+        "headline": headline,
+        "impact_estimate": int(impact_estimate),
+        "proof_points": proof_points,
+        "next_step": "Mostrar el WhatsApp demo y cerrar una prueba con datos reales del negocio.",
+    }
+
+
+def format_demo_sales_summary(summary: dict) -> str:
+    """Format a sales summary as concise Spanish copy for demos or DMs."""
+
+    proof = "\n".join(f"- {item}" for item in summary["proof_points"][:4])
+    return "\n".join(
+        [
+            f"💰 Gancho comercial — {summary['business_name']}",
+            summary["headline"],
+            "",
+            "Prueba:",
+            proof,
+            "",
+            f"Siguiente paso: {summary['next_step']}",
+        ]
+    )

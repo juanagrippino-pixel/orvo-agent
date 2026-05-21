@@ -102,3 +102,41 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_demo_sales_summary_quantifies_business_impact():
+    """Sales demo must translate alerts into a clear pesos-at-risk hook."""
+    from app.brain.demo_scenarios import build_demo_sales_summary
+
+    summary = build_demo_sales_summary("pyme-stock-crisis")
+
+    assert summary["scenario_id"] == "pyme-stock-crisis"
+    assert summary["business_name"] == "Café de Barrio — Colegiales"
+    assert summary["impact_estimate"] == 110000
+    assert "ARS 110.000" in summary["headline"]
+    assert any("ventas vs promedio" in item for item in summary["proof_points"])
+    assert any("ads activos" in item for item in summary["proof_points"])
+    assert summary["next_step"].startswith("Mostrar")
+
+
+def test_format_demo_sales_summary_is_prospect_ready_spanish():
+    """Formatted sales summary should be copy-pasteable into a demo deck or DM."""
+    from app.brain.demo_scenarios import build_demo_sales_summary, format_demo_sales_summary
+
+    text = format_demo_sales_summary(build_demo_sales_summary("pyme-stock-crisis"))
+
+    assert "💰 Gancho comercial" in text
+    assert "Café de Barrio" in text
+    assert "ARS 110.000" in text
+    assert "Prueba" in text
+    assert "Siguiente paso" in text
+    assert len(text) <= 700
+
+
+def test_single_channel_demo_ads_section_uses_revenue_today_for_roas():
+    """Single-channel demo reports should not show 0.0x ROAS when revenue exists."""
+    report = build_demo_report("pyme-stock-crisis")
+    text = compose_daily_report_text(report)
+
+    assert "ROAS estimado: 3.8x" in text
+    assert "ROAS estimado: 0.0x" not in text

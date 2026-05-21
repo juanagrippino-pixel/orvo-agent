@@ -29,7 +29,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.brain.demo_scenarios import SCENARIOS, build_demo_report
+from app.brain.demo_scenarios import (
+    SCENARIOS,
+    build_demo_report,
+    build_demo_sales_summary,
+    format_demo_sales_summary,
+)
 from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
 
 
@@ -37,7 +42,7 @@ def _divider():
     print("=" * 60)
 
 
-def print_scenario(scenario_id: str, *, save_dir: Path | None = None):
+def print_scenario(scenario_id: str, *, save_dir: Path | None = None, sales_summary: bool = False):
     scenario = SCENARIOS[scenario_id]
     report = build_demo_report(scenario_id)
     text = compose_daily_report_text(report)
@@ -55,6 +60,11 @@ def print_scenario(scenario_id: str, *, save_dir: Path | None = None):
     char_count = len(text_truncated)
     print()
     print(f"   📏 {char_count} caracteres{' (truncado)' if char_count != len(text) else ''} / 1000 presupuesto WhatsApp")
+
+    if sales_summary:
+        print()
+        print(format_demo_sales_summary(build_demo_sales_summary(scenario_id)))
+
     print()
 
     if save_dir:
@@ -85,12 +95,17 @@ def main() -> None:
         default=None,
         help="Directory to save text/JSON outputs",
     )
+    parser.add_argument(
+        "--sales-summary",
+        action="store_true",
+        help="Also print a concise ROI hook for demos and follow-up DMs",
+    )
     args = parser.parse_args()
 
     save_dir = Path(args.save_dir) if args.save_dir else None
 
     if args.scenario:
-        print_scenario(args.scenario, save_dir=save_dir)
+        print_scenario(args.scenario, save_dir=save_dir, sales_summary=args.sales_summary)
     else:
         print()
         print("  🧠 Orvo Brain — Demo de Reportes Diarios")
@@ -98,7 +113,7 @@ def main() -> None:
         print()
 
         for sid in SCENARIOS:
-            print_scenario(sid, save_dir=save_dir)
+            print_scenario(sid, save_dir=save_dir, sales_summary=args.sales_summary)
 
     _divider()
 
