@@ -102,3 +102,20 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_demo_script_stock_crisis_preview_is_clean_whatsapp_sample(tmp_path):
+    """The CLI demo should show a paste-ready WhatsApp sample, not a cut-off report."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "scripts/demo_report.py", "--scenario", "pyme-stock-crisis"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Pausar todas las campañas" in result.stdout
+    assert "ver reporte completo" not in result.stdout
+    assert "caracteres / 1000 presupuesto WhatsApp" in result.stdout

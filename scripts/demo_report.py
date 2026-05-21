@@ -30,7 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.brain.demo_scenarios import SCENARIOS, build_demo_report
-from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
+from app.brain.reporting import compose_whatsapp_preview_text
 
 
 def _divider():
@@ -40,8 +40,7 @@ def _divider():
 def print_scenario(scenario_id: str, *, save_dir: Path | None = None):
     scenario = SCENARIOS[scenario_id]
     report = build_demo_report(scenario_id)
-    text = compose_daily_report_text(report)
-    text_truncated = truncate_for_whatsapp(text)
+    text_truncated = compose_whatsapp_preview_text(report)
 
     print()
     _divider()
@@ -54,7 +53,7 @@ def print_scenario(scenario_id: str, *, save_dir: Path | None = None):
     # WhatsApp budget info
     char_count = len(text_truncated)
     print()
-    print(f"   📏 {char_count} caracteres{' (truncado)' if char_count != len(text) else ''} / 1000 presupuesto WhatsApp")
+    print(f"   📏 {char_count} caracteres / 1000 presupuesto WhatsApp")
     print()
 
     if save_dir:

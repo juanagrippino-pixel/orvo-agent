@@ -87,6 +87,26 @@ the caller:
 
 ---
 
+## 2.5. Run the no-credential sales demo
+
+For prospect calls, use the deterministic demo generator. It prints exactly the
+kind of owner-facing WhatsApp preview a PyME receives, without API keys or live
+connectors:
+
+```bash
+python scripts/demo_report.py
+python scripts/demo_report.py --scenario pyme-stock-crisis
+python scripts/demo_report.py --save-dir examples/demo_output/
+```
+
+The bundled scenarios cover a normal day, a stock crisis with active ads, and a
+Tiendanube + MercadoLibre + Meta Ads multi-channel business. The demo output is
+kept under the practical 1000-character WhatsApp budget and prioritizes the
+urgent recommended action so it can be pasted directly into a sales deck or a
+WhatsApp conversation with a prospect.
+
+---
+
 ## 3. Bootstrap the SQLite database
 
 The control-plane state lives in a single SQLite file. The schema is created

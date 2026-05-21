@@ -310,3 +310,57 @@ def test_full_report_under_1000_chars():
     text = compose_daily_report_text(report)
     final = truncate_for_whatsapp(text)
     assert len(final) <= 1000
+
+
+def test_compose_whatsapp_preview_prioritizes_critical_action_under_budget():
+    """Prospect demo previews should fit WhatsApp without cutting urgent actions."""
+    from app.brain.reporting import compose_whatsapp_preview_text
+
+    src = _tn_source()
+    report = DailyReport(
+        business_name="Café de Barrio",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(key="revenue_today", label="Ventas de hoy", value=95000, unit="ARS", evidence=[src]),
+            Metric(key="revenue_baseline", label="Promedio reciente", value=180000, unit="ARS", evidence=[src]),
+            Metric(key="stock_units", label="Stock disponible", value=3, unit="units", evidence=[src]),
+            Metric(key="unanswered_conversations", label="Conversaciones sin responder", value=12, evidence=[src]),
+            Metric(key="ad_spend_today", label="Gasto en anuncios", value=25000, unit="ARS", evidence=[_meta_source()]),
+        ],
+        insights=[
+            Insight(
+                severity="warning",
+                title="Ventas 47% debajo del promedio",
+                explanation="Las ventas de hoy están por debajo del promedio reciente.",
+                recommended_action="Revisá campañas activas, productos principales y mensajes pendientes antes de cerrar el día.",
+                evidence=[src],
+            ),
+            Insight(
+                severity="critical",
+                title="Ads activos con stock bajo — pausar campañas",
+                explanation="Quedan 3 unidades en stock pero hay campañas activas con gasto alto.",
+                recommended_action="Pausar campañas, reponer stock y responder consultas calientes.",
+                evidence=[src, _meta_source()],
+            ),
+        ],
+    )
+
+    text = compose_whatsapp_preview_text(report, max_chars=1000)
+
+    assert len(text) <= 1000
+    assert "🔴 Ads activos" in text
+    assert "Pausar campañas" in text
+    assert "Fuentes" in text
+    assert "ver reporte completo" not in text
+
+
+def test_demo_scenarios_whatsapp_previews_are_not_truncated():
+    """The one-command sales demo should print clean sample WhatsApps."""
+    from app.brain.demo_scenarios import SCENARIOS, build_demo_report
+    from app.brain.reporting import compose_whatsapp_preview_text
+
+    for sid in SCENARIOS:
+        text = compose_whatsapp_preview_text(build_demo_report(sid), max_chars=1000)
+        assert len(text) <= 1000, sid
+        assert "ver reporte completo" not in text, sid
+        assert "Fuentes" in text, sid
