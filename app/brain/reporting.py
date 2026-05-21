@@ -69,15 +69,20 @@ def _ads_section(metrics: dict) -> list[str]:
     if not ad:
         return []
     spend = float(ad.value)
-    revenue = sum(
+    channel_revenues = [
         value
         for value in (
             _metric_float(metrics, _TN_REVENUE_KEYS),
             _metric_float(metrics, _ML_REVENUE_KEYS),
         )
         if value is not None
+    ]
+    revenue = sum(channel_revenues) if channel_revenues else _metric_float(metrics, ("revenue_today",))
+    roas_line = (
+        f"- ROAS estimado: {revenue / spend:.1f}x"
+        if spend > 0 and revenue is not None
+        else "- ROAS estimado: N/A"
     )
-    roas_line = f"- ROAS estimado: {revenue / spend:.1f}x" if spend > 0 else "- ROAS estimado: N/A"
     return [
         "",
         "📣 Publicidad",

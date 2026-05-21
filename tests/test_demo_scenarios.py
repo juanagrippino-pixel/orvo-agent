@@ -1,6 +1,15 @@
 """Tests for the one-command demo report scenarios."""
 
-from app.brain.demo_scenarios import SCENARIOS, build_all_demo_reports, build_demo_report
+import subprocess
+import sys
+from pathlib import Path
+
+from app.brain.demo_scenarios import (
+    SCENARIOS,
+    build_all_demo_reports,
+    build_demo_report,
+    build_demo_sales_brief,
+)
 from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
 
 
@@ -102,3 +111,53 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_each_scenario_has_sales_context():
+    """Demo scenarios should include a concise seller talk track."""
+    for sid, scenario in SCENARIOS.items():
+        assert scenario.get("buyer_pain"), f"{sid} missing buyer_pain"
+        assert scenario.get("sales_angle"), f"{sid} missing sales_angle"
+        assert scenario.get("demo_prompt"), f"{sid} missing demo_prompt"
+
+
+def test_demo_sales_brief_is_prospect_ready():
+    brief = build_demo_sales_brief("pyme-stock-crisis")
+
+    assert brief["scenario_id"] == "pyme-stock-crisis"
+    assert brief["business_name"] == "Café de Barrio — Colegiales"
+    assert brief["buyer_pain"]
+    assert brief["sales_angle"]
+    assert brief["demo_prompt"].endswith("?")
+    assert brief["whatsapp_chars"] <= 1000
+    assert len(brief["next_actions"]) <= 3
+    assert any("stock" in alert.lower() for alert in brief["top_alerts"])
+    assert any("paus" in action.lower() or "repos" in action.lower() for action in brief["next_actions"])
+
+
+def test_demo_sales_brief_has_no_secret_like_values():
+    forbidden = {"WHATSAPP_TOKEN", "ACCESS_TOKEN", "TIENDANUBE_ACCESS_TOKEN", "sk-"}
+    for sid in SCENARIOS:
+        brief_text = str(build_demo_sales_brief(sid))
+        assert not any(value in brief_text for value in forbidden)
+
+
+def test_demo_report_cli_can_print_sales_brief():
+    script = Path(__file__).resolve().parents[1] / "scripts" / "demo_report.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--scenario", "pyme-stock-crisis", "--sales-brief"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Ficha comercial" in result.stdout
+    assert "Dolor PyME" in result.stdout
+    assert "Próximas acciones" in result.stdout
+    assert "Café de Barrio" in result.stdout
+
+
+def test_stock_crisis_demo_ads_section_uses_single_channel_revenue_for_roas():
+    report = build_demo_report("pyme-stock-crisis")
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 3.8x" in text

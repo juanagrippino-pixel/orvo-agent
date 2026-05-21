@@ -31,7 +31,40 @@ source (`google_sheets`, `csv`, `tiendanube`, …).
 
 ---
 
-## 2. Required environment variables
+
+## 2. One-command sellable demo
+
+Use the deterministic demo before connecting any real account. It prints seeded
+Argentine/LatAm PyME reports exactly as a WhatsApp owner sample, with no API
+keys and no external services:
+
+```bash
+python scripts/demo_report.py
+```
+
+For a sales call, add the seller-facing brief:
+
+```bash
+python scripts/demo_report.py --sales-brief
+python scripts/demo_report.py --scenario pyme-stock-crisis --sales-brief
+```
+
+The `--sales-brief` block includes a **Ficha comercial** for each scenario:
+
+- **Dolor PyME**: the concrete owner pain to open the conversation.
+- **Ángulo de venta**: why this scenario proves daily ROI.
+- **Alertas que ve el dueño**: the top deterministic alerts in the WhatsApp sample.
+- **Próximas acciones**: up to three actions the owner can take immediately.
+
+To save shareable WhatsApp samples and JSON payloads for a prospect deck:
+
+```bash
+python scripts/demo_report.py --save-dir examples/demo_output/
+```
+
+---
+
+## 3. Required environment variables
 
 Only set what you actually need — adapters can be invoked independently.
 
@@ -87,7 +120,7 @@ the caller:
 
 ---
 
-## 3. Bootstrap the SQLite database
+## 4. Bootstrap the SQLite database
 
 The control-plane state lives in a single SQLite file. The schema is created
 on first connection.
@@ -127,7 +160,7 @@ finally:
 
 ---
 
-## 4. Configure a Google Sheets connector
+## 5. Configure a Google Sheets connector
 
 A `BusinessConfig` may carry one or more `ConnectorConfig` entries. For Google
 Sheets the `params` block must contain `spreadsheet_id` and `range_name`.
@@ -192,7 +225,7 @@ emitted when at least one row provides a value for it.
 
 ---
 
-## 5. Configure a Tiendanube connector
+## 6. Configure a Tiendanube connector
 
 Example: [`examples/tiendanube_business_config.json`](../examples/tiendanube_business_config.json).
 
@@ -256,7 +289,7 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/tiendanube \
 
 ---
 
-## 6. Configure a Meta Ads connector
+## 7. Configure a Meta Ads connector
 
 Example: [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json).
 
@@ -311,7 +344,7 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/meta-ads \
 
 ---
 
-## 7. Configure a CSV connector
+## 8. Configure a CSV connector
 
 
 The CSV adapter is the simplest path — useful for back-fills or when a client
@@ -362,7 +395,7 @@ report = build_daily_report_from_csv_file(
 
 ---
 
-## 7. Run a dry-run report
+## 9. Run a dry-run report
 
 A dry-run builds the report and composes the WhatsApp text *without* sending
 anything to Meta — safe to run repeatedly in CI or on a laptop.
@@ -405,7 +438,7 @@ report payload.
 
 ---
 
-## 8. Run a real WhatsApp dispatch
+## 10. Run a real WhatsApp dispatch
 
 ```bash
 export WHATSAPP_PHONE_ID="..."
@@ -441,7 +474,7 @@ idempotency keys ensure no duplicate messages.
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
 ### 9.1 Google OAuth expired or revoked
 
@@ -540,7 +573,7 @@ Recovery / behaviour rules:
 
 ---
 
-## 10. Examples bundled with this repo
+## 12. Examples bundled with this repo
 
 | File | Purpose |
 |------|---------|

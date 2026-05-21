@@ -114,3 +114,9 @@ def test_runtime_doc_links_resolve_to_existing_examples() -> None:
     assert referenced, "docs should reference at least one example"
     for name in referenced:
         assert (EXAMPLES_DIR / name).exists(), f"missing example referenced from docs: {name}"
+
+
+def test_runtime_docs_include_sales_brief_demo_command() -> None:
+    docs = DOCS_FILE.read_text(encoding="utf-8")
+    assert "scripts/demo_report.py --sales-brief" in docs
+    assert "Ficha comercial" in docs

@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.brain.demo_scenarios import SCENARIOS, build_demo_report
+from app.brain.demo_scenarios import SCENARIOS, build_demo_report, build_demo_sales_brief
 from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
 
 
@@ -37,7 +37,37 @@ def _divider():
     print("=" * 60)
 
 
-def print_scenario(scenario_id: str, *, save_dir: Path | None = None):
+def format_sales_brief(scenario_id: str) -> str:
+    """Return a concise seller talk track for one deterministic scenario."""
+    brief = build_demo_sales_brief(scenario_id)
+    lines = [
+        "💼 Ficha comercial",
+        f"- Negocio demo: {brief['business_name']}",
+        f"- Dolor PyME: {brief['buyer_pain']}",
+        f"- Ángulo de venta: {brief['sales_angle']}",
+        f"- Pregunta para abrir: {brief['demo_prompt']}",
+        f"- WhatsApp sample: {brief['whatsapp_chars']} caracteres / 1000",
+        "- Alertas que ve el dueño:",
+    ]
+    if brief["top_alerts"]:
+        lines.extend(f"  • {alert}" for alert in brief["top_alerts"])
+    else:
+        lines.append("  • Sin alertas: Orvo confirma que no hay urgencias.")
+
+    lines.append("- Próximas acciones:")
+    if brief["next_actions"]:
+        lines.extend(f"  • {action}" for action in brief["next_actions"])
+    else:
+        lines.append("  • Mantener monitoreo diario y revisar tendencias por canal.")
+    return "\n".join(lines)
+
+
+def print_sales_brief(scenario_id: str) -> None:
+    print()
+    print(format_sales_brief(scenario_id))
+
+
+def print_scenario(scenario_id: str, *, save_dir: Path | None = None, sales_brief: bool = False):
     scenario = SCENARIOS[scenario_id]
     report = build_demo_report(scenario_id)
     text = compose_daily_report_text(report)
@@ -56,6 +86,10 @@ def print_scenario(scenario_id: str, *, save_dir: Path | None = None):
     print()
     print(f"   📏 {char_count} caracteres{' (truncado)' if char_count != len(text) else ''} / 1000 presupuesto WhatsApp")
     print()
+
+    if sales_brief:
+        print_sales_brief(scenario_id)
+        print()
 
     if save_dir:
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -85,12 +119,17 @@ def main() -> None:
         default=None,
         help="Directory to save text/JSON outputs",
     )
+    parser.add_argument(
+        "--sales-brief",
+        action="store_true",
+        help="Print seller-facing pain, pitch angle and next actions for each scenario",
+    )
     args = parser.parse_args()
 
     save_dir = Path(args.save_dir) if args.save_dir else None
 
     if args.scenario:
-        print_scenario(args.scenario, save_dir=save_dir)
+        print_scenario(args.scenario, save_dir=save_dir, sales_brief=args.sales_brief)
     else:
         print()
         print("  🧠 Orvo Brain — Demo de Reportes Diarios")
@@ -98,7 +137,7 @@ def main() -> None:
         print()
 
         for sid in SCENARIOS:
-            print_scenario(sid, save_dir=save_dir)
+            print_scenario(sid, save_dir=save_dir, sales_brief=args.sales_brief)
 
     _divider()
 
