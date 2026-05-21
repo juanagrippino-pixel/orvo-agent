@@ -201,6 +201,25 @@ def test_ads_block_roas_uses_namespaced_merge_revenue_keys():
     assert "ROAS estimado: 3.0x" in text
 
 
+def test_ads_block_roas_uses_single_channel_total_revenue_key():
+    """Single-connector reports expose revenue_today; ROAS must not show 0.0x."""
+    from app.brain.reporting import compose_daily_report_text
+
+    src = _tn_source()
+    report = DailyReport(
+        business_name="Café Test",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(key="revenue_today", label="Ventas", value=95000, unit="ARS", evidence=[src]),
+            Metric(key="ad_spend_today", label="Gasto ads", value=25000, unit="ARS", evidence=[_meta_source()]),
+        ],
+        insights=[],
+    )
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 3.8x" in text
+    assert "ROAS estimado: 0.0x" not in text
+
+
 def test_ads_block_not_shown_without_ad_spend():
     """No ad_spend_today -> no Publicidad section."""
     from app.brain.reporting import compose_daily_report_text

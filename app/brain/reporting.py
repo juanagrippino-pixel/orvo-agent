@@ -32,6 +32,10 @@ _ML_REVENUE_KEYS = (
     "mercadolibre.revenue_today",
     "ml_revenue_today",
 )
+_TOTAL_REVENUE_KEYS = (
+    "revenue_today",
+    "total_revenue_today",
+)
 
 
 def _first_metric(metrics: dict, keys: tuple[str, ...]) -> Metric | None:
@@ -64,20 +68,38 @@ def _canales_section(metrics: dict) -> list[str]:
     ]
 
 
-def _ads_section(metrics: dict) -> list[str]:
-    ad = metrics.get("ad_spend_today")
-    if not ad:
-        return []
-    spend = float(ad.value)
-    revenue = sum(
+def _ads_revenue(metrics: dict) -> float | None:
+    """Return revenue to compare against ad spend.
+
+    Multi-channel reports expose channel-specific revenue keys; single-channel
+    reports expose `revenue_today`. Falling back prevents demo/prospect outputs
+    from showing a misleading 0.0x ROAS when revenue is present.
+    """
+    channel_values = [
         value
         for value in (
             _metric_float(metrics, _TN_REVENUE_KEYS),
             _metric_float(metrics, _ML_REVENUE_KEYS),
         )
         if value is not None
-    )
-    roas_line = f"- ROAS estimado: {revenue / spend:.1f}x" if spend > 0 else "- ROAS estimado: N/A"
+    ]
+    if channel_values:
+        return sum(channel_values)
+    return _metric_float(metrics, _TOTAL_REVENUE_KEYS)
+
+
+def _ads_section(metrics: dict) -> list[str]:
+    ad = metrics.get("ad_spend_today")
+    if not ad:
+        return []
+    spend = float(ad.value)
+    revenue = _ads_revenue(metrics)
+    if spend <= 0:
+        roas_line = "- ROAS estimado: N/A"
+    elif revenue is None:
+        roas_line = "- ROAS estimado: N/D (sin ventas cargadas)"
+    else:
+        roas_line = f"- ROAS estimado: {revenue / spend:.1f}x"
     return [
         "",
         "📣 Publicidad",

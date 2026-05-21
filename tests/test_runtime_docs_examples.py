@@ -114,3 +114,10 @@ def test_runtime_doc_links_resolve_to_existing_examples() -> None:
     assert referenced, "docs should reference at least one example"
     for name in referenced:
         assert (EXAMPLES_DIR / name).exists(), f"missing example referenced from docs: {name}"
+
+
+def test_runtime_doc_includes_one_command_sales_demo() -> None:
+    docs = DOCS_FILE.read_text(encoding="utf-8")
+    assert "python scripts/demo_report.py" in docs
+    assert "--scenario pyme-stock-crisis" in docs
+    assert "WhatsApp-ready" in docs or "WhatsApp" in docs

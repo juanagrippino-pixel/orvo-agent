@@ -362,7 +362,29 @@ report = build_daily_report_from_csv_file(
 
 ---
 
-## 7. Run a dry-run report
+## 8. Run the one-command sales demo
+
+Use the seeded demo when selling Orvo Brain to Argentine/LatAm PyMEs. It needs
+no database, no API keys, and prints WhatsApp-ready examples for a normal day,
+a stock crisis, and a multi-channel Tiendanube + MercadoLibre + Meta Ads shop.
+
+```bash
+python scripts/demo_report.py
+
+# Focus the strongest urgency demo for a prospect call
+python scripts/demo_report.py --scenario pyme-stock-crisis
+
+# Save copy/pasteable WhatsApp samples + JSON payloads
+python scripts/demo_report.py --save-dir examples/demo_output/
+```
+
+The ads block uses available sales metrics for estimated ROAS, so single-channel
+demos show a prospect-friendly value (for example `ARS 95.000 / ARS 25.000 =
+3.8x`) instead of a misleading zero when channel-specific revenue is absent.
+
+---
+
+## 9. Run a dry-run report
 
 A dry-run builds the report and composes the WhatsApp text *without* sending
 anything to Meta — safe to run repeatedly in CI or on a laptop.
@@ -405,7 +427,7 @@ report payload.
 
 ---
 
-## 8. Run a real WhatsApp dispatch
+## 10. Run a real WhatsApp dispatch
 
 ```bash
 export WHATSAPP_PHONE_ID="..."
@@ -441,9 +463,9 @@ idempotency keys ensure no duplicate messages.
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
-### 9.1 Google OAuth expired or revoked
+### 11.1 Google OAuth expired or revoked
 
 Symptoms:
 
@@ -467,7 +489,7 @@ Fix:
    service-account email — refresh tokens cannot be revoked behind your
    back. Point `GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE` at the JSON.
 
-### 9.2 Tiendanube returns 401 / 403
+### 11.2 Tiendanube returns 401 / 403
 
 Symptoms:
 
@@ -487,7 +509,7 @@ Fix:
 4. Regenerate the token from the Tiendanube partner dashboard and update
    `ConnectorConfig.params.access_token`.
 
-### 9.3 WhatsApp credentials missing or wrong
+### 11.3 WhatsApp credentials missing or wrong
 
 Symptoms:
 
@@ -506,7 +528,7 @@ Fix:
 4. For development, use `--dry-run` on `run_orvo_brain_reports.py` to skip
    the WhatsApp call entirely.
 
-### 9.4 Duplicate dispatch / idempotency
+### 11.4 Duplicate dispatch / idempotency
 
 Symptoms:
 
@@ -540,13 +562,15 @@ Recovery / behaviour rules:
 
 ---
 
-## 10. Examples bundled with this repo
+## 12. Examples bundled with this repo
 
 | File | Purpose |
 |------|---------|
 | [`examples/artemea_daily.csv`](../examples/artemea_daily.csv) | 8-day Artemea sample (works with the CSV adapter and `/brain/reports/daily/csv`). |
 | [`examples/google_sheets_business_config.json`](../examples/google_sheets_business_config.json) | Full `BusinessConfig` JSON for a Google Sheets connector. |
 | [`examples/tiendanube_business_config.json`](../examples/tiendanube_business_config.json) | Full `BusinessConfig` JSON for a Tiendanube connector. Uses `[REDACTED]` in place of a real token. |
+| [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json) | Full `BusinessConfig` JSON for a Meta Ads connector. Uses `[REDACTED]` in place of a real token. |
+| `scripts/demo_report.py` | One-command sales demo that prints WhatsApp samples from deterministic PyME scenarios. |
 
 All examples are validated by
 [`tests/test_runtime_docs_examples.py`](../tests/test_runtime_docs_examples.py):

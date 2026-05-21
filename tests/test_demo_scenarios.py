@@ -49,6 +49,18 @@ def test_pyme_stock_crisis_text_content():
     assert "Café de Barrio" in text
 
 
+def test_single_channel_demo_ads_roas_uses_total_revenue():
+    report = build_demo_report("pyme-stock-crisis")
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 3.8x" in text
+    assert "ROAS estimado: 0.0x" not in text
+
+
+def test_pyme_normal_demo_ads_roas_uses_total_revenue():
+    report = build_demo_report("pyme-normal")
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 15.4x" in text
+
 def test_pyme_multi_canal_has_cross_channel_insights():
     report = build_demo_report("pyme-multi-canal")
     severities = [i.severity for i in report.insights]
