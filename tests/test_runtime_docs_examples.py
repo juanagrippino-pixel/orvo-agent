@@ -29,7 +29,9 @@ DOCS_FILE = Path(__file__).resolve().parents[1] / "docs" / "orvo-brain-runtime.m
     "filename,expected_connector_type",
     [
         ("google_sheets_business_config.json", "google_sheets"),
+        ("csv_business_config.json", "csv"),
         ("tiendanube_business_config.json", "tiendanube"),
+        ("mercadolibre_business_config.json", "mercadolibre"),
         ("meta_ads_business_config.json", "meta_ads"),
     ],
 )
@@ -54,6 +56,21 @@ def test_tiendanube_example_uses_placeholder_token() -> None:
         "tiendanube example must use a placeholder token, not a real one"
     )
 
+
+
+
+def test_mercadolibre_example_uses_placeholder_token() -> None:
+    """Guard against accidentally committing real MercadoLibre tokens."""
+    raw = (EXAMPLES_DIR / "mercadolibre_business_config.json").read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    token = payload["connectors"][0]["params"]["access_token"]
+    seller_id = payload["connectors"][0]["params"]["seller_id"]
+    assert token in {"[REDACTED]", "ml_test_token"}, (
+        "mercadolibre example must use a placeholder token, not a real one"
+    )
+    assert seller_id in {"[REDACTED]", "123456789"}, (
+        "mercadolibre example must use a placeholder seller id, not a real one"
+    )
 
 def test_meta_ads_example_uses_placeholder_token() -> None:
     """Guard against accidentally committing real Meta Ads tokens."""

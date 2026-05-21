@@ -120,7 +120,7 @@ class TestConnectorConfigModel:
             connector_id="gs-sales",
             connector_type="google_sheets",
             label="Ventas Artemea",
-            params={"spreadsheet_id": "abc123", "sheet_name": "Ventas"},
+            params={"spreadsheet_id": "abc123", "range_name": "Ventas!A1:F1000"},
         )
         assert conn.connector_id == "gs-sales"
         assert conn.connector_type == "google_sheets"
@@ -159,6 +159,53 @@ class TestConnectorConfigModel:
                 params={},
             )
 
+    def test_known_connectors_validate_required_params(self):
+        from app.brain.config import ConnectorConfig
+
+        required = {
+            "google_sheets": ("spreadsheet_id", "range_name"),
+            "csv": ("csv_path",),
+            "tiendanube": ("store_id", "access_token"),
+            "mercadolibre": ("seller_id", "access_token"),
+            "meta_ads": ("ad_account_id", "access_token"),
+        }
+
+        for connector_type, keys in required.items():
+            params = {key: f"demo-{key}" for key in keys}
+            conn = ConnectorConfig(
+                connector_id=f"demo-{connector_type}",
+                connector_type=connector_type,
+                label=f"Demo {connector_type}",
+                params=params,
+            )
+            assert conn.params == params
+
+    def test_missing_known_connector_params_raise_actionable_error(self):
+        from app.brain.config import ConnectorConfig
+
+        with pytest.raises(ValidationError) as excinfo:
+            ConnectorConfig(
+                connector_id="bad-meta",
+                connector_type="meta_ads",
+                label="Meta Ads",
+                params={"access_token": "meta_test_token"},
+            )
+
+        message = str(excinfo.value)
+        assert "meta_ads connector params must include ad_account_id" in message
+        assert "examples/meta_ads_business_config.json" in message
+
+    def test_unknown_connector_type_is_preserved_for_runtime_error(self):
+        from app.brain.config import ConnectorConfig
+
+        conn = ConnectorConfig(
+            connector_id="future",
+            connector_type="shopify",
+            label="Future connector",
+            params={},
+        )
+        assert conn.connector_type == "shopify"
+
 
 # ---------------------------------------------------------------------------
 # BusinessConfig with connectors
@@ -172,7 +219,7 @@ class TestBusinessConfigWithConnectors:
             connector_id="gs-sales",
             connector_type="google_sheets",
             label="Ventas",
-            params={"spreadsheet_id": "abc"},
+            params={"spreadsheet_id": "abc", "range_name": "Ventas!A1:F1000"},
         )
         cfg = BusinessConfig(
             business_id="artemea-001",
@@ -192,7 +239,7 @@ class TestBusinessConfigWithConnectors:
             connector_id="dup",
             connector_type="google_sheets",
             label="A",
-            params={},
+            params={"spreadsheet_id": "abc", "range_name": "Ventas!A1:F1000"},
         )
         conn2 = ConnectorConfig(
             connector_id="dup",
@@ -295,7 +342,7 @@ class TestJSONSerialisation:
             connector_id="gs-1",
             connector_type="google_sheets",
             label="Ventas",
-            params={"spreadsheet_id": "xyz"},
+            params={"spreadsheet_id": "xyz", "range_name": "Ventas!A1:F1000"},
         )
         cfg = BusinessConfig(
             business_id="artemea-001",

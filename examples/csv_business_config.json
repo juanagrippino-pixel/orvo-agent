@@ -1,0 +1,18 @@
+{
+  "business_id": "demo-csv",
+  "business_name": "Demo CSV",
+  "owner_phone": "+5491150380097",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "demo-csv-file",
+      "connector_type": "csv",
+      "label": "CSV - Demo CSV",
+      "params": {
+        "csv_path": "examples/artemea_daily.csv"
+      },
+      "enabled": true
+    }
+  ]
+}

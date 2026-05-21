@@ -93,7 +93,22 @@ def test_tiendanube_pipeline_fails_if_connector_missing():
 def test_tiendanube_pipeline_fails_if_connector_missing_required_params():
     from app.brain.pipeline import run_tiendanube_daily_report_pipeline
 
-    business = make_tiendanube_business(params={"store_id": "12345"})
+    business = BusinessConfig.model_construct(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig.model_construct(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="Tiendanube Artemea",
+                params={"store_id": "12345"},
+                enabled=True,
+            )
+        ],
+    )
 
     with pytest.raises(ValueError, match="store_id and access_token"):
         run_tiendanube_daily_report_pipeline(

@@ -87,6 +87,33 @@ the caller:
 
 ---
 
+### Config validation before onboarding
+
+`BusinessConfig.model_validate(...)` now fails fast for enabled first-party
+connectors whose required `params` are missing. This catches the most common
+prospect-onboarding mistakes before a scheduled report silently fails.
+
+| Connector | Required `params` | Copy-paste example |
+|-----------|-------------------|--------------------|
+| `google_sheets` | `spreadsheet_id`, `range_name` | [`examples/google_sheets_business_config.json`](../examples/google_sheets_business_config.json) |
+| `csv` | `csv_path` | [`examples/csv_business_config.json`](../examples/csv_business_config.json) |
+| `tiendanube` | `store_id`, `access_token` | [`examples/tiendanube_business_config.json`](../examples/tiendanube_business_config.json) |
+| `mercadolibre` | `seller_id`, `access_token` | [`examples/mercadolibre_business_config.json`](../examples/mercadolibre_business_config.json) |
+| `meta_ads` | `ad_account_id`, `access_token` | [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json) |
+
+Typical error message:
+
+```text
+meta_ads connector params must include ad_account_id (required: ad_account_id, access_token). See examples/meta_ads_business_config.json.
+```
+
+Disabled connectors (`"enabled": false`) may be incomplete, which lets you stage
+future integrations without blocking today's active report. Unknown connector
+types are preserved for forward compatibility, but the runtime will still reject
+them until a pipeline supports them.
+
+---
+
 ## 3. Bootstrap the SQLite database
 
 The control-plane state lives in a single SQLite file. The schema is created
@@ -309,9 +336,71 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/meta-ads \
   }'
 ```
 
+
 ---
 
-## 7. Configure a CSV connector
+## 7. Configure a MercadoLibre connector
+
+Example: [`examples/mercadolibre_business_config.json`](../examples/mercadolibre_business_config.json).
+
+`connector_type` must be `mercadolibre`. Required connector params:
+
+- `seller_id`: MercadoLibre numeric seller/user ID.
+- `access_token`: OAuth bearer token with orders read access.
+
+Optional params:
+
+- `site_id`: MercadoLibre site code. Defaults to `MLA` for Argentina.
+
+Use placeholders in docs and examples; never commit a real seller token.
+
+```json
+{
+  "business_id": "demo-ml",
+  "business_name": "Demo MercadoLibre",
+  "owner_phone": "+5491150380097",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "demo-mercadolibre",
+      "connector_type": "mercadolibre",
+      "label": "MercadoLibre - Demo ML",
+      "params": {
+        "seller_id": "123456789",
+        "access_token": "[REDACTED]",
+        "site_id": "MLA"
+      },
+      "enabled": true
+    }
+  ]
+}
+```
+
+MercadoLibre is wired in the runtime layer:
+
+- HTTP preview endpoint: `POST /brain/reports/daily/mercadolibre` returns composed text and report payload without dispatching.
+- Pipeline: `run_mercadolibre_daily_report_pipeline(...)` builds the report and dispatches through the idempotent dispatcher.
+- Scheduled runner: `run_due_daily_reports(...)` chooses the MercadoLibre pipeline when a business config has an enabled `mercadolibre` connector.
+- Forced runner: `scripts/run_orvo_brain_reports.py --force` selects it for businesses whose first enabled connector is `mercadolibre`.
+
+HTTP preview example:
+
+```bash
+curl -s -X POST http://localhost:5000/brain/reports/daily/mercadolibre \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "business_name": "Demo MercadoLibre",
+    "seller_id": "123456789",
+    "access_token": "ml_test_token",
+    "site_id": "MLA",
+    "report_date": "2026-05-19"
+  }'
+```
+
+---
+
+## 8. Configure a CSV connector
 
 
 The CSV adapter is the simplest path — useful for back-fills or when a client
@@ -362,7 +451,7 @@ report = build_daily_report_from_csv_file(
 
 ---
 
-## 7. Run a dry-run report
+## 9. Run a dry-run report
 
 A dry-run builds the report and composes the WhatsApp text *without* sending
 anything to Meta — safe to run repeatedly in CI or on a laptop.
@@ -405,7 +494,7 @@ report payload.
 
 ---
 
-## 8. Run a real WhatsApp dispatch
+## 10. Run a real WhatsApp dispatch
 
 ```bash
 export WHATSAPP_PHONE_ID="..."
@@ -441,9 +530,9 @@ idempotency keys ensure no duplicate messages.
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
-### 9.1 Google OAuth expired or revoked
+### 11.1 Google OAuth expired or revoked
 
 Symptoms:
 
@@ -467,7 +556,7 @@ Fix:
    service-account email — refresh tokens cannot be revoked behind your
    back. Point `GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE` at the JSON.
 
-### 9.2 Tiendanube returns 401 / 403
+### 11.2 Tiendanube returns 401 / 403
 
 Symptoms:
 
@@ -487,7 +576,7 @@ Fix:
 4. Regenerate the token from the Tiendanube partner dashboard and update
    `ConnectorConfig.params.access_token`.
 
-### 9.3 WhatsApp credentials missing or wrong
+### 11.3 WhatsApp credentials missing or wrong
 
 Symptoms:
 
@@ -506,7 +595,7 @@ Fix:
 4. For development, use `--dry-run` on `run_orvo_brain_reports.py` to skip
    the WhatsApp call entirely.
 
-### 9.4 Duplicate dispatch / idempotency
+### 11.4 Duplicate dispatch / idempotency
 
 Symptoms:
 
@@ -540,13 +629,16 @@ Recovery / behaviour rules:
 
 ---
 
-## 10. Examples bundled with this repo
+## 12. Examples bundled with this repo
 
 | File | Purpose |
 |------|---------|
 | [`examples/artemea_daily.csv`](../examples/artemea_daily.csv) | 8-day Artemea sample (works with the CSV adapter and `/brain/reports/daily/csv`). |
 | [`examples/google_sheets_business_config.json`](../examples/google_sheets_business_config.json) | Full `BusinessConfig` JSON for a Google Sheets connector. |
+| [`examples/csv_business_config.json`](../examples/csv_business_config.json) | Full `BusinessConfig` JSON for a CSV connector. |
 | [`examples/tiendanube_business_config.json`](../examples/tiendanube_business_config.json) | Full `BusinessConfig` JSON for a Tiendanube connector. Uses `[REDACTED]` in place of a real token. |
+| [`examples/mercadolibre_business_config.json`](../examples/mercadolibre_business_config.json) | Full `BusinessConfig` JSON for a MercadoLibre connector. Uses `[REDACTED]` in place of a real token. |
+| [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json) | Full `BusinessConfig` JSON for a Meta Ads connector. Uses `[REDACTED]` in place of a real token. |
 
 All examples are validated by
 [`tests/test_runtime_docs_examples.py`](../tests/test_runtime_docs_examples.py):

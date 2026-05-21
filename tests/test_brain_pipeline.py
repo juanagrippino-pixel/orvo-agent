@@ -133,11 +133,12 @@ def test_pipeline_fails_if_connector_missing_sheet_params():
     business = make_business().model_copy(
         update={
             "connectors": [
-                ConnectorConfig(
+                ConnectorConfig.model_construct(
                     connector_id="bad",
                     connector_type="google_sheets",
                     label="Bad Sheet",
                     params={},
+                    enabled=True,
                 )
             ]
         }

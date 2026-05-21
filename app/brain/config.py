@@ -26,13 +26,57 @@ from app.brain.models import InsightThresholds
 
 
 class ConnectorConfig(BaseModel):
-    """Configuration for one data-source connector attached to a business."""
+    """Configuration for one data-source connector attached to a business.
+
+    Known first-party connectors validate their required params at config-load
+    time so onboarding mistakes fail before a scheduled report runs. Unknown
+    connector types are preserved for forward compatibility and continue to be
+    rejected by the runtime dispatcher if no pipeline supports them.
+    """
 
     connector_id: str = Field(..., min_length=1)
     connector_type: str = Field(..., min_length=1)
     label: str = Field(..., min_length=1)
     params: dict = Field(default_factory=dict)
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def known_connector_params_must_be_complete(self) -> "ConnectorConfig":
+        required_by_type: dict[str, tuple[str, ...]] = {
+            "google_sheets": ("spreadsheet_id", "range_name"),
+            "csv": ("csv_path",),
+            "tiendanube": ("store_id", "access_token"),
+            "mercadolibre": ("seller_id", "access_token"),
+            "meta_ads": ("ad_account_id", "access_token"),
+        }
+        example_by_type: dict[str, str] = {
+            "google_sheets": "examples/google_sheets_business_config.json",
+            "csv": "docs/orvo-brain-runtime.md#configure-a-csv-connector",
+            "tiendanube": "examples/tiendanube_business_config.json",
+            "mercadolibre": "docs/orvo-brain-runtime.md#configure-a-mercadolibre-connector",
+            "meta_ads": "examples/meta_ads_business_config.json",
+        }
+        if not self.enabled:
+            return self
+
+        required = required_by_type.get(self.connector_type)
+        if not required:
+            return self
+
+        missing = [
+            key
+            for key in required
+            if self.params.get(key) is None or str(self.params.get(key)).strip() == ""
+        ]
+        if missing:
+            missing_list = " and ".join(missing) if len(missing) == 2 else ", ".join(missing)
+            required_list = " and ".join(required) if len(required) == 2 else ", ".join(required)
+            example = example_by_type[self.connector_type]
+            raise ValueError(
+                f"{self.connector_type} connector params must include {missing_list} "
+                f"(required: {required_list}). See {example}."
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

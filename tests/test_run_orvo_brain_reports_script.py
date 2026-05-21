@@ -244,18 +244,19 @@ def test_force_report_uses_csv_pipeline_without_loading_sheets():
 
 
 def test_force_report_csv_requires_csv_path():
-    business = BusinessConfig(
+    business = BusinessConfig.model_construct(
         business_id="bad-csv",
         business_name="Bad CSV",
         owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[
-            ConnectorConfig(
+            ConnectorConfig.model_construct(
                 connector_id="bad-csv-conn",
                 connector_type="csv",
                 label="Bad CSV",
                 params={},
+                enabled=True,
             )
         ],
     )
