@@ -22,6 +22,12 @@ SCENARIOS: dict[str, dict] = {
             "Ventas por encima del promedio, stock sano, bajo gasto en ads. "
             "Muestra un día típico sin alertas críticas."
         ),
+        "sales_summary": {
+            "persona": "Dueña de tienda con ventas saludables pero poco tiempo para revisar métricas",
+            "pain": "Hoy vende bien, pero todavía depende de abrir Tiendanube, planillas y Meta Ads a mano.",
+            "roi_hook": "Orvo convierte 10 minutos diarios de revisión manual en un WhatsApp con ventas, stock y ads ya priorizados.",
+            "cta": "Mostrale este WhatsApp y preguntá: ¿querés recibirlo cada mañana antes de abrir el negocio?",
+        },
         "payload": {
             "business_name": "Artemea — Flores",
             "report_date": "2026-05-20",
@@ -43,6 +49,12 @@ SCENARIOS: dict[str, dict] = {
             "responder y $25.000 gastados en ads. Demuestra el valor de la "
             "detección temprana para evitar pérdidas."
         ),
+        "sales_summary": {
+            "persona": "Cafetería/retail con productos de alta rotación y campañas activas",
+            "pain": "Está pagando tráfico mientras se queda sin stock y deja consultas calientes sin responder.",
+            "roi_hook": "Una alerta temprana por WhatsApp ayuda a frenar gasto improductivo y recuperar ventas antes de que cierre el día.",
+            "cta": "Mostrale la alerta roja y ofrecé configurar su primer reporte WhatsApp con stock + ads esta semana.",
+        },
         "payload": {
             "business_name": "Café de Barrio — Colegiales",
             "report_date": "2026-05-20",
@@ -62,6 +74,12 @@ SCENARIOS: dict[str, dict] = {
             "Negocio con ventas en dos canales y gasto en publicidad. Muestra "
             "el balance de canales, ROAS estimado y detección de desbalance."
         ),
+        "sales_summary": {
+            "persona": "Marca PyME que vende por Tiendanube, MercadoLibre y pauta en Meta",
+            "pain": "Las ventas están repartidas en canales y nadie mira ROAS, desbalance ni conversaciones en un solo lugar.",
+            "roi_hook": "Orvo junta canales + ads en un WhatsApp accionable para decidir dónde empujar ventas mañana.",
+            "cta": "Usá este WhatsApp como demo de control multi-canal y pedí acceso a Tiendanube/ML/Meta para un piloto.",
+        },
         "payload": {
             "business_name": "ModaSud — Buenos Aires",
             "report_date": "2026-05-20",
@@ -96,3 +114,22 @@ def build_demo_report(scenario_id: str):
 def build_all_demo_reports():
     """Build DailyReports for every scenario, preserving order."""
     return [(sid, build_demo_report(sid)) for sid in SCENARIOS]
+
+
+def format_demo_sales_summary(scenario_id: str) -> str:
+    """Return compact sales-talk-track copy for a demo scenario.
+
+    The text is intentionally deterministic and prospect-facing so a seller can
+    paste it into notes or read it before showing the WhatsApp output.
+    """
+    scenario = SCENARIOS[scenario_id]
+    sales = scenario["sales_summary"]
+    return "\n".join(
+        [
+            "💬 Para venderlo:",
+            f"- Cliente ideal: {sales['persona']}",
+            f"- Dolor: {sales['pain']}",
+            f"- ROI: {sales['roi_hook']}",
+            f"- CTA: {sales['cta']}",
+        ]
+    )

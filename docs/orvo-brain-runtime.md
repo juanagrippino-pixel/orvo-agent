@@ -10,6 +10,32 @@ real WhatsApp messages, and recovering from common failures.
 
 ---
 
+## Demo-first sales walkthrough
+
+For prospect demos, use the deterministic one-command report generator. It needs
+no credentials and prints exactly the WhatsApp-style message a PyME owner would
+receive:
+
+```bash
+python scripts/demo_report.py --sales-summary
+```
+
+Use a single scenario when the prospect matches a specific pain:
+
+```bash
+python scripts/demo_report.py --scenario pyme-stock-crisis --sales-summary
+```
+
+`--sales-summary` adds a compact talk track after each WhatsApp sample:
+ideal customer, pain, ROI hook, and CTA. When saving outputs, it also writes
+`*-sales.md` files alongside the `.txt` WhatsApp samples and `.json` payloads:
+
+```bash
+python scripts/demo_report.py --sales-summary --save-dir examples/demo_output/
+```
+
+---
+
 ## 1. Components at a glance
 
 | Layer | Module | Purpose |

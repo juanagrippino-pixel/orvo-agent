@@ -102,3 +102,35 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_demo_scenarios_include_sales_summary_copy():
+    """Each demo should include prospect-facing copy for a sales walkthrough."""
+    for sid, scenario in SCENARIOS.items():
+        sales = scenario.get("sales_summary")
+        assert sales, f"{sid} missing sales_summary"
+        assert sales.get("persona"), f"{sid} missing sales persona"
+        assert sales.get("pain"), f"{sid} missing sales pain"
+        assert sales.get("roi_hook"), f"{sid} missing ROI hook"
+        assert sales.get("cta"), f"{sid} missing CTA"
+        assert "WhatsApp" in sales["cta"] or "WhatsApp" in sales["roi_hook"]
+
+
+def test_format_demo_sales_summary_is_compact_and_actionable():
+    from app.brain.demo_scenarios import format_demo_sales_summary
+
+    for sid in SCENARIOS:
+        summary = format_demo_sales_summary(sid)
+        assert len(summary) <= 700
+        assert "Para venderlo:" in summary
+        assert "Dolor:" in summary
+        assert "ROI:" in summary
+        assert "CTA:" in summary
+        assert "[REDACTED]" not in summary
+
+
+def test_demo_stock_crisis_ads_section_uses_generic_revenue_for_roas():
+    report = build_demo_report("pyme-stock-crisis")
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 3.8x" in text
+    assert "ROAS estimado: 0.0x" not in text

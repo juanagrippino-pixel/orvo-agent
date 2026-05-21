@@ -32,6 +32,10 @@ _ML_REVENUE_KEYS = (
     "mercadolibre.revenue_today",
     "ml_revenue_today",
 )
+_GENERIC_REVENUE_KEYS = (
+    "revenue_today",
+    "revenue",
+)
 
 
 def _first_metric(metrics: dict, keys: tuple[str, ...]) -> Metric | None:
@@ -69,14 +73,17 @@ def _ads_section(metrics: dict) -> list[str]:
     if not ad:
         return []
     spend = float(ad.value)
-    revenue = sum(
+    channel_revenue = [
         value
         for value in (
             _metric_float(metrics, _TN_REVENUE_KEYS),
             _metric_float(metrics, _ML_REVENUE_KEYS),
         )
         if value is not None
-    )
+    ]
+    revenue = sum(channel_revenue)
+    if not channel_revenue:
+        revenue = _metric_float(metrics, _GENERIC_REVENUE_KEYS) or 0
     roas_line = f"- ROAS estimado: {revenue / spend:.1f}x" if spend > 0 else "- ROAS estimado: N/A"
     return [
         "",
