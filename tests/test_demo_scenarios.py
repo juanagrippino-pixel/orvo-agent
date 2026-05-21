@@ -102,3 +102,36 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_demo_sales_pack_writes_readme_and_whatsapp_samples(tmp_path):
+    from scripts.demo_report import write_sales_pack
+
+    manifest = write_sales_pack(tmp_path)
+
+    readme = tmp_path / "README.md"
+    assert readme.exists()
+    readme_text = readme.read_text(encoding="utf-8")
+    assert "Orvo Brain — Pack de demo comercial" in readme_text
+    assert "Cómo usarlo en una venta" in readme_text
+    assert "WhatsApp" in readme_text
+    assert "ROI" in readme_text
+
+    scenario_ids = set(SCENARIOS)
+    assert set(manifest) == scenario_ids
+    for scenario_id in scenario_ids:
+        assert (tmp_path / f"{scenario_id}.txt").exists()
+        assert (tmp_path / f"{scenario_id}.json").exists()
+        assert scenario_id in readme_text
+        assert manifest[scenario_id]["whatsapp_chars"] <= 1000
+        assert manifest[scenario_id]["business_name"]
+
+
+def test_demo_sales_pack_readme_does_not_contain_secrets(tmp_path):
+    from scripts.demo_report import write_sales_pack
+
+    write_sales_pack(tmp_path)
+    combined = "\n".join(p.read_text(encoding="utf-8") for p in tmp_path.iterdir() if p.is_file())
+    forbidden = ["WHATSAPP_TOKEN", "access_token", "refresh_token", "client_secret"]
+    for token in forbidden:
+        assert token not in combined

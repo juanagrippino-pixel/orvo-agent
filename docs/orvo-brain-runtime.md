@@ -85,9 +85,40 @@ the caller:
 > Do **not** commit real tokens. Examples in this repo use `[REDACTED]` /
 > `tn_test_token`.
 
+
 ---
 
-## 3. Bootstrap the SQLite database
+## 3. One-command demo and sales pack
+
+For a prospect call or internal readiness check, generate deterministic WhatsApp
+samples without credentials:
+
+```bash
+python scripts/demo_report.py
+```
+
+To create a shareable sales pack with a Spanish README, WhatsApp-ready `.txt`
+messages, and JSON evidence for each seeded PyME scenario:
+
+```bash
+python scripts/demo_report.py --sales-pack examples/demo_output
+```
+
+The generated pack is designed for selling Orvo Brain to Argentine/LatAm PyMEs:
+
+- `pyme-normal`: shows a healthy day report with no fake urgency.
+- `pyme-stock-crisis`: shows the ROI of catching low stock, active ads, and
+  unanswered chats before money is wasted.
+- `pyme-multi-canal`: shows Tiendanube + MercadoLibre + Meta Ads in one
+  WhatsApp summary.
+
+All values are seeded and deterministic. The `.json` files include the evidence
+behind each metric so a seller can prove the WhatsApp copy is grounded in data,
+not invented by an LLM.
+
+---
+
+## 4. Bootstrap the SQLite database
 
 The control-plane state lives in a single SQLite file. The schema is created
 on first connection.
@@ -127,7 +158,7 @@ finally:
 
 ---
 
-## 4. Configure a Google Sheets connector
+## 5. Configure a Google Sheets connector
 
 A `BusinessConfig` may carry one or more `ConnectorConfig` entries. For Google
 Sheets the `params` block must contain `spreadsheet_id` and `range_name`.
@@ -192,7 +223,7 @@ emitted when at least one row provides a value for it.
 
 ---
 
-## 5. Configure a Tiendanube connector
+## 6. Configure a Tiendanube connector
 
 Example: [`examples/tiendanube_business_config.json`](../examples/tiendanube_business_config.json).
 
@@ -256,7 +287,7 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/tiendanube \
 
 ---
 
-## 6. Configure a Meta Ads connector
+## 7. Configure a Meta Ads connector
 
 Example: [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json).
 
@@ -311,7 +342,7 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/meta-ads \
 
 ---
 
-## 7. Configure a CSV connector
+## 8. Configure a CSV connector
 
 
 The CSV adapter is the simplest path — useful for back-fills or when a client
@@ -362,7 +393,7 @@ report = build_daily_report_from_csv_file(
 
 ---
 
-## 7. Run a dry-run report
+## 9. Run a dry-run report
 
 A dry-run builds the report and composes the WhatsApp text *without* sending
 anything to Meta — safe to run repeatedly in CI or on a laptop.
@@ -405,7 +436,7 @@ report payload.
 
 ---
 
-## 8. Run a real WhatsApp dispatch
+## 10. Run a real WhatsApp dispatch
 
 ```bash
 export WHATSAPP_PHONE_ID="..."
@@ -441,9 +472,9 @@ idempotency keys ensure no duplicate messages.
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
-### 9.1 Google OAuth expired or revoked
+### 11.1 Google OAuth expired or revoked
 
 Symptoms:
 
@@ -467,7 +498,7 @@ Fix:
    service-account email — refresh tokens cannot be revoked behind your
    back. Point `GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE` at the JSON.
 
-### 9.2 Tiendanube returns 401 / 403
+### 11.2 Tiendanube returns 401 / 403
 
 Symptoms:
 
@@ -487,7 +518,7 @@ Fix:
 4. Regenerate the token from the Tiendanube partner dashboard and update
    `ConnectorConfig.params.access_token`.
 
-### 9.3 WhatsApp credentials missing or wrong
+### 11.3 WhatsApp credentials missing or wrong
 
 Symptoms:
 
@@ -506,7 +537,7 @@ Fix:
 4. For development, use `--dry-run` on `run_orvo_brain_reports.py` to skip
    the WhatsApp call entirely.
 
-### 9.4 Duplicate dispatch / idempotency
+### 11.4 Duplicate dispatch / idempotency
 
 Symptoms:
 
@@ -540,7 +571,7 @@ Recovery / behaviour rules:
 
 ---
 
-## 10. Examples bundled with this repo
+## 12. Examples bundled with this repo
 
 | File | Purpose |
 |------|---------|
