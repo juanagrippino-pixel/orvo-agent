@@ -2,7 +2,7 @@
 
 This document describes how to operate the Orvo Brain control plane in
 development and production: bootstrapping the SQLite store, configuring
-connectors (Google Sheets, CSV, Tiendanube), running dry-run reports, dispatching
+connectors (Google Sheets, CSV, Tiendanube, MercadoLibre, Meta Ads), running dry-run reports, dispatching
 real WhatsApp messages, and recovering from common failures.
 
 > Scope: this is **operational** documentation. Internal design decisions live
@@ -20,14 +20,16 @@ real WhatsApp messages, and recovering from common failures.
 | Adapters | `app.brain.adapters.google_sheets` | Pull Sheet rows → `DailyReport` |
 | Adapters | `app.brain.adapters.csv_file` | Read local CSV → `DailyReport` |
 | Adapters | `app.brain.adapters.tiendanube` | Call Tiendanube API → `DailyReport` |
+| Adapters | `app.brain.adapters.mercadolibre` | Call MercadoLibre orders API → `DailyReport` |
+| Adapters | `app.brain.adapters.meta_ads` | Call Meta Marketing API → `DailyReport` |
 | Pipeline | `app.brain.pipeline` | Build report + dispatch end-to-end |
 | Dispatch | `app.brain.dispatch` | Idempotent delivery via `WhatsAppDeliveryClient` |
 | Runner | `app.brain.runner` | Execute every *due* schedule from config store |
-| HTTP API | `server.py` | `POST /brain/reports/daily{,/google-sheets,/csv}` |
+| HTTP API | `server.py` | `POST /brain/reports/daily{,/google-sheets,/csv,/tiendanube,/mercadolibre,/meta-ads}` |
 | CLI scripts | `scripts/` | Bootstrap, dry-run, scheduled run |
 
 All metrics carry `Evidence` records so downstream summaries can cite their
-source (`google_sheets`, `csv`, `tiendanube`, …).
+source (`google_sheets`, `csv`, `tiendanube`, `mercadolibre`, `meta_ads`, …).
 
 ---
 
@@ -256,7 +258,65 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/tiendanube \
 
 ---
 
-## 6. Configure a Meta Ads connector
+## 6. Configure a MercadoLibre connector
+
+Example: [`examples/mercadolibre_business_config.json`](../examples/mercadolibre_business_config.json).
+
+`connector_type` must be `mercadolibre`. Required connector params:
+
+- `seller_id`: numeric MercadoLibre seller/user ID.
+- `access_token`: MercadoLibre OAuth bearer token with orders read access.
+- `site_id`: optional site code; use `MLA` for Argentina.
+
+Use placeholders in docs and examples; never commit a real MercadoLibre token.
+
+```json
+{
+  "business_id": "demo-mercadolibre",
+  "business_name": "Demo MercadoLibre",
+  "owner_phone": "+5491150380097",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "demo-mercadolibre-orders",
+      "connector_type": "mercadolibre",
+      "label": "MercadoLibre - Demo MercadoLibre",
+      "params": {
+        "seller_id": "123456789",
+        "access_token": "[REDACTED]",
+        "site_id": "MLA"
+      },
+      "enabled": true
+    }
+  ]
+}
+```
+
+MercadoLibre is wired in the runtime layer:
+
+- HTTP preview endpoint: `POST /brain/reports/daily/mercadolibre` returns composed WhatsApp text and report JSON without dispatching.
+- Pipeline: `run_mercadolibre_daily_report_pipeline(...)` builds revenue, order-count, and AOV metrics from paid/confirmed orders, then dispatches idempotently.
+- Scheduled runner: `run_due_daily_reports(...)` chooses the MercadoLibre pipeline when a business config has an enabled `mercadolibre` connector.
+- Forced runner: `scripts/run_orvo_brain_reports.py --force` selects it for businesses whose first enabled connector is `mercadolibre`.
+
+HTTP preview example:
+
+```bash
+curl -s -X POST http://localhost:5000/brain/reports/daily/mercadolibre \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "business_name": "Demo MercadoLibre",
+    "seller_id": "123456789",
+    "access_token": "ml_test_token",
+    "site_id": "MLA",
+    "report_date": "2026-05-19"
+  }'
+```
+
+---
+
+## 7. Configure a Meta Ads connector
 
 Example: [`examples/meta_ads_business_config.json`](../examples/meta_ads_business_config.json).
 
@@ -311,7 +371,7 @@ curl -s -X POST http://localhost:5000/brain/reports/daily/meta-ads \
 
 ---
 
-## 7. Configure a CSV connector
+## 8. Configure a CSV connector
 
 
 The CSV adapter is the simplest path — useful for back-fills or when a client

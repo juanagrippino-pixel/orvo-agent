@@ -1,0 +1,20 @@
+{
+  "business_id": "demo-mercadolibre",
+  "business_name": "Demo MercadoLibre",
+  "owner_phone": "+5491150380097",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "demo-mercadolibre-orders",
+      "connector_type": "mercadolibre",
+      "label": "MercadoLibre - Demo MercadoLibre",
+      "params": {
+        "seller_id": "123456789",
+        "access_token": "[REDACTED]",
+        "site_id": "MLA"
+      },
+      "enabled": true
+    }
+  ]
+}
