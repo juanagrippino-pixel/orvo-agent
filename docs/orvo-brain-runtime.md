@@ -362,6 +362,30 @@ report = build_daily_report_from_csv_file(
 
 ---
 
+
+### One-command seeded demo WhatsApp samples
+
+For sales calls, demos, and onboarding rehearsals you can generate realistic
+WhatsApp outputs without configuring credentials or calling external APIs:
+
+```bash
+# List seeded PyME stories
+python scripts/demo_orvo_brain_report.py --list
+
+# Print a copy/pasteable stock-crisis WhatsApp sample
+python scripts/demo_orvo_brain_report.py --scenario pyme-stock-crisis --max-chars 1000
+
+# Print all bundled demo samples
+python scripts/demo_orvo_brain_report.py
+```
+
+The command uses deterministic fixtures from `app.brain.demo_scenarios`, routes
+them through the production report composer, and includes cited sources in the
+message footer. It is safe to run live in front of prospects because it never
+reads secrets and never sends WhatsApp messages.
+
+---
+
 ## 7. Run a dry-run report
 
 A dry-run builds the report and composes the WhatsApp text *without* sending

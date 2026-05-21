@@ -102,3 +102,60 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_whatsapp_truncation_preserves_sources_footer():
+    report = build_demo_report("pyme-stock-crisis")
+    text = compose_daily_report_text(report)
+    truncated = truncate_for_whatsapp(
+        text, max_chars=1000, preserve_sources_footer=True
+    )
+
+    assert len(truncated) <= 1000
+    assert "... (ver reporte completo)" in truncated
+    assert "🔗 Fuentes: Demo Tiendanube + Meta Ads" in truncated
+
+
+def test_demo_cli_lists_scenarios():
+    """Sales/demo operators can discover available demo stories from CLI."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "scripts/demo_orvo_brain_report.py", "--list"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "pyme-normal" in result.stdout
+    assert "pyme-stock-crisis" in result.stdout
+    assert "pyme-multi-canal" in result.stdout
+    assert "Stock crítico" in result.stdout
+
+
+def test_demo_cli_prints_whatsapp_sample_for_single_scenario():
+    """One command should generate a bounded, copy/pasteable WhatsApp sample."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/demo_orvo_brain_report.py",
+            "--scenario",
+            "pyme-stock-crisis",
+            "--max-chars",
+            "1000",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "### pyme-stock-crisis" in result.stdout
+    assert "WhatsApp sample" in result.stdout
+    assert "Café de Barrio" in result.stdout
+    assert "🧠 Orvo Brain" in result.stdout
+    assert "🔗 Fuentes:" in result.stdout
+    assert len(result.stdout) < 1800

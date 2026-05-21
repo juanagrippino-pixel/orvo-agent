@@ -151,13 +151,26 @@ def compose_daily_report_text(report: DailyReport) -> str:
     return "\n".join(lines)
 
 
-def truncate_for_whatsapp(text: str, max_chars: int = 1000) -> str:
+def truncate_for_whatsapp(
+    text: str, max_chars: int = 1000, *, preserve_sources_footer: bool = False
+) -> str:
     """Trim a report to fit WhatsApp's practical reading budget.
 
     Keeps the text unchanged if under max_chars. Otherwise trims and appends
-    '... (ver reporte completo)'.
+    '... (ver reporte completo)'. When ``preserve_sources_footer`` is enabled,
+    it keeps the compact sources footer so demo previews remain evidence-backed
+    even after truncation.
     """
     if len(text) <= max_chars:
         return text
+
     suffix = "... (ver reporte completo)"
+    source_marker = "\n\n🔗 Fuentes:"
+    if preserve_sources_footer and source_marker in text:
+        body, footer_tail = text.rsplit(source_marker, 1)
+        footer = source_marker + footer_tail
+        body_budget = max_chars - len(suffix) - len(footer)
+        if body_budget > 0:
+            return body[:body_budget] + suffix + footer
+
     return text[: max_chars - len(suffix)] + suffix
