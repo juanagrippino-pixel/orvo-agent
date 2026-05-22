@@ -67,7 +67,23 @@ def test_meta_ads_pipeline_builds_and_dispatches_report_with_injected_http_clien
     assert metrics["ad_impressions_today"] == 1200
     assert result.dispatch.status == "sent"
     delivery.send_text.assert_called_once()
-    assert http_client.requests[0]["params"]["time_range"] == {"since": "2026-05-17", "until": "2026-05-17"}
+    assert http_client.requests[0]["params"]["time_range"] == '{"since": "2026-05-17", "until": "2026-05-17"}'
+
+
+def test_meta_ads_pipeline_serializes_time_range_as_json_string_for_live_api_compat():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    http_client = FakeMetaAdsHTTPClient()
+
+    run_meta_ads_daily_report_pipeline(
+        business=make_meta_ads_business(),
+        report_date=date(2026, 5, 17),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        http_client=http_client,
+    )
+
+    assert http_client.requests[0]["params"]["time_range"] == '{"since": "2026-05-17", "until": "2026-05-17"}'
 
 
 def test_meta_ads_pipeline_requires_ad_account_id_and_access_token():
