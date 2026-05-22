@@ -434,7 +434,7 @@ def test_request_uses_report_date_time_range_not_today_preset():
         http_client=client,
     )
     params = client.get.call_args_list[0].kwargs.get("params", {})
-    assert params.get("time_range") == {"since": "2026-05-17", "until": "2026-05-17"}
+    assert json.loads(params.get("time_range")) == {"since": "2026-05-17", "until": "2026-05-17"}
     assert "date_preset" not in params
 
 

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 from unittest.mock import MagicMock
 
 from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
@@ -354,5 +355,5 @@ def test_run_due_daily_reports_dispatches_due_meta_ads_report_with_scheduled_dat
     assert results[0].dispatch.status == "sent"
     assert any(metric.key == "ad_spend_today" and metric.value == 12000 for metric in results[0].pipeline.report.metrics)
     assert http_client.params is not None
-    assert http_client.params["time_range"] == {"since": "2026-05-19", "until": "2026-05-19"}
+    assert json.loads(http_client.params["time_range"]) == {"since": "2026-05-19", "until": "2026-05-19"}
     delivery.send_text.assert_called_once()
