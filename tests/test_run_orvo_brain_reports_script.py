@@ -1,4 +1,5 @@
 from datetime import date
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -268,3 +269,86 @@ def test_force_report_csv_requires_csv_path():
             idempotency_store=InMemoryIdempotencyStore(),
             sheets_service_factory=MagicMock(),
         )
+
+
+def make_tiendanube_meta_business():
+    return BusinessConfig(
+        business_id="demo-tn-meta",
+        business_name="Demo TN Meta",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-tiendanube",
+                connector_type="tiendanube",
+                label="Tiendanube Demo",
+                params={"store_id": "123", "access_token": "tn_test_token", "include_stock": False},
+            ),
+            ConnectorConfig(
+                connector_id="demo-meta",
+                connector_type="meta_ads",
+                label="Meta Ads Demo",
+                params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
+            ),
+        ],
+    )
+
+
+def test_force_report_runs_all_supported_connectors_for_hito0_parity():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for TN+Meta"))
+
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_meta_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        meta_ads_http_client=FakeMetaAdsHTTPClient(),
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    assert metrics["revenue_today"] == 1000.0
+    assert metrics["ad_spend_today"] == pytest.approx(725.25)
+    assert result.dispatch.status == "sent"
+    sheets_service_factory.assert_not_called()
+    delivery.send_text.assert_called_once()
+
+
+def test_scheduled_cli_does_not_load_google_sheets_before_runner(monkeypatch, tmp_path, capsys):
+    db_path = tmp_path / "orvo.sqlite3"
+
+    class EmptyConfigStore:
+        pass
+
+    class EmptyIdempotencyStore:
+        pass
+
+    fake_conn = MagicMock()
+    monkeypatch.setattr(
+        reports_script,
+        "open_runtime",
+        MagicMock(return_value=(fake_conn, EmptyConfigStore(), EmptyIdempotencyStore())),
+    )
+    monkeypatch.setattr(reports_script, "DryRunDeliveryClient", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        reports_script,
+        "get_sheets_service",
+        MagicMock(side_effect=AssertionError("scheduled CLI must not eagerly load Google Sheets credentials")),
+    )
+    run_due = MagicMock(return_value=[])
+    monkeypatch.setattr(reports_script, "run_due_daily_reports", run_due)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_orvo_brain_reports.py", "--db", str(db_path), "--dry-run"],
+    )
+
+    reports_script.main()
+
+    assert run_due.call_args.kwargs["sheets_service"] is None
+    fake_conn.close.assert_called_once()
+    assert '"results": []' in capsys.readouterr().out
