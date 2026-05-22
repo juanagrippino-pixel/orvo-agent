@@ -102,3 +102,15 @@ def test_demo_report_text_fits_whatsapp_for_scenarios():
         assert len(truncated) <= 1000
         # Should still contain the business name
         assert report.business_name in truncated
+
+
+def test_single_channel_demo_ads_roas_uses_revenue_today():
+    report = build_demo_report("pyme-normal")
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 15.4x" in text
+
+
+def test_stock_crisis_demo_ads_roas_uses_revenue_today():
+    report = build_demo_report("pyme-stock-crisis")
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 3.8x" in text

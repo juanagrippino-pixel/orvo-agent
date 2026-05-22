@@ -1,0 +1,28 @@
+🧠 Orvo Brain — ModaSud — Buenos Aires
+Reporte diario · 2026-05-20
+
+📊 Métricas
+- Ventas Tiendanube hoy: ARS 320.000
+- Ventas MercadoLibre hoy: ARS 510.000
+- Pedidos Tiendanube hoy: 22
+- Pedidos MercadoLibre hoy: 35
+- Stock disponible: 95 units
+- Conversaciones sin responder: 4
+- Gasto en anuncios: ARS 42.000
+
+📦 Canales
+- Tiendanube: ARS 320.000
+- MercadoLibre: ARS 510.000
+- Total: ARS 830.000
+
+📣 Publicidad
+- Gasto del día: ARS 42.000
+- ROAS estimado: 19.8x
+
+🚨 Alertas
+ℹ️ Revenue total multi-canal hoy: TN: $320,000 + ML: $510,000 = $830,000 ARS en total entre canales.
+   Acción: Monitorear la proporción entre canales para detectar cambios de tendencia.
+🟡 Canal Tiendanube posiblemente sub-rendimiento: MercadoLibre generó 59% más revenue que Tiendanube hoy. Revisá si la tienda Tiendanube está funcionando correctamente.
+   Acción: Verificá que los productos, precios y el checkout de Tiendanube estén activos. Considerá aumentar tráfico directo a la tienda propia.
+
+🔗 Fuentes: Demo Multi-canal

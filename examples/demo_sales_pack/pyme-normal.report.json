@@ -1,0 +1,85 @@
+{
+  "business_name": "Artemea — Flores",
+  "report_date": "2026-05-20",
+  "metrics": [
+    {
+      "key": "revenue_today",
+      "label": "Ventas de hoy",
+      "value": 285000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "revenue_baseline",
+      "label": "Promedio reciente",
+      "value": 240000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "orders_today",
+      "label": "Órdenes",
+      "value": 19,
+      "unit": null,
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "stock_units",
+      "label": "Stock disponible",
+      "value": 180,
+      "unit": "units",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "unanswered_conversations",
+      "label": "Conversaciones sin responder",
+      "value": 2,
+      "unit": null,
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "ad_spend_today",
+      "label": "Gasto en anuncios",
+      "value": 18500,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube",
+          "url": null
+        }
+      ]
+    }
+  ],
+  "insights": []
+}

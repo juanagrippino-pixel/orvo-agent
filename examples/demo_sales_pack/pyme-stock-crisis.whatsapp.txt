@@ -1,0 +1,21 @@
+🧠 Orvo Brain — Café de Barrio — Colegiales
+Reporte diario · 2026-05-20
+
+📊 Métricas
+- Ventas de hoy: ARS 95.000
+- Promedio reciente: ARS 180.000
+- Stock disponible: 3 units
+- Conversaciones sin responder: 12
+- Gasto en anuncios: ARS 25.000
+
+📣 Publicidad
+- Gasto del día: ARS 25.000
+- ROAS estimado: 3.8x
+
+🚨 Alertas
+🟡 Ventas 47% debajo del promedio: Las ventas de hoy están por debajo del promedio reciente.
+   Acción: Revisá campañas activas, productos principales y mensajes pendientes antes de cerrar el día.
+🟡 Conversaciones sin responder: Hay 12 conversaciones pendientes que pueden frenar ventas.
+   Acción: Responder primero consultas de compra, envíos, talles/precios y reclamos recientes.
+🔴 Ads activos con stock bajo — pausar campañas: Quedan 3 unidades en stock pero hay campañas activas con $25,000 ARS de gasto. Seguir invirtiendo en ads con stock insuficiente genera frustración y abandono de carrito.
+   Acción urgente: Pausar todas las campañas que promocionen... (ver reporte completo)

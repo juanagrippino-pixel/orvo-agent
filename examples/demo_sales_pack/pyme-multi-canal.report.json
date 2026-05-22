@@ -1,0 +1,125 @@
+{
+  "business_name": "ModaSud — Buenos Aires",
+  "report_date": "2026-05-20",
+  "metrics": [
+    {
+      "key": "revenue_today_tn",
+      "label": "Ventas Tiendanube hoy",
+      "value": 320000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "revenue_today_ml",
+      "label": "Ventas MercadoLibre hoy",
+      "value": 510000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "orders_today_tn",
+      "label": "Pedidos Tiendanube hoy",
+      "value": 22,
+      "unit": null,
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "orders_today_ml",
+      "label": "Pedidos MercadoLibre hoy",
+      "value": 35,
+      "unit": null,
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "stock_units",
+      "label": "Stock disponible",
+      "value": 95,
+      "unit": "units",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "unanswered_conversations",
+      "label": "Conversaciones sin responder",
+      "value": 4,
+      "unit": null,
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "ad_spend_today",
+      "label": "Gasto en anuncios",
+      "value": 42000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    }
+  ],
+  "insights": [
+    {
+      "severity": "info",
+      "title": "Revenue total multi-canal hoy",
+      "explanation": "TN: $320,000 + ML: $510,000 = $830,000 ARS en total entre canales.",
+      "recommended_action": "Monitorear la proporción entre canales para detectar cambios de tendencia.",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    },
+    {
+      "severity": "warning",
+      "title": "Canal Tiendanube posiblemente sub-rendimiento",
+      "explanation": "MercadoLibre generó 59% más revenue que Tiendanube hoy. Revisá si la tienda Tiendanube está funcionando correctamente.",
+      "recommended_action": "Verificá que los productos, precios y el checkout de Tiendanube estén activos. Considerá aumentar tráfico directo a la tienda propia.",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Multi-canal",
+          "url": null
+        }
+      ]
+    }
+  ]
+}

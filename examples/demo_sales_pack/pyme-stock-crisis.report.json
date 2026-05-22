@@ -1,0 +1,112 @@
+{
+  "business_name": "Café de Barrio — Colegiales",
+  "report_date": "2026-05-20",
+  "metrics": [
+    {
+      "key": "revenue_today",
+      "label": "Ventas de hoy",
+      "value": 95000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "revenue_baseline",
+      "label": "Promedio reciente",
+      "value": 180000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "stock_units",
+      "label": "Stock disponible",
+      "value": 3,
+      "unit": "units",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "unanswered_conversations",
+      "label": "Conversaciones sin responder",
+      "value": 12,
+      "unit": null,
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    },
+    {
+      "key": "ad_spend_today",
+      "label": "Gasto en anuncios",
+      "value": 25000,
+      "unit": "ARS",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    }
+  ],
+  "insights": [
+    {
+      "severity": "warning",
+      "title": "Ventas 47% debajo del promedio",
+      "explanation": "Las ventas de hoy están por debajo del promedio reciente.",
+      "recommended_action": "Revisá campañas activas, productos principales y mensajes pendientes antes de cerrar el día.",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    },
+    {
+      "severity": "warning",
+      "title": "Conversaciones sin responder",
+      "explanation": "Hay 12 conversaciones pendientes que pueden frenar ventas.",
+      "recommended_action": "Responder primero consultas de compra, envíos, talles/precios y reclamos recientes.",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    },
+    {
+      "severity": "critical",
+      "title": "Ads activos con stock bajo — pausar campañas",
+      "explanation": "Quedan 3 unidades en stock pero hay campañas activas con $25,000 ARS de gasto. Seguir invirtiendo en ads con stock insuficiente genera frustración y abandono de carrito.",
+      "recommended_action": "Pausar todas las campañas que promocionen productos con stock bajo. Reactivar solo después de reponer stock o ajustar los anuncios a productos disponibles.",
+      "evidence": [
+        {
+          "source": "manual_sample",
+          "label": "Demo Tiendanube + Meta Ads",
+          "url": null
+        }
+      ]
+    }
+  ]
+}

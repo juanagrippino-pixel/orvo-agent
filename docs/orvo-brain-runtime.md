@@ -558,3 +558,23 @@ All examples are validated by
 > **Never commit real access tokens, phone numbers, or service-account
 > private keys.** Replace with `[REDACTED]` or `tn_test_token` placeholders
 > when sharing.
+---
+
+## Sales demo pack: WhatsApp samples for PyME prospects
+
+For sales calls or async demos, generate a credential-free pack with seeded PyME
+scenarios and copy/paste WhatsApp outputs:
+
+```bash
+python scripts/demo_report.py --sales-pack --save-dir examples/demo_sales_pack
+```
+
+The command writes:
+
+- `examples/demo_sales_pack/README.md` — seller talk track, objections, and all samples in one page.
+- `*.whatsapp.txt` — short buyer-facing messages that fit the WhatsApp reading budget.
+- `*.report.json` — the cited `DailyReport` payload behind each sample.
+
+Use the pack to prove value before asking for credentials: pick the closest
+scenario (normal day, stock crisis, or multi-channel), show the WhatsApp message,
+and explain that every metric and alert is backed by source evidence.
