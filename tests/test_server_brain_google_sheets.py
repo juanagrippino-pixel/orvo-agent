@@ -34,7 +34,7 @@ def test_google_sheets_daily_report_endpoint_returns_report(monkeypatch):
 
     assert response.status_code == 200
     body = response.get_json()
-    assert "Orvo Brain" in body["text"]
+    assert "Prioridad:" in body["text"]
     assert body["report"]["business_name"] == "Artemea"
 
 

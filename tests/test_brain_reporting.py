@@ -40,13 +40,14 @@ def test_compose_whatsapp_daily_report_in_spanish_with_sources():
 
     text = compose_daily_report_text(report)
 
-    assert "Orvo Brain" in text
-    assert "Artemea" in text
+    assert text.startswith("Artemea · 2026-05-19")
+    assert "Prioridad: Revisar campañas" in text
     assert "Ventas de hoy: ARS 120.000" in text
-    assert "Ventas debajo del promedio" in text
-    assert "Revisar campañas" in text
+    assert "Ventas debajo del promedio" not in text
     assert "Fuentes" in text
     assert "Ventas mayo" in text
+    assert "🧠" not in text
+    assert "🚨" not in text
 
 
 def test_compose_report_without_insights_says_no_critical_alerts():
@@ -62,7 +63,8 @@ def test_compose_report_without_insights_says_no_critical_alerts():
 
     text = compose_daily_report_text(report)
 
-    assert "Sin alertas críticas" in text
+    assert "Prioridad: no hay urgencia hoy." in text
+    assert "No hay alertas críticas" in text
     assert "Carga manual" in text
 
 
@@ -237,8 +239,9 @@ def test_critical_alert_has_accion_urgente_prefix():
         ],
     )
     text = compose_daily_report_text(report)
-    assert "🔴" in text
-    assert "Acción urgente:" in text
+    assert "Prioridad: Verificar tienda online." in text
+    assert "🔴" not in text
+    assert "Acción urgente:" not in text
 
 
 def test_footer_compact_sources_line():
@@ -257,10 +260,11 @@ def test_footer_compact_sources_line():
     )
     text = compose_daily_report_text(report)
     # Compact one-liner, not multi-line block
-    assert "🔗 Fuentes:" in text
+    assert "Fuentes:" in text
     assert "·" in text
     # Must NOT contain verbose multi-line evidence bullets
     assert "- Tiendanube (tiendanube)" not in text
+    assert "🔗" not in text
 
 
 def test_truncate_for_whatsapp_under_limit_unchanged():
