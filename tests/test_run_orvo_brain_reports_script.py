@@ -268,3 +268,34 @@ def test_force_report_csv_requires_csv_path():
             idempotency_store=InMemoryIdempotencyStore(),
             sheets_service_factory=MagicMock(),
         )
+
+
+def test_scheduled_dry_run_does_not_eager_load_google_sheets(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "brain.sqlite3"
+    conn, _, _ = reports_script.open_runtime(str(db_path))
+    conn.close()
+    get_sheets = MagicMock(side_effect=AssertionError("scheduled runner should not load Google Sheets unless a due Google Sheets connector needs it"))
+    captured = {}
+
+    def fake_run_due_daily_reports(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(reports_script, "get_sheets_service", get_sheets)
+    monkeypatch.setattr(reports_script, "run_due_daily_reports", fake_run_due_daily_reports)
+    monkeypatch.setattr(
+        reports_script.sys,
+        "argv",
+        [
+            "run_orvo_brain_reports.py",
+            "--db",
+            str(db_path),
+            "--dry-run",
+        ],
+    )
+
+    reports_script.main()
+
+    get_sheets.assert_not_called()
+    assert captured["sheets_service"] is None
+    assert "results" in capsys.readouterr().out
