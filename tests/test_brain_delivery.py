@@ -207,6 +207,10 @@ def test_send_text_posts_correct_json_body():
 
 def test_client_from_env_uses_env_vars(monkeypatch):
     """Runtime constructor reads from environment variables."""
+    monkeypatch.delenv("WHATSAPP_PROVIDER", raising=False)
+    monkeypatch.delenv("TWILIO_ACCOUNT_SID", raising=False)
+    monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("TWILIO_WHATSAPP_NUMBER", raising=False)
     monkeypatch.setenv("WHATSAPP_PHONE_ID", "ENV_PHONE")
     monkeypatch.setenv("WHATSAPP_TOKEN", "ENV_TOKEN")
     client = WhatsAppDeliveryClient.from_env()
@@ -215,7 +219,78 @@ def test_client_from_env_uses_env_vars(monkeypatch):
 
 
 def test_client_from_env_raises_if_missing(monkeypatch):
+    monkeypatch.delenv("WHATSAPP_PROVIDER", raising=False)
+    monkeypatch.delenv("TWILIO_ACCOUNT_SID", raising=False)
+    monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("TWILIO_WHATSAPP_NUMBER", raising=False)
     monkeypatch.delenv("WHATSAPP_PHONE_ID", raising=False)
     monkeypatch.delenv("WHATSAPP_TOKEN", raising=False)
     with pytest.raises(EnvironmentError):
         WhatsAppDeliveryClient.from_env()
+
+
+def test_client_from_env_supports_twilio_provider(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "twilio-secret")
+    monkeypatch.setenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
+
+    client = WhatsAppDeliveryClient.from_env()
+
+    assert client._provider == "twilio"
+    assert client._twilio_account_sid == "AC123"
+    assert client._twilio_whatsapp_number == "whatsapp:+14155238886"
+
+
+def test_client_from_env_twilio_raises_if_missing(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
+    monkeypatch.delenv("TWILIO_ACCOUNT_SID", raising=False)
+    monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("TWILIO_WHATSAPP_NUMBER", raising=False)
+
+    with pytest.raises(EnvironmentError):
+        WhatsAppDeliveryClient.from_env()
+
+
+def test_send_text_uses_twilio_whatsapp_api_when_provider_is_twilio():
+    session = _mock_http(201, {"sid": "SM123"})
+    client = WhatsAppDeliveryClient(
+        phone_id="unused",
+        token="unused",
+        http_client=session,
+        provider="twilio",
+        twilio_account_sid="AC123",
+        twilio_auth_token="twilio-secret",
+        twilio_whatsapp_number="whatsapp:+14155238886",
+    )
+
+    result = client.send_text(phone="+5491112345678", text="Hola Twilio")
+
+    assert result.success is True
+    assert result.message_id == "SM123"
+    posted_url = session.post.call_args[0][0]
+    assert posted_url.endswith("/Accounts/AC123/Messages.json")
+    kwargs = session.post.call_args[1]
+    assert kwargs["data"]["From"] == "whatsapp:+14155238886"
+    assert kwargs["data"]["To"] == "whatsapp:+5491112345678"
+    assert kwargs["data"]["Body"] == "Hola Twilio"
+    assert kwargs["auth"] == ("AC123", "twilio-secret")
+
+
+def test_send_text_twilio_returns_failure_on_error_response():
+    session = _mock_http(400, {"message": "The 'To' number is not a valid WhatsApp-capable number"})
+    client = WhatsAppDeliveryClient(
+        phone_id="unused",
+        token="unused",
+        http_client=session,
+        provider="twilio",
+        twilio_account_sid="AC123",
+        twilio_auth_token="twilio-secret",
+        twilio_whatsapp_number="whatsapp:+14155238886",
+    )
+
+    result = client.send_text(phone="+5491112345678", text="Hola Twilio")
+
+    assert result.success is False
+    assert result.message_id is None
+    assert "400" in result.error

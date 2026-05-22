@@ -60,3 +60,18 @@ def test_runtime_env_check_never_exposes_secret_values():
     assert "tn-secret" not in result.summary
     assert "/tmp/client.json" not in result.summary
     assert "/tmp/token.json" not in result.summary
+
+
+def test_runtime_env_check_accepts_twilio_whatsapp_credentials():
+    result = check_runtime_env(
+        env={
+            "WHATSAPP_PROVIDER": "twilio",
+            "TWILIO_ACCOUNT_SID": "AC123",
+            "TWILIO_AUTH_TOKEN": "twilio-secret",
+            "TWILIO_WHATSAPP_NUMBER": "whatsapp:+14155238886",
+        }
+    )
+
+    assert result.ready is True
+    assert result.missing == []
+    assert "twilio-secret" not in result.summary

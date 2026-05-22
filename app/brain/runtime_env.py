@@ -22,15 +22,20 @@ class RuntimeEnvCheck(BaseModel):
     summary: str
 
 
-_BASE_REQUIRED = ("WHATSAPP_PHONE_ID", "WHATSAPP_TOKEN")
+_META_REQUIRED = ("WHATSAPP_PHONE_ID", "WHATSAPP_TOKEN")
+_TWILIO_REQUIRED = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_NUMBER")
 _CONNECTOR_REQUIRED = {
     "google_sheets": ("GOOGLE_CLIENT_SECRET_FILE", "GOOGLE_OAUTH_TOKEN_FILE"),
     "tiendanube": ("TIENDANUBE_USER_ID", "TIENDANUBE_ACCESS_TOKEN"),
 }
 
 
-def _requirements(connectors: Sequence[str] | None) -> list[str]:
-    required: list[str] = list(_BASE_REQUIRED)
+def _requirements(env: Mapping[str, str], connectors: Sequence[str] | None) -> list[str]:
+    provider = (env.get("WHATSAPP_PROVIDER") or "meta_cloud").strip().lower()
+    if provider == "twilio":
+        required: list[str] = list(_TWILIO_REQUIRED)
+    else:
+        required = list(_META_REQUIRED)
     for connector in connectors or []:
         required.extend(_CONNECTOR_REQUIRED.get(connector, ()))
     return list(dict.fromkeys(required))
@@ -53,7 +58,7 @@ def check_runtime_env(
     """
 
     source = env if env is not None else os.environ
-    required = _requirements(connectors)
+    required = _requirements(source, connectors)
     configured = [name for name in required if bool(source.get(name))]
     missing = [name for name in required if name not in configured]
     ready = not missing
