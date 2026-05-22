@@ -49,10 +49,10 @@ However, for **ARTEMEA Hito 0**, the current path is **not yet robust enough to 
    - Meta Ads adapter: no timeout, retry, rate-limit handling, or pagination handling.
    - WhatsApp send path: no timeout, no retry policy, no delivery receipt reconciliation.
 
-5. **The scheduling/docs default is still 09:00, not the Hito 0 target of 08:00 Argentina.**
-   - `app/brain/bootstrap.py` defaults to cron `0 9 * * *`.
-   - Tests also assume 09:00 Buenos Aires.
-   - Hito 0 requires an explicit schedule shift.
+5. **Resolved in code after this audit: the ARTEMEA bootstrap default now targets 08:00 Argentina.**
+   - `app/brain/bootstrap.py` defaults to cron `0 8 * * *`.
+   - Bootstrap tests now assert that 11:00 UTC fires as 08:00 in `America/Argentina/Buenos_Aires`.
+   - The remaining launch step is verifying/updating the live SQLite schedule row after credentials are loaded.
 
 6. **There are two separate WhatsApp send implementations in the repo.**
    - Brain reporting path uses `app/brain/delivery.py` (Graph API `v19.0`).
@@ -718,7 +718,7 @@ Operational consequence:
 - a manual morning check can disagree with the actual scheduled run behavior,
 - or an operator may think Meta Ads is included when it is not.
 
-### 3) The current default schedule is 09:00, not 08:00
+### 3) Resolved: default schedule is 08:00 Argentina
 
 This is not a connector bug, but it directly affects Hito 0 launch readiness.
 
@@ -911,7 +911,7 @@ These are the files most likely to matter immediately once real ARTEMEA credenti
    - readiness checks drift from actual connector config requirements.
 
 9. `/root/orvo-agent/app/brain/bootstrap.py`
-   - default cron still `0 9 * * *` instead of `0 8 * * *`.
+   - default cron now `0 8 * * *` for the ARTEMEA bootstrap path.
 
 10. `/root/orvo-agent/server.py`
     - separate preview endpoints are useful,
@@ -925,7 +925,7 @@ If only a few fixes fit before the first live send, do them in this order:
 
 1. **Fix Tiendanube + Meta Ads semantic alignment in reporting/insights**.
 2. **Make forced runs use the same multi-connector path as scheduled runs**.
-3. **Move ARTEMEA schedule to 08:00 Argentina**.
+3. **Verify the live ARTEMEA store uses the 08:00 Argentina schedule after credentials are loaded**.
 4. **Add request timeouts + bounded retries for Tiendanube, Meta Ads, and WhatsApp**.
 5. **Implement degraded send policy: Tiendanube-only send when Meta fails**.
 6. **Add minimal structured monitoring for run/connector/delivery status**.

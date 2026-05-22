@@ -27,7 +27,33 @@ def test_upsert_artemea_google_sheets_config_persists_business_and_daily_schedul
     assert schedules == [schedule]
     assert schedule.schedule_id == "artemea-daily-report"
     assert schedule.report_type == "daily"
-    assert schedule.cron_expression == "0 9 * * *"
+    assert schedule.cron_expression == "0 8 * * *"
+
+
+def test_artemea_default_schedule_fires_at_0800_argentina_time():
+    from datetime import datetime, timezone
+
+    from app.brain.bootstrap import upsert_artemea_google_sheets_config
+    from app.brain.scheduler import should_run_schedule
+    from app.brain.storage import SQLiteConfigStore, init_schema
+
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    store = SQLiteConfigStore(conn)
+
+    business, schedule = upsert_artemea_google_sheets_config(
+        store,
+        spreadsheet_id="sheet123",
+        range_name="Daily!A1:G1000",
+        owner_phone="+5491149724933",
+    )
+
+    eight_am_argentina = datetime(2026, 5, 19, 11, 0, 0, tzinfo=timezone.utc)
+    nine_am_argentina = datetime(2026, 5, 19, 12, 0, 0, tzinfo=timezone.utc)
+
+    assert business.timezone == "America/Argentina/Buenos_Aires"
+    assert should_run_schedule(schedule, eight_am_argentina, business.timezone) is True
+    assert should_run_schedule(schedule, nine_am_argentina, business.timezone) is False
 
 
 def test_open_brain_sqlite_store_initializes_schema(tmp_path):
