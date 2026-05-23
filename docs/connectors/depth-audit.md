@@ -49,10 +49,10 @@ However, for **ARTEMEA Hito 0**, the current path is **not yet robust enough to 
    - Meta Ads adapter: no timeout, retry, rate-limit handling, or pagination handling.
    - WhatsApp send path: no timeout, no retry policy, no delivery receipt reconciliation.
 
-5. **The scheduling/docs default is still 09:00, not the Hito 0 target of 08:00 Argentina.**
-   - `app/brain/bootstrap.py` defaults to cron `0 9 * * *`.
-   - Tests also assume 09:00 Buenos Aires.
-   - Hito 0 requires an explicit schedule shift.
+5. **The scheduling/docs default has been aligned to the Hito 0 target of 08:00 Argentina.**
+   - `app/brain/bootstrap.py` now defaults to cron `0 8 * * *`.
+   - Runtime tests cover 08:00 Buenos Aires as 11:00 UTC.
+   - Remaining schedule risk is production host cron invocation, not the app-level ARTEMEA schedule default.
 
 6. **There are two separate WhatsApp send implementations in the repo.**
    - Brain reporting path uses `app/brain/delivery.py` (Graph API `v19.0`).

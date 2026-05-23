@@ -30,7 +30,7 @@ def make_store():
         ReportSchedule(
             schedule_id="artemea-daily-report",
             business_id="artemea",
-            cron_expression="0 9 * * *",
+            cron_expression="0 8 * * *",
             report_type="daily",
         )
     )
@@ -74,7 +74,7 @@ def test_run_due_daily_reports_dispatches_due_google_sheet_report():
         idempotency_store=InMemoryIdempotencyStore(),
         delivery_client=delivery,
         sheets_service=fake_sheets_service(),
-        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),  # 09:00 Buenos Aires
+        now=datetime(2026, 5, 19, 11, 0, tzinfo=timezone.utc),  # 08:00 Buenos Aires
     )
 
     assert len(results) == 1
@@ -93,7 +93,7 @@ def test_run_due_daily_reports_skips_when_not_due():
         idempotency_store=InMemoryIdempotencyStore(),
         delivery_client=delivery,
         sheets_service=fake_sheets_service(),
-        now=datetime(2026, 5, 19, 13, 0, tzinfo=timezone.utc),  # 10:00 Buenos Aires
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),  # 09:00 Buenos Aires
     )
 
     assert results == []
@@ -123,7 +123,7 @@ def make_tiendanube_store():
         ReportSchedule(
             schedule_id="artemea-tiendanube-daily-report",
             business_id="artemea",
-            cron_expression="0 9 * * *",
+            cron_expression="0 8 * * *",
             report_type="daily",
         )
     )
@@ -154,7 +154,7 @@ def test_run_due_daily_reports_dispatches_due_tiendanube_report():
         idempotency_store=InMemoryIdempotencyStore(),
         delivery_client=delivery,
         tiendanube_http_client=FakeTiendanubeClient(),
-        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 5, 19, 11, 0, tzinfo=timezone.utc),
     )
 
     assert len(results) == 1
@@ -187,7 +187,7 @@ def make_mercadolibre_store():
         ReportSchedule(
             schedule_id="artemea-mercadolibre-daily-report",
             business_id="artemea-ml",
-            cron_expression="0 9 * * *",
+            cron_expression="0 8 * * *",
             report_type="daily",
         )
     )
@@ -217,7 +217,7 @@ def test_run_due_daily_reports_dispatches_due_mercadolibre_report():
         idempotency_store=InMemoryIdempotencyStore(),
         delivery_client=delivery,
         mercadolibre_http_client=FakeMercadoLibreClient(),
-        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 5, 19, 11, 0, tzinfo=timezone.utc),
     )
 
     assert len(results) == 1
@@ -256,7 +256,7 @@ def make_tiendanube_mercadolibre_store():
         ReportSchedule(
             schedule_id="artemea-multi-daily-report",
             business_id="artemea-multi",
-            cron_expression="0 9 * * *",
+            cron_expression="0 8 * * *",
             report_type="daily",
         )
     )
@@ -275,7 +275,7 @@ def test_run_due_daily_reports_merges_tiendanube_and_mercadolibre_metrics_once()
         delivery_client=delivery,
         tiendanube_http_client=FakeTiendanubeClient(),
         mercadolibre_http_client=FakeMercadoLibreClient(),
-        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 5, 19, 11, 0, tzinfo=timezone.utc),
     )
 
     assert len(results) == 1
@@ -314,7 +314,7 @@ def make_meta_ads_store():
         ReportSchedule(
             schedule_id="artemea-meta-ads-daily-report",
             business_id="artemea-meta",
-            cron_expression="0 9 * * *",
+            cron_expression="0 8 * * *",
             report_type="daily",
         )
     )
@@ -347,7 +347,7 @@ def test_run_due_daily_reports_dispatches_due_meta_ads_report_with_scheduled_dat
         idempotency_store=InMemoryIdempotencyStore(),
         delivery_client=delivery,
         meta_ads_http_client=http_client,
-        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 5, 19, 11, 0, tzinfo=timezone.utc),
     )
 
     assert len(results) == 1

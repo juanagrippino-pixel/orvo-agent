@@ -27,7 +27,7 @@ def test_upsert_artemea_google_sheets_config_persists_business_and_daily_schedul
     assert schedules == [schedule]
     assert schedule.schedule_id == "artemea-daily-report"
     assert schedule.report_type == "daily"
-    assert schedule.cron_expression == "0 9 * * *"
+    assert schedule.cron_expression == "0 8 * * *"
 
 
 def test_open_brain_sqlite_store_initializes_schema(tmp_path):
