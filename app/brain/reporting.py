@@ -22,6 +22,8 @@ def _format_ars(value: float) -> str:
     return f"ARS {value:,.0f}".replace(",", ".")
 
 
+_SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
+
 _TN_REVENUE_KEYS = (
     "revenue_today_tn",
     "tiendanube.revenue_today",
@@ -130,7 +132,7 @@ def compose_daily_report_text(report: DailyReport) -> str:
 
     lines.extend(["", "🚨 Alertas"])
     if report.insights:
-        for insight in report.insights:
+        for insight in sorted(report.insights, key=lambda i: _SEVERITY_ORDER.get(i.severity, 9)):
             if insight.severity == "critical":
                 prefix = "🔴"
                 urgency = "Acción urgente:"

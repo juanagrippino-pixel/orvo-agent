@@ -281,6 +281,46 @@ def test_truncate_for_whatsapp_over_limit_truncated():
     assert result.endswith("... (ver reporte completo)")
 
 
+def test_alerts_sorted_by_severity_critical_first():
+    """Alertas section must render critical → warning → info regardless of insertion order."""
+    from app.brain.reporting import compose_daily_report_text
+
+    src = _tn_source()
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 20),
+        metrics=[Metric(key="revenue_today", label="Ventas", value=50000, unit="ARS", evidence=[src])],
+        insights=[
+            Insight(
+                severity="info",
+                title="Info menor",
+                explanation="Dato informativo.",
+                recommended_action="Sin acción requerida.",
+                evidence=[src],
+            ),
+            Insight(
+                severity="critical",
+                title="Sin ventas hoy",
+                explanation="No se registraron ventas.",
+                recommended_action="Verificar tienda.",
+                evidence=[src],
+            ),
+            Insight(
+                severity="warning",
+                title="ROAS bajo",
+                explanation="El ROAS está por debajo de 3x.",
+                recommended_action="Pausar anuncios.",
+                evidence=[src],
+            ),
+        ],
+    )
+    text = compose_daily_report_text(report)
+    pos_critical = text.index("Sin ventas hoy")
+    pos_warning = text.index("ROAS bajo")
+    pos_info = text.index("Info menor")
+    assert pos_critical < pos_warning < pos_info
+
+
 def test_full_report_under_1000_chars():
     """A realistic dual-channel + ads report should fit within 1000 chars."""
     from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
