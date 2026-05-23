@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
-from app.brain.config import BusinessConfig, ConnectorConfig
+from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
 import scripts.run_orvo_brain_reports as reports_script
@@ -68,6 +68,100 @@ def make_tiendanube_business():
                 params={"store_id": "123", "access_token": "tn_test_token", "include_stock": False},
             )
         ],
+    )
+
+
+def test_scheduled_mode_does_not_require_google_sheets_for_due_tiendanube_only_report():
+    store = InMemoryConfigStore()
+    business = make_tiendanube_business()
+    store.save_business_config(business)
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="demo-shop-daily",
+            business_id=business.business_id,
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+
+    assert (
+        reports_script.due_daily_reports_need_google_sheets(
+            store,
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),  # 09:00 Argentina
+        )
+        is False
+    )
+
+
+def test_scheduled_mode_requires_google_sheets_only_when_due_daily_google_sheets_report_exists():
+    store = InMemoryConfigStore()
+    business = BusinessConfig(
+        business_id="demo-sheets",
+        business_name="Demo Sheets",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-sheets-conn",
+                connector_type="google_sheets",
+                label="Sheets Demo",
+                params={"spreadsheet_id": "sheet", "range_name": "Daily!A1:G1000"},
+            )
+        ],
+    )
+    store.save_business_config(business)
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="demo-sheets-daily",
+            business_id=business.business_id,
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+
+    assert (
+        reports_script.due_daily_reports_need_google_sheets(
+            store,
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),  # 09:00 Argentina
+        )
+        is True
+    )
+
+
+def test_scheduled_mode_ignores_not_due_google_sheets_report_for_credential_loading():
+    store = InMemoryConfigStore()
+    business = BusinessConfig(
+        business_id="demo-sheets",
+        business_name="Demo Sheets",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-sheets-conn",
+                connector_type="google_sheets",
+                label="Sheets Demo",
+                params={"spreadsheet_id": "sheet", "range_name": "Daily!A1:G1000"},
+            )
+        ],
+    )
+    store.save_business_config(business)
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="demo-sheets-daily",
+            business_id=business.business_id,
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+
+    assert (
+        reports_script.due_daily_reports_need_google_sheets(
+            store,
+            now=datetime(2026, 5, 19, 13, 0, tzinfo=timezone.utc),  # 10:00 Argentina
+        )
+        is False
     )
 
 

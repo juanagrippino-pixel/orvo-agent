@@ -23,6 +23,7 @@ from app.brain.pipeline import (
     run_tiendanube_daily_report_pipeline,
 )
 from app.brain.runner import run_due_daily_reports
+from app.brain.scheduler import due_schedules
 from app.brain.storage import SQLiteConfigStore, SQLiteIdempotencyStore, init_schema
 
 
@@ -41,6 +42,35 @@ def open_runtime(db_path: str):
     init_schema(conn)
     return conn, SQLiteConfigStore(conn), SQLiteIdempotencyStore(conn)
 
+
+
+def _all_schedules(config_store, businesses) -> list:
+    schedules = []
+    for business in businesses:
+        schedules.extend(config_store.list_schedules(business.business_id))
+    return schedules
+
+
+def due_daily_reports_need_google_sheets(config_store, *, now: datetime) -> bool:
+    """Return True only when a due daily run has an enabled Google Sheets connector.
+
+    Scheduled Hito 0 runs for Tiendanube/Meta Ads must not fail before the
+    pipeline starts just because Google Sheets credentials are absent.
+    """
+
+    businesses = config_store.list_business_configs()
+    business_by_id = {business.business_id: business for business in businesses}
+    schedules = _all_schedules(config_store, businesses)
+    for run in due_schedules(schedules, now, business_by_id):
+        if run.report_type != "daily":
+            continue
+        business = business_by_id[run.business_id]
+        if any(
+            connector.enabled and connector.connector_type == "google_sheets"
+            for connector in business.connectors
+        ):
+            return True
+    return False
 
 def _first_enabled_connector_type(business) -> str | None:
     for connector in business.connectors:
@@ -128,12 +158,14 @@ def main() -> None:
             )
             output = [{"business_id": business.business_id, "dispatch": result.dispatch.model_dump(mode="json"), "report": result.report.model_dump(mode="json")}]
         else:
+            now = datetime.now(tz=timezone.utc)
+            sheets_service = get_sheets_service() if due_daily_reports_need_google_sheets(config_store, now=now) else None
             results = run_due_daily_reports(
                 config_store=config_store,
                 idempotency_store=runtime_idempotency_store,
                 delivery_client=delivery_client,
-                sheets_service=get_sheets_service(),
-                now=datetime.now(tz=timezone.utc),
+                sheets_service=sheets_service,
+                now=now,
             )
             output = [
                 {
