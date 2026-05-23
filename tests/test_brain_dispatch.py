@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from unittest.mock import MagicMock
 
@@ -122,3 +123,52 @@ def test_dispatch_daily_report_does_not_mark_failed_send_as_delivered():
     assert result.status == "failed"
     assert result.error == "HTTP 500"
     assert not idempotency.has(result.idempotency_key)
+
+
+# ---------------------------------------------------------------------------
+# Structured logging
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_sent_emits_structured_log(caplog):
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_daily_report
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.log1", error=None)
+
+    with caplog.at_level(logging.INFO, logger="app.brain.dispatch"):
+        dispatch_daily_report(make_report(), make_business(), delivery_client, InMemoryIdempotencyStore())
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("sent" in m and "artemea/2026-05-19/daily" in m for m in messages)
+
+
+def test_dispatch_skipped_duplicate_emits_structured_log(caplog):
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_daily_report
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.log2", error=None)
+    idempotency = InMemoryIdempotencyStore()
+    dispatch_daily_report(make_report(), make_business(), delivery_client, idempotency)  # mark as sent
+
+    with caplog.at_level(logging.INFO, logger="app.brain.dispatch"):
+        dispatch_daily_report(make_report(), make_business(), delivery_client, idempotency)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("skipped_duplicate" in m and "artemea/2026-05-19/daily" in m for m in messages)
+
+
+def test_dispatch_failed_emits_warning_log(caplog):
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_daily_report
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=False, message_id=None, error="HTTP 500")
+
+    with caplog.at_level(logging.WARNING, logger="app.brain.dispatch"):
+        dispatch_daily_report(make_report(), make_business(), delivery_client, InMemoryIdempotencyStore())
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("failed" in r.getMessage() and "artemea/2026-05-19/daily" in r.getMessage() for r in warnings)

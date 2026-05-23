@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
@@ -11,6 +12,8 @@ from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore
 from app.brain.pipeline import PipelineResult, run_enabled_connectors_daily_report_pipeline
 from app.brain.scheduler import due_schedules
+
+_log = logging.getLogger(__name__)
 
 
 class ScheduledPipelineResult(BaseModel):
@@ -69,7 +72,15 @@ def run_due_daily_reports(
         report_date = run.run_at.astimezone(timezone.utc).date()
         connector_types = _enabled_daily_connector_types(business)
         if not connector_types:
+            _log.info(
+                "runner no_connectors business_id=%s schedule_id=%s",
+                run.business_id, run.schedule_id,
+            )
             continue
+        _log.info(
+            "runner starting business_id=%s schedule_id=%s report_date=%s connectors=%s",
+            run.business_id, run.schedule_id, report_date, connector_types,
+        )
         pipeline = run_enabled_connectors_daily_report_pipeline(
             business=business,
             report_date=report_date,

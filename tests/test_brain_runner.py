@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 import json
 from unittest.mock import MagicMock
@@ -426,3 +427,69 @@ def test_artemea_08h00_schedule_does_not_dispatch_at_12h00_utc():
     )
     assert results == []
     delivery.send_text.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Structured logging
+# ---------------------------------------------------------------------------
+
+
+def make_no_connector_store():
+    """Business with a due schedule but no enabled connectors."""
+    store = InMemoryConfigStore()
+    store.save_business_config(
+        BusinessConfig(
+            business_id="artemea-empty",
+            business_name="Artemea Empty",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="artemea-empty-daily-report",
+            business_id="artemea-empty",
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+    return store
+
+
+def test_run_due_daily_reports_logs_no_connectors_skip(caplog):
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+
+    with caplog.at_level(logging.INFO, logger="app.brain.runner"):
+        results = run_due_daily_reports(
+            config_store=make_no_connector_store(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            delivery_client=delivery,
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        )
+
+    assert results == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("no_connectors" in m and "artemea-empty" in m for m in messages)
+
+
+def test_run_due_daily_reports_logs_pipeline_start(caplog):
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.log", error=None)
+
+    with caplog.at_level(logging.INFO, logger="app.brain.runner"):
+        run_due_daily_reports(
+            config_store=make_store(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            delivery_client=delivery,
+            sheets_service=fake_sheets_service(),
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        )
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("starting" in m and "artemea" in m for m in messages)
