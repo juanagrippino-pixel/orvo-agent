@@ -24,7 +24,7 @@ def upsert_artemea_google_sheets_config(
     spreadsheet_id: str,
     range_name: str,
     owner_phone: str,
-    cron_expression: str = "0 9 * * *",
+    cron_expression: str = "0 8 * * *",
 ) -> tuple[BusinessConfig, ReportSchedule]:
     """Persist Artemea's Google Sheets connector and daily report schedule."""
 

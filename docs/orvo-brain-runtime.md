@@ -105,7 +105,7 @@ python scripts/bootstrap_orvo_brain.py \
 ```
 
 This seeds Artemea's `BusinessConfig` + a `ReportSchedule` (daily, cron
-`0 9 * * *`) using `upsert_artemea_google_sheets_config()`. The script prints
+`0 8 * * *`, 08:00 America/Argentina/Buenos_Aires) using `upsert_artemea_google_sheets_config()`. The script prints
 the persisted records as JSON to stdout.
 
 To bootstrap from Python directly:
