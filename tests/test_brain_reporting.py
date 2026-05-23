@@ -40,13 +40,12 @@ def test_compose_whatsapp_daily_report_in_spanish_with_sources():
 
     text = compose_daily_report_text(report)
 
-    assert "Orvo Brain" in text
-    assert "Artemea" in text
-    assert "Ventas de hoy: ARS 120.000" in text
+    assert text.startswith("ARTEMEA · 2026-05-19")
+    assert "Prioridad:" in text
     assert "Ventas debajo del promedio" in text
-    assert "Revisar campañas" in text
-    assert "Fuentes" in text
-    assert "Ventas mayo" in text
+    assert "- Ventas de hoy: ARS 120.000" in text
+    assert "Fuentes: Ventas mayo" in text
+    assert "Orvo Brain" not in text
 
 
 def test_compose_report_without_insights_says_no_critical_alerts():
@@ -62,8 +61,8 @@ def test_compose_report_without_insights_says_no_critical_alerts():
 
     text = compose_daily_report_text(report)
 
-    assert "Sin alertas críticas" in text
-    assert "Carga manual" in text
+    assert "Prioridad: no hay urgencia hoy." in text
+    assert "Fuentes: Carga manual" in text
 
 
 # ── new tests ────────────────────────────────────────────────────────────────
@@ -99,10 +98,10 @@ def test_dual_channel_shows_canales_section():
         insights=[],
     )
     text = compose_daily_report_text(report)
-    assert "Canales" in text
-    assert "Tiendanube: ARS 48.000" in text
-    assert "MercadoLibre: ARS 22.000" in text
-    assert "Total: ARS 70.000" in text
+    assert "Canales" not in text
+    assert "Ventas TN: ARS 48.000" in text
+    assert "Ventas ML: ARS 22.000" in text
+    assert "Total canales: ARS 70.000" in text
 
 
 def test_dual_channel_shows_canales_section_with_current_canonical_keys():
@@ -119,10 +118,10 @@ def test_dual_channel_shows_canales_section_with_current_canonical_keys():
         insights=[],
     )
     text = compose_daily_report_text(report)
-    assert "Canales" in text
-    assert "Tiendanube: ARS 48.000" in text
-    assert "MercadoLibre: ARS 22.000" in text
-    assert "Total: ARS 70.000" in text
+    assert "Canales" not in text
+    assert "Ventas TN: ARS 48.000" in text
+    assert "Ventas ML: ARS 22.000" in text
+    assert "Total canales: ARS 70.000" in text
 
 
 def test_dual_channel_shows_canales_section_with_namespaced_merge_keys():
@@ -139,10 +138,10 @@ def test_dual_channel_shows_canales_section_with_namespaced_merge_keys():
         insights=[],
     )
     text = compose_daily_report_text(report)
-    assert "Canales" in text
-    assert "Tiendanube: ARS 48.000" in text
-    assert "MercadoLibre: ARS 22.000" in text
-    assert "Total: ARS 70.000" in text
+    assert "Canales" not in text
+    assert "Ventas TN: ARS 48.000" in text
+    assert "Ventas ML: ARS 22.000" in text
+    assert "Total canales: ARS 70.000" in text
 
 
 def test_ads_block_shown_when_ad_spend_present():
@@ -160,8 +159,8 @@ def test_ads_block_shown_when_ad_spend_present():
         insights=[],
     )
     text = compose_daily_report_text(report)
-    assert "Publicidad" in text
-    assert "Gasto del día: ARS 3.500" in text
+    assert "Publicidad" not in text
+    assert "Gasto ads: ARS 3.500" in text
     assert "ROAS estimado:" in text
 
 
@@ -237,8 +236,11 @@ def test_critical_alert_has_accion_urgente_prefix():
         ],
     )
     text = compose_daily_report_text(report)
-    assert "🔴" in text
-    assert "Acción urgente:" in text
+    assert "Prioridad:" in text
+    assert "Sin ventas hoy" in text
+    assert "verificar tienda" in text.lower()
+    assert "🔴" not in text
+    assert "Acción urgente:" not in text
 
 
 def test_footer_compact_sources_line():
@@ -257,11 +259,49 @@ def test_footer_compact_sources_line():
     )
     text = compose_daily_report_text(report)
     # Compact one-liner, not multi-line block
-    assert "🔗 Fuentes:" in text
-    assert "·" in text
+    assert "Fuentes:" in text
+    assert "Tiendanube" in text
+    assert "Meta Ads" in text
+    assert "🔗" not in text
     # Must NOT contain verbose multi-line evidence bullets
     assert "- Tiendanube (tiendanube)" not in text
 
+
+
+def test_hito0_operator_report_is_priority_first_dry_and_non_ai():
+    from app.brain.reporting import compose_daily_report_text
+
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 21),
+        metrics=[
+            Metric(key="revenue_today", label="Revenue", value=418000, unit="ARS", evidence=[_tn_source()]),
+            Metric(key="revenue_baseline", label="Revenue baseline", value=603000, unit="ARS", evidence=[_tn_source()]),
+            Metric(key="ad_spend_today", label="Gasto ads", value=52000, unit="ARS", evidence=[_meta_source()]),
+            Metric(key="unanswered_conversations", label="Chats sin responder", value=8, evidence=[Evidence(source="whatsapp", label="WhatsApp")]),
+        ],
+        insights=[
+            Insight(
+                severity="warning",
+                title="Ventas 31% debajo del promedio",
+                explanation="Las ventas de ayer quedaron abajo del promedio reciente con ads activos.",
+                recommended_action="Revisar checkout y pagos pendientes antes de tocar campañas.",
+                evidence=[_tn_source(), _meta_source()],
+            )
+        ],
+    )
+
+    text = compose_daily_report_text(report)
+    lines = text.splitlines()
+
+    assert lines[0] == "ARTEMEA · 2026-05-21"
+    assert lines[1].startswith("Prioridad: ")
+    assert "Orvo" not in text
+    assert "🧠" not in text and "📊" not in text and "🚨" not in text
+    assert "me parece" not in text.lower()
+    assert "oportunidad" not in text.lower()
+    assert "Fuentes: Tiendanube, Meta Ads" in text
+    assert len(text) < 700
 
 def test_truncate_for_whatsapp_under_limit_unchanged():
     """Message under 1000 chars passes through unchanged."""

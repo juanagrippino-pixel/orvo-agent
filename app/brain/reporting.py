@@ -100,54 +100,178 @@ def _compact_sources(report: DailyReport) -> str:
                 labels.append(evidence.label)
                 seen.add(evidence.source)
     if not labels:
-        return "🔗 Fuentes: Sin fuentes"
-    return "🔗 Fuentes: " + " · ".join(labels)
+        return "Fuentes: sin fuentes"
+    return "Fuentes: " + ", ".join(labels)
+
+
+_SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
+
+
+_FACT_KEYS_BY_PRIORITY = (
+    "revenue_today",
+    "revenue_baseline",
+    "revenue_today_tn",
+    "revenue_today_ml",
+    "tiendanube.revenue_today",
+    "mercadolibre.revenue_today",
+    "orders_today",
+    "orders_today_tn",
+    "orders_today_ml",
+    "stock_units",
+    "ad_spend_today",
+    "unanswered_conversations",
+)
+
+
+_ACTION_PREFIXES = ("revisar", "verific", "pausar", "responder", "prioriz", "control", "confirm", "frenar")
+
+
+def _primary_insight(report: DailyReport):
+    if not report.insights:
+        return None
+    return sorted(report.insights, key=lambda item: _SEVERITY_RANK[item.severity])[0]
+
+
+def _priority_line(report: DailyReport) -> str:
+    insight = _primary_insight(report)
+    if insight is None:
+        return "Prioridad: no hay urgencia hoy."
+
+    title = insight.title.lower()
+    action = insight.recommended_action.strip()
+    action_lc = action.lower()
+    if "stock" in title and "ads" in title:
+        return "Prioridad: pausar ads a productos con stock bajo."
+    if "stock" in title:
+        return "Prioridad: revisar stock antes de empujar ventas."
+    if "sin ventas" in title or "sin ventas" in insight.explanation.lower():
+        return "Prioridad: verificar tienda y checkout."
+    if "roas" in title or "ads" in title or "publicidad" in title:
+        return "Prioridad: revisar gasto de ads antes de escalar."
+    if "ventas" in title and ("debajo" in title or "bajo" in title or "caída" in title):
+        return "Prioridad: revisar checkout y pagos primero."
+    if "conversaciones" in title or "chats" in title or "mensajes" in title:
+        return "Prioridad: responder consultas de compra primero."
+
+    if action and action_lc.startswith(_ACTION_PREFIXES):
+        first_sentence = action.split(".", 1)[0].strip()
+        if len(first_sentence) <= 90:
+            return f"Prioridad: {first_sentence[0].lower() + first_sentence[1:]}."
+    return "Prioridad: revisar el punto marcado abajo."
+
+
+def _normalize_business_name(name: str) -> str:
+    clean = name.strip()
+    if clean.casefold() == "artemea":
+        return "ARTEMEA"
+    return clean
+
+
+def _fact_metrics(report: DailyReport) -> list[Metric]:
+    by_key = _metrics_by_key(report)
+    selected: list[Metric] = []
+
+    insight = _primary_insight(report)
+    if insight is not None:
+        insight_sources = {evidence.source for evidence in insight.evidence}
+        for key in _FACT_KEYS_BY_PRIORITY:
+            metric = by_key.get(key)
+            if metric is None:
+                continue
+            if any(evidence.source in insight_sources for evidence in metric.evidence):
+                selected.append(metric)
+            if len(selected) == 3:
+                return selected
+
+    for key in _FACT_KEYS_BY_PRIORITY:
+        metric = by_key.get(key)
+        if metric is not None and metric not in selected:
+            selected.append(metric)
+        if len(selected) == 3:
+            break
+    if len(selected) < 3:
+        for metric in report.metrics:
+            if metric not in selected:
+                selected.append(metric)
+            if len(selected) == 3:
+                break
+    return selected
+
+
+def _summary_line(report: DailyReport) -> str:
+    insight = _primary_insight(report)
+    if insight is None:
+        return "Sin problema crítico detectado con los datos disponibles."
+    return f"{insight.title}: {insight.explanation.rstrip('.')}."
+
+
+def _derived_fact_lines(report: DailyReport) -> list[str]:
+    metrics = _metrics_by_key(report)
+    lines: list[str] = []
+    tn_val = _metric_float(metrics, _TN_REVENUE_KEYS)
+    ml_val = _metric_float(metrics, _ML_REVENUE_KEYS)
+    if tn_val is not None and ml_val is not None:
+        lines.append(f"- Total canales: {_format_ars(tn_val + ml_val)}")
+
+    ad = metrics.get("ad_spend_today")
+    if ad is not None:
+        spend = float(ad.value)
+        revenue = sum(
+            value
+            for value in (
+                _metric_float(metrics, _TN_REVENUE_KEYS),
+                _metric_float(metrics, _ML_REVENUE_KEYS),
+                _metric_float(metrics, ("revenue_today",)),
+            )
+            if value is not None
+        )
+        if spend > 0 and revenue > 0:
+            lines.append(f"- ROAS estimado: {revenue / spend:.1f}x")
+    return lines
+
+
+def _secondary_line(report: DailyReport) -> str | None:
+    primary = _primary_insight(report)
+    for insight in sorted(report.insights, key=lambda item: _SEVERITY_RANK[item.severity]):
+        if insight is primary:
+            continue
+        if insight.severity in {"critical", "warning"}:
+            return f"Secundario: {insight.title}."
+    return None
 
 
 def compose_daily_report_text(report: DailyReport) -> str:
-    """Compose a short, cited Spanish daily report for a business owner."""
+    """Compose the Hito 0 WhatsApp operator brief.
 
-    mkeys = _metrics_by_key(report)
+    The output is intentionally dry and deterministic: priority first, a short
+    explanation, up to three facts, and one source line. No branding, emoji, or
+    assistant-like language is added because this is meant for Juan's 08:00
+    Argentina owner report.
+    """
 
     lines = [
-        f"🧠 Orvo Brain — {report.business_name}",
-        f"Reporte diario · {report.report_date.isoformat()}",
+        f"{_normalize_business_name(report.business_name)} · {report.report_date.isoformat()}",
+        _priority_line(report),
         "",
-        "📊 Métricas",
+        _summary_line(report),
     ]
 
-    if report.metrics:
-        for metric in report.metrics:
-            lines.append(f"- {metric.label}: {_format_value(metric)}")
-    else:
-        lines.append("- Sin métricas cargadas todavía")
+    fact_lines = _derived_fact_lines(report)
+    for metric in _fact_metrics(report):
+        metric_line = f"- {metric.label}: {_format_value(metric)}"
+        if metric_line not in fact_lines:
+            fact_lines.append(metric_line)
+        if len(fact_lines) == 3:
+            break
+    if fact_lines:
+        lines.append("")
+        lines.extend(fact_lines)
 
-    # Cross-channel section (only when both TN + ML present)
-    lines.extend(_canales_section(mkeys))
+    secondary = _secondary_line(report)
+    if secondary:
+        lines.extend(["", secondary])
 
-    # Ads section (only when ad_spend_today present)
-    lines.extend(_ads_section(mkeys))
-
-    lines.extend(["", "🚨 Alertas"])
-    if report.insights:
-        for insight in report.insights:
-            if insight.severity == "critical":
-                prefix = "🔴"
-                urgency = "Acción urgente:"
-            elif insight.severity == "warning":
-                prefix = "🟡"
-                urgency = "Acción:"
-            else:
-                prefix = "ℹ️"
-                urgency = "Acción:"
-            lines.append(f"{prefix} {insight.title}: {insight.explanation}")
-            lines.append(f"   {urgency} {insight.recommended_action}")
-    else:
-        lines.append("✅ Sin alertas críticas por ahora.")
-
-    # Compact footer
     lines.extend(["", _compact_sources(report)])
-
     return "\n".join(lines)
 
 

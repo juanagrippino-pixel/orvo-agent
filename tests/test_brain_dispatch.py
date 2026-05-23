@@ -45,7 +45,7 @@ def test_dispatch_daily_report_sends_composed_text_once():
     delivery_client.send_text.assert_called_once()
     phone, text = delivery_client.send_text.call_args.args
     assert phone == "+5491112345678"
-    assert "Orvo Brain" in text
+    assert text.startswith("ARTEMEA · 2026-05-19")
     assert idempotency.has(result.idempotency_key)
 
 
@@ -90,7 +90,7 @@ def test_dispatch_daily_report_sends_whatsapp_budgeted_text_for_long_report():
     assert result.status == "sent"
     _phone, text = delivery_client.send_text.call_args.args
     assert len(text) <= 1000
-    assert text.endswith("... (ver reporte completo)")
+    assert text.startswith("ARTEMEA · 2026-05-19")
 
 
 def test_dispatch_daily_report_skips_duplicate_key():
