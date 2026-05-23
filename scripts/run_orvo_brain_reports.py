@@ -15,13 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.brain.adapters.google_sheets import get_sheets_service
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient
 from app.brain.dispatch import InMemoryIdempotencyStore
-from app.brain.pipeline import (
-    run_csv_daily_report_pipeline,
-    run_google_sheets_daily_report_pipeline,
-    run_mercadolibre_daily_report_pipeline,
-    run_meta_ads_daily_report_pipeline,
-    run_tiendanube_daily_report_pipeline,
-)
+from app.brain.pipeline import run_enabled_connectors_daily_report_pipeline
 from app.brain.runner import run_due_daily_reports
 from app.brain.storage import SQLiteConfigStore, SQLiteIdempotencyStore, init_schema
 
@@ -42,11 +36,17 @@ def open_runtime(db_path: str):
     return conn, SQLiteConfigStore(conn), SQLiteIdempotencyStore(conn)
 
 
-def _first_enabled_connector_type(business) -> str | None:
+SUPPORTED_DAILY_CONNECTOR_TYPES = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube"}
+
+
+def _enabled_daily_connector_types(business) -> list[str]:
+    connector_types: list[str] = []
     for connector in business.connectors:
-        if connector.enabled:
-            return connector.connector_type
-    return None
+        if not connector.enabled or connector.connector_type not in SUPPORTED_DAILY_CONNECTOR_TYPES:
+            continue
+        if connector.connector_type not in connector_types:
+            connector_types.append(connector.connector_type)
+    return connector_types
 
 
 def run_forced_report(
@@ -60,47 +60,22 @@ def run_forced_report(
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
 ):
-    connector_type = _first_enabled_connector_type(business)
-    if connector_type == "google_sheets":
-        return run_google_sheets_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            sheets_service=sheets_service_factory(),
-        )
-    if connector_type == "tiendanube":
-        return run_tiendanube_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            http_client=tiendanube_http_client,
-        )
-    if connector_type == "mercadolibre":
-        return run_mercadolibre_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            http_client=mercadolibre_http_client,
-        )
-    if connector_type == "meta_ads":
-        return run_meta_ads_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            http_client=meta_ads_http_client,
-        )
-    if connector_type == "csv":
-        return run_csv_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-        )
-    raise ValueError(f"Business {business.business_id} has no supported enabled connector")
+    connector_types = _enabled_daily_connector_types(business)
+    if not connector_types:
+        raise ValueError(f"Business {business.business_id} has no supported enabled connector")
+
+    sheets_service = sheets_service_factory() if "google_sheets" in connector_types else None
+    return run_enabled_connectors_daily_report_pipeline(
+        business=business,
+        report_date=report_date,
+        connector_types=connector_types,
+        delivery_client=delivery_client,
+        idempotency_store=idempotency_store,
+        sheets_service=sheets_service,
+        tiendanube_http_client=tiendanube_http_client,
+        mercadolibre_http_client=mercadolibre_http_client,
+        meta_ads_http_client=meta_ads_http_client,
+    )
 
 
 def main() -> None:
