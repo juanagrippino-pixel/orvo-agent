@@ -1,4 +1,6 @@
 from datetime import date
+import json
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -268,3 +270,30 @@ def test_force_report_csv_requires_csv_path():
             idempotency_store=InMemoryIdempotencyStore(),
             sheets_service_factory=MagicMock(),
         )
+
+
+def test_scheduled_main_does_not_eagerly_load_google_sheets_for_non_sheet_runs(monkeypatch, capsys):
+    conn = MagicMock()
+    config_store = MagicMock()
+    idempotency_store = InMemoryIdempotencyStore()
+    delivery_client = MagicMock()
+
+    monkeypatch.setattr(reports_script, "open_runtime", MagicMock(return_value=(conn, config_store, idempotency_store)))
+    monkeypatch.setattr(reports_script.WhatsAppDeliveryClient, "from_env", MagicMock(return_value=delivery_client))
+    monkeypatch.setattr(
+        reports_script,
+        "get_sheets_service",
+        MagicMock(side_effect=AssertionError("scheduled non-sheet runtime must not load Google Sheets eagerly")),
+    )
+    run_due_daily_reports = MagicMock(return_value=[])
+    monkeypatch.setattr(reports_script, "run_due_daily_reports", run_due_daily_reports)
+    monkeypatch.setattr(sys, "argv", ["run_orvo_brain_reports.py", "--db", ":memory:"])
+
+    reports_script.main()
+
+    call_kwargs = run_due_daily_reports.call_args.kwargs
+    assert call_kwargs["config_store"] is config_store
+    assert call_kwargs["delivery_client"] is delivery_client
+    assert call_kwargs["sheets_service"] is None
+    assert json.loads(capsys.readouterr().out) == {"dry_run": False, "results": []}
+    conn.close.assert_called_once()

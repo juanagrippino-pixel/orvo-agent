@@ -132,7 +132,10 @@ def main() -> None:
                 config_store=config_store,
                 idempotency_store=runtime_idempotency_store,
                 delivery_client=delivery_client,
-                sheets_service=get_sheets_service(),
+                # Keep this lazy. ARTEMEA Hito 0 runs on Tiendanube + Meta Ads;
+                # scheduled runs must not require Google Sheets credentials unless
+                # a due Google Sheets connector actually executes.
+                sheets_service=None,
                 now=datetime.now(tz=timezone.utc),
             )
             output = [
