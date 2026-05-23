@@ -40,8 +40,8 @@ def test_compose_whatsapp_daily_report_in_spanish_with_sources():
 
     text = compose_daily_report_text(report)
 
-    assert "Orvo Brain" in text
-    assert "Artemea" in text
+    assert "ARTEMEA · 2026-05-19" in text
+    assert "Orvo Brain" not in text
     assert "Ventas de hoy: ARS 120.000" in text
     assert "Ventas debajo del promedio" in text
     assert "Revisar campañas" in text
@@ -62,7 +62,8 @@ def test_compose_report_without_insights_says_no_critical_alerts():
 
     text = compose_daily_report_text(report)
 
-    assert "Sin alertas críticas" in text
+    assert "No hay alertas críticas" in text
+    assert "Prioridad: sin urgencias hoy." in text
     assert "Carga manual" in text
 
 
@@ -165,6 +166,23 @@ def test_ads_block_shown_when_ad_spend_present():
     assert "ROAS estimado:" in text
 
 
+
+def test_ads_block_roas_uses_generic_revenue_today_for_hito0_tn_meta_merge():
+    """Merged Hito 0 TN + Meta reports keep revenue as generic revenue_today."""
+    from app.brain.reporting import compose_daily_report_text
+
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(key="revenue_today", label="Ventas", value=20000, unit="ARS", evidence=[_tn_source()]),
+            Metric(key="ad_spend_today", label="Gasto ads", value=10000, unit="ARS", evidence=[_meta_source()]),
+        ],
+        insights=[],
+    )
+    text = compose_daily_report_text(report)
+    assert "ROAS estimado: 2.0x" in text
+
 def test_ads_block_roas_uses_current_canonical_revenue_keys():
     """ROAS should use current TN/ML canonical metric keys, not only legacy keys."""
     from app.brain.reporting import compose_daily_report_text
@@ -217,8 +235,8 @@ def test_ads_block_not_shown_without_ad_spend():
     assert "Publicidad" not in text
 
 
-def test_critical_alert_has_accion_urgente_prefix():
-    """Critical severity insights must have 'Acción urgente:' prefix."""
+def test_critical_alert_uses_priority_first_operator_tone():
+    """Critical severity insights must lead with the concrete priority, not emoji."""
     from app.brain.reporting import compose_daily_report_text
 
     src = _tn_source()
@@ -237,8 +255,9 @@ def test_critical_alert_has_accion_urgente_prefix():
         ],
     )
     text = compose_daily_report_text(report)
-    assert "🔴" in text
-    assert "Acción urgente:" in text
+    assert "🔴" not in text
+    assert "Acción urgente:" not in text
+    assert "Prioridad: Verificar tienda online." in text
 
 
 def test_footer_compact_sources_line():
@@ -257,11 +276,42 @@ def test_footer_compact_sources_line():
     )
     text = compose_daily_report_text(report)
     # Compact one-liner, not multi-line block
-    assert "🔗 Fuentes:" in text
-    assert "·" in text
+    assert "Fuentes:" in text
+    assert "🔗" not in text
+    assert "Tiendanube, MercadoLibre, Meta Ads" in text
     # Must NOT contain verbose multi-line evidence bullets
     assert "- Tiendanube (tiendanube)" not in text
 
+
+
+def test_hito0_operator_report_has_no_ai_branding_or_emoji():
+    from app.brain.reporting import compose_daily_report_text
+
+    src = _tn_source()
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 21),
+        metrics=[Metric(key="orders_today", label="Órdenes", value=7, evidence=[src])],
+        insights=[
+            Insight(
+                severity="warning",
+                title="Pedidos debajo del ritmo",
+                explanation="Hubo menos pedidos que el ritmo reciente.",
+                recommended_action="Revisar checkout antes de tocar campañas.",
+                evidence=[src],
+            )
+        ],
+    )
+
+    text = compose_daily_report_text(report)
+
+    assert text.startswith("ARTEMEA · 2026-05-21\nPrioridad: Revisar checkout")
+    assert "Orvo Brain" not in text
+    assert "assistant" not in text.lower()
+    assert "🧠" not in text
+    assert "📊" not in text
+    assert "🚨" not in text
+    assert "✅" not in text
 
 def test_truncate_for_whatsapp_under_limit_unchanged():
     """Message under 1000 chars passes through unchanged."""

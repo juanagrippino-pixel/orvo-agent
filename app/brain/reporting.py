@@ -32,6 +32,9 @@ _ML_REVENUE_KEYS = (
     "mercadolibre.revenue_today",
     "ml_revenue_today",
 )
+_TOTAL_REVENUE_KEYS = (
+    "revenue_today",
+)
 
 
 def _first_metric(metrics: dict, keys: tuple[str, ...]) -> Metric | None:
@@ -69,7 +72,8 @@ def _ads_section(metrics: dict) -> list[str]:
     if not ad:
         return []
     spend = float(ad.value)
-    revenue = sum(
+    total_revenue = _metric_float(metrics, _TOTAL_REVENUE_KEYS)
+    revenue = total_revenue if total_revenue is not None else sum(
         value
         for value in (
             _metric_float(metrics, _TN_REVENUE_KEYS),
@@ -86,6 +90,7 @@ def _ads_section(metrics: dict) -> list[str]:
     ]
 
 
+
 def _compact_sources(report: DailyReport) -> str:
     seen: set[str] = set()
     labels: list[str] = []
@@ -100,52 +105,137 @@ def _compact_sources(report: DailyReport) -> str:
                 labels.append(evidence.label)
                 seen.add(evidence.source)
     if not labels:
-        return "🔗 Fuentes: Sin fuentes"
-    return "🔗 Fuentes: " + " · ".join(labels)
+        return "Fuentes: sin fuentes"
+    return "Fuentes: " + ", ".join(labels)
+
+
+def _business_label(name: str) -> str:
+    """Return the terse owner-facing business label for the report header."""
+
+    stripped = name.strip()
+    if stripped.casefold() == "artemea":
+        return "ARTEMEA"
+    return stripped
+
+
+def _ensure_sentence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    if stripped[-1] in ".!?":
+        return stripped
+    return stripped + "."
+
+
+def _primary_insight(report: DailyReport) -> object | None:
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    if not report.insights:
+        return None
+    return sorted(report.insights, key=lambda item: severity_rank.get(item.severity, 3))[0]
+
+
+def _metric_line(metric: Metric) -> str:
+    return f"- {metric.label}: {_format_value(metric)}"
+
+
+def _supporting_metric_lines(metrics: dict, report: DailyReport, *, limit: int = 3) -> list[str]:
+    preferred_keys = (
+        "revenue_today",
+        "revenue_today_tn",
+        "tiendanube.revenue_today",
+        "tn_revenue_today",
+        "revenue_today_ml",
+        "mercadolibre.revenue_today",
+        "ml_revenue_today",
+        "orders_today",
+        "ad_spend_today",
+        "stock_units",
+        "unanswered_conversations",
+    )
+    selected: list[Metric] = []
+    seen: set[str] = set()
+    for key in preferred_keys:
+        metric = metrics.get(key)
+        if metric is not None and metric.key not in seen:
+            selected.append(metric)
+            seen.add(metric.key)
+        if len(selected) >= limit:
+            break
+    for metric in report.metrics:
+        if len(selected) >= limit:
+            break
+        if metric.key not in seen:
+            selected.append(metric)
+            seen.add(metric.key)
+    return [_metric_line(metric) for metric in selected]
+
+
+def _operator_priority_line(report: DailyReport) -> str:
+    insight = _primary_insight(report)
+    if insight is None:
+        if report.metrics:
+            return "Prioridad: sin urgencias hoy."
+        return "Prioridad: sin recomendación todavía."
+    return "Prioridad: " + _ensure_sentence(insight.recommended_action)
+
+
+def _summary_lines(report: DailyReport) -> list[str]:
+    insight = _primary_insight(report)
+    if insight is None:
+        if report.metrics:
+            return ["No hay alertas críticas con los datos disponibles."]
+        return ["No hay métricas cargadas. No se envían recomendaciones sobre datos incompletos."]
+    return [_ensure_sentence(f"{insight.title}: {insight.explanation}")]
+
+
+def _secondary_line(report: DailyReport, primary: object | None) -> str | None:
+    for insight in report.insights:
+        if insight is primary:
+            continue
+        return f"Secundario: {_ensure_sentence(insight.title)}"
+    return None
 
 
 def compose_daily_report_text(report: DailyReport) -> str:
-    """Compose a short, cited Spanish daily report for a business owner."""
+    """Compose the Hito 0 WhatsApp report in a dry operator tone.
+
+    The production message must read like a bounded morning operator brief for
+    Juan: no assistant branding, no emoji, one priority, only action-relevant
+    facts, and a compact source line so the owner can see why the report said
+    what it said.
+    """
 
     mkeys = _metrics_by_key(report)
+    primary = _primary_insight(report)
+    partial = not report.metrics
+    header = f"{_business_label(report.business_name)} · {report.report_date.isoformat()}"
+    if partial:
+        header += " · partial"
 
     lines = [
-        f"🧠 Orvo Brain — {report.business_name}",
-        f"Reporte diario · {report.report_date.isoformat()}",
+        header,
+        _operator_priority_line(report),
         "",
-        "📊 Métricas",
+        *_summary_lines(report),
     ]
 
-    if report.metrics:
-        for metric in report.metrics:
-            lines.append(f"- {metric.label}: {_format_value(metric)}")
-    else:
-        lines.append("- Sin métricas cargadas todavía")
+    fact_lines = _supporting_metric_lines(mkeys, report)
+    if fact_lines:
+        lines.append("")
+        lines.extend(fact_lines)
 
-    # Cross-channel section (only when both TN + ML present)
-    lines.extend(_canales_section(mkeys))
+    channel_lines = _canales_section(mkeys)
+    if channel_lines:
+        lines.extend(line.replace("📦 ", "") for line in channel_lines)
 
-    # Ads section (only when ad_spend_today present)
-    lines.extend(_ads_section(mkeys))
+    ad_lines = _ads_section(mkeys)
+    if ad_lines:
+        lines.extend(line.replace("📣 ", "") for line in ad_lines)
 
-    lines.extend(["", "🚨 Alertas"])
-    if report.insights:
-        for insight in report.insights:
-            if insight.severity == "critical":
-                prefix = "🔴"
-                urgency = "Acción urgente:"
-            elif insight.severity == "warning":
-                prefix = "🟡"
-                urgency = "Acción:"
-            else:
-                prefix = "ℹ️"
-                urgency = "Acción:"
-            lines.append(f"{prefix} {insight.title}: {insight.explanation}")
-            lines.append(f"   {urgency} {insight.recommended_action}")
-    else:
-        lines.append("✅ Sin alertas críticas por ahora.")
+    secondary = _secondary_line(report, primary)
+    if secondary:
+        lines.extend(["", secondary])
 
-    # Compact footer
     lines.extend(["", _compact_sources(report)])
 
     return "\n".join(lines)

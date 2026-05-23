@@ -31,7 +31,8 @@ def test_csv_daily_report_endpoint_returns_report(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     body = response.get_json()
-    assert "Orvo Brain" in body["text"]
+    assert "ARTEMEA · 2026-05-19" in body["text"]
+    assert "Orvo Brain" not in body["text"]
     assert body["report"]["business_name"] == "Artemea"
 
 
