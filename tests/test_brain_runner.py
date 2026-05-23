@@ -357,3 +357,72 @@ def test_run_due_daily_reports_dispatches_due_meta_ads_report_with_scheduled_dat
     assert http_client.params is not None
     assert json.loads(http_client.params["time_range"]) == {"since": "2026-05-19", "until": "2026-05-19"}
     delivery.send_text.assert_called_once()
+
+
+def make_artemea_08h00_store():
+    """ARTEMEA production store: 08:00 Buenos Aires schedule = 11:00 UTC."""
+    store = InMemoryConfigStore()
+    store.save_business_config(
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="sheet",
+                    connector_type="google_sheets",
+                    label="Sheet Artemea",
+                    params={"spreadsheet_id": "abc123", "range_name": "Daily!A1:G1000"},
+                )
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="artemea-daily-report",
+            business_id="artemea",
+            cron_expression="0 8 * * *",
+            report_type="daily",
+        )
+    )
+    return store
+
+
+def test_artemea_08h00_schedule_dispatches_at_11h00_utc():
+    """08:00 Buenos Aires = 11:00 UTC: runner must fire at exactly that tick."""
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.art", error=None)
+
+    # 11:00 UTC == 08:00 Buenos Aires: should fire
+    results = run_due_daily_reports(
+        config_store=make_artemea_08h00_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 11, 0, tzinfo=timezone.utc),
+    )
+    assert len(results) == 1
+    assert results[0].schedule_id == "artemea-daily-report"
+    assert results[0].dispatch.status == "sent"
+    delivery.send_text.assert_called_once()
+
+
+def test_artemea_08h00_schedule_does_not_dispatch_at_12h00_utc():
+    """12:00 UTC == 09:00 Buenos Aires: must NOT fire for 08:00 schedule."""
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+
+    results = run_due_daily_reports(
+        config_store=make_artemea_08h00_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+    )
+    assert results == []
+    delivery.send_text.assert_not_called()

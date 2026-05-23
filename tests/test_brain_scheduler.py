@@ -225,3 +225,27 @@ def test_due_schedules_empty_when_nothing_due():
     now = datetime(2026, 5, 19, 9, 0, 0, tzinfo=UTC)
     result = due_schedules([sched], now, {"biz-1": biz})
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Test 13: ARTEMEA production contract — "0 8 * * *" fires at 11:00 UTC
+# America/Argentina/Buenos_Aires is UTC-3, so 08:00 local == 11:00 UTC.
+# ---------------------------------------------------------------------------
+
+def test_artemea_08h00_schedule_fires_at_11h00_utc():
+    """Production contract: 08:00 Buenos Aires = 11:00 UTC, no DST."""
+    sched = make_schedule(cron_expression="0 8 * * *")
+    tz = "America/Argentina/Buenos_Aires"
+
+    # 11:00 UTC == 08:00 Buenos Aires => should fire
+    now_match = datetime(2026, 5, 19, 11, 0, 0, tzinfo=UTC)
+    assert should_run_schedule(sched, now_match, tz) is True
+
+    # 12:00 UTC == 09:00 Buenos Aires => should NOT fire
+    now_miss = datetime(2026, 5, 19, 12, 0, 0, tzinfo=UTC)
+    assert should_run_schedule(sched, now_miss, tz) is False
+
+    # next_daily_run from 10:00 UTC returns today's 11:00 UTC fire
+    after_before = datetime(2026, 5, 19, 10, 0, 0, tzinfo=UTC)
+    nxt = next_daily_run(sched, after_before, tz)
+    assert nxt == datetime(2026, 5, 19, 11, 0, 0, tzinfo=UTC)
