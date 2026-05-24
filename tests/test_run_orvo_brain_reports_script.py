@@ -268,3 +268,31 @@ def test_force_report_csv_requires_csv_path():
             idempotency_store=InMemoryIdempotencyStore(),
             sheets_service_factory=MagicMock(),
         )
+
+
+def test_scheduled_main_does_not_load_google_sheets_before_runner(monkeypatch, capsys):
+    class FakeConn:
+        def close(self):
+            pass
+
+    run_kwargs = {}
+
+    def fake_run_due_daily_reports(**kwargs):
+        run_kwargs.update(kwargs)
+        return []
+
+    get_sheets_service = MagicMock(side_effect=AssertionError("google sheets should be loaded lazily by google_sheets pipelines only"))
+    monkeypatch.setattr(reports_script, "get_sheets_service", get_sheets_service)
+    monkeypatch.setattr(reports_script, "open_runtime", lambda db_path: (FakeConn(), object(), object()))
+    monkeypatch.setattr(reports_script, "run_due_daily_reports", fake_run_due_daily_reports)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["run_orvo_brain_reports.py", "--db", ":memory:", "--dry-run"],
+    )
+
+    reports_script.main()
+
+    get_sheets_service.assert_not_called()
+    assert run_kwargs["sheets_service"] is None
+    captured = capsys.readouterr()
+    assert '"results": []' in captured.out

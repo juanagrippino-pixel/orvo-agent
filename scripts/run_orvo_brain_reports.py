@@ -132,7 +132,7 @@ def main() -> None:
                 config_store=config_store,
                 idempotency_store=runtime_idempotency_store,
                 delivery_client=delivery_client,
-                sheets_service=get_sheets_service(),
+                sheets_service=None,
                 now=datetime.now(tz=timezone.utc),
             )
             output = [
