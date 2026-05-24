@@ -13,6 +13,7 @@ Current Phase A ADR set:
 - [ADR-0001: Control Plane bounded contexts and module ownership](0001-control-plane-bounded-contexts-and-module-ownership.md)
 - [ADR-0002: Operational Case as the native issue object](0002-operational-case-native-issue-object.md)
 - [ADR-0003: Deterministic detection vs LLM explanation boundary](0003-deterministic-detection-llm-explanation-boundary.md)
+- [ADR-0004: Autonomous operating toolchain and artifact contract](0004-autonomous-operating-toolchain.md)
 - [ADR-0005: D2C ecommerce wedge with platform/control-plane core](0005-d2c-ecommerce-wedge-platform-core.md)
 
 The executable Phase A contract that ties these ADRs to migration order, module structure, and invariants lives in:
@@ -31,3 +32,8 @@ The accepted first-product direction and buyer-facing language live in:
 - [D2C Pilot Readiness Checklist](../ops/d2c-pilot-readiness-checklist.md)
 - [D2C Autonomous Worker Addendum](../organization/d2c-autonomous-worker-addendum.md)
 - [D2C Ecommerce Control Plane First Product Plan](../plans/2026-05-24-d2c-control-plane-first-product.md)
+
+Organization/toolchain source of truth lives in:
+
+- [Orvo operating toolchain blueprint](../organization/orvo-operating-toolchain-blueprint.md)
+- [Worker handoff manifest spec](../specs/worker-handoff-manifest.md)
