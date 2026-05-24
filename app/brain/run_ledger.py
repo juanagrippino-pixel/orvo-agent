@@ -6,14 +6,14 @@ report/run lifecycle history without wiring it into the current production paths
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 
 RunTriggerType = Literal["scheduled", "forced", "manual", "preview", "backfill"]
 RunStatus = Literal["running", "succeeded", "failed", "partial", "cancelled"]
@@ -21,22 +21,6 @@ ConnectorRunStatus = Literal["succeeded", "failed", "skipped"]
 DispatchRunStatus = Literal["sent", "failed", "skipped_duplicate", "skipped", "queued"]
 
 TERMINAL_RUN_STATUSES: set[str] = {"succeeded", "failed", "partial", "cancelled"}
-_SECRET_KEY_PARTS = (
-    "access_token",
-    "refresh_token",
-    "api_key",
-    "apikey",
-    "authorization",
-    "auth_header",
-    "password",
-    "private_key",
-    "credential",
-    "cookie",
-    "session",
-    "signature",
-    "secret",
-    "token",
-)
 
 
 class RunLedgerStatusError(ValueError):
@@ -53,63 +37,15 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _redact_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    redacted = re.sub(r"Bearer\s+[^\s,;]+", "Bearer [REDACTED]", value, flags=re.IGNORECASE)
-    redacted = re.sub(
-        r"(?i)\b(access_token|refresh_token|api_key|apikey|authorization|auth_header|password|private_key|credential|cookie|session|signature|secret|token)=([^\s,;&]+)",
-        lambda match: f"{match.group(1)}=[REDACTED]",
-        redacted,
-    )
-    return redacted
-
-
-def _is_secret_key(key: str) -> bool:
-    normalized = key.lower().replace("-", "_")
-    return any(part in normalized for part in _SECRET_KEY_PARTS)
-
-
-def _redact_uri(value: str | None) -> str | None:
-    """Redact secret-shaped query params from artifact/config references."""
-
-    redacted = _redact_text(value)
-    if redacted is None:
-        return None
-    try:
-        parts = urlsplit(redacted)
-    except ValueError:
-        return redacted
-    if not parts.query:
-        return redacted
-
-    safe_query = urlencode(
-        [
-            (key, "[REDACTED]" if _is_secret_key(key) else query_value)
-            for key, query_value in parse_qsl(parts.query, keep_blank_values=True)
-        ],
-        doseq=True,
-    )
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, safe_query, parts.fragment))
-
-
 def redact_metadata(value: Any) -> Any:
     """Recursively redact secret-shaped metadata values.
 
     The ledger should store references and non-sensitive summary metadata only.
-    This helper is intentionally conservative for metadata dictionaries while
-    avoiding broad keys such as ``idempotency_key`` that are audit references.
+    This wrapper preserves the public run_ledger helper while centralizing the
+    actual redaction rules in app.brain.security.redaction.
     """
 
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        for raw_key, raw_value in value.items():
-            key = str(raw_key)
-            redacted[key] = "[REDACTED]" if _is_secret_key(key) else redact_metadata(raw_value)
-        return redacted
-    if isinstance(value, list):
-        return [redact_metadata(item) for item in value]
-    return value
+    return redact_secrets(value)
 
 
 class ArtifactRef(BaseModel):
@@ -131,7 +67,7 @@ class ArtifactRef(BaseModel):
     @field_validator("uri", mode="before")
     @classmethod
     def redact_uri(cls, value: str | None) -> str | None:
-        return _redact_uri(value)
+        return redact_uri(value)
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -160,7 +96,7 @@ class ConnectorRunOutcome(BaseModel):
     @field_validator("error_summary", mode="before")
     @classmethod
     def redact_error_summary(cls, value: str | None) -> str | None:
-        return _redact_text(value)
+        return redact_text(value)
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -195,12 +131,12 @@ class DispatchOutcomeRef(BaseModel):
     @field_validator("provider_response_ref", mode="before")
     @classmethod
     def redact_provider_response_ref(cls, value: str | None) -> str | None:
-        return _redact_uri(value)
+        return redact_uri(value)
 
     @field_validator("error_summary", mode="before")
     @classmethod
     def redact_error_summary(cls, value: str | None) -> str | None:
-        return _redact_text(value)
+        return redact_text(value)
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -233,7 +169,7 @@ class RunRecord(BaseModel):
     @field_validator("config_ref", mode="before")
     @classmethod
     def redact_config_ref(cls, value: str | None) -> str | None:
-        return _redact_uri(value)
+        return redact_uri(value)
 
     @field_validator("summary_metadata", mode="before")
     @classmethod
@@ -243,7 +179,7 @@ class RunRecord(BaseModel):
     @field_validator("error_summary", mode="before")
     @classmethod
     def redact_error_summary(cls, value: str | None) -> str | None:
-        return _redact_text(value)
+        return redact_text(value)
 
     @model_validator(mode="after")
     def validate_lifecycle_times(self) -> "RunRecord":

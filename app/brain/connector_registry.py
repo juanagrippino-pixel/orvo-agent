@@ -34,7 +34,9 @@ CAPABILITY_SHEET_IMPORT = "sheet_import"
 
 RUNTIME_MODE_PREVIEW = "preview"
 RUNTIME_MODE_MANUAL = "manual"
+RUNTIME_MODE_FORCED = "forced"
 RUNTIME_MODE_SCHEDULED = "scheduled"
+RUNTIME_MODE_OPERATOR_TRIGGERED = "operator_triggered"
 RUNTIME_MODE_HEALTH_CHECK = "health_check"
 
 SEVERITY_ERROR = "error"
@@ -80,8 +82,9 @@ class ConnectorExecutorMetadata:
     report_factory: str
     supported_runtime_modes: tuple[str, ...] = (
         RUNTIME_MODE_PREVIEW,
-        RUNTIME_MODE_MANUAL,
+        RUNTIME_MODE_FORCED,
         RUNTIME_MODE_SCHEDULED,
+        RUNTIME_MODE_OPERATOR_TRIGGERED,
     )
 
     @property
@@ -133,6 +136,7 @@ class ConnectorSpec:
     adapter_module: str
     report_factory: str
     capabilities: tuple[str, ...]
+    emitted_metric_families: tuple[str, ...] = ()
     required_config_fields: tuple[str, ...] = ()
     optional_config_fields: tuple[str, ...] = ()
     required_secret_refs: tuple[SecretRequirement, ...] = ()
@@ -359,6 +363,13 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         adapter_module="app.brain.adapters.csv_file",
         report_factory="build_daily_report_from_csv_file",
         capabilities=(CAPABILITY_DAILY_REPORT, CAPABILITY_FILE_IMPORT),
+        emitted_metric_families=(
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ),
         required_config_fields=("csv_path",),
         optional_config_fields=("source_label",),
         rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=10),
@@ -369,6 +380,13 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         adapter_module="app.brain.adapters.google_sheets",
         report_factory="build_daily_report_from_sheet",
         capabilities=(CAPABILITY_DAILY_REPORT, CAPABILITY_SHEET_IMPORT),
+        emitted_metric_families=(
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ),
         required_config_fields=("spreadsheet_id", "range_name"),
         scopes=ConnectorScopeMetadata(required=("spreadsheets.readonly",)),
     ),
@@ -378,6 +396,13 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         adapter_module="app.brain.adapters.mercadolibre",
         report_factory="build_daily_report_from_mercadolibre",
         capabilities=(CAPABILITY_DAILY_REPORT, CAPABILITY_COMMERCE_METRICS),
+        emitted_metric_families=(
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ),
         required_config_fields=("seller_id",),
         optional_config_fields=("site_id", "source_label"),
         required_secret_refs=(
@@ -397,6 +422,12 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         adapter_module="app.brain.adapters.meta_ads",
         report_factory="build_daily_report_from_meta_ads",
         capabilities=(CAPABILITY_DAILY_REPORT, CAPABILITY_AD_METRICS),
+        emitted_metric_families=(
+            "ads.spend",
+            "ads.delivery",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ),
         required_config_fields=("ad_account_id",),
         optional_config_fields=("source_label",),
         required_secret_refs=(
@@ -415,7 +446,13 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         display_name="Manual sample payload",
         adapter_module="app.brain.adapters.sample",
         report_factory="build_daily_report_from_payload",
-        capabilities=(CAPABILITY_DAILY_REPORT, CAPABILITY_MANUAL_PAYLOAD),
+        capabilities=(CAPABILITY_MANUAL_PAYLOAD,),
+        emitted_metric_families=("manual.payload", "runtime.freshness", "runtime.data_quality"),
+        executor=ConnectorExecutorMetadata(
+            adapter_module="app.brain.adapters.sample",
+            report_factory="build_daily_report_from_payload",
+            supported_runtime_modes=(RUNTIME_MODE_PREVIEW, RUNTIME_MODE_OPERATOR_TRIGGERED),
+        ),
     ),
     ConnectorSpec(
         connector_type=CONNECTOR_TYPE_TIENDANUBE,
@@ -426,6 +463,13 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             CAPABILITY_DAILY_REPORT,
             CAPABILITY_COMMERCE_METRICS,
             CAPABILITY_INVENTORY_METRICS,
+        ),
+        emitted_metric_families=(
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
         ),
         required_config_fields=("store_id",),
         optional_config_fields=("include_stock",),

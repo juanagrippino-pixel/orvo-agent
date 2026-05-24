@@ -88,6 +88,10 @@ def test_force_report_uses_tiendanube_pipeline_without_loading_sheets():
     assert result.report.business_name == "Demo Shop"
     assert {metric.key: metric.value for metric in result.report.metrics}["revenue_today"] == 1000.0
     assert result.dispatch.status == "sent"
+    assert result.runtime_metadata["run_mode"] == "forced"
+    assert result.runtime_metadata["config_digest"].startswith("sha256:")
+    assert result.runtime_metadata["config_ref"].startswith("runtime:demo-shop:")
+    assert "tn_test_token" not in str(result.runtime_metadata)
     sheets_service_factory.assert_not_called()
 
 

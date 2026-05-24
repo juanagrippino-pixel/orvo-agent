@@ -23,6 +23,7 @@ from app.brain.pipeline import (
     run_tiendanube_daily_report_pipeline,
 )
 from app.brain.runner import run_due_daily_reports
+from app.brain.runtime import RuntimeCompileError, compile_business_runtime, runtime_run_metadata
 from app.brain.storage import SQLiteConfigStore, SQLiteIdempotencyStore, init_schema
 
 
@@ -42,11 +43,8 @@ def open_runtime(db_path: str):
     return conn, SQLiteConfigStore(conn), SQLiteIdempotencyStore(conn)
 
 
-def _first_enabled_connector_type(business) -> str | None:
-    for connector in business.connectors:
-        if connector.enabled:
-            return connector.connector_type
-    return None
+def _with_runtime_metadata(result, metadata: dict):
+    return result.model_copy(update={"runtime_metadata": metadata}, deep=True)
 
 
 def run_forced_report(
@@ -60,45 +58,67 @@ def run_forced_report(
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
 ):
-    connector_type = _first_enabled_connector_type(business)
+    try:
+        runtime = compile_business_runtime(business, run_mode="forced")
+    except RuntimeCompileError as exc:
+        if any("unsupported connector_type" in error or "no enabled connectors" in error for error in exc.errors):
+            raise ValueError(f"Business {business.business_id} has no supported enabled connector") from exc
+        raise
+    runtime_metadata = runtime_run_metadata(runtime)
+    connector_type = runtime.execution_plan.daily_connector_types[0] if runtime.execution_plan.daily_connector_types else None
     if connector_type == "google_sheets":
-        return run_google_sheets_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            sheets_service=sheets_service_factory(),
+        return _with_runtime_metadata(
+            run_google_sheets_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                sheets_service=sheets_service_factory(),
+            ),
+            runtime_metadata,
         )
     if connector_type == "tiendanube":
-        return run_tiendanube_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            http_client=tiendanube_http_client,
+        return _with_runtime_metadata(
+            run_tiendanube_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                http_client=tiendanube_http_client,
+            ),
+            runtime_metadata,
         )
     if connector_type == "mercadolibre":
-        return run_mercadolibre_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            http_client=mercadolibre_http_client,
+        return _with_runtime_metadata(
+            run_mercadolibre_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                http_client=mercadolibre_http_client,
+            ),
+            runtime_metadata,
         )
     if connector_type == "meta_ads":
-        return run_meta_ads_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            http_client=meta_ads_http_client,
+        return _with_runtime_metadata(
+            run_meta_ads_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                http_client=meta_ads_http_client,
+            ),
+            runtime_metadata,
         )
     if connector_type == "csv":
-        return run_csv_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
+        return _with_runtime_metadata(
+            run_csv_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+            ),
+            runtime_metadata,
         )
     raise ValueError(f"Business {business.business_id} has no supported enabled connector")
 
@@ -126,7 +146,14 @@ def main() -> None:
                 delivery_client=delivery_client,
                 idempotency_store=runtime_idempotency_store,
             )
-            output = [{"business_id": business.business_id, "dispatch": result.dispatch.model_dump(mode="json"), "report": result.report.model_dump(mode="json")}]
+            output = [
+                {
+                    "business_id": business.business_id,
+                    "runtime_metadata": result.runtime_metadata,
+                    "dispatch": result.dispatch.model_dump(mode="json"),
+                    "report": result.report.model_dump(mode="json"),
+                }
+            ]
         else:
             results = run_due_daily_reports(
                 config_store=config_store,
@@ -139,6 +166,7 @@ def main() -> None:
                 {
                     "business_id": result.business_id,
                     "schedule_id": result.schedule_id,
+                    "runtime_metadata": result.runtime_metadata,
                     "dispatch": result.pipeline.dispatch.model_dump(mode="json"),
                     "report": result.pipeline.report.model_dump(mode="json"),
                 }

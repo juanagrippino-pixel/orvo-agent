@@ -81,6 +81,9 @@ def test_run_due_daily_reports_dispatches_due_google_sheet_report():
     assert len(results) == 1
     assert results[0].business_id == "artemea"
     assert results[0].dispatch.status == "sent"
+    assert results[0].runtime_metadata["run_mode"] == "scheduled"
+    assert results[0].runtime_metadata == results[0].pipeline.runtime_metadata
+    assert results[0].runtime_metadata["config_digest"].startswith("sha256:")
     delivery.send_text.assert_called_once()
 
 

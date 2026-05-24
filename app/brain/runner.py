@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.brain.config import BusinessConfig, ReportSchedule
 from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore
 from app.brain.pipeline import PipelineResult, run_enabled_connectors_daily_report_pipeline
+from app.brain.runtime import compile_business_runtime, runtime_run_metadata
 from app.brain.scheduler import due_schedules
 
 _log = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class ScheduledPipelineResult(BaseModel):
     business_id: str
     report_type: str
     pipeline: PipelineResult
+    runtime_metadata: dict = Field(default_factory=dict)
 
     @property
     def dispatch(self):
@@ -43,6 +45,10 @@ def _enabled_daily_connector_types(business: BusinessConfig) -> list[str]:
         if connector.connector_type not in connector_types:
             connector_types.append(connector.connector_type)
     return connector_types
+
+
+def _with_runtime_metadata(pipeline: PipelineResult, runtime_metadata: dict) -> PipelineResult:
+    return pipeline.model_copy(update={"runtime_metadata": runtime_metadata}, deep=True)
 
 
 def run_due_daily_reports(
@@ -69,7 +75,6 @@ def run_due_daily_reports(
         if run.report_type != "daily":
             continue
         business = business_by_id[run.business_id]
-        report_date = run.run_at.astimezone(timezone.utc).date()
         connector_types = _enabled_daily_connector_types(business)
         if not connector_types:
             _log.info(
@@ -77,20 +82,31 @@ def run_due_daily_reports(
                 run.business_id, run.schedule_id,
             )
             continue
+        runtime = compile_business_runtime(
+            business,
+            schedules=[schedule for schedule in schedules if schedule.business_id == business.business_id],
+            run_mode="scheduled",
+        )
+        runtime_metadata = runtime_run_metadata(runtime)
+        report_date = run.run_at.astimezone(timezone.utc).date()
+        connector_types = runtime.execution_plan.daily_connector_types
         _log.info(
             "runner starting business_id=%s schedule_id=%s report_date=%s connectors=%s",
             run.business_id, run.schedule_id, report_date, connector_types,
         )
-        pipeline = run_enabled_connectors_daily_report_pipeline(
-            business=business,
-            report_date=report_date,
-            connector_types=connector_types,
-            delivery_client=delivery_client,
-            idempotency_store=idempotency_store,
-            sheets_service=sheets_service,
-            tiendanube_http_client=tiendanube_http_client,
-            mercadolibre_http_client=mercadolibre_http_client,
-            meta_ads_http_client=meta_ads_http_client,
+        pipeline = _with_runtime_metadata(
+            run_enabled_connectors_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                connector_types=connector_types,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                sheets_service=sheets_service,
+                tiendanube_http_client=tiendanube_http_client,
+                mercadolibre_http_client=mercadolibre_http_client,
+                meta_ads_http_client=meta_ads_http_client,
+            ),
+            runtime_metadata,
         )
         results.append(
             ScheduledPipelineResult(
@@ -98,6 +114,7 @@ def run_due_daily_reports(
                 business_id=run.business_id,
                 report_type=run.report_type,
                 pipeline=pipeline,
+                runtime_metadata=runtime_metadata,
             )
         )
     return results

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.brain.adapters.csv_file import build_daily_report_from_csv_file
 from app.brain.adapters.google_sheets import build_daily_report_from_sheet
@@ -21,6 +21,7 @@ from app.brain.models import DailyReport, Metric
 class PipelineResult(BaseModel):
     report: DailyReport
     dispatch: ReportDispatchResult
+    runtime_metadata: dict = Field(default_factory=dict)
 
 
 def _find_google_sheets_connector(business: BusinessConfig) -> ConnectorConfig:

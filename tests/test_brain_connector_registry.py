@@ -43,7 +43,12 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
         assert callable(factory)
         assert spec.factory_path == f"{spec.adapter_module}.{spec.report_factory}"
         assert spec.executor.factory_path == spec.factory_path
-        assert spec.executor.supported_runtime_modes == ("preview", "manual", "scheduled")
+        expected_modes = (
+            ("preview", "operator_triggered")
+            if spec.connector_type == "sample"
+            else ("preview", "forced", "scheduled", "operator_triggered")
+        )
+        assert spec.executor.supported_runtime_modes == expected_modes
         assert spec.health.readiness_check == "metadata_only"
         assert spec.rate_limit.default_timeout_seconds > 0
         assert spec.lifecycle.status == "active"

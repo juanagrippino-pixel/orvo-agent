@@ -1,20 +1,31 @@
 """Compiled runtime artifacts for Orvo Brain business execution.
 
-This module is intentionally additive: it compiles the existing Pydantic config
-models into an execution-ready shape without changing current pipeline, preview,
-forced-run, scheduler, or dispatch behavior.
+This module compiles durable business configuration into an execution-ready,
+audit-safe control-plane artifact. The compiled artifact is intentionally safe
+to serialize into run metadata: raw legacy secrets are stripped and represented
+as secret references.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.brain.config import BusinessConfig, ConnectorConfig, ReportSchedule
+from app.brain.connector_registry import (
+    CAPABILITY_DAILY_REPORT,
+    ConnectorSpec,
+    default_connector_registry,
+)
 from app.brain.models import InsightThresholds
+from app.brain.security.redaction import is_secret_key, redact_secrets
+
+RuntimeMode = Literal["preview", "forced", "scheduled", "operator_triggered"]
 
 
 class RuntimeCompileError(ValueError):
@@ -25,19 +36,8 @@ class RuntimeCompileError(ValueError):
         super().__init__("Invalid business runtime: " + "; ".join(self.errors))
 
 
-class ConnectorRuntimeDescriptor(BaseModel):
-    """Static runtime contract for a connector type."""
-
-    model_config = ConfigDict(frozen=True)
-
-    connector_type: str
-    required_params: list[str] = Field(default_factory=list)
-    secret_param_names: list[str] = Field(default_factory=list)
-    capabilities: list[str] = Field(default_factory=list)
-
-
 class CompiledConnectorRuntime(BaseModel):
-    """Execution-ready connector config with its runtime contract attached."""
+    """Execution-ready connector config with its registry contract attached."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -45,9 +45,13 @@ class CompiledConnectorRuntime(BaseModel):
     connector_type: str
     label: str
     params: dict[str, Any] = Field(default_factory=dict)
+    secret_refs: dict[str, str] = Field(default_factory=dict)
     required_params: list[str] = Field(default_factory=list)
     secret_param_names: list[str] = Field(default_factory=list)
+    legacy_secret_param_names: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
+    emitted_metric_families: list[str] = Field(default_factory=list)
+    executor_factory_path: str
 
 
 class CompiledReportSchedule(BaseModel):
@@ -80,7 +84,7 @@ class CompiledReportSettings(BaseModel):
 
 
 class CompiledExecutionPlan(BaseModel):
-    """Minimal execution plan that current daily report paths can consume later."""
+    """Minimal execution plan that current daily report paths can consume."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -91,14 +95,17 @@ class CompiledExecutionPlan(BaseModel):
 class CompiledBusinessRuntime(BaseModel):
     """Execution-ready runtime artifact for one business.
 
-    This is the first stable slice of the future control-plane runtime. It keeps
-    original connector params intact for current adapters, while also attaching
-    connector contracts so preview, forced, and scheduled paths can converge on
-    one compiled artifact over time.
+    Raw connector secrets are never embedded in this model. Current adapters can
+    still receive resolved raw secrets from legacy ``BusinessConfig`` at the
+    execution boundary, but the compiled control-plane artifact stores only
+    public params and deterministic secret refs.
     """
 
     model_config = ConfigDict(frozen=True)
 
+    runtime_id: str
+    compiled_from_hash: str
+    run_mode: RuntimeMode
     business_id: str
     business_name: str
     timezone: str
@@ -110,53 +117,37 @@ class CompiledBusinessRuntime(BaseModel):
     execution_plan: CompiledExecutionPlan
 
 
-_CONNECTOR_DESCRIPTORS: dict[str, ConnectorRuntimeDescriptor] = {
-    "csv": ConnectorRuntimeDescriptor(
-        connector_type="csv",
-        required_params=["csv_path"],
-        capabilities=["daily_report"],
-    ),
-    "google_sheets": ConnectorRuntimeDescriptor(
-        connector_type="google_sheets",
-        required_params=["spreadsheet_id", "range_name"],
-        capabilities=["daily_report"],
-    ),
-    "mercadolibre": ConnectorRuntimeDescriptor(
-        connector_type="mercadolibre",
-        required_params=["seller_id", "access_token"],
-        secret_param_names=["access_token"],
-        capabilities=["daily_report"],
-    ),
-    "meta_ads": ConnectorRuntimeDescriptor(
-        connector_type="meta_ads",
-        required_params=["ad_account_id", "access_token"],
-        secret_param_names=["access_token"],
-        capabilities=["daily_report"],
-    ),
-    "tiendanube": ConnectorRuntimeDescriptor(
-        connector_type="tiendanube",
-        required_params=["store_id", "access_token"],
-        secret_param_names=["access_token"],
-        capabilities=["daily_report"],
-    ),
-}
-
-
 def supported_runtime_connector_types() -> list[str]:
     """Return connector types this runtime compiler currently understands."""
 
-    return list(_CONNECTOR_DESCRIPTORS.keys())
+    return list(default_connector_registry().connector_types())
+
+
+def runtime_run_metadata(runtime: CompiledBusinessRuntime) -> dict[str, Any]:
+    """Return run-ledger-compatible metadata for a compiled runtime."""
+
+    return {
+        "runtime_id": runtime.runtime_id,
+        "compiled_from_hash": runtime.compiled_from_hash,
+        "config_digest": runtime.compiled_from_hash,
+        "config_ref": runtime.runtime_id,
+        "run_mode": runtime.run_mode,
+        "connector_types": list(runtime.execution_plan.daily_connector_types),
+        "report_types": list(runtime.execution_plan.report_types),
+    }
 
 
 def compile_business_runtime(
     business: BusinessConfig,
     *,
     schedules: Sequence[ReportSchedule] | None = None,
+    run_mode: RuntimeMode = "scheduled",
 ) -> CompiledBusinessRuntime:
     """Compile a BusinessConfig into an execution-ready runtime artifact.
 
-    The function is pure: it performs no I/O, does not mutate its inputs, and
-    reports all currently-detectable validation errors in one RuntimeCompileError.
+    The function is pure: it performs no I/O, does not mutate inputs, uses the
+    connector registry as its source of truth, and reports all detectable
+    validation errors in one RuntimeCompileError.
     """
 
     errors: list[str] = []
@@ -175,13 +166,26 @@ def compile_business_runtime(
     daily_connector_types = _unique_in_order(
         connector.connector_type
         for connector in compiled_connectors
-        if "daily_report" in connector.capabilities
+        if CAPABILITY_DAILY_REPORT in connector.capabilities
     )
     report_types = _unique_in_order(schedule.report_type for schedule in compiled_schedules if schedule.enabled)
     if not report_types and daily_connector_types:
         report_types = ["daily"]
 
+    hash_payload = _runtime_hash_payload(
+        business=business,
+        connectors=compiled_connectors,
+        schedules=compiled_schedules,
+        report_types=report_types,
+        daily_connector_types=daily_connector_types,
+        run_mode=run_mode,
+    )
+    compiled_from_hash = _sha256_digest(hash_payload)
+
     return CompiledBusinessRuntime(
+        runtime_id=f"runtime:{business.business_id}:{compiled_from_hash.removeprefix('sha256:')[:16]}",
+        compiled_from_hash=compiled_from_hash,
+        run_mode=run_mode,
         business_id=business.business_id,
         business_name=business.business_name,
         timezone=business.timezone,
@@ -208,16 +212,20 @@ def _compile_connectors(
         errors.append(f"business {business.business_id} has no enabled connectors")
         return []
 
+    registry = default_connector_registry()
     compiled: list[CompiledConnectorRuntime] = []
     for connector in enabled_connectors:
-        descriptor = _CONNECTOR_DESCRIPTORS.get(connector.connector_type)
-        if descriptor is None:
+        try:
+            spec = registry.get(connector.connector_type)
+        except ValueError:
             errors.append(
                 f"connector {connector.connector_id} has unsupported connector_type: {connector.connector_type}"
             )
             continue
 
-        missing = _missing_required_params(connector, descriptor.required_params)
+        missing_public = _missing_required_params(connector, spec.required_config_fields)
+        missing_secret_refs = _missing_required_secret_refs(connector, spec)
+        missing = missing_public + missing_secret_refs
         if missing:
             errors.append(
                 f"connector {connector.connector_id} ({connector.connector_type}) missing required params: "
@@ -225,15 +233,23 @@ def _compile_connectors(
             )
             continue
 
+        secret_names = [secret.name for secret in spec.required_secret_refs]
+        legacy_secret_names = list(spec.legacy_secret_config_fields)
+        public_params = _public_params(connector.params, legacy_secret_names)
+        secret_refs = _secret_refs_for(business.business_id, connector, spec)
         compiled.append(
             CompiledConnectorRuntime(
                 connector_id=connector.connector_id,
                 connector_type=connector.connector_type,
                 label=connector.label,
-                params=dict(connector.params),
-                required_params=list(descriptor.required_params),
-                secret_param_names=list(descriptor.secret_param_names),
-                capabilities=list(descriptor.capabilities),
+                params=public_params,
+                secret_refs=secret_refs,
+                required_params=list(spec.required_config_fields),
+                secret_param_names=secret_names,
+                legacy_secret_param_names=legacy_secret_names,
+                capabilities=list(spec.capabilities),
+                emitted_metric_families=list(spec.emitted_metric_families),
+                executor_factory_path=spec.factory_path,
             )
         )
     return compiled
@@ -277,6 +293,68 @@ def _missing_required_params(connector: ConnectorConfig, required_params: Sequen
         if value is None or value == "":
             missing.append(param_name)
     return missing
+
+
+def _missing_required_secret_refs(connector: ConnectorConfig, spec: ConnectorSpec) -> list[str]:
+    missing: list[str] = []
+    for secret in spec.required_secret_refs:
+        legacy_field = secret.legacy_config_field or secret.name
+        # Until the config model grows explicit secret_refs, legacy inline config
+        # proves the execution path has a resolvable secret. The compiled runtime
+        # still strips the raw value and emits only a deterministic secret ref.
+        value = connector.params.get(legacy_field)
+        if value is None or value == "":
+            missing.append(secret.name)
+    return missing
+
+
+def _public_params(params: dict, legacy_secret_names: Sequence[str]) -> dict[str, Any]:
+    secret_names = set(legacy_secret_names)
+    return {
+        str(key): redact_secrets(value)
+        for key, value in params.items()
+        if key not in secret_names and not is_secret_key(str(key))
+    }
+
+
+def _secret_refs_for(business_id: str, connector: ConnectorConfig, spec: ConnectorSpec) -> dict[str, str]:
+    refs: dict[str, str] = {}
+    for secret in spec.required_secret_refs:
+        refs[secret.name] = f"secret://businesses/{business_id}/connectors/{connector.connector_id}/{secret.name}"
+    return refs
+
+
+def _runtime_hash_payload(
+    *,
+    business: BusinessConfig,
+    connectors: Sequence[CompiledConnectorRuntime],
+    schedules: Sequence[CompiledReportSchedule],
+    report_types: Sequence[str],
+    daily_connector_types: Sequence[str],
+    run_mode: RuntimeMode,
+) -> dict[str, Any]:
+    return {
+        "run_mode": run_mode,
+        "business": {
+            "business_id": business.business_id,
+            "business_name": business.business_name,
+            "timezone": business.timezone,
+            "currency": business.currency,
+            "owner_phone": business.owner_phone,
+            "insight_thresholds": business.insight_thresholds.model_dump(mode="json"),
+        },
+        "connectors": [connector.model_dump(mode="json") for connector in connectors],
+        "schedules": [schedule.model_dump(mode="json") for schedule in schedules],
+        "execution_plan": {
+            "daily_connector_types": list(daily_connector_types),
+            "report_types": list(report_types),
+        },
+    }
+
+
+def _sha256_digest(value: dict[str, Any]) -> str:
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _daily_cron_error(cron_expression: str) -> str | None:
