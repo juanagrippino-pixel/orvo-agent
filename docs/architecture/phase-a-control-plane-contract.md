@@ -8,6 +8,7 @@ Related ADRs:
 - `docs/adr/0001-control-plane-bounded-contexts-and-module-ownership.md`
 - `docs/adr/0002-operational-case-native-issue-object.md`
 - `docs/adr/0003-deterministic-detection-llm-explanation-boundary.md`
+- `docs/adr/0004-autonomous-operating-toolchain.md`
 
 ## Purpose
 
@@ -28,6 +29,17 @@ Phase A must copy Atlassian's structural primitives, not its surface complexity.
 7. Treat operability as product: every run must be explainable through ledgers, artifacts, health/degraded state, replay hooks, and sanitized audit events.
 8. Keep surfaces lightweight: WhatsApp and the operator API are initial interfaces; they must not become hidden sources of product truth.
 9. Prefer additive maintenance paths: schemas/contracts are versioned or compatibility-shimmed, migrations preserve Hito0 behavior, and broad rewrites are forbidden until tests prove replacement parity.
+
+
+## Operating/toolchain alignment
+
+The autonomous organization that builds this platform must follow the same control-plane principles as the product:
+
+- product work is represented as durable task packets/manifests, not transient chat state;
+- implementation happens through external worktrees and reviewable commits;
+- cross-boundary changes require ADR/spec/contract updates;
+- cron-run workers must not recursively create or mutate cron jobs;
+- Vasilios/Atlassian-inspired broker/control-plane/gateway/observability patterns are translated into Orvo gradually through `docs/organization/orvo-operating-toolchain-blueprint.md`, `docs/architecture/vasilios-atlassian-platform-patterns.md`, and `docs/specs/worker-handoff-manifest.md`.
 
 ## Control plane vs runtime/data plane boundary
 

@@ -1,6 +1,8 @@
 # Orvo Autonomous Organization Operating Plan
 
 > Pivot: Orvo is no longer being managed as a sequence of milestones or a WhatsApp-report project. The organization is now oriented toward building a **sellable Atlassian-like operations control plane** for LatAm ecommerce.
+>
+> Canonical toolchain blueprint: `docs/organization/orvo-operating-toolchain-blueprint.md`. Platform pattern note: `docs/architecture/vasilios-atlassian-platform-patterns.md`.
 
 ## Product thesis
 
@@ -51,12 +53,13 @@ WhatsApp is a surface. Reports are a wedge/projection. The product is the **case
 | SRE / Operations Director | `d62555476c05` | Keeps cron/gateway/worktrees/repo/runtime healthy and observable. |
 | Knowledge / Roadmap Librarian | `c155ea848ddb` | Keeps product docs, ADRs, specs, roadmap, and operating map coherent. |
 | Board Report | `61c5bd141ea2` | Executive synthesis for Juan: product progress, shipped artifacts, risks, decisions. |
-| Work Management Platform | `NEW` | Owns OperationalCase/WorkItem, lifecycle, comments, evidence, audit, transitions. |
-| Workflow Automation Platform | `NEW` | Owns rules, triggers, approvals, playbooks, controlled automations. |
+| Work Management Platform | `e5a97cfadbb8` | Owns OperationalCase/WorkItem, lifecycle, comments, evidence, audit, transitions. |
+| Workflow Automation Platform | `6cbd04a19d3b` | Owns rules, triggers, approvals, playbooks, controlled automations. |
 | Connector Platform | existing `daad02bc0620` + product expansion | Owns connector registry, contracts, health, scopes, secrets, emitted events/metrics. |
 | Semantic Intelligence Platform | existing `fe5814e07377` | Owns metric/event definitions, aliases, evidence semantics, cross-connector correctness. |
 | Operator Experience / Surfaces | existing `20fe2125e513` + surface lane | Owns API/timeline/queue/WhatsApp/web surfaces as projections around cases. |
-| Platform Trust / Security / Admin | `NEW` | Owns tenants/workspaces, RBAC, audit log, secret indirection, compliance boundaries. |
+| Platform Trust / Security / Admin | `a6bfc3a931da` | Owns tenants/workspaces, RBAC, audit log, secret indirection, compliance boundaries. |
+| Edge / Developer Platform | `NEW` | Translates Vasilios/Atlassian broker-control-plane-gateway patterns into Orvo: self-service provisioning, compiled runtime specs, gateway/rate-limit/auth/telemetry conventions. |
 
 ## Bounded contexts
 
@@ -159,6 +162,24 @@ Likely paths:
 - `app/brain/run_ledger.py`
 - `app/brain/storage.py`
 - `tests/contracts/test_audit_log_contract.py`
+
+### 7. Edge / Developer Platform
+
+Inspired by the public Vasilios/Atlassian platform references: Sovereign/xDS control plane, Steward/rate-limit service, Open Service Broker-style self-service, Envoy gateway concerns, SaltStack/Packer reproducibility, OpenTelemetry observability, and supply-chain gates.
+
+Owns:
+- self-service broker/API pattern for provisioning businesses/connectors/workflows/SLAs
+- compiled runtime specs as the product analog of rendered data-plane config
+- gateway concerns: auth, RBAC, rate limits, tenant routing, idempotency, audit, redaction
+- service/component catalog for Orvo bounded contexts
+- observability/provenance standards for runtime and autonomous workers
+
+Likely paths:
+- `app/brain/runtime/*`
+- `app/brain/security/*`
+- `app/brain/audit/*`
+- `docs/architecture/vasilios-atlassian-platform-patterns.md`
+- `docs/specs/worker-handoff-manifest.md`
 
 ## First product wave
 

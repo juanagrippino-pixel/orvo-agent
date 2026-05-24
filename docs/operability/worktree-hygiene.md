@@ -94,13 +94,11 @@ These still contain unverified work or durable context and should not be deleted
    - Registered worktrees are easier to enumerate with `git worktree list --porcelain`.
    - If a task uses an ad-hoc clone anyway, the task owner should delete it before marking the task done.
 
-7. Review automation should emit a manifest.
-   - Future autonomous workers should write a small manifest file or kanban comment with:
-     - worktree path
-     - branch
-     - clean/dirty status
-     - whether work was committed/pushed
-     - whether remaining files are provenance-only
+7. Review automation must emit a manifest.
+   - Future autonomous workers should write a small manifest file or kanban comment following `docs/specs/worker-handoff-manifest.md`.
+   - At minimum it must include: worktree path, branch, base/head SHA, clean/dirty status, files changed, tests run, docs updated, secret-check result, integration notes, and recommended next action.
+   - Successful work should be committed before exit. Blocked work should leave an explicit dirty-blocked manifest.
+   - Do not use dirty implementation worktrees for docs-only strategy commits. Use a dedicated external worktree for org/toolchain docs.
    - This makes later cleanup deterministic.
 
 ## Recommended next manual cleanup queue
