@@ -21,6 +21,8 @@ Those objects are necessary but not enough for a control plane. An `Insight` is 
 
 Make `OperationalCase` the native Orvo issue/workflow object. Reports, WhatsApp alerts, internal queues, timelines, and automations must become projections or actions around Operational Cases.
 
+This is a platform contract, not naming guidance: future `Alert`, `Task`, `Opportunity`, `Incident`, or automation-run concepts may exist only as projections, subtypes, or action records backed by `OperationalCase` identity and evidence. They must not create independent lifecycle stores that compete with cases.
+
 `Insight` remains a deterministic finding object for Hito0 compatibility and for the detection layer. Phase B should introduce case creation from current insights, but the Phase A architecture must reserve the object boundary now.
 
 ## Conceptual model
@@ -210,3 +212,4 @@ If run ledger tables arrive first, `case_evidence.artifact_ref` should point to 
 6. Case dedupe must be stable across preview, forced run, and scheduled run for the same business/date/input.
 7. Owner-facing WhatsApp text must be a projection of case/report data, not a hidden source of state.
 8. Existing `DailyReport` behavior must keep passing until the migration explicitly flips a tested projection path.
+9. New workflow-like concepts (`Alert`, `Task`, `Opportunity`, `Incident`, automation run) must be projections, subtypes, or actions around `OperationalCase`, not competing issue objects.

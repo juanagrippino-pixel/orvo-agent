@@ -23,6 +23,12 @@ The current design works for Hito0 reporting, but the control-plane pivot needs 
 
 Use six bounded contexts as the architectural ownership map for Phase A and later work. Context ownership is about decision authority and dependency direction, not necessarily one Python package per context on day one.
 
+The bounded contexts implement a control-plane/runtime-plane split:
+
+- The control plane owns tenant/business context, connector configuration, secret references, schedules, permissions, policies, thresholds, templates, and compiled runtime specs.
+- The runtime/data plane owns connector pulls, normalized metrics/evidence, deterministic detections, case engine execution, projections, dispatch/actions, run artifacts, and ledger/audit writes.
+- A run executes from an already validated `CompiledBusinessRuntime`; runtime code may record outcomes and typed failures, but it must not silently mutate control-plane source-of-truth configuration or policy.
+
 ### C1. Runtime & Orchestration
 
 Owns execution planning, compiled runtime, scheduler/forced/preview parity, run ledger writes, and top-level orchestration.
@@ -119,6 +125,8 @@ Phase A additions:
 
 C5 may render, summarize, and route. It may not decide business truth or mutate case lifecycle without going through C4 contracts.
 
+C5 gateway/edge concerns must be explicit in every new surface: auth handoff, route ownership, tenant scoping, permission checks, rate limits, structured request logging, audit event emission, dispatch/action idempotency, and observability hooks. WhatsApp, HTTP preview endpoints, operator API endpoints, and future UI routes are edges over the same platform contracts, not separate product cores.
+
 ### C6. Trust, Security & Observability
 
 Owns tenant boundaries, secret references, audit trail, run/artifact retention policy, permissions, replay support, and redaction rules.
@@ -159,6 +167,7 @@ More concretely:
 - C3 may read metric registry definitions and emit deterministic findings/case candidates, but must not dispatch messages.
 - C4 may consume deterministic findings/case candidates and persist workflow state, but must not fetch connector data.
 - C5 may consume reports/cases/projections and call delivery transports, but must not calculate metrics.
+- C5/C6 must centralize gateway concerns for surfaces: auth, rate limits, route ownership, structured logging, tenant isolation, audit logging, observability, and idempotency.
 - C6 may wrap storage/audit/secret behavior, but must not embed product-specific detection rules.
 
 ## Consequences
@@ -185,3 +194,5 @@ More concretely:
 5. Do not let adapters dispatch messages or transition cases.
 6. Do not store secrets in run artifacts, ledger rows, docs examples, or tests.
 7. Every new context boundary must include a contract test or invariant test before it becomes a dependency for another worker.
+8. Every new edge/surface must document auth, tenant isolation, rate limit, routing, logging/audit, observability, and idempotency behavior before live use.
+9. Runtime/data-plane code must not mutate control-plane config, permissions, policies, schedules, templates, or registry definitions during a run.

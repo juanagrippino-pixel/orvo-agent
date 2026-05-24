@@ -15,6 +15,49 @@ This document is the architectural contract for the Phase A Orvo Control Plane p
 
 The pivot is additive first. The current Orvo Brain report path stays operational while the platform layer is introduced around it.
 
+## Applied Atlassian-style platform principles
+
+Phase A must copy Atlassian's structural primitives, not its surface complexity. The required interpretation for Orvo is:
+
+1. Build a platform/control plane, not a pile of scripts: new modules expose stable contracts and contract/invariant tests before other workers depend on them.
+2. Separate control plane from runtime/data plane: configuration, policies, schedules, permissions, templates, and validated runtime specs are compiled before execution; connector pulls, detections, dispatch, and automations execute from that compiled contract.
+3. Use a native issue object: `OperationalCase` is Orvo's Jira-style issue object; reports, alerts, timelines, queues, and automations are projections/actions around cases.
+4. Keep the core deterministic: metrics, thresholds, detections, case creation, priority, lifecycle transitions, degraded-mode decisions, and dispatch idempotency are reproducible and auditable; LLMs may only explain/project validated facts.
+5. Centralize edge/gateway concerns: auth, rate limits, structured logging, routing, tenant isolation, permission scopes, audit logging, observability, and idempotency belong in shared platform layers, not scattered through adapters or report renderers.
+6. Make integrations registry/plugin-like: connector metadata, capabilities, required fields, secret refs, limits, health semantics, and executors are discoverable through a typed registry.
+7. Treat operability as product: every run must be explainable through ledgers, artifacts, health/degraded state, replay hooks, and sanitized audit events.
+8. Keep surfaces lightweight: WhatsApp and the operator API are initial interfaces; they must not become hidden sources of product truth.
+9. Prefer additive maintenance paths: schemas/contracts are versioned or compatibility-shimmed, migrations preserve Hito0 behavior, and broad rewrites are forbidden until tests prove replacement parity.
+
+## Control plane vs runtime/data plane boundary
+
+The platform split is a hard architecture boundary for future workers.
+
+### Control plane owns
+
+- business and tenant context
+- connector configuration and secret references
+- schedules and run policies
+- metric/case/report policies and thresholds
+- permissions, auth policy, tenant isolation, and operator API contracts
+- templates and allowed surface actions
+- compiled runtime specs and their version/hash metadata
+
+### Runtime/data plane owns
+
+- connector execution against external systems
+- source freshness and degraded-mode observations
+- normalized metric/evidence emission
+- deterministic detection and case candidate generation
+- case engine execution against stored state
+- report/queue/timeline projection rendering
+- dispatch/action execution and idempotency checks
+- run ledger, artifact, and audit-event writes
+
+### Boundary rule
+
+Runtime workers execute an already validated `CompiledBusinessRuntime`. They may record observed outcomes and typed failures, but they must not silently rewrite tenant configuration, thresholds, permissions, schedules, templates, or connector definitions during execution. Control-plane workers may change config/policy only through explicit operator/API flows that are tenant-scoped and audited.
+
 ## Current repo baseline to preserve
 
 Do not treat the repo as blank. Current behavior is grounded in these paths:
@@ -38,8 +81,8 @@ Do not treat the repo as blank. Current behavior is grounded in these paths:
 Phase A introduces five tightly related platform pieces. They must be built in this dependency order so workers do not create competing abstractions.
 
 ```text
-BusinessConfig + schedules + operator inputs
-  -> CompiledBusinessRuntime
+Control plane state: BusinessConfig + schedules + policies + permissions + operator inputs
+  -> validated CompiledBusinessRuntime
       -> Connector registry
           -> Connector executions
               -> Metric registry validation
@@ -48,6 +91,8 @@ BusinessConfig + schedules + operator inputs
                           -> projections / dispatch
       -> Run ledger records every step
 ```
+
+The arrows above are one-way for a run: runtime/data-plane execution records facts and failures back to ledgers/audit surfaces, but it does not mutate the control-plane source of truth except through explicit case/action state transitions owned by their contexts.
 
 ### 1. Compiled runtime
 
@@ -194,11 +239,18 @@ Proposed modules:
 
 Contract:
 
+- `OperationalCase` is the native issue object for Orvo. An insight/report/alert can point at a case or project case state, but it must not become a parallel workflow object.
 - Case creation consumes deterministic detections and runtime/data-health events.
 - Case dedupe is stable for the same business, case type, entity scope, primary metric, and time grain.
 - Case lifecycle transitions are append-only and auditable.
 - Case priority is deterministic and explainable.
 - Existing `Insight` and `DailyReport` flows remain valid while cases are introduced; initial case projection can run in parallel before owner-facing reports switch to cases.
+
+Native issue object rule:
+
+- One business-worthy unit of attention equals one `OperationalCase` lineage, not one WhatsApp paragraph, one insight row, or one automation run.
+- Reports, queues, timelines, messages, and automations must reference `case_id`/evidence/action records once the case engine exists.
+- Worker-created alternatives such as `Alert`, `Task`, `Opportunity`, or `Incident` may only be projections/subtypes backed by `OperationalCase`, not independent lifecycle stores.
 
 Compatibility shim:
 
@@ -239,10 +291,11 @@ app/brain/
     case_queue.py           # operator queue read models
   operator_api/
     __init__.py
-    routes.py               # internal config/compile/history/cases endpoints
+    routes.py               # internal config/compile/history/cases endpoints; auth/routing/tenant scope enforced at edge
   security/
     __init__.py
     secrets.py              # secret refs and resolution boundary
+    gateway.py              # shared auth, rate limit, tenant isolation, permission/idempotency helpers when needed
   audit/
     __init__.py
     events.py               # audit/run event shapes and redaction helpers
@@ -348,6 +401,7 @@ Do not create empty placeholder packages just to match this tree. Create them wh
 - One failed secondary connector must not corrupt successful primary connector artifacts.
 - Run ledger writes must be idempotent or safely retryable.
 - Dispatch idempotency must stay business/date/report-type scoped until superseded by tested outbox semantics.
+- Runtime/data-plane execution must not mutate control-plane configuration, schedules, permissions, templates, or registry definitions except through explicit audited operator/API commands.
 
 ### Case invariants
 
@@ -369,6 +423,8 @@ Do not create empty placeholder packages just to match this tree. Create them wh
 - Errors stored in the ledger are sanitized.
 - Operator APIs must be internal by default and tenant-scoped before exposing live data.
 - Artifact retention must favor replay/debuggability without raw secret-bearing payloads.
+- Gateway/edge paths must enforce auth, tenant isolation, permission scopes, rate limits, routing rules, structured logging, audit logging, observability, and idempotency before they trigger runtime/data-plane work.
+- WhatsApp, HTTP previews, operator API endpoints, and future UI routes are surfaces over the same contracts; none may bypass compiled runtime, case, audit, or idempotency rules for convenience.
 
 ## Worker ownership guidance
 
