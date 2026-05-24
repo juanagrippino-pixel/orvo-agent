@@ -17,6 +17,7 @@ from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient
 from app.brain.dispatch import InMemoryIdempotencyStore
 from app.brain.pipeline import (
     run_csv_daily_report_pipeline,
+    run_enabled_connectors_daily_report_pipeline,
     run_google_sheets_daily_report_pipeline,
     run_mercadolibre_daily_report_pipeline,
     run_meta_ads_daily_report_pipeline,
@@ -49,6 +50,17 @@ def _first_enabled_connector_type(business) -> str | None:
     return None
 
 
+def _enabled_daily_connector_types(business) -> list[str]:
+    supported = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube"}
+    connector_types: list[str] = []
+    for connector in business.connectors:
+        if not connector.enabled or connector.connector_type not in supported:
+            continue
+        if connector.connector_type not in connector_types:
+            connector_types.append(connector.connector_type)
+    return connector_types
+
+
 def run_forced_report(
     *,
     business,
@@ -60,7 +72,21 @@ def run_forced_report(
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
 ):
-    connector_type = _first_enabled_connector_type(business)
+    connector_types = _enabled_daily_connector_types(business)
+    if len(connector_types) > 1:
+        return run_enabled_connectors_daily_report_pipeline(
+            business=business,
+            report_date=report_date,
+            connector_types=connector_types,
+            delivery_client=delivery_client,
+            idempotency_store=idempotency_store,
+            sheets_service=sheets_service_factory() if "google_sheets" in connector_types else None,
+            tiendanube_http_client=tiendanube_http_client,
+            mercadolibre_http_client=mercadolibre_http_client,
+            meta_ads_http_client=meta_ads_http_client,
+        )
+
+    connector_type = connector_types[0] if connector_types else _first_enabled_connector_type(business)
     if connector_type == "google_sheets":
         return run_google_sheets_daily_report_pipeline(
             business=business,

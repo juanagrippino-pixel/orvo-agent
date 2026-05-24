@@ -148,6 +148,54 @@ def make_meta_ads_business():
     )
 
 
+def make_tiendanube_meta_ads_business():
+    return BusinessConfig(
+        business_id="artemea",
+        business_name="ARTEMEA",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="artemea-tiendanube",
+                connector_type="tiendanube",
+                label="Tiendanube ARTEMEA",
+                params={"store_id": "123", "access_token": "tn_test_token", "include_stock": False},
+            ),
+            ConnectorConfig(
+                connector_id="artemea-meta",
+                connector_type="meta_ads",
+                label="Meta Ads ARTEMEA",
+                params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
+            ),
+        ],
+    )
+
+
+def test_force_report_merges_tiendanube_and_meta_ads_like_scheduled_hito0_path():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for ARTEMEA"))
+
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_meta_ads_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        meta_ads_http_client=FakeMetaAdsHTTPClient(),
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    assert result.report.business_name == "ARTEMEA"
+    assert metrics["revenue_today"] == 1000.0
+    assert metrics["ad_spend_today"] == pytest.approx(725.25)
+    assert result.dispatch.status == "sent"
+    delivery.send_text.assert_called_once()
+    sheets_service_factory.assert_not_called()
+
+
 def test_force_report_uses_meta_ads_pipeline_without_loading_other_clients():
     delivery = MagicMock()
     delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
