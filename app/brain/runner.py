@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 from app.brain.config import BusinessConfig, ReportSchedule
 from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore
+from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failure, record_pipeline_success
 from app.brain.pipeline import PipelineResult, run_enabled_connectors_daily_report_pipeline
+from app.brain.run_ledger import RunLedger
 from app.brain.runtime import compile_business_runtime, runtime_run_metadata
 from app.brain.scheduler import due_schedules
 
@@ -61,6 +63,7 @@ def run_due_daily_reports(
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
     now: datetime | None = None,
+    run_ledger: RunLedger | None = None,
 ) -> list[ScheduledPipelineResult]:
     """Run every due daily report from the config store."""
 
@@ -87,26 +90,50 @@ def run_due_daily_reports(
             schedules=[schedule for schedule in schedules if schedule.business_id == business.business_id],
             run_mode="scheduled",
         )
-        runtime_metadata = runtime_run_metadata(runtime)
+        runtime_metadata = begin_pipeline_run(
+            run_ledger=run_ledger,
+            business_id=business.business_id,
+            trigger_type="scheduled",
+            runtime_metadata=runtime_run_metadata(runtime),
+            summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
+        )
         report_date = run.run_at.astimezone(timezone.utc).date()
         connector_types = runtime.execution_plan.daily_connector_types
         _log.info(
             "runner starting business_id=%s schedule_id=%s report_date=%s connectors=%s",
             run.business_id, run.schedule_id, report_date, connector_types,
         )
-        pipeline = _with_runtime_metadata(
-            run_enabled_connectors_daily_report_pipeline(
-                business=business,
-                report_date=report_date,
-                connector_types=connector_types,
-                delivery_client=delivery_client,
-                idempotency_store=idempotency_store,
-                sheets_service=sheets_service,
-                tiendanube_http_client=tiendanube_http_client,
-                mercadolibre_http_client=mercadolibre_http_client,
-                meta_ads_http_client=meta_ads_http_client,
-            ),
-            runtime_metadata,
+        run_id = runtime_metadata.get("run_id")
+        try:
+            pipeline = _with_runtime_metadata(
+                run_enabled_connectors_daily_report_pipeline(
+                    business=business,
+                    report_date=report_date,
+                    connector_types=connector_types,
+                    delivery_client=delivery_client,
+                    idempotency_store=idempotency_store,
+                    sheets_service=sheets_service,
+                    tiendanube_http_client=tiendanube_http_client,
+                    mercadolibre_http_client=mercadolibre_http_client,
+                    meta_ads_http_client=meta_ads_http_client,
+                ),
+                runtime_metadata,
+            )
+        except Exception as exc:
+            record_pipeline_failure(
+                run_ledger=run_ledger,
+                run_id=run_id,
+                error=exc,
+                summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
+            )
+            raise
+        record_pipeline_success(
+            run_ledger=run_ledger,
+            run_id=run_id,
+            business=business,
+            connector_types=connector_types,
+            pipeline=pipeline,
+            summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
         )
         results.append(
             ScheduledPipelineResult(

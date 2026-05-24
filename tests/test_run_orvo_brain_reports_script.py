@@ -6,6 +6,7 @@ import pytest
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
+from app.brain.run_ledger import InMemoryRunLedger
 import scripts.run_orvo_brain_reports as reports_script
 
 
@@ -93,6 +94,76 @@ def test_force_report_uses_tiendanube_pipeline_without_loading_sheets():
     assert result.runtime_metadata["config_ref"].startswith("runtime:demo-shop:")
     assert "tn_test_token" not in str(result.runtime_metadata)
     sheets_service_factory.assert_not_called()
+
+
+def test_force_report_records_successful_run_in_ledger_without_raw_secrets():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    ledger = InMemoryRunLedger()
+
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        run_ledger=ledger,
+    )
+
+    assert result.runtime_metadata["run_id"]
+    [record] = ledger.list_runs(business_id="demo-shop")
+    assert record.run_id == result.runtime_metadata["run_id"]
+    assert record.trigger_type == "forced"
+    assert record.status == "succeeded"
+    assert record.config_digest == result.runtime_metadata["config_digest"]
+    assert record.summary_metadata["run_mode"] == "forced"
+    assert record.summary_metadata["connector_types"] == ["tiendanube"]
+    assert record.connector_outcomes[0].connector_id == "demo-tiendanube"
+    assert record.connector_outcomes[0].connector_type == "tiendanube"
+    assert record.connector_outcomes[0].status == "succeeded"
+    assert record.connector_outcomes[0].metrics_count == len(result.report.metrics)
+    assert record.dispatch_outcomes[0].status == "sent"
+    assert record.dispatch_outcomes[0].message_id == "dry-run"
+    assert record.artifacts[0].artifact_type == "daily_report"
+    assert "tn_test_token" not in record.model_dump_json()
+
+
+def test_force_report_ledger_only_records_connector_that_forced_path_executed():
+    business = make_tiendanube_business().model_copy(
+        update={
+            "connectors": [
+                *make_tiendanube_business().connectors,
+                ConnectorConfig(
+                    connector_id="demo-meta",
+                    connector_type="meta_ads",
+                    label="Meta Ads Demo",
+                    params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
+                ),
+            ]
+        }
+    )
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    ledger = InMemoryRunLedger()
+
+    reports_script.run_forced_report(
+        business=business,
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        meta_ads_http_client=MagicMock(side_effect=AssertionError("forced path should not call second connector")),
+        run_ledger=ledger,
+    )
+
+    [record] = ledger.list_runs(business_id="demo-shop")
+    assert [(out.connector_id, out.connector_type) for out in record.connector_outcomes] == [
+        ("demo-tiendanube", "tiendanube")
+    ]
+    assert record.artifacts[0].evidence_refs == ["evidence://demo-tiendanube/2026-05-19"]
+    assert record.summary_metadata["connector_types"] == ["tiendanube"]
 
 
 def make_mercadolibre_business():

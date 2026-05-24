@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
+from app.brain.run_ledger import InMemoryRunLedger
 
 
 def make_store():
@@ -85,6 +86,39 @@ def test_run_due_daily_reports_dispatches_due_google_sheet_report():
     assert results[0].runtime_metadata == results[0].pipeline.runtime_metadata
     assert results[0].runtime_metadata["config_digest"].startswith("sha256:")
     delivery.send_text.assert_called_once()
+
+
+def test_run_due_daily_reports_records_scheduled_run_in_ledger():
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.ledger", error=None)
+    ledger = InMemoryRunLedger()
+
+    results = run_due_daily_reports(
+        config_store=make_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        run_ledger=ledger,
+    )
+
+    assert len(results) == 1
+    assert results[0].runtime_metadata["run_id"]
+    [record] = ledger.list_runs(business_id="artemea")
+    assert record.run_id == results[0].runtime_metadata["run_id"]
+    assert record.trigger_type == "scheduled"
+    assert record.status == "succeeded"
+    assert record.config_digest == results[0].runtime_metadata["config_digest"]
+    assert record.summary_metadata["schedule_id"] == "artemea-daily-report"
+    assert record.summary_metadata["report_type"] == "daily"
+    assert record.connector_outcomes[0].connector_id == "sheet"
+    assert record.connector_outcomes[0].connector_type == "google_sheets"
+    assert record.connector_outcomes[0].status == "succeeded"
+    assert record.dispatch_outcomes[0].status == "sent"
+    assert record.dispatch_outcomes[0].message_id == "wamid.ledger"
+    assert record.artifacts[0].artifact_type == "daily_report"
 
 
 def test_run_due_daily_reports_skips_when_not_due():
