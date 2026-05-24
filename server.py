@@ -4,8 +4,11 @@ load_dotenv()
 import hashlib
 import hmac
 import os
+import sqlite3
 import threading
+from contextlib import closing
 from datetime import date
+from uuid import uuid4
 import requests
 from flask import Flask, request, jsonify
 from langchain_core.messages import HumanMessage, AIMessage
@@ -33,6 +36,15 @@ from app.brain.adapters.meta_ads import (
     build_daily_report_from_meta_ads,
 )
 from app.brain.reporting import compose_daily_report_text
+from app.brain.operator_api import (
+    OperatorAPIError,
+    apply_case_action,
+    get_case_projection,
+    get_run_projection,
+    list_case_queue,
+    list_run_history,
+)
+from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 
 app = Flask(__name__)
 
@@ -59,6 +71,143 @@ def _verify_meta_signature(body: bytes) -> bool:
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+def _internal_request_id() -> str:
+    return request.headers.get("X-Request-ID") or f"req_{uuid4().hex}"
+
+
+def _internal_success(business_id: str, data: dict, *, warnings: list[str] | None = None):
+    return jsonify(
+        {
+            "ok": True,
+            "business_id": business_id,
+            "request_id": _internal_request_id(),
+            "data": data,
+            "warnings": warnings or [],
+            "redaction_applied": True,
+        }
+    )
+
+
+def _internal_error(business_id: str, code: str, message: str, *, status_code: int):
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "business_id": business_id,
+                "request_id": _internal_request_id(),
+                "error": {"code": code, "message": message, "safe_to_show_owner": False},
+                "redaction_applied": True,
+            }
+        ),
+        status_code,
+    )
+
+
+def _authorize_internal_operator(business_id: str):
+    expected = os.environ.get("ORVO_INTERNAL_OPERATOR_TOKEN", "")
+    if not expected:
+        return _internal_error(
+            business_id,
+            "internal_auth_not_configured",
+            "Internal operator API token is not configured.",
+            status_code=503,
+        )
+    supplied = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+        return _internal_error(business_id, "unauthorized", "Unauthorized", status_code=401)
+    return None
+
+
+def _internal_brain_db_path() -> str:
+    return os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3")
+
+
+def _with_internal_stores(business_id: str, handler):
+    auth_error = _authorize_internal_operator(business_id)
+    if auth_error is not None:
+        return auth_error
+    try:
+        with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+            init_schema(conn)
+            return handler(SQLiteOperationalCaseStore(conn), SQLiteRunLedger(conn))
+    except OperatorAPIError as exc:
+        return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases")
+def internal_brain_cases(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_case_queue(
+                case_store,
+                business_id=business_id,
+                status=request.args.get("status"),
+                limit=request.args.get("limit"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/<case_id>")
+def internal_brain_case_detail(business_id: str, case_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            get_case_projection(case_store, business_id=business_id, case_id=case_id),
+        ),
+    )
+
+
+@app.post("/internal/brain/businesses/<business_id>/cases/<case_id>/actions")
+def internal_brain_case_action(business_id: str, case_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_ref = request.headers.get("X-Orvo-Operator", "")
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            apply_case_action(
+                case_store,
+                business_id=business_id,
+                case_id=case_id,
+                action_key=str(payload.get("action_key", "")),
+                actor_ref=actor_ref,
+                reason=payload.get("reason"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/runs")
+def internal_brain_runs(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_run_history(
+                run_ledger,
+                business_id=business_id,
+                status=request.args.get("status"),
+                limit=request.args.get("limit"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/runs/<run_id>")
+def internal_brain_run_detail(business_id: str, run_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            get_run_projection(run_ledger, business_id=business_id, run_id=run_id),
+        ),
+    )
 
 
 @app.post("/brain/reports/daily")
