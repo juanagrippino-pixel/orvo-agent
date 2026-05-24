@@ -115,7 +115,15 @@ def list_case_queue(
     business_id: str,
     status: str | None,
     limit: str | None,
+    jql: str | None = None,
 ) -> dict[str, Any]:
+    if jql not in (None, ""):
+        if status not in (None, ""):
+            raise OperatorAPIError("conflicting_case_filters", "status and jql filters are mutually exclusive", status_code=400)
+        from app.brain.operator_views import query_case_queue
+
+        return query_case_queue(store, business_id=business_id, jql=jql, limit=limit)
+
     parsed_status = parse_case_status(status)
     parsed_limit = parse_limit(limit)
     cases = store.list_cases(business_id=business_id, status=parsed_status, limit=parsed_limit)
@@ -131,6 +139,25 @@ def get_scoped_case(store: OperationalCaseStore, *, business_id: str, case_id: s
 
 def get_case_projection(store: OperationalCaseStore, *, business_id: str, case_id: str) -> dict[str, Any]:
     return {"case": case_detail(get_scoped_case(store, business_id=business_id, case_id=case_id))}
+
+
+def list_builtin_case_views() -> dict[str, Any]:
+    from app.brain.operator_views import builtin_case_views
+
+    return {"views": builtin_case_views()}
+
+
+def execute_builtin_case_view(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    view_id: str,
+    limit: str | None,
+) -> dict[str, Any]:
+    from app.brain.operator_views import get_builtin_case_view, query_case_queue
+
+    view = get_builtin_case_view(view_id)
+    return query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
 
 
 def apply_case_action(

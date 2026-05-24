@@ -39,8 +39,10 @@ from app.brain.reporting import compose_daily_report_text
 from app.brain.operator_api import (
     OperatorAPIError,
     apply_case_action,
+    execute_builtin_case_view,
     get_case_projection,
     get_run_projection,
+    list_builtin_case_views,
     list_case_queue,
     list_run_history,
 )
@@ -146,6 +148,31 @@ def internal_brain_cases(business_id: str):
                 case_store,
                 business_id=business_id,
                 status=request.args.get("status"),
+                limit=request.args.get("limit"),
+                jql=request.args.get("jql"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/case-views")
+def internal_brain_case_views(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(business_id, list_builtin_case_views()),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/case-views/<view_id>/cases")
+def internal_brain_case_view_cases(business_id: str, view_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            execute_builtin_case_view(
+                case_store,
+                business_id=business_id,
+                view_id=view_id,
                 limit=request.args.get("limit"),
             ),
         ),
