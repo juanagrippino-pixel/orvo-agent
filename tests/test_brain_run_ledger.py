@@ -40,10 +40,14 @@ def test_in_memory_run_ledger_records_status_transitions_and_artifacts():
         business_id="artemea",
         trigger_type="scheduled",
         started_at=utc_dt(8),
+        config_ref="config://businesses/artemea/runtime/daily",
+        config_digest="sha256:runtime-v1",
     )
 
     assert run.status == "running"
     assert run.finished_at is None
+    assert run.config_ref == "config://businesses/artemea/runtime/daily"
+    assert run.config_digest == "sha256:runtime-v1"
 
     ledger.append_connector_outcome(
         "run-1",
@@ -54,6 +58,7 @@ def test_in_memory_run_ledger_records_status_transitions_and_artifacts():
             started_at=utc_dt(8),
             finished_at=utc_dt(8, 1),
             metrics_count=5,
+            evidence_refs=["evidence://sheet-main/orders/2026-05-24"],
             metadata={"range_name": "Daily!A1:F1000"},
         ),
     )
@@ -63,6 +68,8 @@ def test_in_memory_run_ledger_records_status_transitions_and_artifacts():
             artifact_id="report-json",
             artifact_type="daily_report",
             uri="memory://run-1/report.json",
+            evidence_refs=["evidence://sheet-main/orders/2026-05-24"],
+            operational_case_ids=["case-low-conversion"],
             metadata={"metrics_count": 5, "insights_count": 2},
         ),
     )
@@ -71,8 +78,10 @@ def test_in_memory_run_ledger_records_status_transitions_and_artifacts():
         DispatchOutcomeRef(
             channel="whatsapp",
             status="sent",
+            attempt_number=2,
             idempotency_key="artemea/2026-05-24/daily",
             message_id="wamid.1",
+            provider_response_ref="dispatch://whatsapp/wamid.1",
         ),
     )
     finished = ledger.update_run(
@@ -85,8 +94,11 @@ def test_in_memory_run_ledger_records_status_transitions_and_artifacts():
     assert finished.status == "succeeded"
     assert finished.finished_at == utc_dt(8, 2)
     assert finished.connector_outcomes[0].connector_type == "google_sheets"
+    assert finished.connector_outcomes[0].evidence_refs == ["evidence://sheet-main/orders/2026-05-24"]
     assert finished.artifacts[0].artifact_type == "daily_report"
+    assert finished.artifacts[0].operational_case_ids == ["case-low-conversion"]
     assert finished.dispatch_outcomes[0].message_id == "wamid.1"
+    assert finished.dispatch_outcomes[0].attempt_number == 2
     assert finished.summary_metadata == {"report_type": "daily"}
 
 
@@ -116,7 +128,7 @@ def test_terminal_status_requires_finished_at_and_valid_time_order():
         ledger.update_run("run-time", status="succeeded", finished_at=utc_dt(9))
 
 
-def test_secret_redaction_covers_common_metadata_keys_and_error_text():
+def test_secret_redaction_covers_common_metadata_keys_error_text_and_reference_uris():
     outcome = ConnectorRunOutcome(
         connector_id="meta-main",
         connector_type="meta_ads",
@@ -136,6 +148,29 @@ def test_secret_redaction_covers_common_metadata_keys_and_error_text():
     assert outcome.error_summary is not None
     assert "abc123" not in outcome.error_summary
     assert "supersecret" not in outcome.error_summary
+
+    artifact = ArtifactRef(
+        artifact_id="signed-report",
+        artifact_type="daily_report",
+        uri="https://artifacts.example/report.json?access_token=raw-token&signature=sig-secret&safe=ok",
+    )
+    dispatch = DispatchOutcomeRef(
+        channel="whatsapp",
+        status="failed",
+        provider_response_ref="https://gateway.example/messages/1?authorization=raw-secret&safe=ok",
+    )
+    run = InMemoryRunLedger().create_run(
+        run_id="run-secret-config",
+        business_id="artemea",
+        trigger_type="manual",
+        config_ref="https://config.example/runtime?token=config-secret&version=1",
+    )
+
+    assert "raw-token" not in (artifact.uri or "")
+    assert "sig-secret" not in (artifact.uri or "")
+    assert "raw-secret" not in (dispatch.provider_response_ref or "")
+    assert "config-secret" not in (run.config_ref or "")
+    assert "safe=ok" in (artifact.uri or "")
 
 
 def test_sqlite_run_ledger_persists_records_and_lists_newest_first(conn):
@@ -200,6 +235,7 @@ def test_sqlite_run_ledger_persists_records_and_lists_newest_first(conn):
 
     runs = SQLiteRunLedger(conn).list_runs(business_id="artemea")
     assert [run.run_id for run in runs] == ["run-new", "run-old"]
+    assert [run.run_id for run in SQLiteRunLedger(conn).list_runs(business_id="artemea", limit=1)] == ["run-new"]
 
 
 def test_sqlite_run_ledger_list_runs_can_filter_by_status(conn):
