@@ -1,135 +1,213 @@
 # Orvo Autonomous Organization Operating Plan
 
-> Created to move from a "mini organization" of agents to an actual autonomous operating system for Orvo Brain.
+> Pivot: Orvo is no longer being managed as a sequence of milestones or a WhatsApp-report project. The organization is now oriented toward building a **sellable Atlassian-like operations control plane** for LatAm ecommerce.
 
-## Objective
+## Product thesis
 
-Run Orvo as a layered autonomous organization that continuously converts model capacity into verified product, research, architecture, implementation, QA, integration, and operations progress.
+Orvo should become the operating system for D2C physical-goods ecommerce operations in Argentina/LatAm.
 
-The organization's first hard trust milestone remains **Hito 0**: a real 08:00 Argentina WhatsApp report for ARTEMEA/client-zero with dry, non-AI tone. Platform work is allowed and encouraged, but it must be additive and must not regress Hito 0.
+The right analogy is **Atlassian/Jira for ecommerce operations**, not a chatbot, not a dashboard, not a daily-report bot, and not a mini ERP.
+
+```text
+Connectors + events + metrics
+        ↓
+Semantic registry + evidence model
+        ↓
+OperationalCase / WorkItem native object
+        ↓
+Workflow states, comments, decisions, ownership, SLA, audit
+        ↓
+Operator surfaces: WhatsApp, API, timeline, queue, admin
+        ↓
+Rules, approvals, playbooks, controlled automations
+        ↓
+Sellable team/product platform
+```
+
+WhatsApp is a surface. Reports are a wedge/projection. The product is the **case/workflow control plane**.
 
 ## Operating principles
 
-1. **Capacity becomes artifacts, not noise.** Extra gpt-5.5/openai-codex usage must show up as research outputs, specs, commits, tests, evals, review findings, or integration plans.
-2. **Layered organization, not flat swarm.** Departments have ownership and gates; they do not all edit the same files.
-3. **Parent repo stays clean.** `/root/orvo-agent` is the integration checkout. Workers use external worktrees under `/root/orvo-agent-worktrees`.
-4. **Research feeds implementation.** Research and architecture outputs are wired into implementation/review/integration lanes through cron `context_from` and repo docs.
-5. **Human-controlled integration.** Autonomous workers may prepare branches, commits, tests, and merge plans; push/deploy/major merge decisions remain human-controlled unless explicitly delegated.
-6. **Verification beats self-report.** Worker summaries are untrusted until checked by git status, diffs, tests, commits, and file inspection.
-7. **Hito 0 wins conflicts.** If architecture/platform work conflicts with first customer trust, Hito 0 gets priority.
+1. **Product-first, not milestone-first.** Stop optimizing around isolated Hitos. Optimize for the sellable product: cases, workflows, governance, connectors, operator experience, and trust.
+2. **Native object first.** `OperationalCase`/`WorkItem` is the equivalent of a Jira Issue. Everything else is a projection, event, action, automation, or surface around it.
+3. **Atlassian-like primitives.** Workspaces, projects/businesses, issue types, statuses, transitions, comments, assignees, labels, evidence, audit log, rules, integrations, permissions, admin APIs.
+4. **External systems remain source of truth.** Tiendanube/MercadoLibre/Meta/Sheets own commerce facts. Orvo owns coordination, exceptions, decisions, operational state, and evidence-backed workflow.
+5. **Connector platform, not one-off adapters.** Connectors must become registry-driven, contract-tested, health-scored, permissioned, and auditable.
+6. **LLMs explain; deterministic core decides.** Calculations, detections, state transitions, dedupe, reopen, and automation gates are deterministic and testable.
+7. **Capacity becomes product artifacts.** Tokens should yield specs, ADRs, code, tests, evals, review findings, integration plans, and sellable packaging.
+8. **Autonomous organization, not swarm.** Departments own domains, gates, and outputs. No overlapping random edits.
+9. **Human-controlled integration.** Branches, commits, tests, and merge plans are prepared autonomously; push/deploy/major merge remains controlled unless explicitly delegated.
 
 ## Departments and live jobs
 
-| Department | Job ID | Cadence | Role |
-|---|---:|---|---|
-| Chief of Staff / COO | `661036933588` | every 60m | Coordinates the org, audits lanes, makes operating decisions, launches bounded workers. |
-| Product & Market Intelligence | `11d230a06306` | every 3h | LatAm/Tiendanube/WhatsApp ecommerce research, product wedge, specs. |
-| Architecture Review Board | `156fc69339e5` | every 3h | Control-plane architecture, ADRs, invariants, module boundaries. |
-| Engineering Factory Manager | `19a7934d892f` | every 90m | Selects implementation slices, prevents overlap, launches bounded coding workers. |
-| QA / Red Team Director | `be285bc8f107` | every 75m | Evals, golden tests, regression gates, failure scenarios. |
-| Release / Integration Manager | `9273c4bc5131` | every 90m | Reviews branches, verifies tests, prepares safe integration order. |
-| SRE / Operations Director | `d62555476c05` | every 60m | Cron/gateway/watchdog health, repo hygiene, logs, delivery risks. |
-| Knowledge / Roadmap Librarian | `c155ea848ddb` | every 3h | Keeps docs, ADRs, roadmap, specs coherent and current. |
-| Board Report | `61c5bd141ea2` | every 4h | Executive synthesis for Juan. |
+| Department | Job ID | Role |
+|---|---:|---|
+| Chief of Staff / COO | `661036933588` | Runs the product organization, allocates capacity, resolves overlap, enforces product-first strategy. |
+| Product & Market Intelligence | `11d230a06306` | ICP, packaging, sellable use cases, competitor/primitives research, pricing/GTM implications. |
+| Architecture Review Board | `156fc69339e5` | Atlassian-like platform architecture, bounded contexts, ADRs, source-of-truth boundaries. |
+| Engineering Factory Manager | `19a7934d892f` | Converts product/platform strategy into non-overlapping implementation worktrees. |
+| QA / Red Team Director | `be285bc8f107` | Platform invariants, contract tests, workflow/case lifecycle tests, trust/security regression gates. |
+| Release / Integration Manager | `9273c4bc5131` | Verifies branches/commits/tests and prepares product integration trains. |
+| SRE / Operations Director | `d62555476c05` | Keeps cron/gateway/worktrees/repo/runtime healthy and observable. |
+| Knowledge / Roadmap Librarian | `c155ea848ddb` | Keeps product docs, ADRs, specs, roadmap, and operating map coherent. |
+| Board Report | `61c5bd141ea2` | Executive synthesis for Juan: product progress, shipped artifacts, risks, decisions. |
+| Work Management Platform | `NEW` | Owns OperationalCase/WorkItem, lifecycle, comments, evidence, audit, transitions. |
+| Workflow Automation Platform | `NEW` | Owns rules, triggers, approvals, playbooks, controlled automations. |
+| Connector Platform | existing `daad02bc0620` + product expansion | Owns connector registry, contracts, health, scopes, secrets, emitted events/metrics. |
+| Semantic Intelligence Platform | existing `fe5814e07377` | Owns metric/event definitions, aliases, evidence semantics, cross-connector correctness. |
+| Operator Experience / Surfaces | existing `20fe2125e513` + surface lane | Owns API/timeline/queue/WhatsApp/web surfaces as projections around cases. |
+| Platform Trust / Security / Admin | `NEW` | Owns tenants/workspaces, RBAC, audit log, secret indirection, compliance boundaries. |
 
-## Existing specialist lanes absorbed into the org
+## Bounded contexts
 
-These existing lanes remain active as specialist production units:
+### 1. Work Management Core
 
-- Hito0 runtime lane: `70e0189b04a2`
-- Hito0 reliability lane: `ebb43bdc7fe5`
-- Hito0 reporting lane: `1af3dff762ac`
-- Hito0 evals lane: `ef61ae4b51c6`
-- Hito0 observability lane: `69bec26899b0`
-- Deep research architect: `51ef44f54957`
-- Research-to-implementation worker: `24de093511bf`
-- Research market lane: `bcd31561788e`
-- Research architecture lane: `ba3aeb852f40`
-- Implementation runtime lane: `6dca27f31a95`
-- Implementation review lane: `6ab866a6acaf`
-- Integration controller lane: `1a14a8ed4d5e`
-- Metric semantics lane: `fe5814e07377`
-- Operational case lane: `88c926969f63`
-- Connector contract lane: `daad02bc0620`
-- Operator API/timeline lane: `20fe2125e513`
-- Platform evals/redteam lane: `411d6caf9cd1`
-- Platform docs/roadmap curator: `adb1536b4199`
+Equivalent to Jira Issue core.
 
-## Department interaction graph
+Owns:
+- `OperationalCase` / `WorkItem`
+- issue types: stockout, fulfillment delay, payment risk, revenue anomaly, campaign inefficiency, data freshness, connector failure
+- status model: open, triaged, waiting_owner, waiting_external, snoozed, resolved, dismissed, reopened
+- transitions with deterministic guards
+- comments, events, labels, priority, assignee, due/SLA
+- evidence links and run references
+- dedupe/reopen semantics
+
+Likely paths:
+- `app/brain/cases/models.py`
+- `app/brain/cases/engine.py`
+- `app/brain/cases/store.py`
+- `tests/contracts/test_case_engine_contract.py`
+
+### 2. Workflow Automation Core
+
+Equivalent to Jira Automation/Atlassian rules.
+
+Owns:
+- triggers: case_created, case_reopened, connector_failed, metric_threshold_crossed, owner_replied, scheduled_check
+- conditions: business, connector, metric, priority, stale evidence, SLA
+- actions: comment, assign, notify surface, request approval, create follow-up, suppress, escalate
+- human-in-the-loop approvals before external side effects
+
+Likely paths:
+- `app/brain/workflows/rules.py`
+- `app/brain/workflows/engine.py`
+- `app/brain/workflows/actions.py`
+- `tests/contracts/test_workflow_rules_contract.py`
+
+### 3. Connector Platform
+
+Equivalent to Atlassian app/connectors + Zapier-style integration runtime.
+
+Owns:
+- connector registry as source of truth
+- connector capabilities, scopes, rate limits, health checks
+- public config vs secret references
+- emitted event/metric contracts
+- connector outcome logging
+
+Likely paths:
+- `app/brain/connector_registry.py`
+- `app/brain/runtime.py`
+- `app/brain/adapters/*`
+- `tests/contracts/test_connector_contracts.py`
+
+### 4. Semantic Intelligence
+
+Owns:
+- metric definitions
+- event definitions
+- aliases and namespace policy
+- evidence types
+- deterministic insight-to-case mapping
+
+Likely paths:
+- `app/brain/semantics/*`
+- `app/brain/insights.py`
+- `tests/contracts/test_metric_registry_contract.py`
+
+### 5. Operator Experience / Surfaces
+
+Surfaces are projections, not the system of record.
+
+Owns:
+- case queue
+- case timeline
+- operator API
+- WhatsApp commands/replies
+- digest/report projections
+- future lightweight web/admin UI
+
+Likely paths:
+- `app/brain/operator_api.py`
+- `app/brain/surfaces/*`
+- `app/brain/reporting.py`
+- `app/brain/dispatch.py`
+
+### 6. Trust, Admin, Security
+
+Owns:
+- workspaces/businesses/users
+- RBAC and permissions
+- audit log
+- run ledger integration
+- secret indirection
+- data retention and export boundaries
+
+Likely paths:
+- `app/brain/admin/*`
+- `app/brain/run_ledger.py`
+- `app/brain/storage.py`
+- `tests/contracts/test_audit_log_contract.py`
+
+## First product wave
+
+This replaces milestone-first work.
+
+1. **Product object spec:** canonical `OperationalCase`/`WorkItem` spec with lifecycle and Atlassian analogy.
+2. **Case model/store/engine:** pure deterministic core with tests.
+3. **Metric/event registry:** semantic definitions before cross-connector logic expands.
+4. **Connector emitted-event contracts:** adapters emit typed metrics/events with source/evidence.
+5. **Insight-to-case mapper:** deterministic mapping from current insights to work items.
+6. **Case timeline/queue API skeleton:** sellable operator surface.
+7. **Run ledger/audit integration:** every case has evidence lineage.
+8. **Workflow rules MVP:** trigger/condition/action DSL for controlled internal actions.
+9. **Tenant/admin/security skeleton:** business/workspace boundaries, secret references, audit.
+10. **GTM packaging:** define the first sellable SKU: “ops control plane for Tiendanube brands”, not “daily WhatsApp report”.
+
+## What to stop doing
+
+- Stop calling the operating strategy Hito-first.
+- Stop making WhatsApp report tone the center of the product.
+- Stop building one-off report rules when the real product object should be a case/work item.
+- Stop treating adapters as isolated scripts instead of a connector platform.
+- Stop adding scaffolds that are not wired to cases, workflows, audit, or sellable operator surfaces.
+
+## Organization interaction graph
 
 ```text
-Product & Market ─┐
-Deep Research ────┤
-Architecture Board ├──> Knowledge/Roadmap ───┐
-                  │                           │
-                  └──> Engineering Factory ───┼──> QA/Red Team ───> Release Integration
-                                              │                         │
-SRE/Ops ──────────────────────────────────────┘                         │
-                                                                        ↓
-Chief of Staff / COO <──────────────────────── Board Report <───────────┘
+Product/GTM ─────────────┐
+Architecture Board ──────┼──> Knowledge/Roadmap ───────┐
+Deep Research ───────────┘                              │
+                                                        ↓
+Semantic Intelligence ──> Work Management Core ──> Workflow Automation
+Connector Platform ─────┘             │                    │
+                                      ↓                    ↓
+                         Operator Surfaces/API/WhatsApp/Digest
+                                      │
+                                      ↓
+QA/Red Team ───────────────> Release Integration ─────────> Board Report
+SRE/Ops ────────────────────────────────────────┘
+COO monitors and reallocates across all departments.
 ```
-
-## Weekly operating model
-
-The system runs continuously, but decisions should be interpreted in this rhythm:
-
-- **Every hour:** Chief of Staff and SRE check health, blockers, and whether capacity is being used productively.
-- **Every 75-90 minutes:** Engineering/QA/Release loops select, test, review, and prepare code branches.
-- **Every 3 hours:** Product, Architecture, and Knowledge update the strategic source of truth.
-- **Every 4 hours:** Board Report gives Juan a concise executive view.
-
-## Gate taxonomy
-
-### Pre-flight gates
-
-- Parent repo `/root/orvo-agent` must be clean before long implementation workers start.
-- Worker must have exact allowed files, tests, branch/worktree path, and commit/report schema.
-- No worker may touch secrets or `.env` values.
-
-### Revision gates
-
-- Spec review before quality review.
-- QA can request failing tests or golden fixtures before integration.
-- Architecture Board can block broad changes that violate bounded contexts or Hito 0 compatibility.
-
-### Escalation gates
-
-Escalate to Juan only when:
-
-- a merge/deploy/push decision is required;
-- product direction has a real trade-off;
-- a credential/customer account/action is needed;
-- Hito 0 cannot proceed without external information.
-
-### Abort gates
-
-Stop or pause a worker if:
-
-- parent repo is dirty and cause is unknown;
-- worker edits outside scope;
-- tests fail and root cause is not understood;
-- secrets are exposed;
-- multiple workers collide on same files.
-
-## Immediate first-wave mandate
-
-The first wave after creating the org should produce:
-
-1. Current org state audit from Chief of Staff.
-2. Product/market ranked opportunities tied to Hito 0 and OperationalCase.
-3. Architecture Board invariants for metric registry, connector contracts, run ledger, and OperationalCase.
-4. Engineering Factory implementation queue with non-overlapping worktrees.
-5. QA/Red Team high-risk regression list and at least one new test/eval path if safe.
-6. Release Integration inventory of existing worktrees/branches.
-7. SRE health report for cron/gateway/repo hygiene.
-8. Knowledge Librarian source-of-truth index.
 
 ## Success metric
 
 A good autonomous-org day ends with:
 
-- Hito 0 closer to a real customer report;
-- at least one verified green branch/commit or test/eval improvement;
-- clearer product/architecture decisions;
-- fewer unknowns in integration and ops;
-- concise report to Juan with evidence, not vibes.
+- one or more product-platform branches or specs closer to a sellable Atlassian-like control plane;
+- concrete movement on native cases/workflows/connectors/semantics/operator surfaces;
+- tests/contracts proving invariants;
+- a clear integration queue;
+- product/GTM clarity about the first sellable package;
+- no regression to “just make the report nicer” as the strategic center.
