@@ -1,5 +1,7 @@
 # Orvo Autonomous Organization Research Marathon v2
 
+> **Supersession note (2026-05-24):** This report was produced from an older prompt and still contains Hito/report-first framing. That framing is superseded. Orvo is now being operated as a sellable Atlassian-like ecommerce operations control plane. Read `docs/organization/product-pivot-correction.md` before using this report; keep the market/control-plane research, but reject any priority ordering that centers Hito 0 or a single WhatsApp report.
+
 Date: 2026-05-24
 Branch/worktree: `org/autonomous-org-research-v2` at `/root/orvo-agent-worktrees/autonomous-org-research-v2`
 Scope: research and synthesis only; no cron creation, no push, no deploy.
