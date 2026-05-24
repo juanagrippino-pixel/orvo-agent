@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python, FastAPI-style existing server surface, Pydantic v2 models, SQLite storage, existing Orvo Brain modules under `app/brain/*`, pytest.
 
+**Companion specs:** `docs/product/d2c-control-plane-prd.md`, `docs/specs/d2c-case-family-catalog.md`, `docs/specs/d2c-operator-surface-contract.md`, `docs/roadmap/d2c-control-plane-roadmap.md`, `docs/organization/d2c-autonomous-worker-addendum.md`.
+
 ---
 
 ## Priority rule

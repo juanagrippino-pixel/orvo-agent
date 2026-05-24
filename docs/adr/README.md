@@ -22,3 +22,12 @@ The executable Phase A contract that ties these ADRs to migration order, module 
 The accepted first-product direction and buyer-facing language live in:
 
 - [Orvo D2C Ecommerce Control Plane](../product/d2c-ecommerce-control-plane.md)
+- [Orvo D2C Control Plane PRD](../product/d2c-control-plane-prd.md)
+- [D2C Case Family Catalog](../specs/d2c-case-family-catalog.md)
+- [D2C Action Key Catalog](../specs/d2c-action-key-catalog.md)
+- [D2C Operator Surface Contract](../specs/d2c-operator-surface-contract.md)
+- [D2C Control Plane Roadmap](../roadmap/d2c-control-plane-roadmap.md)
+- [D2C Packaging and Messaging](../gtm/d2c-packaging-and-messaging.md)
+- [D2C Pilot Readiness Checklist](../ops/d2c-pilot-readiness-checklist.md)
+- [D2C Autonomous Worker Addendum](../organization/d2c-autonomous-worker-addendum.md)
+- [D2C Ecommerce Control Plane First Product Plan](../plans/2026-05-24-d2c-control-plane-first-product.md)

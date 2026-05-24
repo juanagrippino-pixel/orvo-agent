@@ -4,6 +4,16 @@ Status: Product direction accepted
 Date: 2026-05-24
 Related ADR: `docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`
 
+Companion docs:
+
+- `docs/product/d2c-control-plane-prd.md`
+- `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/d2c-action-key-catalog.md`
+- `docs/specs/d2c-operator-surface-contract.md`
+- `docs/roadmap/d2c-control-plane-roadmap.md`
+- `docs/gtm/d2c-packaging-and-messaging.md`
+- `docs/ops/d2c-pilot-readiness-checklist.md`
+
 ## One-line thesis
 
 Orvo is the operational control plane for D2C ecommerce: it turns Tiendanube/commerce, ads, inventory, fulfillment, and conversation signals into evidence-backed cases, priorities, workflows, and owner/operator actions.
