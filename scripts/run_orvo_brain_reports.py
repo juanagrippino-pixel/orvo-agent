@@ -49,6 +49,21 @@ def _first_enabled_connector_type(business) -> str | None:
     return None
 
 
+def _load_scheduled_sheets_service_if_needed(config_store, sheets_service_factory=get_sheets_service):
+    """Load Google Sheets credentials only when a scheduled run needs them.
+
+    ARTEMEA Hito 0 is expected to run from Tiendanube + Meta Ads. The scheduled
+    runtime must not fail before connector selection just because Google Sheets
+    credentials are absent in that production environment.
+    """
+
+    for business in config_store.list_business_configs():
+        for connector in business.connectors:
+            if connector.enabled and connector.connector_type == "google_sheets":
+                return sheets_service_factory()
+    return None
+
+
 def run_forced_report(
     *,
     business,
@@ -132,7 +147,7 @@ def main() -> None:
                 config_store=config_store,
                 idempotency_store=runtime_idempotency_store,
                 delivery_client=delivery_client,
-                sheets_service=get_sheets_service(),
+                sheets_service=_load_scheduled_sheets_service_if_needed(config_store),
                 now=datetime.now(tz=timezone.utc),
             )
             output = [

@@ -148,6 +148,59 @@ def make_meta_ads_business():
     )
 
 
+class FakeConfigStore:
+    def __init__(self, businesses):
+        self._businesses = businesses
+
+    def list_business_configs(self):
+        return self._businesses
+
+
+def test_scheduled_runtime_does_not_load_sheets_service_for_tiendanube_meta_only():
+    tiendanube_business = make_tiendanube_business()
+    meta_ads_business = make_meta_ads_business()
+    business = tiendanube_business.model_copy(
+        update={"connectors": [*tiendanube_business.connectors, *meta_ads_business.connectors]}
+    )
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets credentials should not be loaded"))
+
+    service = reports_script._load_scheduled_sheets_service_if_needed(
+        FakeConfigStore([business]),
+        sheets_service_factory=sheets_service_factory,
+    )
+
+    assert service is None
+    sheets_service_factory.assert_not_called()
+
+
+def test_scheduled_runtime_loads_sheets_service_when_enabled_google_sheets_exists():
+    expected_service = object()
+    sheets_service_factory = MagicMock(return_value=expected_service)
+    business = BusinessConfig(
+        business_id="sheet-shop",
+        business_name="Sheet Shop",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="sheet-conn",
+                connector_type="google_sheets",
+                label="Sheet",
+                params={"spreadsheet_id": "sheet_id", "range_name": "A:D"},
+            )
+        ],
+    )
+
+    service = reports_script._load_scheduled_sheets_service_if_needed(
+        FakeConfigStore([business]),
+        sheets_service_factory=sheets_service_factory,
+    )
+
+    assert service is expected_service
+    sheets_service_factory.assert_called_once_with()
+
+
 def test_force_report_uses_meta_ads_pipeline_without_loading_other_clients():
     delivery = MagicMock()
     delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
