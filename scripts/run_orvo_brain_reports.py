@@ -132,7 +132,11 @@ def main() -> None:
                 config_store=config_store,
                 idempotency_store=runtime_idempotency_store,
                 delivery_client=delivery_client,
-                sheets_service=get_sheets_service(),
+                # Leave this lazy. The Google Sheets adapter will load credentials only
+                # if a due business actually uses a google_sheets connector. Hito 0
+                # ARTEMEA scheduled sends should not fail before Tiendanube/Meta run
+                # just because Google credentials are absent.
+                sheets_service=None,
                 now=datetime.now(tz=timezone.utc),
             )
             output = [

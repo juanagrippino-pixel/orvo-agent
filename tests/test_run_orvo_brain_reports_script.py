@@ -1,4 +1,5 @@
 from datetime import date
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -69,6 +70,21 @@ def make_tiendanube_business():
             )
         ],
     )
+
+
+def test_scheduled_main_does_not_eagerly_load_google_sheets(monkeypatch, tmp_path):
+    db_path = tmp_path / "orvo_brain.sqlite3"
+    get_sheets_service = MagicMock(side_effect=AssertionError("scheduled non-sheets runs must not require Google credentials"))
+    run_due_daily_reports = MagicMock(return_value=[])
+
+    monkeypatch.setattr(sys, "argv", ["run_orvo_brain_reports.py", "--db", str(db_path), "--dry-run"])
+    monkeypatch.setattr(reports_script, "get_sheets_service", get_sheets_service)
+    monkeypatch.setattr(reports_script, "run_due_daily_reports", run_due_daily_reports)
+
+    reports_script.main()
+
+    get_sheets_service.assert_not_called()
+    assert run_due_daily_reports.call_args.kwargs["sheets_service"] is None
 
 
 def test_force_report_uses_tiendanube_pipeline_without_loading_sheets():
