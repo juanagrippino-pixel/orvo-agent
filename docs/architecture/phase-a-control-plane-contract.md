@@ -8,12 +8,15 @@ Related ADRs:
 - `docs/adr/0001-control-plane-bounded-contexts-and-module-ownership.md`
 - `docs/adr/0002-operational-case-native-issue-object.md`
 - `docs/adr/0003-deterministic-detection-llm-explanation-boundary.md`
+- `docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`
 
 ## Purpose
 
 This document is the architectural contract for the Phase A Orvo Control Plane pivot. It is deliberately implementation-facing: future workers should use it to decide where code belongs, which dependencies are legal, what must remain compatible with Hito0, and what invariants cannot be broken.
 
 The pivot is additive first. The current Orvo Brain report path stays operational while the platform layer is introduced around it.
+
+The accepted first sellable product is the D2C ecommerce control plane wedge: Tiendanube/WhatsApp-first operator workflows backed by the same platform-grade internals. Architecture workers must sell narrow/build deep: D2C cases and surfaces get priority, but they must not bypass compiled runtime, connector registry, run ledger, metric registry, `OperationalCase`, audit, or deterministic boundaries.
 
 ## Applied Atlassian-style platform principles
 
@@ -28,6 +31,7 @@ Phase A must copy Atlassian's structural primitives, not its surface complexity.
 7. Treat operability as product: every run must be explainable through ledgers, artifacts, health/degraded state, replay hooks, and sanitized audit events.
 8. Keep surfaces lightweight: WhatsApp and the operator API are initial interfaces; they must not become hidden sources of product truth.
 9. Prefer additive maintenance paths: schemas/contracts are versioned or compatibility-shimmed, migrations preserve Hito0 behavior, and broad rewrites are forbidden until tests prove replacement parity.
+10. Sell narrow/build deep: first-wave work optimizes for D2C ecommerce cases and operator workflows, but implementation must preserve generic platform/control-plane boundaries rather than hard-coding Tiendanube/WhatsApp shortcuts.
 
 ## Control plane vs runtime/data plane boundary
 

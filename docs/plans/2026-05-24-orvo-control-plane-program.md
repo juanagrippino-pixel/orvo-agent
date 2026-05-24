@@ -6,6 +6,8 @@
 
 **North star:** Orvo becomes the place where a business sees, prioritizes, and resolves operational issues/opportunities across sales, conversations, fulfillment, inventory, and marketing — with WhatsApp as the first interface, not the whole product.
 
+**Accepted first-product wedge:** Sell Orvo first as a **D2C ecommerce control plane** for Tiendanube/WhatsApp-first operators, while building the internal architecture as the broader platform/control-plane core. See `docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`, `docs/product/d2c-ecommerce-control-plane.md`, and `docs/plans/2026-05-24-d2c-control-plane-first-product.md`.
+
 **Why now:** The current repo already has the hard nucleus: connectors, deterministic insights, reporting, dispatch, scheduler, storage, and 340 passing tests. The bottleneck is no longer “can we generate a report?” but “can we build the control-plane architecture and execution machine fast enough to become a real platform?”
 
 ---
@@ -48,6 +50,17 @@ Do build a control plane with:
 - evidence and auditability
 - safe operator APIs
 - reusable automation primitives
+
+### Wedge vs architecture split
+
+The first sellable product is narrow by design:
+
+```text
+Buyer-facing wedge: D2C ecommerce operations, initially Tiendanube + WhatsApp.
+Internal architecture: platform/control-plane primitives that can later support more verticals.
+```
+
+This means D2C case families, Tiendanube reliability, WhatsApp/operator projections, run history, and case inspection win first-wave priority. Generic platform features are backlog unless they directly strengthen the D2C control-plane wedge or protect the platform contracts.
 
 ---
 
