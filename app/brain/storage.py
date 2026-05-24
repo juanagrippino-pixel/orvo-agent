@@ -1,9 +1,10 @@
-"""SQLite-backed config and idempotency stores for Orvo Brain.
+"""SQLite-backed config, idempotency, and run ledger stores for Orvo Brain.
 
 Provides:
 - init_schema(conn)          — creates all tables (idempotent)
 - SQLiteConfigStore          — drop-in replacement for InMemoryConfigStore
 - SQLiteIdempotencyStore     — satisfies IdempotencyStore Protocol
+- SQLiteRunLedger            — durable RunLedger implementation
 
 Only stdlib sqlite3 is used — no external dependencies.
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
+from app.brain.run_ledger import SQLiteRunLedger
 from app.brain.config import (
     BusinessConfig,
     ReportSchedule,
@@ -47,6 +49,22 @@ def init_schema(conn: sqlite3.Connection) -> None:
             key        TEXT PRIMARY KEY,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS run_ledger (
+            run_id       TEXT PRIMARY KEY,
+            business_id  TEXT NOT NULL,
+            trigger_type TEXT NOT NULL,
+            status       TEXT NOT NULL,
+            started_at   TEXT NOT NULL,
+            finished_at  TEXT,
+            data         TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_run_ledger_business_started
+            ON run_ledger (business_id, started_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_run_ledger_status_started
+            ON run_ledger (status, started_at DESC);
         """
     )
     conn.commit()
