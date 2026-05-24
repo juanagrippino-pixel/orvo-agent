@@ -19,15 +19,16 @@ The goal is not to imitate Atlassian's UI or deploy heavyweight infrastructure t
 
 ## Public source note on Vasilios Syrakis references
 
-The current public evidence found for the “Vasilios/Atlassian platform” thread is:
+The current public/source evidence found for the “Vasilios/Atlassian platform” thread is:
 
 - Vasilios Syrakis's public site: `https://cetanu.github.io/`.
 - `cetanu/sovereign`: described as a JSON control plane for Envoy, supplying dynamic config to downstream Envoy proxies through templates, data sources, and Python plugin extension points. Its README points support to `vsyrakis@atlassian.com` and Atlassian developer docs for Sovereign.
 - `cetanu/steward`: described as an implementation of the Lyft rate-limit service; it loads rate-limit config from HTTP/file, runs as a gRPC server, uses Redis, and is implemented primarily in Rust.
 - `cetanu/envoy-formula`: SaltStack formula for Envoy-related system configuration.
 - `gufranco/regnant`: a third-party study artifact claiming to reproduce the platform Vasilios described publicly; useful as an interpretation, not as primary Atlassian authority. It combines Envoy, xDS/Sovereign, Open Service Broker, mTLS, OIDC/RBAC, OpenTelemetry, Packer/SaltStack, LocalStack/AWS-shaped infra, Keycloak, Redis, Prometheus/Grafana/Loki/Tempo, WASM filters, cosign, syft, Trivy, and SLSA provenance.
+- `docs/research/2026-05-24-atlassian-platform-video-analysis.md`: local analyzed video transcript. It describes, as a personal retrospective, an Open Service Broker-style load-balancing broker, FastAPI/worker/durable-state provisioning flow, Sovereign/Envoy template/context rendering, CloudFormation/Packer/SaltStack proxy infrastructure, gateway sidecars for auth/authz/rate-limit/logging concerns, and maintenance/on-call lessons.
 
-Operational rule: use these as design references. Do not claim Orvo has verified Atlassian-internal details unless the repo or public source directly supports the claim.
+Operational rule: use these as design references. Do not claim Orvo has verified Atlassian-internal details unless the repo or public source directly supports the claim. The transcript is useful because it is closer to first-person architectural recollection than a third-party reconstruction, but it is still not an official Atlassian architecture document.
 
 ## Product operating thesis
 
@@ -66,12 +67,15 @@ External systems remain source of truth for their native facts. Orvo becomes sou
 | Atlassian Marketplace / Forge / Connect | App ecosystem with scopes, permissions, webhooks, certification | Connector/app registry, permission scopes, event contracts, developer docs, certification tests |
 | Atlassian Admin / Guard | Org/site/user/security/admin controls | Tenant/workspace/project model, RBAC, audit export, secret indirection, retention policy |
 | Compass | Service catalog and ownership | Internal service/component catalog for Orvo bounded contexts, owners, SLIs, docs, repos/tests |
-| Sovereign / xDS control plane | Dynamic config rendered from templates/data sources into Envoy | Compile validated Orvo runtime specs from tenant config, connector registry, policies, templates, secrets refs |
-| Open Service Broker | Self-service provisioning API | Broker/API for adding businesses, connectors, workflows, SLAs, and runtime resources with audited lifecycle |
-| Envoy edge/gateway | Central routing/auth/rate-limit/logging boundary | Shared API/surface gateway layer: auth, RBAC, rate limits, idempotency, tenant routing, audit/logging |
+| Sovereign / xDS control plane | Dynamic config rendered from templates plus context/data sources into Envoy resources | Compile validated Orvo runtime specs from tenant config, connector registry, policies, templates, secrets refs, and durable provisioning state |
+| Open Service Broker | Self-service provisioning API with catalog/plans, provision/update/delete requests, worker execution, and status polling | Broker/API for adding businesses, connectors, workflows, SLAs, and runtime resources with validation, status ledger, and audit trail |
+| Envoy edge/gateway | Central routing/auth/rate-limit/logging boundary, with some concerns handled by filters or local sidecars | Shared API/surface gateway layer: auth, RBAC, rate limits, idempotency, tenant routing, audit/logging; implement as Python middleware/contracts before any proxy/sidecar stack |
 | Steward / Lyft rate limit | Central rate-limit service fed by config | Tenant/connector/operator rate-limit policies with deterministic outcomes and test fixtures |
 | OpenTelemetry/Prometheus/Grafana/Loki/Tempo | Observability across proxy/runtime | Run ledger, traces/log correlation, connector health, SLOs, replay hooks, failure taxonomy |
-| Packer + SaltStack | Reproducible host/system image config | Reproducible worker/runtime environment docs/scripts; later container/build provenance if needed |
+| Packer + SaltStack | Reproducible proxy host/image configuration with observability/security/runtime agents | Reproducible worker/runtime environment docs/scripts and preflight checks; only later container/image provenance if operational scale demands it |
+| Broker queue/status flow | Request path enqueues durable work; worker performs side effects and records completion/error | DB-backed provisioning queue/status ledger first; later external queue only if scale requires it |
+| Sidecar extension model | Specialized auth/authz/rate-limit logic runs beside the proxy and receives dynamic config | Plugin/sidecar model for connectors, auth providers, workflow actions, renderers, redaction, and rate-limit policies, beginning in-process with certification tests |
+| On-call/debug maintenance | Docs, logs, metrics, expected failure modes, onboarding, and churn management | Component catalog, runbooks, failure taxonomy, operability risks in worker manifests, and churn/deprecation review |
 | cosign/syft/Trivy/SLSA | Supply-chain integrity | SBOM/provenance/vulnerability gates before customer-facing deployments |
 
 ## Organization model
@@ -148,10 +152,13 @@ The software architecture should grow in this order:
 10. Service-management/SLA/playbook product surfaces.
 11. Edge/developer platform hardening: broker, gateway, rate limits, service catalog, telemetry, provenance.
 
+Video-derived sequencing rule: copy the shape before the infrastructure. For Orvo this means: product contracts and registries first, then a durable request/status ledger, then compiled runtime validation, then shared gateway policies in the existing Python runtime, and only later separate broker/queue/proxy/sidecar infrastructure if scale or team boundaries require it.
+
 ## Non-goals for now
 
 - Do not copy Atlassian's complexity before Orvo has stable primitives.
 - Do not deploy Envoy/xDS/Keycloak/Prometheus stacks just because they appear in the reference material. First translate the architecture pattern into Orvo's current Python runtime and tests.
+- Do not let the video push Orvo into building a generic infrastructure platform before the ecommerce operations primitives are stable: cases, workflows, connector events, semantic registry, operator surfaces, and tenant/admin/audit.
 - Do not create more cron jobs from cron-run agents. Organization changes are applied by the human/controller session only.
 - Do not allow multiple workers to own the same persistence model or central module.
 - Do not let Hito/report-first language override the product control-plane pivot.

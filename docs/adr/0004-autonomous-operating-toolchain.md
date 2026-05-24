@@ -9,7 +9,7 @@ Orvo is being built by an autonomous organization of agents/workers. Without a d
 
 The product direction is now Atlassian-like: Orvo must become a sellable ecommerce operations control plane, with `OperationalCase` / `WorkItem` as the native product object. The same principle should govern the autonomous organization: work should be represented by durable issue-like artifacts, not transient chat memory.
 
-Public Vasilios/Atlassian platform references also point to a useful pattern: self-service broker, validated control plane, narrow data plane, centralized gateway concerns, observability, and reproducible operations.
+Public Vasilios/Atlassian platform references also point to a useful pattern: self-service broker, validated control plane, narrow data plane, centralized gateway concerns, observability, and reproducible operations. The newly analyzed retrospective reinforces the same sequence: self-service broker → worker/status-backed provisioning → durable state → template/context control plane → centralized gateway concerns → operability/runbook discipline. It should be treated as a personal retrospective source, not official Atlassian doctrine.
 
 ## Decision
 
@@ -21,7 +21,7 @@ Orvo will use a formal autonomous operating toolchain:
 4. Cross-boundary work requires an ADR/spec/contract diff before broad implementation.
 5. Review and integration are separate gates. Worker success summaries are untrusted until files, commits, tests, and manifests are verified.
 6. Cron-run agents must not recursively create, update, pause, resume, remove, or schedule Hermes cron jobs. They may propose org changes; the controller/human applies them.
-7. Atlassian/Vasilios-inspired platform mechanics should be translated into Orvo as product architecture: broker/control-plane/runtime/gateway/observability patterns, not premature infrastructure sprawl.
+7. Atlassian/Vasilios-inspired platform mechanics should be translated into Orvo as product architecture — broker request, durable status/audit, compiled runtime specs, gateway policy, observability, and runbooks — not premature infrastructure sprawl.
 
 ## Consequences
 

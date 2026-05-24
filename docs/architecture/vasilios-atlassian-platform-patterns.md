@@ -12,8 +12,9 @@ This note is grounded in public repos/pages available during the 2026-05-24 audi
 - `https://github.com/cetanu/steward` — README: implementation of the Lyft Rate-Limit service; config via HTTP/file; gRPC server; Redis; Rust; Tavern HTTP integration tests.
 - `https://github.com/cetanu/envoy-formula` — SaltStack formula repository for Envoy-related configuration.
 - `https://github.com/gufranco/regnant` — third-party reproduction that claims to model Vasilios's public Atlassian platform walkthrough; useful as an interpreted map, not primary authority.
+- `docs/research/2026-05-24-atlassian-platform-video-analysis.md` — local analysis of the Drive video transcript: a first-person retrospective describing an Open Service Broker-style provisioning app, Sovereign/Envoy dynamic control plane, CloudFormation/Packer/SaltStack proxy infrastructure, gateway sidecars, and maintenance lessons.
 
-Use this as platform pattern input, not as a claim that every listed component is currently or officially used inside Atlassian.
+Use this as platform pattern input, not as a claim that every listed component is currently or officially used inside Atlassian. Video-derived details should be cited as a personal retrospective unless independently corroborated by public repos/docs.
 
 ## Core pattern
 
@@ -39,6 +40,19 @@ Observability + audit + SLOs + provenance
 
 The important idea is not Envoy itself. The important idea is that teams do not hand-edit runtime behavior. They request capabilities through a broker/control plane; the system validates inputs, renders artifacts, applies them through a narrow data-plane boundary, and records what happened.
 
+## Video-derived refinements
+
+The analyzed retrospective adds concrete sequencing that should shape Orvo without forcing premature infrastructure:
+
+1. The broker is not merely an API facade. It exposes a catalog of service plans, accepts provision/update/delete/bind-style operations, records durable operation status, and lets clients poll or inspect results.
+2. The request path does not perform heavy provisioning directly. It validates intent, creates an operation/job record, and lets a worker perform side effects.
+3. The control plane renders runtime behavior from templates plus context/data sources; bad product-level parameters fail before runtime config is emitted.
+4. The data plane is long-lived and receives dynamic config; users do not hand-edit runtime behavior directly.
+5. Cross-cutting concerns are centralized early in the request chain: auth, authorization, DDoS/rate protection, rate limiting, access logs, routing, structured logs, and observability.
+6. Sidecars/extensions carry specialized logic and can receive their own dynamic config; Orvo should begin with typed plugin contracts and certification tests, not separate processes.
+7. Reproducible runtime/image creation matters because every data-plane worker must carry known agents, security settings, telemetry, and rollback behavior.
+8. Maintenance is architecture: onboarding, runbooks, expected failure modes, metrics, logs, debugging paths, and churn control must be represented as durable artifacts.
+
 ## Orvo translation
 
 ### 1. Self-service broker
@@ -54,7 +68,7 @@ Orvo should expose internal APIs/commands for provisioning:
 - operator surface projection;
 - playbook/template.
 
-Each request should create an auditable record and compile to runtime-safe specs.
+Each request should create an auditable record and compile to runtime-safe specs. The broker does not need to implement the full Open Service Broker spec in the near term. For Orvo, the useful primitive is: request → validation → durable status/audit record → compiled runtime spec update.
 
 ### 2. Compiled runtime specs
 
@@ -68,7 +82,7 @@ Before a run, Orvo compiles a `CompiledBusinessRuntime` from:
 - secret references;
 - permission/rate-limit policy.
 
-The runtime/data plane executes the compiled spec and records outcomes. It must not silently mutate source-of-truth configuration during execution.
+The runtime/data plane executes the compiled spec and records outcomes. It must not silently mutate source-of-truth configuration during execution. Video lesson: expose simple product parameters to operators/developers, then validate and compile them into richer runtime specs; do not expose the full internal runtime/config surface as user-editable input.
 
 ### 3. Gateway concerns
 
@@ -123,6 +137,7 @@ Every runtime and automation action should answer:
 Short term, stay inside the current Python repo and add product-shaped contracts before infra:
 
 - Pydantic models for specs and manifests;
+- a small provisioning/status ledger for config-changing requests before introducing external queues;
 - SQLite-backed ledger/audit tables;
 - pytest contract tests;
 - docs/specs/ADRs;
@@ -149,6 +164,8 @@ Long term, if Orvo becomes multi-service/multi-tenant enough:
 ## What not to do
 
 - Do not install Envoy/xDS/Keycloak/Prometheus/Loki/Tempo/SaltStack just to look like Atlassian.
+- Do not implement the full Open Service Broker API unless Orvo actually needs ecosystem-compatible provisioning.
+- Do not introduce SQS/DynamoDB/CloudFormation/Packer/Envoy sidecars as first-class dependencies; translate their roles into current Python contracts, ledgers, tests, and docs first.
 - Do not rewrite the existing deterministic report path; wrap it behind compiled runtime contracts.
 - Do not let connector adapters become product logic.
 - Do not let cron workers create more cron workers.

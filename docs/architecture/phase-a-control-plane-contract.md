@@ -106,6 +106,60 @@ Control plane state: BusinessConfig + schedules + policies + permissions + opera
 
 The arrows above are one-way for a run: runtime/data-plane execution records facts and failures back to ledgers/audit surfaces, but it does not mutate the control-plane source of truth except through explicit case/action state transitions owned by their contexts.
 
+
+## Platform broker extension
+
+The video-derived platform shape adds one Phase A extension: config-changing requests should move toward a broker/status pattern before Orvo adds many operator endpoints.
+
+```text
+Operator/API request
+  -> Broker command
+  -> BrokerOperation
+  -> ProvisioningJob
+  -> Worker side effects
+  -> Control-plane state/artifacts
+  -> Runtime compilation
+  -> OperationStatus
+```
+
+Initial broker commands:
+
+- create/update/deactivate business workspace;
+- create/update/deactivate connector instance;
+- create/update workflow scheme;
+- create/update SLA policy;
+- create/update automation rule;
+- create/update surface projection;
+- compile runtime preview;
+- inspect operation status.
+
+The broker must be idempotent, tenant-scoped, audited, and safe to retry. The first implementation can be a service-layer contract plus SQLite-backed operation/status tables; external queues or a full Open Service Broker implementation are non-goals until scale or ecosystem compatibility requires them.
+
+Proposed future modules, when implementation reaches this slice:
+
+```text
+app/brain/platform/
+  __init__.py
+  broker.py              # broker command handlers
+  catalog.py             # service/plan catalog
+  operations.py          # BrokerOperation models/status
+  provisioning_queue.py  # DB-backed queue/outbox abstraction
+  provisioning_worker.py # worker execution loop/contracts
+```
+
+Suggested future tests:
+
+```text
+tests/contracts/
+  test_platform_broker_contract.py
+  test_provisioning_queue_contract.py
+
+tests/invariants/
+  test_broker_idempotency.py
+  test_operation_status_is_auditable.py
+  test_provisioning_worker_does_not_mutate_runtime_without_operation.py
+```
+
 ### 1. Compiled runtime
 
 Proposed owner: Runtime & Orchestration (ADR-0001 C1)

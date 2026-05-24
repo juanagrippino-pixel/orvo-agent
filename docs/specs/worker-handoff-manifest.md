@@ -25,7 +25,7 @@ The manifest can initially be a Markdown block in the final report or a JSON/YAM
 | `files_changed` | yes | Explicit list, not just counts |
 | `tests_run` | yes | Commands run and result |
 | `docs_updated` | yes | Docs/ADRs/specs touched, or `none` |
-| `risks` | yes | Integration/security/product risks |
+| `risks` | yes | Integration/security/product/operability risks, including degraded modes when runtime, gateway, queue, connector, or provisioning behavior changes |
 | `secrets_checked` | yes | Confirmation no secrets/tokens were committed; note method |
 | `integration_notes` | yes | Suggested merge order, conflicts, migrations, rollback |
 | `recommended_next_action` | yes | Review, merge, fix, discard, continue, or block reason |
@@ -88,3 +88,4 @@ A reviewer/integration controller must verify:
 4. Files changed match `git diff --name-only base_sha...head_sha` or current dirty state.
 5. Test commands either passed or have explicit block reasons.
 6. Secret check is credible for the files touched.
+7. For runtime/gateway/provisioning changes, expected degraded states, rollback/replay path, and any needed runbook/doc update are identified.
