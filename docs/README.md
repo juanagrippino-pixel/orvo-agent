@@ -26,10 +26,19 @@ Start here:
 - [`docs/adr/0001-control-plane-bounded-contexts-and-module-ownership.md`](adr/0001-control-plane-bounded-contexts-and-module-ownership.md)
 - [`docs/adr/0002-operational-case-native-issue-object.md`](adr/0002-operational-case-native-issue-object.md)
 - [`docs/adr/0003-deterministic-detection-llm-explanation-boundary.md`](adr/0003-deterministic-detection-llm-explanation-boundary.md)
+- [`docs/specs/compiled-runtime-contract.md`](specs/compiled-runtime-contract.md)
+- [`docs/specs/connector-registry-contract.md`](specs/connector-registry-contract.md)
+- [`docs/specs/metric-registry-contract.md`](specs/metric-registry-contract.md)
+- [`docs/specs/operational-case-engine-contract.md`](specs/operational-case-engine-contract.md)
 - [`docs/specs/d2c-case-family-catalog.md`](specs/d2c-case-family-catalog.md)
 - [`docs/specs/d2c-action-key-catalog.md`](specs/d2c-action-key-catalog.md)
 - [`docs/specs/d2c-operator-surface-contract.md`](specs/d2c-operator-surface-contract.md)
+- [`docs/specs/internal-operator-api-contract.md`](specs/internal-operator-api-contract.md)
 - [`docs/specs/run-ledger-foundation.md`](specs/run-ledger-foundation.md)
+- [`docs/specs/storage-migration-contract.md`](specs/storage-migration-contract.md)
+- [`docs/specs/tenant-secret-redaction-contract.md`](specs/tenant-secret-redaction-contract.md)
+- [`docs/specs/testing-invariant-matrix.md`](specs/testing-invariant-matrix.md)
+- [`docs/specs/integration-train-contract.md`](specs/integration-train-contract.md)
 
 ## Product and GTM
 
@@ -40,7 +49,9 @@ Start here:
 ## Operations and autonomous workers
 
 - [`docs/organization/d2c-autonomous-worker-addendum.md`](organization/d2c-autonomous-worker-addendum.md)
+- [`docs/organization/d2c-worker-task-packets.md`](organization/d2c-worker-task-packets.md)
 - [`docs/ops/d2c-pilot-readiness-checklist.md`](ops/d2c-pilot-readiness-checklist.md)
+- [`docs/ops/d2c-pilot-runbook.md`](ops/d2c-pilot-runbook.md)
 - [`docs/operability/worktree-hygiene.md`](operability/worktree-hygiene.md)
 - [`docs/orvo-brain-runtime.md`](orvo-brain-runtime.md)
 

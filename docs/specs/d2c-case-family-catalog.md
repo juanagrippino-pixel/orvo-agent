@@ -40,8 +40,8 @@ Forbidden:
 
 **Required metrics:**
 
-- `commerce.orders.today` or legacy alias
-- `commerce.revenue.today` or legacy alias
+- `commerce.orders.count` with daily time grain; legacy aliases: `commerce.orders.today`, `orders_today`
+- `commerce.revenue.total` with daily time grain; legacy aliases: `commerce.revenue.today`, `revenue_today`
 - baseline/comparison metric when available
 - freshness/data-quality metric
 

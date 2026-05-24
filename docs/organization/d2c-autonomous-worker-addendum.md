@@ -36,9 +36,16 @@ Workers must prefer these docs over older milestone-first or generic-platform wo
 - `docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`
 - `docs/product/d2c-ecommerce-control-plane.md`
 - `docs/product/d2c-control-plane-prd.md`
+- `docs/specs/compiled-runtime-contract.md`
+- `docs/specs/connector-registry-contract.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/operational-case-engine-contract.md`
 - `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
+- `docs/specs/testing-invariant-matrix.md`
 - `docs/specs/d2c-operator-surface-contract.md`
 - `docs/roadmap/d2c-control-plane-roadmap.md`
+- `docs/organization/d2c-worker-task-packets.md`
 - `docs/plans/2026-05-24-d2c-control-plane-first-product.md`
 - `docs/architecture/phase-a-control-plane-contract.md`
 

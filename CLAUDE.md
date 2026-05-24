@@ -9,6 +9,7 @@ Build Orvo Brain: a deterministic control plane for Argentine/LatAm PyMEs. It in
 - Sell narrow/build deep: prioritize D2C ecommerce cases and operator workflows without bypassing platform contracts.
 - Do not position the first product as a generic chatbot or generic agent platform.
 - Start from `docs/README.md`, `docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`, `docs/product/d2c-control-plane-prd.md`, `docs/specs/d2c-case-family-catalog.md`, `docs/specs/d2c-action-key-catalog.md`, `docs/specs/d2c-operator-surface-contract.md`, `docs/roadmap/d2c-control-plane-roadmap.md`, and `docs/organization/d2c-autonomous-worker-addendum.md` before product/architecture work.
+- For implementation work, also read `docs/specs/compiled-runtime-contract.md`, `docs/specs/connector-registry-contract.md`, `docs/specs/metric-registry-contract.md`, `docs/specs/tenant-secret-redaction-contract.md`, `docs/specs/testing-invariant-matrix.md`, and `docs/organization/d2c-worker-task-packets.md`.
 
 ## Architecture
 - Deterministic core: Connector -> Normalizer/Adapter -> Insight/Report -> Dispatcher.

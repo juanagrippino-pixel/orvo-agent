@@ -10,6 +10,10 @@ Companion docs:
 - `docs/specs/d2c-case-family-catalog.md`
 - `docs/specs/d2c-action-key-catalog.md`
 - `docs/specs/d2c-operator-surface-contract.md`
+- `docs/specs/compiled-runtime-contract.md`
+- `docs/specs/connector-registry-contract.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
 - `docs/roadmap/d2c-control-plane-roadmap.md`
 - `docs/gtm/d2c-packaging-and-messaging.md`
 - `docs/ops/d2c-pilot-readiness-checklist.md`

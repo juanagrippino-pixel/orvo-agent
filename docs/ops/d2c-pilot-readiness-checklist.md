@@ -2,7 +2,7 @@
 
 Status: Operational checklist
 Date: 2026-05-24
-Related: `docs/product/d2c-control-plane-prd.md`, `docs/roadmap/d2c-control-plane-roadmap.md`
+Related: `docs/product/d2c-control-plane-prd.md`, `docs/roadmap/d2c-control-plane-roadmap.md`, `docs/ops/d2c-pilot-runbook.md`
 
 ## Purpose
 

@@ -27,11 +27,23 @@ The accepted first-product direction and buyer-facing language live in:
 - [D2C Case Family Catalog](../specs/d2c-case-family-catalog.md)
 - [D2C Action Key Catalog](../specs/d2c-action-key-catalog.md)
 - [D2C Operator Surface Contract](../specs/d2c-operator-surface-contract.md)
+- [Compiled Runtime Contract](../specs/compiled-runtime-contract.md)
+- [Connector Registry Contract](../specs/connector-registry-contract.md)
+- [Metric Registry Contract](../specs/metric-registry-contract.md)
+- [Operational Case Engine Contract](../specs/operational-case-engine-contract.md)
+- [Tenant, Secret Reference, and Redaction Contract](../specs/tenant-secret-redaction-contract.md)
+- [Internal Operator API Contract](../specs/internal-operator-api-contract.md)
+- [Storage and Migration Contract](../specs/storage-migration-contract.md)
+- [Testing and Invariant Matrix](../specs/testing-invariant-matrix.md)
+- [Integration Train Contract](../specs/integration-train-contract.md)
 - [D2C Control Plane Roadmap](../roadmap/d2c-control-plane-roadmap.md)
 - [D2C Packaging and Messaging](../gtm/d2c-packaging-and-messaging.md)
 - [D2C Pilot Readiness Checklist](../ops/d2c-pilot-readiness-checklist.md)
+- [D2C Pilot Runbook](../ops/d2c-pilot-runbook.md)
 - [D2C Autonomous Worker Addendum](../organization/d2c-autonomous-worker-addendum.md)
+- [D2C Worker Task Packets](../organization/d2c-worker-task-packets.md)
 - [D2C Ecommerce Control Plane First Product Plan](../plans/2026-05-24-d2c-control-plane-first-product.md)
+- [Milestone 1 Runtime/Ledger/Registry Implementation Plan](../plans/2026-05-24-milestone-1-runtime-ledger-registry-implementation.md)
 
 Organization/toolchain source of truth lives in:
 
