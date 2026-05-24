@@ -5,6 +5,7 @@ Provides:
 - SQLiteConfigStore          — drop-in replacement for InMemoryConfigStore
 - SQLiteIdempotencyStore     — satisfies IdempotencyStore Protocol
 - SQLiteRunLedger            — durable RunLedger implementation
+- SQLiteOperationalCaseStore — durable OperationalCase store
 
 Only stdlib sqlite3 is used — no external dependencies.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
+from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.run_ledger import SQLiteRunLedger
 from app.brain.config import (
     BusinessConfig,
@@ -65,6 +67,25 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_run_ledger_status_started
             ON run_ledger (status, started_at DESC);
+
+        CREATE TABLE IF NOT EXISTS operational_cases (
+            case_id        TEXT PRIMARY KEY,
+            business_id    TEXT NOT NULL,
+            dedupe_key     TEXT NOT NULL,
+            status         TEXT NOT NULL,
+            case_type      TEXT NOT NULL,
+            priority_score INTEGER NOT NULL,
+            opened_at      TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            data           TEXT NOT NULL,
+            UNIQUE (business_id, dedupe_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_operational_cases_business_status
+            ON operational_cases (business_id, status, priority_score DESC, opened_at ASC);
+
+        CREATE INDEX IF NOT EXISTS idx_operational_cases_updated
+            ON operational_cases (updated_at DESC);
         """
     )
     conn.commit()

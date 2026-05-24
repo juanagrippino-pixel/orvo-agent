@@ -7,6 +7,7 @@ from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStor
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
 from app.brain.run_ledger import InMemoryRunLedger
+from app.brain.operational_cases import InMemoryOperationalCaseStore
 
 
 def make_store():
@@ -119,6 +120,36 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.dispatch_outcomes[0].status == "sent"
     assert record.dispatch_outcomes[0].message_id == "wamid.ledger"
     assert record.artifacts[0].artifact_type == "daily_report"
+
+
+def test_run_due_daily_reports_persists_operational_cases_and_links_ledger_artifact():
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.cases", error=None)
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    results = run_due_daily_reports(
+        config_store=make_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    assert len(results) == 1
+    cases = case_store.list_cases(business_id="artemea")
+    assert {case.case_type for case in cases} == {"sales_drop", "stockout_risk", "unanswered_conversations"}
+    assert all(case.status == "open" for case in cases)
+    assert all(case.latest_run_id == results[0].runtime_metadata["run_id"] for case in cases)
+
+    [run] = run_ledger.list_runs(business_id="artemea")
+    assert set(run.artifacts[0].operational_case_ids) == {case.case_id for case in cases}
+    assert run.summary_metadata["cases_opened"] == 3
+    assert run.summary_metadata["cases_updated"] == 0
 
 
 def test_run_due_daily_reports_skips_when_not_due():

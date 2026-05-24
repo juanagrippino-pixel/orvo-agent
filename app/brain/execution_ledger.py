@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from app.brain.config import BusinessConfig
+from app.brain.operational_cases import (
+    OperationalCaseStore,
+    upsert_cases_from_report,
+    upsert_data_stale_cases,
+)
 from app.brain.pipeline import PipelineResult
 from app.brain.run_ledger import ArtifactRef, ConnectorRunOutcome, DispatchOutcomeRef, RunLedger
 
@@ -81,6 +86,7 @@ def _metric_count_for_connector(pipeline: PipelineResult, connector_type: str, c
 def record_pipeline_success(
     *,
     run_ledger: RunLedger | None,
+    case_store: OperationalCaseStore | None = None,
     run_id: str | None,
     business: BusinessConfig,
     connector_types: Sequence[str],
@@ -110,16 +116,26 @@ def record_pipeline_success(
             ),
         )
 
+    artifact_uri = f"ledger://runs/{run_id}/daily-report"
+    case_summary = upsert_cases_from_report(
+        case_store=case_store,
+        business_id=business.business_id,
+        report=pipeline.report,
+        run_id=run_id,
+        artifact_ref=artifact_uri,
+    )
+
     run_ledger.append_artifact_ref(
         run_id,
         ArtifactRef(
             artifact_id=f"{run_id}:daily_report",
             artifact_type="daily_report",
-            uri=f"ledger://runs/{run_id}/daily-report",
+            uri=artifact_uri,
             evidence_refs=[
                 f"evidence://{connector.connector_id}/{pipeline.report.report_date.isoformat()}"
                 for connector in connectors
             ],
+            operational_case_ids=case_summary.case_ids,
             metadata={
                 "report_date": pipeline.report.report_date.isoformat(),
                 "metrics_count": len(pipeline.report.metrics),
@@ -146,25 +162,45 @@ def record_pipeline_success(
         run_id,
         status=final_status,  # type: ignore[arg-type]
         finished_at=finished_at,
-        summary_metadata={"report_type": "daily", **(summary_metadata or {})},
+        summary_metadata={
+            "report_type": "daily",
+            "cases_opened": case_summary.opened_count,
+            "cases_updated": case_summary.updated_count,
+            **(summary_metadata or {}),
+        },
     )
 
 
 def record_pipeline_failure(
     *,
     run_ledger: RunLedger | None,
+    case_store: OperationalCaseStore | None = None,
     run_id: str | None,
     error: BaseException,
+    business_id: str | None = None,
+    connector_types: Sequence[str] | None = None,
     summary_metadata: dict[str, Any] | None = None,
 ) -> None:
-    """Mark a running ledger record as failed without swallowing the exception."""
+    """Mark a running ledger record as failed and open/update data_stale cases."""
 
+    error_summary = f"{type(error).__name__}: {error}"
+    case_summary = upsert_data_stale_cases(
+        case_store=case_store,
+        business_id=business_id,
+        connector_types=list(connector_types or []),
+        run_id=run_id,
+        error_summary=error_summary,
+    )
     if run_ledger is None or run_id is None:
         return
     run_ledger.update_run(
         run_id,
         status="failed",
         finished_at=_now_utc(),
-        summary_metadata=summary_metadata or {},
-        error_summary=f"{type(error).__name__}: {error}",
+        summary_metadata={
+            "cases_opened": case_summary.opened_count,
+            "cases_updated": case_summary.updated_count,
+            **(summary_metadata or {}),
+        },
+        error_summary=error_summary,
     )

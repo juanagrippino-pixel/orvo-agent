@@ -16,6 +16,7 @@ from app.brain.adapters.google_sheets import get_sheets_service
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient
 from app.brain.dispatch import InMemoryIdempotencyStore
 from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failure, record_pipeline_success
+from app.brain.operational_cases import OperationalCaseStore
 from app.brain.pipeline import (
     run_csv_daily_report_pipeline,
     run_google_sheets_daily_report_pipeline,
@@ -26,7 +27,13 @@ from app.brain.pipeline import (
 from app.brain.runner import run_due_daily_reports
 from app.brain.run_ledger import RunLedger
 from app.brain.runtime import RuntimeCompileError, compile_business_runtime, runtime_run_metadata
-from app.brain.storage import SQLiteConfigStore, SQLiteIdempotencyStore, SQLiteRunLedger, init_schema
+from app.brain.storage import (
+    SQLiteConfigStore,
+    SQLiteIdempotencyStore,
+    SQLiteOperationalCaseStore,
+    SQLiteRunLedger,
+    init_schema,
+)
 
 
 class DryRunDeliveryClient(WhatsAppDeliveryClient):
@@ -42,7 +49,13 @@ class DryRunDeliveryClient(WhatsAppDeliveryClient):
 def open_runtime(db_path: str):
     conn = sqlite3.connect(db_path)
     init_schema(conn)
-    return conn, SQLiteConfigStore(conn), SQLiteIdempotencyStore(conn), SQLiteRunLedger(conn)
+    return (
+        conn,
+        SQLiteConfigStore(conn),
+        SQLiteIdempotencyStore(conn),
+        SQLiteRunLedger(conn),
+        SQLiteOperationalCaseStore(conn),
+    )
 
 
 def _with_runtime_metadata(result, metadata: dict):
@@ -60,6 +73,7 @@ def run_forced_report(
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
     run_ledger: RunLedger | None = None,
+    case_store: OperationalCaseStore | None = None,
 ):
     try:
         runtime = compile_business_runtime(business, run_mode="forced")
@@ -126,8 +140,11 @@ def run_forced_report(
     except Exception as exc:
         record_pipeline_failure(
             run_ledger=run_ledger,
+            case_store=case_store,
             run_id=run_id,
             error=exc,
+            business_id=business.business_id,
+            connector_types=executed_connector_types,
             summary_metadata={"report_type": "daily"},
         )
         raise
@@ -135,6 +152,7 @@ def run_forced_report(
     result = _with_runtime_metadata(result, runtime_metadata)
     record_pipeline_success(
         run_ledger=run_ledger,
+        case_store=case_store,
         run_id=run_id,
         business=business,
         connector_types=executed_connector_types,
@@ -153,7 +171,7 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Run the selected business now instead of only due schedules")
     args = parser.parse_args()
 
-    conn, config_store, idempotency_store, run_ledger = open_runtime(args.db)
+    conn, config_store, idempotency_store, run_ledger, case_store = open_runtime(args.db)
     try:
         delivery_client = DryRunDeliveryClient() if args.dry_run else WhatsAppDeliveryClient.from_env()
         runtime_idempotency_store = InMemoryIdempotencyStore() if args.dry_run else idempotency_store
@@ -167,6 +185,7 @@ def main() -> None:
                 delivery_client=delivery_client,
                 idempotency_store=runtime_idempotency_store,
                 run_ledger=run_ledger,
+                case_store=case_store,
             )
             output = [
                 {
@@ -184,6 +203,7 @@ def main() -> None:
                 sheets_service=get_sheets_service(),
                 now=datetime.now(tz=timezone.utc),
                 run_ledger=run_ledger,
+                case_store=case_store,
             )
             output = [
                 {

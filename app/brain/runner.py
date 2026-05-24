@@ -11,6 +11,7 @@ from app.brain.config import BusinessConfig, ReportSchedule
 from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore
 from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failure, record_pipeline_success
+from app.brain.operational_cases import OperationalCaseStore
 from app.brain.pipeline import PipelineResult, run_enabled_connectors_daily_report_pipeline
 from app.brain.run_ledger import RunLedger
 from app.brain.runtime import compile_business_runtime, runtime_run_metadata
@@ -64,6 +65,7 @@ def run_due_daily_reports(
     meta_ads_http_client=None,
     now: datetime | None = None,
     run_ledger: RunLedger | None = None,
+    case_store: OperationalCaseStore | None = None,
 ) -> list[ScheduledPipelineResult]:
     """Run every due daily report from the config store."""
 
@@ -122,13 +124,17 @@ def run_due_daily_reports(
         except Exception as exc:
             record_pipeline_failure(
                 run_ledger=run_ledger,
+                case_store=case_store,
                 run_id=run_id,
                 error=exc,
+                business_id=business.business_id,
+                connector_types=connector_types,
                 summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
             )
             raise
         record_pipeline_success(
             run_ledger=run_ledger,
+            case_store=case_store,
             run_id=run_id,
             business=business,
             connector_types=connector_types,

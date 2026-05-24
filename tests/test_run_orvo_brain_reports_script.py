@@ -7,6 +7,7 @@ from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
 from app.brain.run_ledger import InMemoryRunLedger
+from app.brain.operational_cases import InMemoryOperationalCaseStore
 import scripts.run_orvo_brain_reports as reports_script
 
 
@@ -164,6 +165,71 @@ def test_force_report_ledger_only_records_connector_that_forced_path_executed():
     ]
     assert record.artifacts[0].evidence_refs == ["evidence://demo-tiendanube/2026-05-19"]
     assert record.summary_metadata["connector_types"] == ["tiendanube"]
+
+
+def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():
+    class FailingTiendanubeHTTPClient:
+        def get(self, url, headers=None, params=None):
+            raise RuntimeError("401 access_token=raw_failure_secret")
+
+    delivery = MagicMock()
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(RuntimeError):
+        reports_script.run_forced_report(
+            business=make_tiendanube_business(),
+            report_date=date(2026, 5, 19),
+            delivery_client=delivery,
+            idempotency_store=InMemoryIdempotencyStore(),
+            sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+            tiendanube_http_client=FailingTiendanubeHTTPClient(),
+            run_ledger=run_ledger,
+            case_store=case_store,
+        )
+
+    [case] = case_store.list_cases(business_id="demo-shop")
+    assert case.case_type == "data_stale"
+    assert case.dedupe_key == "demo-shop/data_stale/connector/tiendanube/runtime.freshness/daily"
+    assert "raw_failure_secret" not in case.model_dump_json()
+
+    [run] = run_ledger.list_runs(business_id="demo-shop")
+    assert run.status == "failed"
+    assert run.summary_metadata["cases_opened"] == 1
+    assert run.summary_metadata["cases_updated"] == 0
+
+
+def test_force_report_persists_operational_cases_and_links_ledger_artifact(tmp_path):
+    csv_path = tmp_path / "crisis.csv"
+    csv_path.write_text(
+        "fecha,ventas,ordenes,stock,conversaciones_sin_responder,gasto_ads\n"
+        "2026-05-18,100000,10,10,1,0\n"
+        "2026-05-19,70000,8,3,8,18500\n"
+    )
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    result = reports_script.run_forced_report(
+        business=make_csv_business(str(csv_path)),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube should not be loaded")),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    cases = case_store.list_cases(business_id="demo-csv")
+    assert {case.case_type for case in cases} == {"sales_drop", "stockout_risk", "unanswered_conversations"}
+    assert all(case.latest_run_id == result.runtime_metadata["run_id"] for case in cases)
+
+    [run] = run_ledger.list_runs(business_id="demo-csv")
+    assert set(run.artifacts[0].operational_case_ids) == {case.case_id for case in cases}
+    assert run.summary_metadata["cases_opened"] == 3
+    assert run.summary_metadata["cases_updated"] == 0
 
 
 def make_mercadolibre_business():
