@@ -48,6 +48,10 @@ from app.brain.operator_api import (
     list_run_history,
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
+from app.brain.delivery_status import (
+    SQLiteWhatsAppDeliveryStatusStore,
+    parse_meta_status_payload,
+)
 
 app = Flask(__name__)
 
@@ -238,6 +242,26 @@ def internal_brain_runs(business_id: str):
             ),
         ),
     )
+
+
+@app.get("/internal/brain/whatsapp/delivery-statuses")
+def internal_brain_whatsapp_delivery_statuses():
+    business_id = "whatsapp"
+    auth_error = _authorize_internal_operator(business_id)
+    if auth_error is not None:
+        return auth_error
+    raw_limit = request.args.get("limit")
+    try:
+        limit = int(raw_limit) if raw_limit not in (None, "") else 50
+    except ValueError:
+        return _internal_error(business_id, "invalid_limit", "limit must be an integer", status_code=400)
+    if limit < 1:
+        return _internal_error(business_id, "invalid_limit", "limit must be positive", status_code=400)
+    limit = min(limit, 200)
+    with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+        init_schema(conn)
+        events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(limit=limit)
+    return _internal_success(business_id, {"events": redact_secrets(events)})
 
 
 @app.get("/internal/brain/businesses/<business_id>/runs/<run_id>")
@@ -441,6 +465,10 @@ def webhook():
         return "Unauthorized", 401
     data = request.get_json(silent=True) or {}
     try:
+        _persist_delivery_status_events(data)
+    except Exception as e:
+        print(f"[webhook] Failed to persist delivery statuses: {e}")
+    try:
         value = data["entry"][0]["changes"][0]["value"]
         messages = value.get("messages")
         if not messages:
@@ -461,6 +489,16 @@ def webhook():
     except (KeyError, IndexError, TypeError) as e:
         print(f"[webhook] Unexpected payload shape: {e}")
     return "ok", 200
+
+
+def _persist_delivery_status_events(data: dict) -> None:
+    events = parse_meta_status_payload(data)
+    if not events:
+        return
+    with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+        init_schema(conn)
+        store = SQLiteWhatsAppDeliveryStatusStore(conn)
+        store.record_events(events)
 
 
 def _process(phone: str) -> None:

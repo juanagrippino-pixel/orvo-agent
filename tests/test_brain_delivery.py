@@ -225,6 +225,8 @@ def test_client_from_env_raises_if_missing(monkeypatch):
     monkeypatch.delenv("TWILIO_WHATSAPP_NUMBER", raising=False)
     monkeypatch.delenv("WHATSAPP_PHONE_ID", raising=False)
     monkeypatch.delenv("WHATSAPP_TOKEN", raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE_NUMBER_ID", raising=False)
+    monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN", raising=False)
     with pytest.raises(EnvironmentError):
         WhatsAppDeliveryClient.from_env()
 

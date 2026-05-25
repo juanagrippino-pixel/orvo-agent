@@ -86,6 +86,24 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_operational_cases_updated
             ON operational_cases (updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS whatsapp_delivery_status_events (
+            event_key         TEXT PRIMARY KEY,
+            provider          TEXT NOT NULL,
+            message_id        TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            recipient_id      TEXT,
+            business_id       TEXT,
+            status_timestamp  TEXT,
+            created_at        TEXT NOT NULL,
+            data              TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_delivery_status_message
+            ON whatsapp_delivery_status_events (message_id, status_timestamp);
+
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_delivery_status_recent
+            ON whatsapp_delivery_status_events (created_at DESC);
         """
     )
     conn.commit()

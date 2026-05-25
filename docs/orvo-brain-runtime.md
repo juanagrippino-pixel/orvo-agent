@@ -65,6 +65,38 @@ Delivery error strings are passed through the secret-redaction helper before
 being returned, so leaked bearer/Basic auth headers never reach logs or
 operator surfaces.
 
+### WhatsApp delivery status webhook
+
+A `200 OK` from the Graph API only means Meta accepted the send request. Final
+message lifecycle (`sent`, `delivered`, `read`, `failed`) arrives asynchronously
+through the WhatsApp webhook, on the same `messages` subscription used for
+inbound WhatsApp messages.
+
+Configure Meta Developers → WhatsApp → Configuration:
+
+| Setting | Value |
+|---------|-------|
+| Callback URL | `https://<your-orvo-host>/webhook` |
+| Verify token | The exact `VERIFY_TOKEN` value from the runtime environment. |
+| Webhook field | Subscribe to WhatsApp `messages`. Status events arrive in `value.statuses[]`. |
+| App secret proof | Optional but recommended: set `WHATSAPP_APP_SECRET` so Orvo validates `X-Hub-Signature-256`. |
+
+Orvo stores status events in the append-only SQLite table
+`whatsapp_delivery_status_events`. Meta may retry webhook delivery, so events
+are deduplicated by `(provider, message_id, status, timestamp)`. Failed-status
+metadata is redacted before it is stored or exposed.
+
+Inspect recent delivery statuses through the internal operator API:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer $ORVO_INTERNAL_OPERATOR_TOKEN" \
+  "https://<your-orvo-host>/internal/brain/whatsapp/delivery-statuses?limit=50"
+```
+
+Use this endpoint to distinguish `accepted by Meta` from actually `sent`,
+`delivered`, `read`, or `failed`.
+
 ### Google Sheets (one of two auth modes)
 
 **Service account (recommended for production):**
@@ -520,7 +552,30 @@ Fix:
 4. For development, use `--dry-run` on `run_orvo_brain_reports.py` to skip
    the WhatsApp call entirely.
 
-### 9.4 Duplicate dispatch / idempotency
+### 9.4 Meta accepted the WhatsApp message but the phone did not receive it
+
+Symptoms:
+
+- `send_text()` returns `DeliveryResult(success=True, message_id="wamid…")`.
+- The recipient does not see the WhatsApp message.
+
+Fix / diagnosis:
+
+1. Confirm the recipient opened a 24h conversation window, or use an approved
+   template message for business-initiated conversations.
+2. Confirm the Meta app is subscribed to the WhatsApp `messages` webhook field.
+3. Query recent status events:
+   ```bash
+   curl -sS \
+     -H "Authorization: Bearer $ORVO_INTERNAL_OPERATOR_TOKEN" \
+     "https://<your-orvo-host>/internal/brain/whatsapp/delivery-statuses?limit=20"
+   ```
+4. If no status events appear, verify Meta's callback URL, `VERIFY_TOKEN`, and
+   optional `WHATSAPP_APP_SECRET` signature validation.
+5. If a `failed` event appears, inspect the redacted `raw.errors[]` payload for
+   Meta's error code (for example policy/window/template issues).
+
+### 9.5 Duplicate dispatch / idempotency
 
 Symptoms:
 

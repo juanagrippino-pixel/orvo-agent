@@ -1,0 +1,215 @@
+"""Tests for the WhatsApp delivery status webhook integration and internal read endpoint."""
+
+from __future__ import annotations
+
+import sqlite3
+
+import pytest
+
+from app.brain.storage import init_schema
+
+
+AUTH = {"Authorization": "Bearer test-internal-token", "X-Orvo-Operator": "operator:juan", "X-Request-ID": "req-test"}
+
+
+def _client(monkeypatch, tmp_path):
+    db_path = tmp_path / "delivery.sqlite3"
+    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(db_path))
+    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
+    monkeypatch.delenv("WHATSAPP_APP_SECRET", raising=False)
+    from server import app
+
+    return app.test_client(), db_path
+
+
+def _status_payload(*, message_id="wamid.STATUS1", status="delivered", timestamp="1748000000"):
+    return {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA-ID",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {"phone_number_id": "1234567890"},
+                            "statuses": [
+                                {
+                                    "id": message_id,
+                                    "status": status,
+                                    "timestamp": timestamp,
+                                    "recipient_id": "5491150380097",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _read_status_rows(db_path):
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    rows = conn.execute(
+        "SELECT message_id, status, recipient_id, provider FROM whatsapp_delivery_status_events"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Webhook
+# ---------------------------------------------------------------------------
+
+
+def test_webhook_persists_status_only_payload(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    response = client.post("/webhook", json=_status_payload())
+    assert response.status_code == 200
+    rows = _read_status_rows(db_path)
+    assert len(rows) == 1
+    message_id, status, recipient_id, provider = rows[0]
+    assert message_id == "wamid.STATUS1"
+    assert status == "delivered"
+    assert recipient_id == "5491150380097"
+    assert provider == "meta_cloud"
+
+
+def test_webhook_deduplicates_repeated_status_delivery(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    payload = _status_payload()
+    assert client.post("/webhook", json=payload).status_code == 200
+    assert client.post("/webhook", json=payload).status_code == 200
+    rows = _read_status_rows(db_path)
+    assert len(rows) == 1
+
+
+def test_webhook_persists_multiple_statuses_for_same_message(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    assert client.post(
+        "/webhook", json=_status_payload(message_id="wamid.MULTI", status="sent", timestamp="1748001000")
+    ).status_code == 200
+    assert client.post(
+        "/webhook",
+        json=_status_payload(message_id="wamid.MULTI", status="delivered", timestamp="1748001100"),
+    ).status_code == 200
+    rows = _read_status_rows(db_path)
+    assert sorted(row[1] for row in rows) == ["delivered", "sent"]
+
+
+def test_webhook_handles_malformed_status_payload_without_500(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    malformed = {
+        "object": "whatsapp_business_account",
+        "entry": [{"changes": [{"value": {"statuses": "not-a-list"}}]}],
+    }
+    response = client.post("/webhook", json=malformed)
+    assert response.status_code == 200
+    assert _read_status_rows(db_path) == []
+
+
+def test_webhook_status_only_payload_does_not_trigger_inbound_message_buffer(monkeypatch, tmp_path):
+    """Status-only payloads must not be misinterpreted as inbound text messages."""
+    client, db_path = _client(monkeypatch, tmp_path)
+    called: list[str] = []
+
+    import server
+
+    monkeypatch.setattr(server.threading, "Timer", lambda *a, **k: called.append("timer-created") or (_ for _ in ()).throw(AssertionError("no timer for status-only payload")))
+
+    response = client.post("/webhook", json=_status_payload())
+    assert response.status_code == 200
+    assert called == []
+
+
+# ---------------------------------------------------------------------------
+# Internal endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_internal_delivery_statuses_requires_auth(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    response = client.get("/internal/brain/whatsapp/delivery-statuses")
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "unauthorized"
+
+
+def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    assert client.post("/webhook", json=_status_payload(message_id="wamid.A", status="sent", timestamp="1748002000")).status_code == 200
+    assert client.post("/webhook", json=_status_payload(message_id="wamid.A", status="delivered", timestamp="1748002100")).status_code == 200
+    assert client.post("/webhook", json=_status_payload(message_id="wamid.B", status="read", timestamp="1748002200")).status_code == 200
+
+    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=AUTH)
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["request_id"] == "req-test"
+    assert body["redaction_applied"] is True
+    events = body["data"]["events"]
+    assert len(events) == 3
+    assert all(e["provider"] == "meta_cloud" for e in events)
+    assert {e["message_id"] for e in events} == {"wamid.A", "wamid.B"}
+
+
+def test_internal_delivery_statuses_redacts_failed_error_metadata(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    failure = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "statuses": [
+                                {
+                                    "id": "wamid.FAIL",
+                                    "status": "failed",
+                                    "timestamp": "1748003000",
+                                    "recipient_id": "5491150380097",
+                                    "errors": [
+                                        {
+                                            "code": 131000,
+                                            "title": "Authorization: Bearer raw_endpoint_secret rejected",
+                                            "error_data": {
+                                                "access_token": "raw_endpoint_secret",
+                                                "details": "details access_token=raw_endpoint_secret",
+                                            },
+                                        }
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    assert client.post("/webhook", json=failure).status_code == 200
+
+    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=AUTH)
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_endpoint_secret" not in raw_body
+    body = response.get_json()
+    events = body["data"]["events"]
+    assert any(e["status"] == "failed" for e in events)
+
+
+def test_internal_delivery_statuses_respects_limit_bounds(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    for i in range(6):
+        assert client.post(
+            "/webhook",
+            json=_status_payload(message_id=f"wamid.X{i}", status="delivered", timestamp=str(1748000000 + i)),
+        ).status_code == 200
+
+    response = client.get("/internal/brain/whatsapp/delivery-statuses?limit=3", headers=AUTH)
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["data"]["events"]) == 3
