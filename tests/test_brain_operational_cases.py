@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from app.brain.models import DailyReport, Evidence, Insight
+from app.brain.models import DailyReport, Evidence, Insight, Metric
 from app.brain.operational_cases import (
     InMemoryOperationalCaseStore,
     OperationalCaseDetection,
@@ -169,6 +169,56 @@ def test_detect_cases_from_report_synthesizes_minimal_evidence_snapshots():
     assert snapshot.summary == "Stock crítico"
     assert snapshot.freshness_state == "unknown"
     assert snapshot.artifact_ref == "ledger://runs/run-1/daily-report"
+
+
+def test_detect_cases_from_report_attaches_canonical_case_metrics_and_advisory_issues_without_mutation():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source]),
+            Metric(key="custom.owner_note_metric", label="Owner note", value="manual", evidence=[source]),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+    original_report_dump = report.model_dump(mode="json")
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    assert report.model_dump(mode="json") == original_report_dump
+    assert len(detections) == 1
+    assert detections[0].metadata["metric_registry_issues"] == [
+        {
+            "code": "unknown_metric",
+            "key": "custom.owner_note_metric",
+            "message": "Metric key 'custom.owner_note_metric' is not registered in the semantic metric registry",
+            "severity": "warning",
+            "index": 1,
+        }
+    ]
+    assert detections[0].metadata["metric_registry_mode"] == "advisory"
+    assert detections[0].title == "Stock crítico"
+    assert detections[0].metadata["recommended_action"] == "Reponer stock."
+    assert len(detections[0].evidence_snapshots) == 1
+    snapshot = detections[0].evidence_snapshots[0]
+    assert [metric.metric_key for metric in snapshot.metrics] == ["commerce.inventory.available_units"]
+    assert snapshot.metrics[0].label == "Unidades en stock"
+    assert snapshot.metrics[0].value == 3
+    assert snapshot.metrics[0].unit == "units"
 
 
 def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():

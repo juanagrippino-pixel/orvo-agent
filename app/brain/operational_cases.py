@@ -8,15 +8,16 @@ surfaces are projections of this state, not owners of lifecycle.
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.brain.models import DailyReport, Insight
+from app.brain.models import DailyReport, Insight, Metric
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
+from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
 
 OperationalCaseStatus = Literal["open", "acknowledged", "resolved"]
 OperationalCaseType = Literal[
@@ -755,6 +756,52 @@ def _evidence_refs_for_insight(insight: Insight, report: DailyReport, case_type:
     return [f"evidence://{source}/{report.report_date.isoformat()}/{case_type}" for source in sources]
 
 
+def _metric_sources(metric: Metric) -> set[str]:
+    return {evidence.source for evidence in metric.evidence}
+
+
+def _case_evidence_metrics_for_source(
+    *,
+    report: DailyReport,
+    case_type: OperationalCaseType,
+    source: str,
+) -> list[OperationalCaseEvidenceMetric]:
+    registry = default_metric_registry()
+    allowed_case_keys = set(CASE_FAMILY_METRICS.get(case_type, ()))
+    evidence_metrics: list[OperationalCaseEvidenceMetric] = []
+    seen_keys: set[str] = set()
+    for metric in report.metrics:
+        canonical_key = registry.try_resolve_key(metric.key)
+        if canonical_key is None or canonical_key not in allowed_case_keys:
+            continue
+        definition = registry.get(canonical_key)
+        if not definition.case_allowed or source not in _metric_sources(metric):
+            continue
+        if canonical_key in seen_keys:
+            continue
+        seen_keys.add(canonical_key)
+        evidence_metrics.append(
+            OperationalCaseEvidenceMetric(
+                metric_key=canonical_key,
+                label=metric.label,
+                value=metric.value,
+                unit=metric.unit,
+                metadata={"source_metric_key": metric.key} if metric.key != canonical_key else {},
+            )
+        )
+    return evidence_metrics
+
+
+def _metric_registry_metadata(report: DailyReport) -> dict[str, Any]:
+    issues = validate_metrics(report.metrics, strict=False)
+    if not issues:
+        return {}
+    return {
+        "metric_registry_mode": "advisory",
+        "metric_registry_issues": [asdict(issue) for issue in issues],
+    }
+
+
 def _evidence_snapshots_for_insight(
     insight: Insight,
     report: DailyReport,
@@ -765,12 +812,22 @@ def _evidence_snapshots_for_insight(
     snapshots: list[OperationalCaseEvidenceSnapshot] = []
     for evidence in insight.evidence:
         evidence_ref = f"evidence://{evidence.source}/{report.report_date.isoformat()}/{case_type}"
+        snapshot = _minimal_snapshot_from_detection(
+            detection,
+            evidence_ref=evidence_ref,
+            artifact_ref=artifact_ref,
+            source_label=evidence.label,
+        )
         snapshots.append(
-            _minimal_snapshot_from_detection(
-                detection,
-                evidence_ref=evidence_ref,
-                artifact_ref=artifact_ref,
-                source_label=evidence.label,
+            snapshot.model_copy(
+                update={
+                    "metrics": _case_evidence_metrics_for_source(
+                        report=report,
+                        case_type=case_type,
+                        source=evidence.source,
+                    )
+                },
+                deep=True,
             )
         )
     return _unique_snapshots(snapshots)
@@ -857,6 +914,7 @@ def detect_cases_from_report(
                 "insight_title": insight.title,
                 "insight_explanation": insight.explanation,
                 "recommended_action": insight.recommended_action,
+                **_metric_registry_metadata(report),
             },
         )
         detection = detection.model_copy(
