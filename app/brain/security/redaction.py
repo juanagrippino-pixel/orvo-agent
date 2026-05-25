@@ -13,6 +13,8 @@ _SECRET_KEY_PARTS = (
     "apikey",
     "authorization",
     "auth_header",
+    "authorization_code",
+    "oauth_code",
     "password",
     "private_key",
     "credential",
@@ -25,7 +27,7 @@ _SECRET_KEY_PARTS = (
 
 _BEARER_RE = re.compile(r"Bearer\s+[^\s,;]+", flags=re.IGNORECASE)
 _SECRET_KEY_PATTERN = (
-    r"access_token|refresh_token|api_key|apikey|authorization|auth_header|password|"
+    r"access_token|refresh_token|api_key|apikey|authorization_code|oauth_code|authorization|auth_header|password|"
     r"private_key|credential|cookie|session|signature|secret|token"
 )
 _QUOTED_KEY_VALUE_SECRET_RE = re.compile(
@@ -45,6 +47,13 @@ def is_secret_key(key: str) -> bool:
 
     normalized = key.lower().replace("-", "_")
     return any(part in normalized for part in _SECRET_KEY_PARTS)
+
+
+def _is_secret_query_key(key: str) -> bool:
+    """Return True for URL query keys that commonly carry credential material."""
+
+    normalized = key.lower().replace("-", "_")
+    return normalized == "code" or is_secret_key(normalized)
 
 
 def redact_text(value: str | None) -> str | None:
@@ -80,7 +89,7 @@ def redact_uri(value: str | None) -> str | None:
 
     safe_query = urlencode(
         [
-            (key, "[REDACTED]" if is_secret_key(key) else query_value)
+            (key, "[REDACTED]" if _is_secret_query_key(key) else query_value)
             for key, query_value in parse_qsl(parts.query, keep_blank_values=True)
         ],
         doseq=True,
