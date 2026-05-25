@@ -141,6 +141,25 @@ def test_apply_case_action_add_comment_returns_case_detail_with_redacted_comment
     assert_no_raw_comment_secret(str(result))
 
 
+def test_apply_case_action_add_comment_strips_actor_ref_before_persisting_timeline_event():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    result = apply_case_action(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="add_comment",
+        actor_ref="  operator@example.com  ",
+        comment="Checked supplier",
+    )
+
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert result["case"]["timeline"][-1]["actor_ref"] == "operator@example.com"
+    assert reloaded.timeline[-1].actor_ref == "operator@example.com"
+
+
 @pytest.mark.parametrize("bad_comment", [None, "", "   ", 123, {"text": "hi"}])
 def test_apply_case_action_add_comment_rejects_missing_blank_or_non_string_comment(bad_comment: Any):
     store = InMemoryOperationalCaseStore()
@@ -159,6 +178,58 @@ def test_apply_case_action_add_comment_rejects_missing_blank_or_non_string_comme
     assert exc.value.code == "invalid_comment"
     assert exc.value.status_code == 400
     assert len(store.get_case(opened.case_id).timeline) == len(opened.timeline)
+
+
+@pytest.mark.parametrize(
+    ("bad_actor", "expected_code"),
+    [("   ", "missing_operator_actor"), (123, "invalid_operator_actor")],
+)
+def test_apply_case_action_add_comment_rejects_blank_or_non_string_actor_ref(bad_actor: Any, expected_code: str):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="add_comment",
+            actor_ref=bad_actor,
+            comment="Looks good",
+        )
+
+    assert exc.value.code == expected_code
+    assert exc.value.status_code == 400
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert len(reloaded.timeline) == len(opened.timeline)
+
+
+@pytest.mark.parametrize("action_key", ["acknowledge_case", "resolve_case"])
+@pytest.mark.parametrize(
+    ("bad_actor", "expected_code"),
+    [("   ", "missing_operator_actor"), (123, "invalid_operator_actor")],
+)
+def test_apply_case_action_status_actions_reject_blank_or_non_string_actor_ref(
+    action_key: str, bad_actor: Any, expected_code: str
+):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key=action_key,
+            actor_ref=bad_actor,
+        )
+
+    assert exc.value.code == expected_code
+    assert exc.value.status_code == 400
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert len(reloaded.timeline) == len(opened.timeline)
 
 
 def test_apply_case_action_add_comment_rejects_missing_actor_and_preserves_cross_business_scope():

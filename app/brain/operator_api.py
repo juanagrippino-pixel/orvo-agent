@@ -84,6 +84,18 @@ def parse_run_status(value: str | None) -> RunStatus | None:
     return value  # type: ignore[return-value]
 
 
+def normalize_operator_actor(actor_ref: Any, actor: Any) -> str:
+    effective_actor_ref = actor_ref if actor_ref is not None else actor
+    if effective_actor_ref is None:
+        raise OperatorAPIError("missing_operator_actor", "operator actor is required", status_code=400)
+    if not isinstance(effective_actor_ref, str):
+        raise OperatorAPIError("invalid_operator_actor", "operator actor must be a string", status_code=400)
+    normalized = effective_actor_ref.strip()
+    if not normalized:
+        raise OperatorAPIError("missing_operator_actor", "operator actor is required", status_code=400)
+    return normalized
+
+
 def case_queue_item(case: OperationalCase) -> dict[str, Any]:
     return redact_secrets(
         {
@@ -271,9 +283,7 @@ def apply_case_action(
 ) -> dict[str, Any]:
     if action_key not in _ALLOWED_CASE_ACTIONS:
         raise OperatorAPIError("unknown_action_key", f"unknown action_key: {action_key}", status_code=400)
-    effective_actor_ref = actor_ref if actor_ref is not None else actor
-    if not effective_actor_ref:
-        raise OperatorAPIError("missing_operator_actor", "operator actor is required", status_code=400)
+    effective_actor_ref = normalize_operator_actor(actor_ref, actor)
 
     case = get_scoped_case(store, business_id=business_id, case_id=case_id)
     if action_key == "add_comment":
