@@ -39,6 +39,19 @@ def _headers(access_token: str, store_id: str) -> dict[str, str]:
     }
 
 
+def _is_empty_last_page_response(resp: Any) -> bool:
+    if resp.status_code != 404:
+        return False
+    try:
+        body = resp.json()
+    except Exception:
+        return False
+    if not isinstance(body, dict):
+        return False
+    description = str(body.get("description") or "")
+    return "Last page is 0" in description
+
+
 def _check_response(resp: Any) -> None:
     status = resp.status_code
     if status in (401, 403):
@@ -58,6 +71,8 @@ def _parse_next_link(link_header: str) -> str:
 def _fetch_all_pages(session: Any, url: str, headers: dict, params: dict) -> list[dict]:
     items: list[dict] = []
     resp = session.get(url, headers=headers, params=params)
+    if _is_empty_last_page_response(resp):
+        return items
     _check_response(resp)
     items.extend(resp.json())
     while True:
@@ -65,6 +80,8 @@ def _fetch_all_pages(session: Any, url: str, headers: dict, params: dict) -> lis
         if not next_url:
             break
         resp = session.get(next_url, headers=headers)
+        if _is_empty_last_page_response(resp):
+            break
         _check_response(resp)
         items.extend(resp.json())
     return items

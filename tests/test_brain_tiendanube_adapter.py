@@ -125,6 +125,24 @@ def test_revenue_today_zero_when_no_orders():
     assert m.value == 0.0
 
 
+def test_revenue_today_zero_when_tiendanube_reports_last_page_zero_404():
+    """Tiendanube returns 404/"Last page is 0" for an empty filtered orders page."""
+
+    client = _client(
+        {
+            "orders": _response(
+                {"code": 404, "message": "Not Found", "description": "Last page is 0"},
+                status=404,
+            )
+        }
+    )
+
+    result = build_daily_report_from_tiendanube("T", "1", "tok", http_client=client)
+
+    m = next(m for m in result.metrics if m.key == "revenue_today")
+    assert m.value == 0.0
+
+
 # ---------------------------------------------------------------------------
 # orders_today
 # ---------------------------------------------------------------------------
