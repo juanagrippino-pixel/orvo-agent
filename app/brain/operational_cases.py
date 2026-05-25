@@ -181,9 +181,9 @@ class OperationalCaseTimelineEvent(BaseModel):
     def normalize_created_at(cls, value: datetime) -> datetime:
         return _as_utc(value)
 
-    @field_validator("summary", mode="before")
+    @field_validator("summary", "actor_ref", mode="before")
     @classmethod
-    def redact_summary(cls, value: str) -> str:
+    def redact_text_fields(cls, value: str) -> str:
         return redact_text(value) or "[REDACTED]"
 
     @field_validator("artifact_ref", mode="before")

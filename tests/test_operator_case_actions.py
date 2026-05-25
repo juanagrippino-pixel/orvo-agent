@@ -72,6 +72,42 @@ def assert_no_raw_comment_secret(serialized: str) -> None:
     assert "raw_comment_meta_secret" not in serialized
 
 
+def assert_no_raw_actor_secret(serialized: str) -> None:
+    assert "raw_actor_secret" not in serialized
+
+
+def test_timeline_actor_ref_is_redacted_for_comments_and_status_actions_before_persistence(conn):
+    store = SQLiteOperationalCaseStore(conn)
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    commented = store.add_comment(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="operator access_token=raw_actor_secret",
+        comment="Checked supplier",
+        commented_at=utc(9),
+    )
+    assert commented.timeline[-1].actor_ref == "operator access_token=[REDACTED]"
+    assert_no_raw_actor_secret(commented.model_dump_json())
+
+    acknowledged = store.transition_case(
+        opened.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator access_token=raw_actor_secret",
+        reason="Acknowledged",
+        transitioned_at=utc(10),
+    )
+    assert acknowledged.timeline[-1].actor_ref == "operator access_token=[REDACTED]"
+    assert_no_raw_actor_secret(acknowledged.model_dump_json())
+
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.timeline[-2].actor_ref == "operator access_token=[REDACTED]"
+    assert reloaded.timeline[-1].actor_ref == "operator access_token=[REDACTED]"
+    assert_no_raw_actor_secret(reloaded.model_dump_json())
+
+
 def test_store_add_comment_appends_operator_timeline_event_preserves_status_redacts_and_persists(conn):
     sqlite_store = SQLiteOperationalCaseStore(conn)
     opened = sqlite_store.upsert_detection(case_detection(), detected_at=utc(8))
@@ -268,13 +304,14 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
 
     response = test_client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Orvo-Operator": "operator access_token=raw_actor_secret"},
         json={"action_key": "add_comment", "comment": "Supplier pinged api_key=raw_comment_secret"},
     )
 
     assert response.status_code == 200
     raw_body = response.get_data(as_text=True)
     assert_no_raw_comment_secret(raw_body)
+    assert_no_raw_actor_secret(raw_body)
     body = response.get_json()
     assert body["ok"] is True
     assert body["business_id"] == "artemea"
@@ -283,7 +320,7 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     detail = body["data"]["case"]
     assert detail["status"] == "open"
     assert detail["timeline"][-1]["event_type"] == "operator_comment"
-    assert detail["timeline"][-1]["actor_ref"] == "operator@example.com"
+    assert detail["timeline"][-1]["actor_ref"] == "operator access_token=[REDACTED]"
 
     connection = sqlite3.connect(db_path)
     reloaded = SQLiteOperationalCaseStore(connection).get_case(case.case_id)
@@ -291,5 +328,6 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     assert reloaded is not None
     assert reloaded.status == "open"
     assert reloaded.timeline[-1].event_type == "operator_comment"
-    assert reloaded.timeline[-1].actor_ref == "operator@example.com"
+    assert reloaded.timeline[-1].actor_ref == "operator access_token=[REDACTED]"
     assert_no_raw_comment_secret(reloaded.model_dump_json())
+    assert_no_raw_actor_secret(reloaded.model_dump_json())
