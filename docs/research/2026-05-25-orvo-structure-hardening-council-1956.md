@@ -1,8 +1,8 @@
 # Orvo Structure / Organization / Hardening Council — 2026-05-25 19:56
 
-Status: durable research synthesis  
-Branch: `research/orvo-structure-hardening-20260525-1956`  
-Scope: structure, organization, hardening, pilot readiness, and architecture refinement only  
+Status: durable research synthesis
+Branch: `research/orvo-structure-hardening-20260525-1956`
+Scope: structure, organization, hardening, pilot readiness, and architecture refinement only
 Strategy constraint: no broad new end-user product functions
 
 ## Council inputs
