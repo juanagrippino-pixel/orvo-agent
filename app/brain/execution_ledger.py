@@ -111,14 +111,70 @@ def _dispatch_outcome(
     )
 
 
+def _failed_connector_outcome(
+    *,
+    connector_id: str,
+    connector_type: str,
+    connector_label: str | None,
+    error_summary: str,
+    failed_at: datetime,
+) -> ConnectorRunOutcome:
+    metadata = {"failure_stage": "pre_dispatch"}
+    if connector_label is not None:
+        metadata["label"] = connector_label
+    return ConnectorRunOutcome(
+        connector_id=connector_id,
+        connector_type=connector_type,
+        status="failed",
+        started_at=failed_at,
+        finished_at=failed_at,
+        error_summary=error_summary,
+        metadata=metadata,
+    )
+
+
 def _failed_connector_outcomes(
     *,
     business: BusinessConfig | None,
     connector_types: Sequence[str] | None,
     error_summary: str,
     failed_at: datetime,
+    error: BaseException | None = None,
 ) -> list[ConnectorRunOutcome]:
     """Build exact failed connector outcomes when the failed connector is unambiguous."""
+
+    exact_connector_type = getattr(error, "connector_type", None)
+    exact_connector_id = getattr(error, "connector_id", None)
+    if isinstance(exact_connector_type, str) and exact_connector_type:
+        matching_connectors = [
+            connector
+            for connector in (business.connectors if business is not None else [])
+            if connector.enabled
+            and connector.connector_type == exact_connector_type
+            and (not exact_connector_id or connector.connector_id == exact_connector_id)
+        ]
+        if len(matching_connectors) == 1:
+            connector = matching_connectors[0]
+            return [
+                _failed_connector_outcome(
+                    connector_id=connector.connector_id,
+                    connector_type=connector.connector_type,
+                    connector_label=connector.label,
+                    error_summary=error_summary,
+                    failed_at=failed_at,
+                )
+            ]
+        if isinstance(exact_connector_id, str) and exact_connector_id:
+            return [
+                _failed_connector_outcome(
+                    connector_id=exact_connector_id,
+                    connector_type=exact_connector_type,
+                    connector_label=None,
+                    error_summary=error_summary,
+                    failed_at=failed_at,
+                )
+            ]
+        return []
 
     if business is None or not connector_types:
         return []
@@ -134,14 +190,12 @@ def _failed_connector_outcomes(
 
     connector = matching_connectors[0]
     return [
-        ConnectorRunOutcome(
+        _failed_connector_outcome(
             connector_id=connector.connector_id,
             connector_type=connector.connector_type,
-            status="failed",
-            started_at=failed_at,
-            finished_at=failed_at,
+            connector_label=connector.label,
             error_summary=error_summary,
-            metadata={"label": connector.label, "failure_stage": "pre_dispatch"},
+            failed_at=failed_at,
         )
     ]
 
@@ -288,6 +342,7 @@ def record_pipeline_failure(
         connector_types=connector_types,
         error_summary=error_summary,
         failed_at=failed_at,
+        error=error,
     ):
         run_ledger.append_connector_outcome(run_id, outcome)
     run_ledger.update_run(

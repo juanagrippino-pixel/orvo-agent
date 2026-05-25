@@ -25,6 +25,29 @@ class PipelineResult(BaseModel):
     runtime_metadata: dict = Field(default_factory=dict)
 
 
+class PipelineConnectorError(RuntimeError):
+    """Connector-scoped pipeline failure with exact attribution context."""
+
+    def __init__(
+        self,
+        *,
+        connector_type: str,
+        connector_id: str | None = None,
+        original_exception: BaseException,
+    ) -> None:
+        super().__init__(str(original_exception))
+        self.connector_type = connector_type
+        self.connector_id = connector_id
+        self.original_exception = original_exception
+
+
+def _find_enabled_connector_for_type(business: BusinessConfig, connector_type: str) -> ConnectorConfig | None:
+    for connector in business.connectors:
+        if connector.enabled and connector.connector_type == connector_type:
+            return connector
+    return None
+
+
 def _find_google_sheets_connector(business: BusinessConfig) -> ConnectorConfig:
     for connector in business.connectors:
         if connector.enabled and connector.connector_type == "google_sheets":
@@ -376,18 +399,29 @@ def run_enabled_connectors_daily_report_pipeline(
 ) -> PipelineResult:
     """Build all enabled connector reports, merge metrics, then dispatch once."""
 
-    reports = [
-        _build_daily_report_for_connector_type(
-            connector_type=connector_type,
-            business=business,
-            report_date=report_date,
-            sheets_service=sheets_service,
-            tiendanube_http_client=tiendanube_http_client,
-            mercadolibre_http_client=mercadolibre_http_client,
-            meta_ads_http_client=meta_ads_http_client,
-        )
-        for connector_type in connector_types
-    ]
+    reports: list[DailyReport] = []
+    for connector_type in connector_types:
+        connector = _find_enabled_connector_for_type(business, connector_type)
+        try:
+            reports.append(
+                _build_daily_report_for_connector_type(
+                    connector_type=connector_type,
+                    business=business,
+                    report_date=report_date,
+                    sheets_service=sheets_service,
+                    tiendanube_http_client=tiendanube_http_client,
+                    mercadolibre_http_client=mercadolibre_http_client,
+                    meta_ads_http_client=meta_ads_http_client,
+                )
+            )
+        except PipelineConnectorError:
+            raise
+        except Exception as exc:
+            raise PipelineConnectorError(
+                connector_type=connector_type,
+                connector_id=connector.connector_id if connector is not None else None,
+                original_exception=exc,
+            ) from exc
     report = merge_daily_reports(reports, business=business)
     dispatch = dispatch_daily_report(
         report=report,

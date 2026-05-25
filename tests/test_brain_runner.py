@@ -177,6 +177,83 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
     delivery.send_text.assert_not_called()
 
 
+def test_run_due_daily_reports_records_exact_failed_connector_for_multi_connector_scheduled_failure(tmp_path):
+    from app.brain.pipeline import PipelineConnectorError
+    from app.brain.runner import run_due_daily_reports
+
+    store = InMemoryConfigStore()
+    missing_csv_path = tmp_path / "missing.csv"
+    store.save_business_config(
+        BusinessConfig(
+            business_id="artemea-multi-source",
+            business_name="Artemea Multi Source",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="sheet",
+                    connector_type="google_sheets",
+                    label="Sheet Artemea",
+                    params={"spreadsheet_id": "abc123", "range_name": "Daily!A1:G1000"},
+                ),
+                ConnectorConfig(
+                    connector_id="csv-orders",
+                    connector_type="csv",
+                    label="CSV Orders",
+                    params={"csv_path": str(missing_csv_path)},
+                ),
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="artemea-multi-source-daily-report",
+            business_id="artemea-multi-source",
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+    delivery = MagicMock()
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(PipelineConnectorError) as raised:
+        run_due_daily_reports(
+            config_store=store,
+            idempotency_store=InMemoryIdempotencyStore(),
+            delivery_client=delivery,
+            sheets_service=fake_sheets_service(),
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+            run_ledger=run_ledger,
+            case_store=case_store,
+        )
+    assert raised.value.connector_type == "csv"
+    assert raised.value.connector_id == "csv-orders"
+    assert isinstance(raised.value.original_exception, FileNotFoundError)
+
+    [run] = run_ledger.list_runs(business_id="artemea-multi-source")
+    assert run.status == "failed"
+    assert [(out.connector_id, out.connector_type, out.status) for out in run.connector_outcomes] == [
+        ("csv-orders", "csv", "failed")
+    ]
+    failed_connector = run.connector_outcomes[0]
+    assert failed_connector.error_summary is not None
+    assert "missing.csv" in failed_connector.error_summary
+    assert failed_connector.metadata["label"] == "CSV Orders"
+    assert failed_connector.metadata["failure_stage"] == "pre_dispatch"
+    assert run.artifacts == []
+    assert run.dispatch_outcomes == []
+    assert run.summary_metadata["schedule_id"] == "artemea-multi-source-daily-report"
+    assert run.summary_metadata["report_type"] == "daily"
+    assert run.summary_metadata["cases_opened"] == 2
+    assert {case.entity_scope["id"] for case in case_store.list_cases(business_id="artemea-multi-source")} == {
+        "google_sheets",
+        "csv",
+    }
+    delivery.send_text.assert_not_called()
+
+
 def test_run_due_daily_reports_persists_operational_cases_and_links_ledger_artifact():
     from app.brain.runner import run_due_daily_reports
 
