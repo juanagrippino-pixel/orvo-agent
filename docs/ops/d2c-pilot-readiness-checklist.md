@@ -28,12 +28,14 @@ Use this checklist before telling a real D2C store owner that Orvo is ready to o
 ## Case readiness
 
 - [ ] `sales_drop` deterministic tests pass.
-- [ ] `stockout_risk` deterministic tests pass.
+- [ ] `stockout_risk` deterministic tests pass at SKU/product scope, not only aggregate stock scope.
 - [ ] `data_stale` deterministic tests pass.
 - [ ] Dedupe prevents daily spam.
 - [ ] Evidence exists for every case.
 - [ ] Case timeline records opens/updates/resolution.
 - [ ] Missing/stale data suppresses or narrows downstream advice.
+- [ ] Owner-facing claim allowlist prevents internal/backtest-only cases from appearing in WhatsApp/customer-facing output.
+- [ ] `fulfillment_backlog` remains internal/backtest-only unless Tiendanube payment/fulfillment field semantics have passed store-specific truth gates.
 
 ## Surface readiness
 
@@ -60,6 +62,7 @@ Use this checklist before telling a real D2C store owner that Orvo is ready to o
 - [ ] Owner understands Orvo may say "no puedo recomendar por datos stale".
 - [ ] Follow-up workflow is agreed: who receives briefs, who acts, who resolves cases.
 - [ ] Pricing/trial/concierge terms are stated without unsupported guarantees.
+- [ ] Buyer understands fulfillment backlog/pending-order alerts are not included unless the store-specific truth gate passes.
 
 ## No-go conditions
 
@@ -68,6 +71,7 @@ Do not launch a live pilot if:
 - raw secrets appear in artifacts/logs/docs;
 - owner-facing brief can include unsupported numbers;
 - stale data is silently treated as good data;
+- owner-facing WhatsApp output includes `fulfillment_backlog` before the fulfillment truth gate passes;
 - same case repeats daily as new spam;
 - operator cannot inspect why a recommendation was made;
 - current scheduled/forced behavior is broken.

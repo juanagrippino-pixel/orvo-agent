@@ -18,9 +18,9 @@ Keep the internal product direction: Orvo is a D2C ecommerce operations control 
 
 Sharpen the buyer-facing first product from broad "D2C control plane" into:
 
-> **Orvo Tiendanube Exception Desk** — daily Tiendanube exception monitoring over WhatsApp: stockout risk, aging paid/unfulfilled orders, and stale/data-unsafe states, each with evidence and follow-up history.
+> **Orvo Tiendanube Exception Desk** — daily Tiendanube exception monitoring over WhatsApp: SKU-level stockout risk, stale/data-unsafe states, and conservative sales-floor exceptions, each with evidence and open/resolved memory. Aging paid/unfulfilled orders stay truth-gated until Tiendanube payment/fulfillment fields are verified for the store.
 
-Reason: SMB buyers do not buy "control planes" or "cases" as abstractions. They buy concrete operational risk detection: products about to run out, paid orders stuck before fulfillment, and data/source failures that make advice unsafe.
+Reason: SMB buyers do not buy "control planes" or "cases" as abstractions. They buy concrete operational risk detection: specific products about to run out, data/source failures that make advice unsafe, and only later paid orders stuck before fulfillment once the evidence path is reliable.
 
 ## ICP and buyer pain
 
@@ -50,11 +50,11 @@ Reason: SMB buyers do not buy "control planes" or "cases" as abstractions. They 
 
 ## Ranked sellable opportunities
 
-### 1. Tiendanube Stock + Fulfillment Exception Desk
+### 1. Tiendanube Stock + Data-Freshness Exception Desk
 
 **Rank:** 1
 
-**Buyer promise:** Orvo watches Tiendanube and tells the operator what needs action today: products at risk of stockout, paid orders getting stuck, and data problems that make advice unsafe.
+**Buyer promise:** Orvo watches Tiendanube and tells the operator what needs action today: moving or important SKUs at risk of stockout, data problems that make advice unsafe, and conservative sales-floor misses when configured.
 
 **Why this wins first:**
 
@@ -66,10 +66,10 @@ Reason: SMB buyers do not buy "control planes" or "cases" as abstractions. They 
 
 **Required case families:**
 
-1. `stockout_risk`
-2. `fulfillment_backlog`
-3. `data_stale`
-4. Optional conservative `sales_drop` only with owner-configured floor or very trustworthy baseline.
+1. `stockout_risk` at SKU/product scope.
+2. `data_stale` with suppression of unsafe downstream advice.
+3. Optional conservative `sales_drop` only with owner-configured floor or very trustworthy baseline.
+4. `fulfillment_backlog` as an internal/backtest truth-gated candidate until real Tiendanube fields prove reliable.
 
 **Primary product area:** Work Management Core + Operator Surfaces.
 
@@ -149,7 +149,7 @@ Reason: SMB buyers do not buy "control planes" or "cases" as abstractions. They 
 - **Price hypothesis:** USD 149 / 30 days, ARS equivalent at invoice time.
 - **Goal:** validate daily usefulness, onboarding burden, evidence quality, and willingness to pay.
 - **Included:** 1 Tiendanube store, 1 WhatsApp destination/group, daily exception brief, assisted setup, evidence-backed case queue/history, run health/degraded caveats, one weekly review or async improvement note.
-- **Case families:** launch with `stockout_risk`, `fulfillment_backlog`, `data_stale`; include `sales_drop` only if configured floor/baseline is safe.
+- **Case families:** launch with SKU-level `stockout_risk` and `data_stale`; include `sales_drop` only if configured floor/baseline is safe. Keep `fulfillment_backlog` internal/backtest-only until the fulfillment truth gate passes.
 - **Limits:** 30 days, up to ~500 monthly orders or ~300 active SKUs as fit signal, no custom connectors, no guaranteed revenue lift, no autonomous external actions.
 
 ### Starter: Orvo Operaciones Starter
@@ -168,7 +168,7 @@ Reason: SMB buyers do not buy "control planes" or "cases" as abstractions. They 
 
 ### Work Management Core
 
-1. `OperationalCase` model/storage/engine for `stockout_risk`, `fulfillment_backlog`, and `data_stale`.
+1. `OperationalCase` model/storage/engine for SKU-level `stockout_risk` and `data_stale`; `fulfillment_backlog` remains a gated expansion spec until implemented and validated.
 2. Stable dedupe keys per case family and entity scope.
 3. Evidence snapshots for every owner-facing number.
 4. Lifecycle: `open -> acknowledged -> in_progress -> resolved`, plus `dismissed` and `reopened`.
@@ -231,15 +231,15 @@ Reason: SMB buyers do not buy "control planes" or "cases" as abstractions. They 
 - Render projection in `app/brain/reporting.py`.
 - Test in future `tests/test_brain_cases_stockout.py` and existing Tiendanube adapter/pipeline tests.
 
-### Spec B: `fulfillment_backlog`
+### Spec B: `fulfillment_backlog` truth gate
 
-**Detection:** Open/update when paid/unfulfilled order count exceeds configured threshold or oldest paid/unfulfilled order age exceeds configured SLA.
+**Detection:** Do not open owner-facing cases yet. First backtest/audit whether paid/unfulfilled order count and oldest paid/unfulfilled order age can be derived reliably for the store.
 
 **Suppress:** Do not alert if order/fulfillment fields are missing, ambiguous, or stale; create/update `data_stale` with affected advice instead.
 
 **Evidence:** affected order count, oldest order age, redacted safe order refs, payment/fulfillment status grouping, source freshness, latest run ID.
 
-**Actions:** `inspect_pending_orders`, `assign_owner`, `add_comment`, `mark_in_progress`, `resolve_case`, `dismiss_case`.
+**Actions:** Treat `inspect_pending_orders`, `assign_owner`, `add_comment`, `mark_in_progress`, `resolve_case`, and `dismiss_case` as roadmap/catalog keys unless implemented in code. Current implemented actions are `acknowledge_case` and `resolve_case` only.
 
 **Repo paths:**
 
@@ -332,6 +332,6 @@ Copy the durable mechanics, not the breadth:
 
 ## Decision needed
 
-Product should decide whether to promote `fulfillment_backlog` into the first sellable proof slice alongside `stockout_risk` and `data_stale`, and demote `sales_drop` from flagship to conservative optional case.
+Product should not promote `fulfillment_backlog` into the first sellable proof slice until Tiendanube order/payment/fulfillment field semantics are audited against real stores and backtests. The first paid proof slice is SKU-level `stockout_risk` + `data_stale` + optional configured `sales_drop`.
 
-Recommended decision: yes, if Tiendanube order/fulfillment fields are reliable enough in the current adapter/API path. If not, keep `sales_drop` in the first slice but position it as "sales below configured floor," not broad anomaly detection.
+Recommended decision: keep `fulfillment_backlog` internal/backtest-only for now; position `sales_drop` as "sales below configured floor," not broad anomaly detection.
