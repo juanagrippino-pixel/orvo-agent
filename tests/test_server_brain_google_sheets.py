@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from app.brain.models import DailyReport, Evidence, Metric
 
 
@@ -55,11 +57,30 @@ def test_google_sheets_daily_report_endpoint_rejects_missing_required_fields():
     assert "spreadsheet_id" in response.get_json()["error"]
 
 
-def test_google_sheets_daily_report_endpoint_redacts_secret_shaped_value_errors(monkeypatch):
+@pytest.mark.parametrize(
+    ("exception_message", "raw_values"),
+    [
+        (
+            "Sheets auth callback failed refresh_token=raw-refresh-token",
+            ("raw-refresh-token",),
+        ),
+        (
+            "Sheets OAuth callback failed Bearer raw-public-bearer-token "
+            "https://oauth.example.test/callback?access_token=raw-query-token&state=safe-state "
+            "code=raw_oauth_code",
+            ("raw-public-bearer-token", "raw-query-token", "raw_oauth_code"),
+        ),
+    ],
+)
+def test_google_sheets_daily_report_endpoint_redacts_secret_shaped_value_errors(
+    monkeypatch,
+    exception_message,
+    raw_values,
+):
     from server import app
 
     def raise_secret_error(**kwargs):
-        raise ValueError("Sheets auth callback failed refresh_token=raw-refresh-token")
+        raise ValueError(exception_message)
 
     monkeypatch.setattr("server.build_daily_report_from_sheet", raise_secret_error)
 
@@ -71,4 +92,4 @@ def test_google_sheets_daily_report_endpoint_redacts_secret_shaped_value_errors(
 
     assert response.status_code == 400
     assert "[REDACTED]" in response.get_json()["error"]
-    _assert_public_error_redacted(response, "raw-refresh-token")
+    _assert_public_error_redacted(response, *raw_values)

@@ -39,6 +39,9 @@ _QUOTED_KEY_VALUE_SECRET_RE = re.compile(
 _UNQUOTED_KEY_VALUE_SECRET_RE = re.compile(
     rf"(?i)([\"']?\b({_SECRET_KEY_PATTERN})\b[\"']?\s*[:=]\s*)([^\"'\s,;&}}]+)"
 )
+_OAUTH_CODE_CONTEXT_RE = re.compile(r"(?i)\b(oauth|authorization|auth|callback)\b")
+_QUOTED_BARE_OAUTH_CODE_RE = re.compile(r"(?i)([\"']?\bcode\b[\"']?\s*[:=]\s*)([\"'])(.*?)(\2)")
+_UNQUOTED_BARE_OAUTH_CODE_RE = re.compile(r"(?i)([\"']?\bcode\b[\"']?\s*[:=]\s*)([^\"'\s,;&}]+)")
 _PRIVATE_KEY_BLOCK_RE = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
     flags=re.DOTALL,
@@ -75,7 +78,32 @@ def redact_text(value: str | None) -> str | None:
         lambda match: f"{match.group(1)}[REDACTED]",
         redacted,
     )
+    redacted = _redact_bare_oauth_code_values(redacted)
     return redacted
+
+
+def _redact_bare_oauth_code_values(value: str) -> str:
+    """Redact bare ``code=...`` values only in OAuth/auth callback-like text."""
+
+    def should_redact(match: re.Match[str], secret_value: str, text: str) -> bool:
+        context = text[max(0, match.start() - 80) : min(len(text), match.end() + 80)]
+        return "oauth" in secret_value.lower() or _OAUTH_CODE_CONTEXT_RE.search(context) is not None
+
+    def redact_quoted(match: re.Match[str]) -> str:
+        secret_value = match.group(3)
+        if not should_redact(match, secret_value, value):
+            return match.group(0)
+        return f"{match.group(1)}{match.group(2)}[REDACTED]{match.group(4)}"
+
+    quoted_redacted = _QUOTED_BARE_OAUTH_CODE_RE.sub(redact_quoted, value)
+
+    def redact_unquoted(match: re.Match[str]) -> str:
+        secret_value = match.group(2)
+        if not should_redact(match, secret_value, quoted_redacted):
+            return match.group(0)
+        return f"{match.group(1)}[REDACTED]"
+
+    return _UNQUOTED_BARE_OAUTH_CODE_RE.sub(redact_unquoted, quoted_redacted)
 
 
 def redact_uri(value: str | None) -> str | None:

@@ -51,3 +51,16 @@ def test_redact_text_removes_multi_token_basic_authorization_headers():
     assert "Basic dXNlcjpzdXBlcl9zZWNyZXQ=" not in (redacted or "")
     assert "dXNlcjpzdXBlcl9zZWNyZXQ=" not in (redacted or "")
     assert redacted == "connector failed with Authorization: [REDACTED] while syncing"
+
+
+def test_redact_text_redacts_bare_oauth_code_key_values_without_dropping_context():
+    from app.brain.security.redaction import redact_text
+
+    text = "oauth callback failed before code=raw_oauth_code after state=safe-state"
+
+    redacted = redact_text(text)
+
+    assert redacted == "oauth callback failed before code=[REDACTED] after state=safe-state"
+    assert "raw_oauth_code" not in (redacted or "")
+    assert "oauth callback failed before" in (redacted or "")
+    assert "after state=safe-state" in (redacted or "")
