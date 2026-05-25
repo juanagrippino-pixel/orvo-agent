@@ -44,12 +44,26 @@ Only set what you actually need — adapters can be invoked independently.
 
 ### WhatsApp delivery (real dispatch)
 
+Orvo's own WhatsApp number is delivered via the **Meta WhatsApp Cloud API** by
+default. Twilio is supported only as an explicit fallback for legacy clients.
+
 | Variable | Required | Notes |
 |----------|----------|-------|
-| `WHATSAPP_PHONE_ID` | yes | From Meta dashboard. |
-| `WHATSAPP_TOKEN` | yes | Permanent or temporary access token. Treat as a secret. |
+| `WHATSAPP_PROVIDER` | no | `meta_cloud` (default) or `twilio`. Any other value fails fast. |
+| `WHATSAPP_PHONE_ID` | Meta Cloud | From Meta dashboard. Alias: `WHATSAPP_PHONE_NUMBER_ID`. |
+| `WHATSAPP_TOKEN` | Meta Cloud | Permanent or temporary access token. Treat as a secret. Alias: `WHATSAPP_ACCESS_TOKEN`. |
+| `TWILIO_ACCOUNT_SID` | Twilio only | Required when `WHATSAPP_PROVIDER=twilio`. |
+| `TWILIO_AUTH_TOKEN` | Twilio only | Treat as a secret. |
+| `TWILIO_WHATSAPP_NUMBER` | Twilio only | E.g. `whatsapp:+14155238886`. |
 
-`WhatsAppDeliveryClient.from_env()` raises `EnvironmentError` if either is empty.
+If both an existing var (`WHATSAPP_PHONE_ID`/`WHATSAPP_TOKEN`) and its
+Meta-native alias are set, the existing var wins. `from_env()` raises
+`EnvironmentError` when the selected provider is missing required vars, and
+`ValueError` when `WHATSAPP_PROVIDER` is set to an unsupported value.
+
+Delivery error strings are passed through the secret-redaction helper before
+being returned, so leaked bearer/Basic auth headers never reach logs or
+operator surfaces.
 
 ### Google Sheets (one of two auth modes)
 

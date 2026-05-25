@@ -20,6 +20,8 @@ from typing import Any
 import requests
 from pydantic import BaseModel, Field
 
+from app.brain.security.redaction import redact_text
+
 
 # ---------------------------------------------------------------------------
 # Domain models
@@ -97,6 +99,13 @@ _GRAPH_API_VERSION = "v19.0"
 _BASE_URL = "https://graph.facebook.com"
 _TWILIO_BASE_URL = "https://api.twilio.com/2010-04-01"
 
+_SUPPORTED_PROVIDERS = ("meta_cloud", "twilio")
+
+
+def _safe_error(message: str) -> str:
+    """Redact any leaked bearer/auth tokens from an error string."""
+    return redact_text(message) or message
+
 
 class WhatsAppDeliveryClient:
     """Sends WhatsApp text messages via the Meta Cloud API.
@@ -134,14 +143,27 @@ class WhatsAppDeliveryClient:
     def from_env(cls) -> "WhatsAppDeliveryClient":
         """Construct a client from environment variables.
 
-        Required env vars:
-            WHATSAPP_PHONE_ID
-            WHATSAPP_TOKEN
+        Defaults to Meta Cloud API. Set ``WHATSAPP_PROVIDER=twilio`` to switch.
+
+        Meta Cloud env vars (existing names take precedence over Meta-native aliases):
+            WHATSAPP_PHONE_ID        (alias: WHATSAPP_PHONE_NUMBER_ID)
+            WHATSAPP_TOKEN           (alias: WHATSAPP_ACCESS_TOKEN)
+
+        Twilio env vars:
+            TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
 
         Raises:
-            EnvironmentError: if either variable is missing or empty.
+            ValueError: if WHATSAPP_PROVIDER is set to an unsupported value.
+            EnvironmentError: if required variables for the selected provider are missing.
         """
         provider = (os.environ.get("WHATSAPP_PROVIDER") or "meta_cloud").strip().lower()
+        if provider not in _SUPPORTED_PROVIDERS:
+            supported = ", ".join(_SUPPORTED_PROVIDERS)
+            raise ValueError(
+                f"Unsupported WHATSAPP_PROVIDER={provider!r}. "
+                f"Supported providers: {supported}."
+            )
+
         if provider == "twilio":
             account_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
             auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
@@ -168,19 +190,23 @@ class WhatsAppDeliveryClient:
                 twilio_whatsapp_number=whatsapp_number,
             )
 
-        phone_id = os.environ.get("WHATSAPP_PHONE_ID", "")
-        token = os.environ.get("WHATSAPP_TOKEN", "")
-        missing = [
-            name
-            for name, val in [
-                ("WHATSAPP_PHONE_ID", phone_id),
-                ("WHATSAPP_TOKEN", token),
-            ]
-            if not val
-        ]
-        if missing:
+        phone_id = (
+            os.environ.get("WHATSAPP_PHONE_ID")
+            or os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
+        )
+        token = (
+            os.environ.get("WHATSAPP_TOKEN")
+            or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+        )
+        if not phone_id:
             raise EnvironmentError(
-                f"Missing required environment variable(s): {', '.join(missing)}"
+                "Missing required environment variable(s): "
+                "WHATSAPP_PHONE_ID (or alias WHATSAPP_PHONE_NUMBER_ID)"
+            )
+        if not token:
+            raise EnvironmentError(
+                "Missing required environment variable(s): "
+                "WHATSAPP_TOKEN (or alias WHATSAPP_ACCESS_TOKEN)"
             )
         return cls(phone_id=phone_id, token=token)
 
@@ -214,14 +240,17 @@ class WhatsAppDeliveryClient:
         try:
             response = self._http.post(url, json=payload, headers=headers)
         except Exception as exc:
-            return DeliveryResult(success=False, message_id=None, error=str(exc))
+            return DeliveryResult(
+                success=False, message_id=None, error=_safe_error(str(exc))
+            )
 
-        if response.status_code == 200:
+        if response.status_code in (200, 201):
             data = response.json()
             message_id = (data.get("messages") or [{}])[0].get("id")
-            return DeliveryResult(success=True, message_id=message_id, error=None)
+            if message_id:
+                return DeliveryResult(success=True, message_id=message_id, error=None)
 
-        # Non-200: extract error message
+        # Non-2xx, or 2xx without a message id: extract error message
         try:
             err_body = response.json()
             error_msg = (
@@ -234,7 +263,7 @@ class WhatsAppDeliveryClient:
         return DeliveryResult(
             success=False,
             message_id=None,
-            error=f"HTTP {response.status_code}: {error_msg}",
+            error=_safe_error(f"HTTP {response.status_code}: {error_msg}"),
         )
 
     def _send_text_via_twilio(self, *, phone: str, text: str) -> DeliveryResult:
@@ -255,7 +284,9 @@ class WhatsAppDeliveryClient:
                 auth=(account_sid, auth_token),
             )
         except Exception as exc:
-            return DeliveryResult(success=False, message_id=None, error=str(exc))
+            return DeliveryResult(
+                success=False, message_id=None, error=_safe_error(str(exc))
+            )
 
         if response.status_code in (200, 201):
             body = response.json()
@@ -270,5 +301,5 @@ class WhatsAppDeliveryClient:
         return DeliveryResult(
             success=False,
             message_id=None,
-            error=f"HTTP {response.status_code}: {error_msg}",
+            error=_safe_error(f"HTTP {response.status_code}: {error_msg}"),
         )

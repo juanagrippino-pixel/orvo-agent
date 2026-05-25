@@ -294,3 +294,147 @@ def test_send_text_twilio_returns_failure_on_error_response():
     assert result.success is False
     assert result.message_id is None
     assert "400" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Meta Cloud API contract — default provider, env aliases, status codes
+# ---------------------------------------------------------------------------
+
+
+def test_client_from_env_defaults_to_meta_cloud(monkeypatch):
+    """Unset WHATSAPP_PROVIDER must default to Meta Cloud (Orvo's own number)."""
+    monkeypatch.delenv("WHATSAPP_PROVIDER", raising=False)
+    monkeypatch.setenv("WHATSAPP_PHONE_ID", "P")
+    monkeypatch.setenv("WHATSAPP_TOKEN", "T")
+
+    client = WhatsAppDeliveryClient.from_env()
+
+    assert client._provider == "meta_cloud"
+
+
+def test_client_from_env_accepts_meta_native_aliases(monkeypatch):
+    """Meta-native env names act as aliases for the existing var names."""
+    monkeypatch.delenv("WHATSAPP_PROVIDER", raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE_ID", raising=False)
+    monkeypatch.delenv("WHATSAPP_TOKEN", raising=False)
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "META_PHONE")
+    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "META_TOKEN")
+
+    client = WhatsAppDeliveryClient.from_env()
+
+    assert client._phone_id == "META_PHONE"
+    assert client._token == "META_TOKEN"
+
+
+def test_client_from_env_existing_names_take_precedence_over_aliases(monkeypatch):
+    """If both existing and Meta-native env names are set, existing wins."""
+    monkeypatch.delenv("WHATSAPP_PROVIDER", raising=False)
+    monkeypatch.setenv("WHATSAPP_PHONE_ID", "EXISTING_PHONE")
+    monkeypatch.setenv("WHATSAPP_TOKEN", "EXISTING_TOKEN")
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "META_PHONE")
+    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "META_TOKEN")
+
+    client = WhatsAppDeliveryClient.from_env()
+
+    assert client._phone_id == "EXISTING_PHONE"
+    assert client._token == "EXISTING_TOKEN"
+
+
+def test_client_from_env_rejects_unsupported_provider(monkeypatch):
+    """An unsupported WHATSAPP_PROVIDER must fail fast (not silently use Meta)."""
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "gupshup")
+    monkeypatch.setenv("WHATSAPP_PHONE_ID", "P")
+    monkeypatch.setenv("WHATSAPP_TOKEN", "T")
+
+    with pytest.raises(ValueError) as excinfo:
+        WhatsAppDeliveryClient.from_env()
+
+    message = str(excinfo.value)
+    assert "WHATSAPP_PROVIDER" in message
+    assert "gupshup" in message
+    # Supported providers should be enumerated for the operator.
+    assert "meta_cloud" in message
+    assert "twilio" in message
+
+
+def test_send_text_meta_returns_success_on_201_with_message_id():
+    """Meta Cloud sometimes responds 201 Created — also a success when id present."""
+    session = _mock_http(201, {"messages": [{"id": "wam_201"}]})
+    client = WhatsAppDeliveryClient(phone_id="P", token="T", http_client=session)
+
+    result = client.send_text(phone="+5491112345678", text="Hola")
+
+    assert result.success is True
+    assert result.message_id == "wam_201"
+    assert result.error is None
+
+
+def test_send_text_meta_payload_disables_link_preview():
+    """Meta send-text body must include text.preview_url = False explicitly."""
+    session = _mock_http()
+    client = WhatsAppDeliveryClient(phone_id="P", token="T", http_client=session)
+
+    client.send_text(phone="+5491112345678", text="Reporte")
+
+    body = session.post.call_args[1]["json"]
+    assert body["text"]["preview_url"] is False
+
+
+# ---------------------------------------------------------------------------
+# Error redaction — bearer tokens / auth tokens must never leak
+# ---------------------------------------------------------------------------
+
+
+def test_send_text_meta_redacts_bearer_token_in_network_exception():
+    session = MagicMock()
+    session.post.side_effect = RuntimeError(
+        "Connection failed; sent header Authorization: Bearer SECRET_TOKEN_XYZ"
+    )
+    client = WhatsAppDeliveryClient(
+        phone_id="P", token="SECRET_TOKEN_XYZ", http_client=session
+    )
+
+    result = client.send_text(phone="+5491112345678", text="Hi")
+
+    assert result.success is False
+    assert "SECRET_TOKEN_XYZ" not in (result.error or "")
+    assert "[REDACTED]" in (result.error or "")
+
+
+def test_send_text_meta_redacts_access_token_in_error_body():
+    session = _mock_http(
+        400,
+        {"error": {"message": "Invalid access_token=SECRET_TOKEN_XYZ"}},
+    )
+    client = WhatsAppDeliveryClient(
+        phone_id="P", token="SECRET_TOKEN_XYZ", http_client=session
+    )
+
+    result = client.send_text(phone="+5491112345678", text="Hi")
+
+    assert result.success is False
+    assert "SECRET_TOKEN_XYZ" not in (result.error or "")
+    assert "[REDACTED]" in (result.error or "")
+
+
+def test_send_text_twilio_redacts_basic_auth_header_in_network_exception():
+    """Twilio uses HTTP Basic — a leaked Authorization: Basic header must be redacted."""
+    session = MagicMock()
+    session.post.side_effect = RuntimeError(
+        "Request failed; sent Authorization: Basic QUMxMjM6VFdJTElPX1JBV19TRUNSRVQ="
+    )
+    client = WhatsAppDeliveryClient(
+        phone_id="unused",
+        token="unused",
+        http_client=session,
+        provider="twilio",
+        twilio_account_sid="AC123",
+        twilio_auth_token="TWILIO_RAW_SECRET",
+        twilio_whatsapp_number="whatsapp:+14155238886",
+    )
+
+    result = client.send_text(phone="+5491112345678", text="Hi")
+
+    assert result.success is False
+    assert "QUMxMjM6VFdJTElPX1JBV19TRUNSRVQ=" not in (result.error or "")
+    assert "[REDACTED]" in (result.error or "")
