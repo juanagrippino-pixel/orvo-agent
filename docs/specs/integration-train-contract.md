@@ -23,6 +23,39 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 9. WhatsApp projection migration;
 10. controlled actions/automation.
 
+## Current next recommendations train
+
+After the 2026-05-25 runtime/ledger/metric/operator-comment integrations, the next safe train should stay inside the existing control-plane path and avoid owner-facing delivery changes until each projection is evidence-backed.
+
+Recommended order:
+
+1. **Metric registry adoption gate**
+   - Wire canonical metric validation into case detection/report generation in advisory mode first.
+   - Keep legacy aliases accepted and do not change owner-facing wording.
+   - Gate: metric registry contract tests, case-family compatibility tests, and full suite.
+
+2. **Evidence snapshot canonicalization**
+   - Ensure case timeline events reference canonical persisted evidence snapshot IDs, not ad-hoc refs from transient detection inputs.
+   - Keep snapshot payloads redacted before persistence and response projection.
+   - Gate: raw SQLite/store reload assertions for snapshot/timeline IDs and secret-shaped refs.
+
+3. **Case-backed owner/operator brief dry projection**
+   - Build a dry projection from actionable Operational Cases for owner/operator review, without enabling automatic WhatsApp delivery.
+   - Exclude resolved cases, include evidence freshness, and keep total open-case counts truthful when truncating displayed cases.
+   - Gate: golden brief tests for healthy, degraded, stale-data, and truncated queues.
+
+4. **Operator search/view hardening**
+   - Keep built-in case views read-only before any saved-view persistence.
+   - Align docs, route enums, JQL allowlist, business scoping, limits, and redacted error envelopes.
+   - Gate: built-in views match equivalent direct queries and SQL-looking input never reaches storage as SQL.
+
+5. **Pilot-readiness runbook refresh**
+   - Update the Tiendanube/WhatsApp-first pilot checklist to reflect the real runtime, ledger, case, evidence, and operator-comment capabilities.
+   - Keep WhatsApp as a projection/delivery surface, not the source of truth.
+   - Gate: docs link validation, secret scan, and one dry-run operator report artifact.
+
+Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, and evidence.
+
 ## Branch rules
 
 - One bounded context per branch.

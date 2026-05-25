@@ -182,6 +182,130 @@ Acceptance:
 - no LLM decision path;
 - evidence required.
 
+## Packet I — Metric registry adoption gate
+
+Goal: use the semantic metric registry as the advisory validation layer for current case/report inputs before promoting any strict runtime behavior.
+
+Dependency: dispatch after Packet G and after existing compatibility tests are green.
+
+Read:
+
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/integration-train-contract.md`
+
+Likely files:
+
+- `app/brain/semantics/metric_registry.py`
+- `app/brain/operational_cases.py`
+- `app/brain/reporting.py`
+- `tests/contracts/test_metric_validation_contract.py`
+- `tests/test_brain_operational_cases.py`
+
+Acceptance:
+
+- legacy metric aliases still resolve;
+- unknown metric behavior is advisory unless explicitly strict;
+- no owner-facing wording changes;
+- full suite remains green.
+
+## Packet J — Evidence snapshot canonicalization
+
+Goal: make evidence snapshots the canonical case/timeline reference for operator projections and persisted case history.
+
+Dependency: dispatch after case engine basics and operator case actions/comments are green.
+
+Read:
+
+- `docs/specs/operational-case-engine-contract.md`
+- `docs/specs/internal-operator-api-contract.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
+
+Likely files:
+
+- `app/brain/operational_cases.py`
+- `app/brain/operator_api.py`
+- `tests/test_brain_operational_cases.py`
+- `tests/test_internal_operator_api.py`
+
+Acceptance:
+
+- timeline events reference persisted canonical snapshot IDs;
+- duplicate detections reuse/update canonical snapshots instead of creating ambiguous refs;
+- raw SQLite/store reload tests prove secret-shaped refs and actor values are redacted before persistence.
+
+## Packet K — Case-backed brief dry projection
+
+Goal: create a dry owner/operator brief projection from actionable Operational Cases without enabling automatic WhatsApp delivery.
+
+Dependency: dispatch after Packet J so projection cites canonical evidence.
+
+Read:
+
+- `docs/product/report-design.md`
+- `docs/specs/operational-case-engine-contract.md`
+- `docs/specs/integration-train-contract.md`
+
+Likely files:
+
+- `app/brain/reporting.py`
+- `app/brain/operator_api.py`
+- `tests/test_brain_reporting.py`
+- `tests/test_internal_operator_api.py`
+
+Acceptance:
+
+- resolved cases are excluded;
+- evidence freshness/degraded state is explicit;
+- truncation preserves truthful total open-case count;
+- no WhatsApp send path changes.
+
+## Packet L — Operator search/view hardening
+
+Goal: harden read-only built-in case views and JQL-lite query behavior before saved views or writable filters exist.
+
+Read:
+
+- `docs/specs/internal-operator-api-contract.md`
+- `docs/specs/integration-train-contract.md`
+
+Likely files:
+
+- `app/brain/operator_views.py`
+- `app/brain/operator_api.py`
+- `server.py`
+- `tests/test_operator_case_views.py`
+- `tests/test_internal_operator_api.py`
+
+Acceptance:
+
+- built-in views match equivalent direct queries;
+- route/context owns business scope;
+- SQL-looking input is rejected before storage;
+- response/error envelopes are redacted and stable.
+
+## Packet M — Pilot-readiness runbook refresh
+
+Goal: update pilot operating docs so the Tiendanube/WhatsApp-first checklist matches actual runtime, ledger, case, evidence, and operator-comment capabilities.
+
+Read:
+
+- `docs/ops/d2c-pilot-readiness-checklist.md`
+- `docs/specs/integration-train-contract.md`
+- `docs/roadmap/d2c-control-plane-roadmap.md`
+
+Likely files:
+
+- `docs/ops/d2c-pilot-readiness-checklist.md`
+- `docs/roadmap/d2c-control-plane-roadmap.md`
+- `docs/specs/integration-train-contract.md`
+
+Acceptance:
+
+- docs link to real implemented surfaces only;
+- WhatsApp remains a projection/delivery surface, not source of truth;
+- docs validation and secret scan pass.
+
 ## Packet output format
 
 Workers must report:
