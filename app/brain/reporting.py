@@ -1,6 +1,11 @@
 """Report composition for WhatsApp-first Orvo Brain output."""
 
+from datetime import date
+from typing import Iterable
+
 from app.brain.models import DailyReport, Evidence, Metric
+from app.brain.operational_cases import OperationalCase
+from app.brain.security.redaction import redact_text
 
 
 def _format_value(metric: Metric) -> str:
@@ -104,6 +109,93 @@ def _compact_sources(report: DailyReport) -> str:
     if not labels:
         return "🔗 Fuentes: Sin fuentes"
     return "🔗 Fuentes: " + " · ".join(labels)
+
+
+def _case_order(case: OperationalCase) -> tuple[int, int, str, str]:
+    return (_SEVERITY_ORDER.get(case.severity, 9), -case.priority_score, case.opened_at.isoformat(), case.case_id)
+
+
+def _case_sources(case: OperationalCase) -> list[str]:
+    seen: set[str] = set()
+    labels: list[str] = []
+    for snapshot in case.evidence_snapshots:
+        label = snapshot.source_label or snapshot.source
+        if label and label not in seen:
+            labels.append(label)
+            seen.add(label)
+    return labels
+
+
+def _case_metric_lines(case: OperationalCase, *, max_metrics: int = 2) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for snapshot in case.evidence_snapshots:
+        for metric in snapshot.metrics:
+            label = metric.label or metric.metric_key
+            if label in seen:
+                continue
+            seen.add(label)
+            if metric.value is None:
+                continue
+            value = f"{metric.value:g}" if isinstance(metric.value, (int, float)) else str(metric.value)
+            suffix = f" {metric.unit}" if metric.unit else ""
+            lines.append(f"{label}: {value}{suffix}")
+            if len(lines) >= max_metrics:
+                return lines
+    return lines
+
+
+def _case_is_degraded(case: OperationalCase) -> bool:
+    return any(snapshot.freshness_state in {"stale", "degraded", "missing"} for snapshot in case.evidence_snapshots)
+
+
+def compose_owner_case_brief(
+    business_name: str,
+    cases: Iterable[OperationalCase],
+    *,
+    report_date: date | None = None,
+    max_cases: int = 3,
+) -> str:
+    """Compose a WhatsApp-sized owner brief from canonical open Operational Cases.
+
+    This is a projection only: case state/evidence remains owned by the case
+    store. The text is intentionally short and fully redacted before returning.
+    """
+
+    actionable = [case for case in cases if case.status in {"open", "acknowledged"}]
+    actionable = sorted(actionable, key=_case_order)
+    visible_cases = actionable[:max_cases]
+    date_suffix = f" · {report_date.isoformat()}" if report_date else ""
+    lines = [f"🧠 Orvo — {business_name}", f"Brief operativo{date_suffix}", ""]
+
+    if not actionable:
+        lines.append("✅ Sin temas operativos abiertos por ahora.")
+        return redact_text("\n".join(lines)) or "[REDACTED]"
+
+    total_plural = "tema operativo abierto" if len(actionable) == 1 else "temas operativos abiertos"
+    if len(actionable) > len(visible_cases):
+        shown_plural = "principal" if len(visible_cases) == 1 else "principales"
+        lines.append(f"Hay {len(actionable)} {total_plural}; te muestro los {len(visible_cases)} {shown_plural}:")
+    else:
+        review_plural = "tema operativo" if len(actionable) == 1 else "temas operativos"
+        lines.append(f"Hoy hay {len(actionable)} {review_plural} para revisar:")
+
+    for index, case in enumerate(visible_cases, start=1):
+        prefix = "🔴" if case.severity == "critical" else "🟡" if case.severity == "warning" else "ℹ️"
+        lines.extend(["", f"{index}. {prefix} {case.title}", f"   Caso: {case.case_id}"])
+        sources = _case_sources(case)
+        if sources:
+            lines.append("   Evidencia: " + " · ".join(sources))
+        metric_lines = _case_metric_lines(case)
+        if metric_lines:
+            lines.append("   Métricas: " + " · ".join(metric_lines))
+        if _case_is_degraded(case):
+            lines.append("   ⚠️ Evidencia degradada: revisar frescura antes de decidir.")
+        recommended_action = case.metadata.get("recommended_action")
+        if recommended_action:
+            lines.append(f"   Acción sugerida: {recommended_action}")
+
+    return redact_text("\n".join(lines)) or "[REDACTED]"
 
 
 def compose_daily_report_text(report: DailyReport) -> str:
