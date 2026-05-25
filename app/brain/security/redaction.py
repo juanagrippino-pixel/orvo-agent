@@ -26,6 +26,9 @@ _SECRET_KEY_PARTS = (
 )
 
 _BEARER_RE = re.compile(r"Bearer\s+[^\s,;]+", flags=re.IGNORECASE)
+_BASIC_AUTH_HEADER_RE = re.compile(
+    r"(?i)([\"']?\bauthorization\b[\"']?\s*[:=]\s*)Basic\s+[^\s,;]+"
+)
 _SECRET_KEY_PATTERN = (
     r"access_token|refresh_token|api_key|apikey|authorization_code|oauth_code|authorization|auth_header|password|"
     r"private_key|credential|cookie|session|signature|secret|token"
@@ -62,6 +65,7 @@ def redact_text(value: str | None) -> str | None:
     if value is None:
         return None
     redacted = _PRIVATE_KEY_BLOCK_RE.sub("[REDACTED_PRIVATE_KEY]", value)
+    redacted = _BASIC_AUTH_HEADER_RE.sub(lambda match: f"{match.group(1)}[REDACTED]", redacted)
     redacted = _BEARER_RE.sub("Bearer [REDACTED]", redacted)
     redacted = _QUOTED_KEY_VALUE_SECRET_RE.sub(
         lambda match: f"{match.group(1)}{match.group(3)}[REDACTED]{match.group(5)}",

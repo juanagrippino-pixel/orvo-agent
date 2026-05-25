@@ -39,3 +39,15 @@ def test_redact_secrets_handles_bearer_headers_url_tokens_private_keys_and_neste
     assert "abc" not in rendered
     assert "safe=ok" in rendered
     assert "state=safe-state" in rendered
+
+
+def test_redact_text_removes_multi_token_basic_authorization_headers():
+    from app.brain.security.redaction import redact_text
+
+    text = "connector failed with Authorization: Basic dXNlcjpzdXBlcl9zZWNyZXQ= while syncing"
+
+    redacted = redact_text(text)
+
+    assert "Basic dXNlcjpzdXBlcl9zZWNyZXQ=" not in (redacted or "")
+    assert "dXNlcjpzdXBlcl9zZWNyZXQ=" not in (redacted or "")
+    assert redacted == "connector failed with Authorization: [REDACTED] while syncing"
