@@ -3,6 +3,13 @@ from datetime import date
 from app.brain.models import DailyReport, Evidence, Metric
 
 
+def _assert_public_error_redacted(response, *raw_values):
+    rendered = response.get_data(as_text=True)
+    for raw_value in raw_values:
+        assert raw_value not in rendered
+    assert "[REDACTED]" in rendered
+
+
 def test_google_sheets_daily_report_endpoint_returns_report(monkeypatch):
     from server import app
 
@@ -46,3 +53,22 @@ def test_google_sheets_daily_report_endpoint_rejects_missing_required_fields():
 
     assert response.status_code == 400
     assert "spreadsheet_id" in response.get_json()["error"]
+
+
+def test_google_sheets_daily_report_endpoint_redacts_secret_shaped_value_errors(monkeypatch):
+    from server import app
+
+    def raise_secret_error(**kwargs):
+        raise ValueError("Sheets auth callback failed refresh_token=raw-refresh-token")
+
+    monkeypatch.setattr("server.build_daily_report_from_sheet", raise_secret_error)
+
+    client = app.test_client()
+    response = client.post(
+        "/brain/reports/daily/google-sheets",
+        json={"business_name": "Artemea", "spreadsheet_id": "abc123", "range_name": "Daily!A1:F1000"},
+    )
+
+    assert response.status_code == 400
+    assert "[REDACTED]" in response.get_json()["error"]
+    _assert_public_error_redacted(response, "raw-refresh-token")

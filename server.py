@@ -36,6 +36,7 @@ from app.brain.adapters.meta_ads import (
     build_daily_report_from_meta_ads,
 )
 from app.brain.reporting import compose_daily_report_text
+from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.operator_api import (
     OperatorAPIError,
     apply_case_action,
@@ -105,6 +106,17 @@ def _internal_error(business_id: str, code: str, message: str, *, status_code: i
         ),
         status_code,
     )
+
+
+def _public_error_text(exc: Exception) -> str:
+    redacted = redact_text(str(exc))
+    if not redacted:
+        return "[REDACTED]"
+    return str(redact_secrets(redacted))
+
+
+def _public_error_response(payload: dict, status_code: int):
+    return jsonify(redact_secrets(payload)), status_code
 
 
 def _authorize_internal_operator(business_id: str):
@@ -273,7 +285,7 @@ def brain_daily_report_google_sheets():
             source_label=payload.get("source_label"),
         )
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _public_error_response({"error": _public_error_text(e)}, 400)
 
     return jsonify({
         "text": compose_daily_report_text(report),
@@ -302,7 +314,7 @@ def brain_daily_report_csv():
             source_label=payload.get("source_label"),
         )
     except (FileNotFoundError, ValueError) as e:
-        return jsonify({"error": str(e)}), 400
+        return _public_error_response({"error": _public_error_text(e)}, 400)
 
     return jsonify({
         "text": compose_daily_report_text(report),
@@ -333,9 +345,9 @@ def brain_daily_report_tiendanube():
             source_label=payload.get("source_label") or "Tiendanube",
         )
     except TiendanubeAuthError as e:
-        return jsonify({"error": str(e)}), 401
+        return _public_error_response({"error": _public_error_text(e)}, 401)
     except TiendanubeConnectionError as e:
-        return jsonify({"error": str(e)}), 502
+        return _public_error_response({"error": _public_error_text(e)}, 502)
 
     return jsonify({
         "text": compose_daily_report_text(report),
@@ -366,11 +378,11 @@ def brain_daily_report_mercadolibre():
             source_label=payload.get("source_label") or "MercadoLibre",
         )
     except MercadoLibreAuthError as e:
-        return jsonify({"error": "mercadolibre_auth_error", "message": str(e)}), 401
+        return _public_error_response({"error": "mercadolibre_auth_error", "message": _public_error_text(e)}, 401)
     except (MercadoLibreAPIError, MercadoLibreConnectionError) as e:
-        return jsonify({"error": "mercadolibre_api_error", "message": str(e)}), 502
+        return _public_error_response({"error": "mercadolibre_api_error", "message": _public_error_text(e)}, 502)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _public_error_response({"error": _public_error_text(e)}, 400)
 
     return jsonify({
         "text": compose_daily_report_text(report),
@@ -400,11 +412,11 @@ def brain_daily_report_meta_ads():
             source_label=payload.get("source_label") or "Meta Ads",
         )
     except MetaAdsAuthError as e:
-        return jsonify({"error": "meta_ads_auth_error", "message": str(e)}), 401
+        return _public_error_response({"error": "meta_ads_auth_error", "message": _public_error_text(e)}, 401)
     except (MetaAdsAPIError, MetaAdsConnectionError) as e:
-        return jsonify({"error": "meta_ads_api_error", "message": str(e)}), 502
+        return _public_error_response({"error": "meta_ads_api_error", "message": _public_error_text(e)}, 502)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _public_error_response({"error": _public_error_text(e)}, 400)
 
     return jsonify({
         "text": compose_daily_report_text(report),

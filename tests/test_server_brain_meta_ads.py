@@ -1,7 +1,16 @@
 from datetime import date
 
-from app.brain.adapters.meta_ads import MetaAdsAPIError, MetaAdsAuthError
+import pytest
+
+from app.brain.adapters.meta_ads import MetaAdsAPIError, MetaAdsAuthError, MetaAdsConnectionError
 from app.brain.models import DailyReport, Evidence, Metric
+
+
+def _assert_public_error_redacted(response, *raw_values):
+    rendered = response.get_data(as_text=True)
+    for raw_value in raw_values:
+        assert raw_value not in rendered
+    assert "[REDACTED]" in rendered
 
 
 def test_meta_ads_daily_report_endpoint_returns_text_and_report(monkeypatch):
@@ -112,3 +121,63 @@ def test_meta_ads_daily_report_endpoint_maps_api_errors(monkeypatch):
 
     assert response.status_code == 502
     assert response.get_json()["error"] == "meta_ads_api_error"
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_status", "expected_error", "raw_values"),
+    [
+        (
+            MetaAdsAuthError("Meta Ads auth failed access_token=raw-public-token"),
+            401,
+            "meta_ads_auth_error",
+            ("raw-public-token",),
+        ),
+        (
+            MetaAdsAPIError("Meta Ads API failed Authorization: Basic dXNlcjpzdXBlcl9zZWNyZXQ="),
+            502,
+            "meta_ads_api_error",
+            ("dXNlcjpzdXBlcl9zZWNyZXQ=",),
+        ),
+        (
+            MetaAdsConnectionError("Meta Ads connection failed refresh_token=raw-refresh-token"),
+            502,
+            "meta_ads_api_error",
+            ("raw-refresh-token",),
+        ),
+        (
+            ValueError("Meta Ads payload invalid refresh_token=raw-refresh-token"),
+            400,
+            None,
+            ("raw-refresh-token",),
+        ),
+    ],
+)
+def test_meta_ads_daily_report_endpoint_redacts_secret_shaped_errors(
+    monkeypatch,
+    exception,
+    expected_status,
+    expected_error,
+    raw_values,
+):
+    from server import app
+
+    client = app.test_client()
+
+    def raise_secret_error(**kwargs):
+        raise exception
+
+    monkeypatch.setattr("server.build_daily_report_from_meta_ads", raise_secret_error)
+
+    response = client.post(
+        "/brain/reports/daily/meta-ads",
+        json={"business_name": "Demo", "ad_account_id": "act_123", "access_token": "tok"},
+    )
+
+    assert response.status_code == expected_status
+    payload = response.get_json()
+    if expected_error is not None:
+        assert payload["error"] == expected_error
+        assert "[REDACTED]" in payload["message"]
+    else:
+        assert "[REDACTED]" in payload["error"]
+    _assert_public_error_redacted(response, *raw_values)

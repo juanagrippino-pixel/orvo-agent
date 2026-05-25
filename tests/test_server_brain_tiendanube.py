@@ -1,7 +1,16 @@
 from datetime import date
 
+import pytest
+
 from app.brain.models import DailyReport, Evidence, Metric
 from app.brain.adapters.tiendanube import TiendanubeAuthError, TiendanubeConnectionError
+
+
+def _assert_public_error_redacted(response, *raw_values):
+    rendered = response.get_data(as_text=True)
+    for raw_value in raw_values:
+        assert raw_value not in rendered
+    assert "[REDACTED]" in rendered
 
 
 def test_tiendanube_daily_report_endpoint_returns_report(monkeypatch):
@@ -108,3 +117,43 @@ def test_tiendanube_daily_report_endpoint_maps_connection_errors(monkeypatch):
 
     assert response.status_code == 502
     assert "api down" in response.get_json()["error"]
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_status", "raw_values"),
+    [
+        (
+            TiendanubeAuthError("Tiendanube auth failed access_token=raw-public-token"),
+            401,
+            ("raw-public-token",),
+        ),
+        (
+            TiendanubeConnectionError(
+                "Tiendanube transport failed Authorization: Basic dXNlcjpzdXBlcl9zZWNyZXQ="
+            ),
+            502,
+            ("dXNlcjpzdXBlcl9zZWNyZXQ=",),
+        ),
+    ],
+)
+def test_tiendanube_daily_report_endpoint_redacts_secret_shaped_errors(
+    monkeypatch,
+    exception,
+    expected_status,
+    raw_values,
+):
+    from server import app
+
+    def raise_secret_error(**kwargs):
+        raise exception
+
+    monkeypatch.setattr("server.build_daily_report_from_tiendanube", raise_secret_error)
+
+    client = app.test_client()
+    response = client.post(
+        "/brain/reports/daily/tiendanube",
+        json={"business_name": "Artemea", "store_id": "12345", "access_token": "tok"},
+    )
+
+    assert response.status_code == expected_status
+    _assert_public_error_redacted(response, *raw_values)

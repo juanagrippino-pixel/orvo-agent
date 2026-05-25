@@ -1,7 +1,20 @@
 from datetime import date
 
-from app.brain.adapters.mercadolibre import MercadoLibreAPIError, MercadoLibreAuthError
+import pytest
+
+from app.brain.adapters.mercadolibre import (
+    MercadoLibreAPIError,
+    MercadoLibreAuthError,
+    MercadoLibreConnectionError,
+)
 from app.brain.models import DailyReport, Evidence, Metric
+
+
+def _assert_public_error_redacted(response, *raw_values):
+    rendered = response.get_data(as_text=True)
+    for raw_value in raw_values:
+        assert raw_value not in rendered
+    assert "[REDACTED]" in rendered
 
 
 def test_mercadolibre_daily_report_endpoint_returns_text_and_report(monkeypatch):
@@ -115,3 +128,65 @@ def test_mercadolibre_daily_report_endpoint_maps_api_errors(monkeypatch):
 
     assert response.status_code == 502
     assert response.get_json()["error"] == "mercadolibre_api_error"
+
+
+@pytest.mark.parametrize(
+    ("exception", "expected_status", "expected_error", "raw_values"),
+    [
+        (
+            MercadoLibreAuthError("MercadoLibre auth failed access_token=raw-public-token"),
+            401,
+            "mercadolibre_auth_error",
+            ("raw-public-token",),
+        ),
+        (
+            MercadoLibreAPIError(
+                "MercadoLibre API failed Authorization: Basic dXNlcjpzdXBlcl9zZWNyZXQ="
+            ),
+            502,
+            "mercadolibre_api_error",
+            ("dXNlcjpzdXBlcl9zZWNyZXQ=",),
+        ),
+        (
+            MercadoLibreConnectionError("MercadoLibre connection failed refresh_token=raw-refresh-token"),
+            502,
+            "mercadolibre_api_error",
+            ("raw-refresh-token",),
+        ),
+        (
+            ValueError("MercadoLibre payload invalid refresh_token=raw-refresh-token"),
+            400,
+            None,
+            ("raw-refresh-token",),
+        ),
+    ],
+)
+def test_mercadolibre_daily_report_endpoint_redacts_secret_shaped_errors(
+    monkeypatch,
+    exception,
+    expected_status,
+    expected_error,
+    raw_values,
+):
+    from server import app
+
+    client = app.test_client()
+
+    def raise_secret_error(**kwargs):
+        raise exception
+
+    monkeypatch.setattr("server.build_daily_report_from_mercadolibre", raise_secret_error)
+
+    response = client.post(
+        "/brain/reports/daily/mercadolibre",
+        json={"business_name": "Demo", "seller_id": "123", "access_token": "tok"},
+    )
+
+    assert response.status_code == expected_status
+    payload = response.get_json()
+    if expected_error is not None:
+        assert payload["error"] == expected_error
+        assert "[REDACTED]" in payload["message"]
+    else:
+        assert "[REDACTED]" in payload["error"]
+    _assert_public_error_redacted(response, *raw_values)

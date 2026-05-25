@@ -1,6 +1,15 @@
 from datetime import date
 
+import pytest
+
 from app.brain.models import DailyReport, Evidence, Metric
+
+
+def _assert_public_error_redacted(response, *raw_values):
+    rendered = response.get_data(as_text=True)
+    for raw_value in raw_values:
+        assert raw_value not in rendered
+    assert "[REDACTED]" in rendered
 
 
 def test_csv_daily_report_endpoint_returns_report(monkeypatch, tmp_path):
@@ -43,3 +52,35 @@ def test_csv_daily_report_endpoint_rejects_missing_required_fields():
 
     assert response.status_code == 400
     assert "csv_path" in response.get_json()["error"]
+
+
+@pytest.mark.parametrize(
+    ("exception", "raw_values"),
+    [
+        (
+            FileNotFoundError("CSV missing access_token=raw-public-token"),
+            ("raw-public-token",),
+        ),
+        (
+            ValueError("CSV invalid Authorization: Basic dXNlcjpzdXBlcl9zZWNyZXQ="),
+            ("dXNlcjpzdXBlcl9zZWNyZXQ=",),
+        ),
+    ],
+)
+def test_csv_daily_report_endpoint_redacts_secret_shaped_errors(monkeypatch, exception, raw_values):
+    from server import app
+
+    def raise_secret_error(**kwargs):
+        raise exception
+
+    monkeypatch.setattr("server.build_daily_report_from_csv_file", raise_secret_error)
+
+    client = app.test_client()
+    response = client.post(
+        "/brain/reports/daily/csv",
+        json={"business_name": "Artemea", "csv_path": "/tmp/orders.csv"},
+    )
+
+    assert response.status_code == 400
+    assert "[REDACTED]" in response.get_json()["error"]
+    _assert_public_error_redacted(response, *raw_values)
