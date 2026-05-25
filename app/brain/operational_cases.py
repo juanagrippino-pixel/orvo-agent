@@ -28,7 +28,8 @@ OperationalCaseType = Literal[
     "channel_mix_shift",
 ]
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
-TimelineEventType = Literal["case_opened", "case_updated", "case_reopened", "status_changed"]
+EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
+TimelineEventType = Literal["case_opened", "case_updated", "case_reopened", "status_changed", "evidence_attached"]
 ActorType = Literal["system", "operator"]
 
 _CASE_STATUS_TRANSITIONS: dict[str, set[str]] = {
@@ -67,12 +68,103 @@ def _safe_metadata(value: Any) -> dict[str, Any]:
     return redacted if isinstance(redacted, dict) else {}
 
 
+class OperationalCaseEvidenceMetric(BaseModel):
+    """Scalar evidence metric captured for an Operational Case snapshot."""
+
+    metric_key: str = Field(..., min_length=1)
+    label: str | None = None
+    value: int | float | str | bool | None = None
+    unit: str | None = None
+    currency: str | None = None
+    window: str | None = None
+    observed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("observed_at")
+    @classmethod
+    def normalize_observed_at(cls, value: datetime | None) -> datetime | None:
+        return _as_utc(value) if value is not None else None
+
+    @field_validator("label", "unit", "currency", "window", mode="before")
+    @classmethod
+    def redact_optional_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        return redact_text(str(value)) or "[REDACTED]"
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def redact_string_value(cls, value: Any) -> Any:
+        return redact_text(value) if isinstance(value, str) else value
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def redact_metadata_values(cls, value: Any) -> dict[str, Any]:
+        return _safe_metadata(value)
+
+
+class OperationalCaseEvidenceSnapshot(BaseModel):
+    """Evidence snapshot attached to a case occurrence without raw payloads."""
+
+    snapshot_id: str = Field(default_factory=lambda: str(uuid4()))
+    snapshot_key: str = Field(..., min_length=1)
+    captured_at: datetime = Field(default_factory=_now_utc)
+    run_id: str | None = None
+    artifact_ref: str | None = None
+    evidence_ref: str = Field(..., min_length=1)
+    source: str = Field(..., min_length=1)
+    source_label: str | None = None
+    case_type: OperationalCaseType | None = None
+    entity_scope: dict[str, Any] = Field(default_factory=dict)
+    summary: str = Field(..., min_length=1)
+    freshness_state: EvidenceFreshnessState = "unknown"
+    metrics: list[OperationalCaseEvidenceMetric] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("captured_at")
+    @classmethod
+    def normalize_captured_at(cls, value: datetime) -> datetime:
+        return _as_utc(value)
+
+    @field_validator("snapshot_key", mode="before")
+    @classmethod
+    def redact_snapshot_key(cls, value: Any) -> str:
+        return redact_uri(str(value)) or "[REDACTED]"
+
+    @field_validator("artifact_ref", mode="before")
+    @classmethod
+    def redact_optional_ref(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        return redact_uri(str(value)) or "[REDACTED]"
+
+    @field_validator("evidence_ref", mode="before")
+    @classmethod
+    def redact_required_ref(cls, value: Any) -> str:
+        return redact_uri(str(value)) or "[REDACTED]"
+
+    @field_validator("source", "source_label", "summary", mode="before")
+    @classmethod
+    def redact_text_values(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        return redact_text(str(value)) or "[REDACTED]"
+
+    @field_validator("metadata", "entity_scope", mode="before")
+    @classmethod
+    def redact_dict_values(cls, value: Any) -> dict[str, Any]:
+        return _safe_metadata(value)
+
+
 class OperationalCaseTimelineEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid4()))
     event_type: TimelineEventType
     actor_type: ActorType = "system"
     actor_ref: str = "orvo_runtime"
     run_id: str | None = None
+    case_id: str | None = None
+    artifact_ref: str | None = None
+    evidence_snapshot_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now_utc)
     summary: str = Field(..., min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -86,6 +178,18 @@ class OperationalCaseTimelineEvent(BaseModel):
     @classmethod
     def redact_summary(cls, value: str) -> str:
         return redact_text(value) or "[REDACTED]"
+
+    @field_validator("artifact_ref", mode="before")
+    @classmethod
+    def redact_artifact_ref(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        return redact_uri(str(value)) or "[REDACTED]"
+
+    @field_validator("evidence_snapshot_ids", mode="before")
+    @classmethod
+    def redact_snapshot_ids(cls, value: Any) -> list[str]:
+        return [redact_text(str(item)) or "[REDACTED]" for item in (value or [])]
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -106,6 +210,7 @@ class OperationalCaseDetection(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
     run_id: str | None = None
     artifact_refs: list[str] = Field(default_factory=list)
+    evidence_snapshots: list[OperationalCaseEvidenceSnapshot] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("title", mode="before")
@@ -142,6 +247,7 @@ class OperationalCase(BaseModel):
     source_run_ids: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     artifact_refs: list[str] = Field(default_factory=list)
+    evidence_snapshots: list[OperationalCaseEvidenceSnapshot] = Field(default_factory=list)
     timeline: list[OperationalCaseTimelineEvent] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -176,6 +282,100 @@ class OperationalCase(BaseModel):
         if self.status == "resolved" and self.resolved_at is None:
             raise ValueError("resolved case requires resolved_at")
         return self
+
+
+def _unique_snapshots(snapshots: list[OperationalCaseEvidenceSnapshot]) -> list[OperationalCaseEvidenceSnapshot]:
+    seen: set[str] = set()
+    result: list[OperationalCaseEvidenceSnapshot] = []
+    for snapshot in snapshots:
+        if snapshot.snapshot_key in seen:
+            continue
+        seen.add(snapshot.snapshot_key)
+        result.append(snapshot)
+    return result
+
+
+def _canonical_snapshot_ids(
+    snapshots: list[OperationalCaseEvidenceSnapshot],
+    requested_keys: list[str],
+) -> list[str]:
+    by_key = {snapshot.snapshot_key: snapshot.snapshot_id for snapshot in snapshots}
+    ids: list[str] = []
+    seen: set[str] = set()
+    for key in requested_keys:
+        snapshot_id = by_key.get(key)
+        if snapshot_id is None or snapshot_id in seen:
+            continue
+        seen.add(snapshot_id)
+        ids.append(snapshot_id)
+    return ids
+
+
+def _source_from_evidence_ref(evidence_ref: str) -> str:
+    if evidence_ref.startswith("evidence://"):
+        remainder = evidence_ref.removeprefix("evidence://")
+        return remainder.split("/", 1)[0] or "unknown"
+    return "unknown"
+
+
+def _snapshot_key(
+    *,
+    run_id: str | None,
+    evidence_ref: str,
+    case_type: OperationalCaseType,
+    entity_scope: dict[str, Any],
+) -> str:
+    entity_kind = entity_scope.get("kind", "unknown")
+    entity_id = entity_scope.get("id", "unknown")
+    return f"{run_id or 'unknown-run'}/{evidence_ref}/{case_type}/{entity_kind}/{entity_id}"
+
+
+def _minimal_snapshot_from_detection(
+    detection: OperationalCaseDetection,
+    *,
+    evidence_ref: str,
+    artifact_ref: str | None,
+    source_label: str | None = None,
+    captured_at: datetime | None = None,
+) -> OperationalCaseEvidenceSnapshot:
+    return OperationalCaseEvidenceSnapshot(
+        snapshot_key=_snapshot_key(
+            run_id=detection.run_id,
+            evidence_ref=evidence_ref,
+            case_type=detection.case_type,
+            entity_scope=detection.entity_scope,
+        ),
+        captured_at=captured_at or _now_utc(),
+        run_id=detection.run_id,
+        artifact_ref=artifact_ref,
+        evidence_ref=evidence_ref,
+        source=_source_from_evidence_ref(evidence_ref),
+        source_label=source_label,
+        case_type=detection.case_type,
+        entity_scope=detection.entity_scope,
+        summary=detection.title,
+        freshness_state="unknown",
+    )
+
+
+def _snapshots_for_detection(
+    detection: OperationalCaseDetection,
+    *,
+    captured_at: datetime,
+) -> list[OperationalCaseEvidenceSnapshot]:
+    if detection.evidence_snapshots:
+        return _unique_snapshots(detection.evidence_snapshots)
+    return _unique_snapshots(
+        [
+            _minimal_snapshot_from_detection(
+                detection,
+                evidence_ref=evidence_ref,
+                artifact_ref=detection.artifact_refs[0] if detection.artifact_refs else None,
+                captured_at=captured_at,
+            )
+            for evidence_ref in detection.evidence_refs
+        ]
+    )
 
 
 class OperationalCaseStore(Protocol):
@@ -225,10 +425,14 @@ class _OperationalCaseMutations:
         detected_at: datetime | None = None,
     ) -> OperationalCase:
         detected_at = _as_utc(detected_at) if detected_at is not None else _now_utc()
+        detection_snapshots = _snapshots_for_detection(detection, captured_at=detected_at)
+        detection_snapshot_keys = [snapshot.snapshot_key for snapshot in detection_snapshots]
+        detection_artifact_ref = detection.artifact_refs[0] if detection.artifact_refs else None
         existing = self.find_by_dedupe_key(detection.business_id, detection.dedupe_key)  # type: ignore[attr-defined]
         if existing is None:
+            case_id = str(uuid4())
             case = OperationalCase(
-                case_id=str(uuid4()),
+                case_id=case_id,
                 business_id=detection.business_id,
                 case_type=detection.case_type,
                 dedupe_key=detection.dedupe_key,
@@ -243,6 +447,7 @@ class _OperationalCaseMutations:
                 source_run_ids=[detection.run_id] if detection.run_id else [],
                 evidence_refs=_unique(detection.evidence_refs),
                 artifact_refs=_unique(detection.artifact_refs),
+                evidence_snapshots=detection_snapshots,
                 metadata=detection.metadata,
                 timeline=[
                     OperationalCaseTimelineEvent(
@@ -250,6 +455,9 @@ class _OperationalCaseMutations:
                         actor_type="system",
                         actor_ref="orvo_runtime",
                         run_id=detection.run_id,
+                        case_id=case_id,
+                        artifact_ref=detection_artifact_ref,
+                        evidence_snapshot_ids=_canonical_snapshot_ids(detection_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"Opened {detection.case_type} case from deterministic detection.",
                         metadata={"dedupe_key": detection.dedupe_key},
@@ -260,6 +468,7 @@ class _OperationalCaseMutations:
             is_recurrence = existing.status == "resolved"
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
+            merged_snapshots = _unique_snapshots([*existing.evidence_snapshots, *detection_snapshots])
             update: dict[str, Any] = {
                 "title": detection.title,
                 "status": "open" if is_recurrence else existing.status,
@@ -274,6 +483,7 @@ class _OperationalCaseMutations:
                 ]),
                 "evidence_refs": _unique([*existing.evidence_refs, *detection.evidence_refs]),
                 "artifact_refs": _unique([*existing.artifact_refs, *detection.artifact_refs]),
+                "evidence_snapshots": merged_snapshots,
                 "metadata": {**existing.metadata, **detection.metadata},
                 "timeline": [
                     *existing.timeline,
@@ -282,6 +492,9 @@ class _OperationalCaseMutations:
                         actor_type="system",
                         actor_ref="orvo_runtime",
                         run_id=detection.run_id,
+                        case_id=existing.case_id,
+                        artifact_ref=detection_artifact_ref,
+                        evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"{event_verb} {detection.case_type} case from deterministic detection.",
                         metadata={"dedupe_key": detection.dedupe_key},
@@ -321,6 +534,7 @@ class _OperationalCaseMutations:
                     event_type="status_changed",
                     actor_type=actor_type,
                     actor_ref=actor_ref,
+                    case_id=record.case_id,
                     created_at=transitioned_at,
                     summary=reason or f"Status changed from {record.status} to {status}.",
                     metadata={"from_status": record.status, "to_status": status},
@@ -489,6 +703,27 @@ def _evidence_refs_for_insight(insight: Insight, report: DailyReport, case_type:
     return [f"evidence://{source}/{report.report_date.isoformat()}/{case_type}" for source in sources]
 
 
+def _evidence_snapshots_for_insight(
+    insight: Insight,
+    report: DailyReport,
+    case_type: OperationalCaseType,
+    detection: OperationalCaseDetection,
+    artifact_ref: str | None,
+) -> list[OperationalCaseEvidenceSnapshot]:
+    snapshots: list[OperationalCaseEvidenceSnapshot] = []
+    for evidence in insight.evidence:
+        evidence_ref = f"evidence://{evidence.source}/{report.report_date.isoformat()}/{case_type}"
+        snapshots.append(
+            _minimal_snapshot_from_detection(
+                detection,
+                evidence_ref=evidence_ref,
+                artifact_ref=artifact_ref,
+                source_label=evidence.label,
+            )
+        )
+    return _unique_snapshots(snapshots)
+
+
 def make_data_stale_detection(
     *,
     business_id: str,
@@ -555,25 +790,37 @@ def detect_cases_from_report(
         case_type = _case_type_for_insight(insight)
         if case_type is None:
             continue
-        detections.append(
-            OperationalCaseDetection(
-                business_id=business_id,
-                case_type=case_type,
-                dedupe_key=_dedupe_key(business_id, case_type),
-                title=insight.title,
-                severity=insight.severity,
-                priority_score=_priority_for_severity(insight.severity),
-                entity_scope=_entity_scope(case_type),
-                evidence_refs=_evidence_refs_for_insight(insight, report, case_type),
-                run_id=run_id,
-                artifact_refs=[artifact_ref] if artifact_ref else [],
-                metadata={
-                    "insight_title": insight.title,
-                    "insight_explanation": insight.explanation,
-                    "recommended_action": insight.recommended_action,
-                },
-            )
+        detection = OperationalCaseDetection(
+            business_id=business_id,
+            case_type=case_type,
+            dedupe_key=_dedupe_key(business_id, case_type),
+            title=insight.title,
+            severity=insight.severity,
+            priority_score=_priority_for_severity(insight.severity),
+            entity_scope=_entity_scope(case_type),
+            evidence_refs=_evidence_refs_for_insight(insight, report, case_type),
+            run_id=run_id,
+            artifact_refs=[artifact_ref] if artifact_ref else [],
+            metadata={
+                "insight_title": insight.title,
+                "insight_explanation": insight.explanation,
+                "recommended_action": insight.recommended_action,
+            },
         )
+        detection = detection.model_copy(
+            update={
+                "evidence_snapshots": _evidence_snapshots_for_insight(
+                    insight,
+                    report,
+                    case_type,
+                    detection,
+                    artifact_ref,
+                )
+            },
+            deep=True,
+        )
+        detection = OperationalCaseDetection.model_validate(detection.model_dump())
+        detections.append(detection)
     return detections
 
 

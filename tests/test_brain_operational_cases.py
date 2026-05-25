@@ -14,6 +14,8 @@ from app.brain.models import DailyReport, Evidence, Insight
 from app.brain.operational_cases import (
     InMemoryOperationalCaseStore,
     OperationalCaseDetection,
+    OperationalCaseEvidenceMetric,
+    OperationalCaseEvidenceSnapshot,
     OperationalCaseStatusError,
     SQLiteOperationalCaseStore,
     detect_cases_from_report,
@@ -33,7 +35,7 @@ def conn():
     c.close()
 
 
-def make_stockout_detection(*, run_id: str = "run-1", evidence_ref: str = "evidence://tn/stock/2026-05-24"):
+def make_stockout_detection(*, run_id: str = "run-1", evidence_ref: str = "evidence://tn/stock/2026-05-24", snapshots=None):
     return OperationalCaseDetection(
         business_id="artemea",
         case_type="stockout_risk",
@@ -45,8 +47,128 @@ def make_stockout_detection(*, run_id: str = "run-1", evidence_ref: str = "evide
         evidence_refs=[evidence_ref],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/daily-report"],
+        evidence_snapshots=snapshots or [],
         metadata={"recommended_action": "Reponer stock", "access_token": "fixture_secret_token"},
     )
+
+
+def make_stock_snapshot(
+    *,
+    run_id: str = "run-1",
+    captured_at: datetime | None = None,
+    token: str = "raw_snapshot_secret",
+    snapshot_id: str | None = None,
+    snapshot_key: str | None = None,
+):
+    kwargs = {"snapshot_id": snapshot_id} if snapshot_id is not None else {}
+    return OperationalCaseEvidenceSnapshot(
+        **kwargs,
+        snapshot_key=snapshot_key or f"{run_id}/evidence://tn/stock/2026-05-24/stockout_risk/business/monitored",
+        captured_at=captured_at or utc_dt(8),
+        run_id=run_id,
+        artifact_ref=f"ledger://runs/{run_id}/daily-report?access_token={token}",
+        evidence_ref=f"evidence://tiendanube/{run_id}/stockout_risk?api_key={token}",
+        source="tiendanube",
+        source_label=f"Tiendanube access_token={token}",
+        case_type="stockout_risk",
+        entity_scope={"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
+        summary=f"Quedan pocas unidades. Bearer {token}",
+        freshness_state="fresh",
+        metrics=[
+            OperationalCaseEvidenceMetric(
+                metric_key="commerce.inventory.available_units",
+                label=f"Stock access_token={token}",
+                value=3,
+                unit="units",
+                window="daily",
+                observed_at=captured_at or utc_dt(8),
+                metadata={"access_token": token},
+            )
+        ],
+        metadata={"access_token": token, "safe_note": "fixture"},
+    )
+
+
+def test_operational_case_persists_redacted_evidence_snapshots_and_dedupes_by_snapshot_key(conn):
+    snapshot = make_stock_snapshot(run_id="run-1", captured_at=utc_dt(8), token="raw_snapshot_secret")
+    store = InMemoryOperationalCaseStore()
+
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-1", snapshots=[snapshot]), detected_at=utc_dt(8))
+    duplicate = store.upsert_detection(make_stockout_detection(run_id="run-1", snapshots=[snapshot]), detected_at=utc_dt(9))
+    sqlite_store = SQLiteOperationalCaseStore(conn)
+    sqlite_case = sqlite_store.upsert_detection(make_stockout_detection(run_id="run-1", snapshots=[snapshot]), detected_at=utc_dt(8))
+    reloaded = sqlite_store.get_case(sqlite_case.case_id)
+
+    assert duplicate.case_id == opened.case_id
+    assert len(duplicate.evidence_snapshots) == 1
+    assert duplicate.evidence_snapshots[0].snapshot_key == snapshot.snapshot_key
+    assert duplicate.timeline[-1].evidence_snapshot_ids == [snapshot.snapshot_id]
+    assert reloaded is not None
+    assert len(reloaded.evidence_snapshots) == 1
+    assert "raw_snapshot_secret" not in duplicate.model_dump_json()
+    assert "raw_snapshot_secret" not in reloaded.model_dump_json()
+
+
+def test_evidence_snapshot_key_is_redacted_before_persistence(conn):
+    snapshot = make_stock_snapshot(
+        snapshot_key="run-1/evidence://tiendanube/stockout?access_token=raw_snapshot_key_secret",
+        token="raw_snapshot_key_secret",
+    )
+    sqlite_store = SQLiteOperationalCaseStore(conn)
+
+    persisted = sqlite_store.upsert_detection(make_stockout_detection(snapshots=[snapshot]), detected_at=utc_dt(8))
+    reloaded = sqlite_store.get_case(persisted.case_id)
+
+    assert reloaded is not None
+    assert "raw_snapshot_key_secret" not in reloaded.model_dump_json()
+    assert reloaded.evidence_snapshots[0].snapshot_key == "run-1/evidence://tiendanube/stockout?access_token=%5BREDACTED%5D"
+
+
+def test_evidence_update_timeline_references_canonical_snapshot_id_when_duplicate_key_recurs():
+    store = InMemoryOperationalCaseStore()
+    original = make_stock_snapshot(snapshot_id="snapshot-original", snapshot_key="run-1/evidence://tn/stock/shared")
+    duplicate = make_stock_snapshot(snapshot_id="snapshot-discarded", snapshot_key="run-1/evidence://tn/stock/shared")
+
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-1", snapshots=[original]), detected_at=utc_dt(8))
+    updated = store.upsert_detection(make_stockout_detection(run_id="run-2", snapshots=[duplicate]), detected_at=utc_dt(9))
+
+    assert updated.case_id == opened.case_id
+    assert [snapshot.snapshot_id for snapshot in updated.evidence_snapshots] == ["snapshot-original"]
+    assert updated.timeline[-1].evidence_snapshot_ids == ["snapshot-original"]
+
+
+def test_detect_cases_from_report_synthesizes_minimal_evidence_snapshots():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    assert len(detections) == 1
+    assert len(detections[0].evidence_snapshots) == 1
+    snapshot = detections[0].evidence_snapshots[0]
+    assert snapshot.snapshot_key == "run-1/evidence://tiendanube/2026-05-24/stockout_risk/stockout_risk/business/monitored"
+    assert snapshot.source == "tiendanube"
+    assert snapshot.source_label == "Tiendanube"
+    assert snapshot.summary == "Stock crítico"
+    assert snapshot.freshness_state == "unknown"
+    assert snapshot.artifact_ref == "ledger://runs/run-1/daily-report"
 
 
 def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():

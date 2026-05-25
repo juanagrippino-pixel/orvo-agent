@@ -7,6 +7,7 @@ helpers over the canonical stores. The stores remain source of truth.
 from __future__ import annotations
 
 from typing import Any, Literal, get_args
+from datetime import datetime, timezone
 
 from app.brain.operational_cases import (
     OperationalCase,
@@ -33,6 +34,26 @@ class OperatorAPIError(Exception):
         self.message = redact_text(message) or "Operator API error"
         self.status_code = status_code
         super().__init__(self.message)
+
+
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _latest_evidence_at(case: OperationalCase) -> datetime | None:
+    if not case.evidence_snapshots:
+        return None
+    return max(snapshot.captured_at for snapshot in case.evidence_snapshots)
+
+
+def _source_connectors(case: OperationalCase) -> list[str]:
+    return sorted({snapshot.source for snapshot in case.evidence_snapshots if snapshot.source})
+
+
+def _is_degraded(case: OperationalCase) -> bool:
+    return any(snapshot.freshness_state in {"stale", "degraded", "missing"} for snapshot in case.evidence_snapshots)
 
 
 def parse_limit(value: str | None, *, default: int = _DEFAULT_LIMIT, max_limit: int = _MAX_LIMIT) -> int:
@@ -77,13 +98,89 @@ def case_queue_item(case: OperationalCase) -> dict[str, Any]:
             "opened_at": case.opened_at.isoformat(),
             "updated_at": case.updated_at.isoformat(),
             "evidence_count": len(case.evidence_refs),
+            "evidence_snapshot_count": len(case.evidence_snapshots),
+            "latest_evidence_at": _iso(_latest_evidence_at(case)),
+            "source_connectors": _source_connectors(case),
+            "degraded": _is_degraded(case),
             "latest_run_id": case.latest_run_id,
         }
     )
 
 
+def evidence_metric_projection(metric: Any) -> dict[str, Any]:
+    return {
+        "metric_key": metric.metric_key,
+        "label": metric.label,
+        "value": metric.value,
+        "unit": metric.unit,
+        "currency": metric.currency,
+        "window": metric.window,
+        "observed_at": _iso(metric.observed_at),
+        "metadata": metric.metadata,
+    }
+
+
+def evidence_snapshot_projection(snapshot: Any) -> dict[str, Any]:
+    return {
+        "snapshot_id": snapshot.snapshot_id,
+        "snapshot_key": snapshot.snapshot_key,
+        "captured_at": _iso(snapshot.captured_at),
+        "run_id": snapshot.run_id,
+        "artifact_ref": snapshot.artifact_ref,
+        "evidence_ref": snapshot.evidence_ref,
+        "source": snapshot.source,
+        "source_label": snapshot.source_label,
+        "case_type": snapshot.case_type,
+        "entity_scope": snapshot.entity_scope,
+        "summary": snapshot.summary,
+        "freshness_state": snapshot.freshness_state,
+        "metrics": [evidence_metric_projection(metric) for metric in snapshot.metrics],
+        "metadata": snapshot.metadata,
+    }
+
+
+def timeline_event_projection(case: OperationalCase, event: Any) -> dict[str, Any]:
+    return {
+        "event_id": event.event_id,
+        "case_id": event.case_id or case.case_id,
+        "event_type": event.event_type,
+        "actor_type": event.actor_type,
+        "actor_ref": event.actor_ref,
+        "run_id": event.run_id,
+        "artifact_ref": event.artifact_ref,
+        "created_at": _iso(event.created_at),
+        "summary": event.summary,
+        "evidence_snapshot_ids": event.evidence_snapshot_ids,
+        "metadata": event.metadata,
+    }
+
+
 def case_detail(case: OperationalCase) -> dict[str, Any]:
-    return redact_secrets(case.model_dump(mode="json"))
+    return redact_secrets(
+        {
+            "case_id": case.case_id,
+            "business_id": case.business_id,
+            "case_type": case.case_type,
+            "dedupe_key": case.dedupe_key,
+            "title": case.title,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "entity_scope": case.entity_scope,
+            "opened_at": _iso(case.opened_at),
+            "updated_at": _iso(case.updated_at),
+            "acknowledged_at": _iso(case.acknowledged_at),
+            "resolved_at": _iso(case.resolved_at),
+            "latest_run_id": case.latest_run_id,
+            "source_run_ids": case.source_run_ids,
+            "evidence_refs": case.evidence_refs,
+            "artifact_refs": case.artifact_refs,
+            "evidence_snapshot_count": len(case.evidence_snapshots),
+            "evidence_snapshots": [evidence_snapshot_projection(snapshot) for snapshot in case.evidence_snapshots],
+            "timeline": [timeline_event_projection(case, event) for event in case.timeline],
+            "metadata": case.metadata,
+        }
+    )
 
 
 def run_history_item(run: RunRecord) -> dict[str, Any]:

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from app.brain.operational_cases import (
     OperationalCaseDetection,
+    OperationalCaseEvidenceMetric,
+    OperationalCaseEvidenceSnapshot,
     OperationalCaseSeverity,
     OperationalCaseType,
     SQLiteOperationalCaseStore,
@@ -41,6 +43,32 @@ def _case_detection(
         evidence_refs=[f"evidence://{business_id}/{run_id}/{case_type}"],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/daily-report"],
+        evidence_snapshots=[
+            OperationalCaseEvidenceSnapshot(
+                snapshot_key=f"{run_id}/evidence://{business_id}/{run_id}/{case_type}/{case_type}/business/monitored",
+                captured_at=_utc(8),
+                run_id=run_id,
+                artifact_ref=f"ledger://runs/{run_id}/daily-report?access_token=raw_snapshot_secret",
+                evidence_ref=f"evidence://{business_id}/{run_id}/{case_type}?api_key=raw_snapshot_secret",
+                source="tiendanube",
+                source_label="Tiendanube access_token=raw_snapshot_secret",
+                case_type=case_type,
+                entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado"},
+                summary="Snapshot Bearer raw_snapshot_secret",
+                freshness_state="fresh",
+                metrics=[
+                    OperationalCaseEvidenceMetric(
+                        metric_key="commerce.inventory.available_units",
+                        label="Stock access_token=raw_snapshot_secret",
+                        value=3,
+                        unit="units",
+                        observed_at=_utc(8),
+                        metadata={"api_key": "raw_snapshot_secret"},
+                    )
+                ],
+                metadata={"source": "test", "access_token": "raw_snapshot_secret"},
+            )
+        ],
         metadata={"source": "test"},
     )
 
@@ -125,6 +153,33 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert [item["case_id"] for item in body["data"]["cases"]] == [critical_case.case_id, warning_case.case_id]
     assert all(item["business_id"] == "artemea" for item in body["data"]["cases"])
     assert body["data"]["cases"][0]["evidence_count"] == 1
+    assert body["data"]["cases"][0]["evidence_snapshot_count"] == 1
+    assert body["data"]["cases"][0]["latest_evidence_at"] == "2026-05-24T08:00:00Z"
+    assert body["data"]["cases"][0]["source_connectors"] == ["tiendanube"]
+    assert body["data"]["cases"][0]["degraded"] is False
+
+
+def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(f"/internal/brain/businesses/artemea/cases/{case.case_id}", headers=AUTH)
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_snapshot_secret" not in raw_body
+    body = response.get_json()
+    detail = body["data"]["case"]
+    assert detail["case_id"] == case.case_id
+    assert detail["evidence_snapshot_count"] == 1
+    assert detail["evidence_snapshots"][0]["source"] == "tiendanube"
+    assert detail["evidence_snapshots"][0]["freshness_state"] == "fresh"
+    assert detail["evidence_snapshots"][0]["metrics"][0]["metric_key"] == "commerce.inventory.available_units"
+    assert detail["evidence_snapshots"][0]["metrics"][0]["value"] == 3
+    assert detail["timeline"][0]["case_id"] == case.case_id
+    assert detail["timeline"][0]["evidence_snapshot_ids"] == [case.evidence_snapshots[0].snapshot_id]
+    assert detail["timeline"][0]["artifact_ref"] == "ledger://runs/run-artemea-1/daily-report"
+    assert body["redaction_applied"] is True
 
 
 def test_internal_case_detail_cannot_cross_business_scope(monkeypatch, tmp_path):
