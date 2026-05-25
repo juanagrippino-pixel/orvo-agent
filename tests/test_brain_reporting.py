@@ -5,6 +5,7 @@ from app.brain.operational_cases import (
     OperationalCase,
     OperationalCaseEvidenceMetric,
     OperationalCaseEvidenceSnapshot,
+    OperationalCaseTimelineEvent,
 )
 
 
@@ -374,8 +375,12 @@ def _owner_case(
     metric_value: int = 3,
     recommended_action: str = "Reponer stock o pausar campañas.",
     token: str = "raw_case_brief_secret",
+    opened_at: datetime | None = None,
+    timeline: list[OperationalCaseTimelineEvent] | None = None,
 ) -> OperationalCase:
     kwargs = {"resolved_at": _utc(10)} if status == "resolved" else {}
+    opened = opened_at if opened_at is not None else _utc(8)
+    updated = max(opened, _utc(9))
     return OperationalCase(
         **kwargs,
         case_id=case_id,
@@ -387,8 +392,9 @@ def _owner_case(
         severity=severity,  # type: ignore[arg-type]
         priority_score=priority_score,
         entity_scope={"kind": "product", "id": "sku-1", "label": "Remera Negra"},
-        opened_at=_utc(8),
-        updated_at=_utc(9),
+        opened_at=opened,
+        updated_at=updated,
+        timeline=timeline or [],
         latest_run_id="run-1",
         evidence_refs=[f"evidence://tiendanube/stock?access_token={token}"],
         artifact_refs=[f"ledger://runs/run-1/daily-report?access_token={token}"],
@@ -481,3 +487,176 @@ def test_compose_owner_case_brief_distinguishes_total_open_from_display_limit():
     assert "Tema 0" in text
     assert "Tema 2" in text
     assert "Tema 3" not in text
+
+
+def test_owner_brief_marks_new_today_when_opened_on_report_date():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-new",
+        title="Sin ventas",
+        opened_at=datetime(2026, 5, 24, 8, tzinfo=timezone.utc),
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Nuevo hoy" in text
+    assert "Abierto hace" not in text
+
+
+def test_owner_brief_shows_age_for_cases_opened_before_report_date():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-old",
+        title="Sin ventas",
+        opened_at=datetime(2026, 5, 22, 8, tzinfo=timezone.utc),
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Abierto hace 2 días" in text
+    assert "Nuevo hoy" not in text
+
+
+def test_owner_brief_uses_latest_reopen_event_for_age():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-reopened-today",
+        title="Stock crítico",
+        opened_at=datetime(2026, 5, 10, 8, tzinfo=timezone.utc),
+        timeline=[
+            OperationalCaseTimelineEvent(
+                event_type="case_reopened",
+                summary="Reabierto por nueva detección",
+                created_at=datetime(2026, 5, 24, 7, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Reabierto hoy" in text
+    assert "Abierto hace" not in text
+    assert "Nuevo hoy" not in text
+
+
+def test_owner_brief_shows_reopened_age_for_past_reopen():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-reopened-old",
+        title="Stock crítico",
+        opened_at=datetime(2026, 5, 1, 8, tzinfo=timezone.utc),
+        timeline=[
+            OperationalCaseTimelineEvent(
+                event_type="case_reopened",
+                summary="Reapertura previa",
+                created_at=datetime(2026, 5, 19, 7, tzinfo=timezone.utc),
+            ),
+            OperationalCaseTimelineEvent(
+                event_type="case_reopened",
+                summary="Última reapertura",
+                created_at=datetime(2026, 5, 21, 7, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Reabierto hace 3 días" in text
+    assert "Reabierto hace 5 días" not in text
+
+
+def test_owner_brief_marks_acknowledged_status_with_seen_marker():
+    from app.brain.reporting import compose_owner_case_brief
+
+    ack = _owner_case(
+        case_id="case-ack",
+        title="Stock bajo",
+        status="acknowledged",
+    )
+    open_case = _owner_case(
+        case_id="case-open",
+        title="ROAS bajo",
+        status="open",
+    )
+
+    text = compose_owner_case_brief(
+        "Artemea", [ack, open_case], report_date=date(2026, 5, 24)
+    )
+
+    # acknowledged case carries seen marker
+    ack_pos = text.index("case-ack")
+    open_pos = text.index("case-open")
+    next_caso = text.find("   Caso:", ack_pos + 1)
+    ack_block = text[ack_pos: next_caso if next_caso != -1 else len(text)]
+    open_block = text[open_pos:]
+    assert "✓ Visto" in ack_block
+    assert "✓ Visto" not in open_block
+
+
+def test_owner_brief_fits_whatsapp_budget_with_age_and_status_lines():
+    from app.brain.reporting import compose_owner_case_brief, truncate_for_whatsapp
+
+    cases = [
+        _owner_case(
+            case_id="case-critical-reopened",
+            title="Stock crítico recurrente",
+            severity="critical",
+            priority_score=95,
+            opened_at=datetime(2026, 5, 1, 8, tzinfo=timezone.utc),
+            timeline=[
+                OperationalCaseTimelineEvent(
+                    event_type="case_reopened",
+                    summary="Recurrencia detectada",
+                    created_at=datetime(2026, 5, 22, 8, tzinfo=timezone.utc),
+                )
+            ],
+        ),
+        _owner_case(
+            case_id="case-ack-stale",
+            title="ROAS bajo",
+            severity="warning",
+            priority_score=80,
+            status="acknowledged",
+            opened_at=datetime(2026, 5, 20, 8, tzinfo=timezone.utc),
+            freshness_state="stale",
+            source="google_sheets",
+            source_label="Sheet ventas",
+        ),
+        _owner_case(
+            case_id="case-new",
+            title="Conversaciones sin responder",
+            severity="warning",
+            priority_score=70,
+            opened_at=datetime(2026, 5, 24, 8, tzinfo=timezone.utc),
+        ),
+    ]
+
+    text = compose_owner_case_brief("Artemea", cases, report_date=date(2026, 5, 24), max_cases=3)
+    final = truncate_for_whatsapp(text)
+
+    assert len(final) <= 1000
+    assert "ver reporte completo" not in final
+    # Sanity: each labelled status renders in the rendered brief.
+    assert "Reabierto hace 2 días" in final
+    assert "Abierto hace 4 días" in final
+    assert "Nuevo hoy" in final
+    assert "✓ Visto" in final
+
+
+def test_owner_brief_status_line_redaction_still_applies():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-redact",
+        title="Stock crítico",
+        opened_at=datetime(2026, 5, 22, 8, tzinfo=timezone.utc),
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "raw_case_brief_secret" not in text
+    assert "Abierto hace 2 días" in text

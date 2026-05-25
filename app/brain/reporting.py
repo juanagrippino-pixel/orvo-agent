@@ -1,6 +1,6 @@
 """Report composition for WhatsApp-first Orvo Brain output."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Iterable
 
 from app.brain.models import DailyReport, Evidence, Metric
@@ -149,6 +149,42 @@ def _case_is_degraded(case: OperationalCase) -> bool:
     return any(snapshot.freshness_state in {"stale", "degraded", "missing"} for snapshot in case.evidence_snapshots)
 
 
+def _utc_date(value: datetime) -> date:
+    return value.astimezone(timezone.utc).date()
+
+
+def _latest_reopen_at(case: OperationalCase) -> datetime | None:
+    reopens = [event.created_at for event in case.timeline if event.event_type == "case_reopened"]
+    return max(reopens) if reopens else None
+
+
+def _format_age_label(verb_today: str, verb_past: str, reference: date, anchor: date) -> str:
+    delta = (reference - anchor).days
+    if delta <= 0:
+        return f"{verb_today} hoy"
+    if delta == 1:
+        return f"{verb_past} hace 1 día"
+    return f"{verb_past} hace {delta} días"
+
+
+def _case_age_label(case: OperationalCase, report_date: date) -> str:
+    reopen_at = _latest_reopen_at(case)
+    if reopen_at is not None:
+        return _format_age_label("Reabierto", "Reabierto", report_date, _utc_date(reopen_at))
+    return _format_age_label("Nuevo", "Abierto", report_date, _utc_date(case.opened_at))
+
+
+def _case_status_line(case: OperationalCase, report_date: date | None) -> str | None:
+    parts: list[str] = []
+    if report_date is not None:
+        parts.append(_case_age_label(case, report_date))
+    if case.status == "acknowledged":
+        parts.append("✓ Visto")
+    if not parts:
+        return None
+    return "   Estado: " + " · ".join(parts)
+
+
 def compose_owner_case_brief(
     business_name: str,
     cases: Iterable[OperationalCase],
@@ -183,6 +219,9 @@ def compose_owner_case_brief(
     for index, case in enumerate(visible_cases, start=1):
         prefix = "🔴" if case.severity == "critical" else "🟡" if case.severity == "warning" else "ℹ️"
         lines.extend(["", f"{index}. {prefix} {case.title}", f"   Caso: {case.case_id}"])
+        status_line = _case_status_line(case, report_date)
+        if status_line:
+            lines.append(status_line)
         sources = _case_sources(case)
         if sources:
             lines.append("   Evidencia: " + " · ".join(sources))
