@@ -8,16 +8,20 @@ control-plane run ledger contract.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from app.brain.config import BusinessConfig
 from app.brain.operational_cases import (
+    OperationalCase,
     OperationalCaseStore,
     upsert_cases_from_report,
     upsert_data_stale_cases,
 )
+from app.brain.dispatch import ReportDispatchResult
+from app.brain.delivery import make_idempotency_key
 from app.brain.pipeline import PipelineResult
 from app.brain.run_ledger import ArtifactRef, ConnectorRunOutcome, DispatchOutcomeRef, RunLedger
+from app.brain.security.redaction import redact_text
 
 
 def _now_utc() -> datetime:
@@ -83,6 +87,30 @@ def _metric_count_for_connector(pipeline: PipelineResult, connector_type: str, c
     )
 
 
+def _owner_brief_cases(case_store: OperationalCaseStore, business_id: str) -> list[OperationalCase]:
+    cases: list[OperationalCase] = []
+    for status in ("open", "acknowledged"):
+        cases.extend(case_store.list_cases(business_id=business_id, status=status, limit=None))
+    return cases
+
+
+def _dispatch_outcome(
+    dispatch: ReportDispatchResult,
+    *,
+    message_type: str,
+    metadata: dict[str, Any] | None = None,
+) -> DispatchOutcomeRef:
+    delivery = dispatch.delivery
+    return DispatchOutcomeRef(
+        channel="whatsapp",
+        status=dispatch.status,
+        idempotency_key=dispatch.idempotency_key,
+        message_id=delivery.message_id if delivery else None,
+        error_summary=dispatch.error or (delivery.error if delivery else None),
+        metadata={"message_type": message_type, **(metadata or {})},
+    )
+
+
 def record_pipeline_success(
     *,
     run_ledger: RunLedger | None,
@@ -92,11 +120,12 @@ def record_pipeline_success(
     connector_types: Sequence[str],
     pipeline: PipelineResult,
     summary_metadata: dict[str, Any] | None = None,
-) -> None:
+    case_brief_dispatcher: Callable[[Sequence[OperationalCase]], ReportDispatchResult | None] | None = None,
+) -> ReportDispatchResult | None:
     """Append successful connector/artifact/dispatch records and finish the run."""
 
     if run_ledger is None or run_id is None:
-        return
+        return None
 
     finished_at = _now_utc()
     connectors = list(_connector_by_type(business, connector_types))
@@ -145,30 +174,54 @@ def record_pipeline_success(
     )
 
     dispatch = pipeline.dispatch
-    delivery = dispatch.delivery
     run_ledger.append_dispatch_outcome(
         run_id,
-        DispatchOutcomeRef(
-            channel="whatsapp",
-            status=dispatch.status,
-            idempotency_key=dispatch.idempotency_key,
-            message_id=delivery.message_id if delivery else None,
-            error_summary=dispatch.error or (delivery.error if delivery else None),
-        ),
+        _dispatch_outcome(dispatch, message_type="daily_report"),
     )
 
-    final_status = "succeeded" if dispatch.status in {"sent", "skipped_duplicate"} else "partial"
+    case_brief_dispatch: ReportDispatchResult | None = None
+    if case_store is not None and case_brief_dispatcher is not None and dispatch.status in {"sent", "skipped_duplicate"}:
+        owner_cases = _owner_brief_cases(case_store, business.business_id)
+        try:
+            case_brief_dispatch = case_brief_dispatcher(owner_cases)
+        except Exception as exc:  # keep the run ledger terminal even if the secondary brief fails unexpectedly
+            case_brief_dispatch = ReportDispatchResult(
+                status="failed",
+                idempotency_key=make_idempotency_key(
+                    business.business_id,
+                    pipeline.report.report_date,
+                    "owner_case_brief",
+                ),
+                error=redact_text(f"{type(exc).__name__}: {exc}"),
+            )
+        if case_brief_dispatch is not None:
+            run_ledger.append_dispatch_outcome(
+                run_id,
+                _dispatch_outcome(
+                    case_brief_dispatch,
+                    message_type="owner_case_brief",
+                    metadata={"case_count": len(owner_cases)},
+                ),
+            )
+
+    dispatch_ok = dispatch.status in {"sent", "skipped_duplicate"}
+    case_brief_ok = case_brief_dispatch is None or case_brief_dispatch.status in {"sent", "skipped_duplicate"}
+    final_status = "succeeded" if dispatch_ok and case_brief_ok else "partial"
+    final_summary = {
+        "report_type": "daily",
+        "cases_opened": case_summary.opened_count,
+        "cases_updated": case_summary.updated_count,
+        **(summary_metadata or {}),
+    }
+    if case_brief_dispatch is not None:
+        final_summary["case_brief_dispatch_status"] = case_brief_dispatch.status
     run_ledger.update_run(
         run_id,
         status=final_status,  # type: ignore[arg-type]
         finished_at=finished_at,
-        summary_metadata={
-            "report_type": "daily",
-            "cases_opened": case_summary.opened_count,
-            "cases_updated": case_summary.updated_count,
-            **(summary_metadata or {}),
-        },
+        summary_metadata=final_summary,
     )
+    return case_brief_dispatch
 
 
 def record_pipeline_failure(

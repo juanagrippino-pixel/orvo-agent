@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.brain.adapters.google_sheets import get_sheets_service
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient
-from app.brain.dispatch import InMemoryIdempotencyStore
+from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
 from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failure, record_pipeline_success
 from app.brain.operational_cases import OperationalCaseStore
 from app.brain.pipeline import (
@@ -150,7 +150,7 @@ def run_forced_report(
         raise
 
     result = _with_runtime_metadata(result, runtime_metadata)
-    record_pipeline_success(
+    case_brief_dispatch = record_pipeline_success(
         run_ledger=run_ledger,
         case_store=case_store,
         run_id=run_id,
@@ -158,7 +158,16 @@ def run_forced_report(
         connector_types=executed_connector_types,
         pipeline=result,
         summary_metadata={"report_type": "daily"},
+        case_brief_dispatcher=lambda cases: dispatch_owner_case_brief(
+            cases,
+            business,
+            report_date,
+            delivery_client,
+            idempotency_store,
+        ),
     )
+    if case_brief_dispatch is not None:
+        result = result.model_copy(update={"case_brief_dispatch": case_brief_dispatch}, deep=True)
     return result
 
 

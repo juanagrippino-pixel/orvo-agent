@@ -21,6 +21,7 @@ from app.brain.models import DailyReport, Metric
 class PipelineResult(BaseModel):
     report: DailyReport
     dispatch: ReportDispatchResult
+    case_brief_dispatch: ReportDispatchResult | None = None
     runtime_metadata: dict = Field(default_factory=dict)
 
 

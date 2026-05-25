@@ -152,6 +152,81 @@ def test_run_due_daily_reports_persists_operational_cases_and_links_ledger_artif
     assert run.summary_metadata["cases_updated"] == 0
 
 
+def test_run_due_daily_reports_sends_owner_case_brief_after_cases_are_persisted():
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="wamid.daily", error=None),
+        DeliveryResult(success=True, message_id="wamid.case-brief", error=None),
+    ]
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    results = run_due_daily_reports(
+        config_store=make_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    assert len(results) == 1
+    assert results[0].pipeline.case_brief_dispatch is not None
+    assert results[0].pipeline.case_brief_dispatch.status == "sent"
+    assert results[0].pipeline.case_brief_dispatch.idempotency_key == "artemea/2026-05-19/owner_case_brief"
+    assert delivery.send_text.call_count == 2
+    _daily_phone, daily_text = delivery.send_text.call_args_list[0].args
+    brief_phone, brief_text = delivery.send_text.call_args_list[1].args
+    assert brief_phone == "+5491149724933"
+    assert "Brief operativo" in brief_text
+    assert "Caso:" in brief_text
+    assert "Orvo Brain" in daily_text
+
+    [run] = run_ledger.list_runs(business_id="artemea")
+    assert [out.metadata.get("message_type") for out in run.dispatch_outcomes] == ["daily_report", "owner_case_brief"]
+    assert [out.message_id for out in run.dispatch_outcomes] == ["wamid.daily", "wamid.case-brief"]
+    assert run.summary_metadata["case_brief_dispatch_status"] == "sent"
+
+
+def test_run_due_daily_reports_records_partial_when_owner_case_brief_raises():
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="wamid.daily", error=None),
+        RuntimeError("brief provider exploded access_token=raw_runtime_secret"),
+    ]
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    results = run_due_daily_reports(
+        config_store=make_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    assert len(results) == 1
+    assert results[0].pipeline.case_brief_dispatch is not None
+    assert results[0].pipeline.case_brief_dispatch.status == "failed"
+    assert results[0].pipeline.case_brief_dispatch.idempotency_key == "artemea/2026-05-19/owner_case_brief"
+    assert "raw_runtime_secret" not in (results[0].pipeline.case_brief_dispatch.error or "")
+
+    [run] = run_ledger.list_runs(business_id="artemea")
+    assert run.status == "partial"
+    assert run.finished_at is not None
+    assert [out.metadata.get("message_type") for out in run.dispatch_outcomes] == ["daily_report", "owner_case_brief"]
+    assert run.dispatch_outcomes[1].status == "failed"
+    assert "raw_runtime_secret" not in (run.dispatch_outcomes[1].error_summary or "")
+    assert run.summary_metadata["case_brief_dispatch_status"] == "failed"
+
+
 def test_run_due_daily_reports_skips_when_not_due():
     from app.brain.runner import run_due_daily_reports
 

@@ -232,6 +232,52 @@ def test_force_report_persists_operational_cases_and_links_ledger_artifact(tmp_p
     assert run.summary_metadata["cases_updated"] == 0
 
 
+def test_force_report_dispatches_owner_case_brief_and_records_it_in_ledger(tmp_path):
+    csv_path = tmp_path / "case_brief.csv"
+    csv_path.write_text(
+        "fecha,ventas,ordenes,stock,conversaciones_sin_responder,gasto_ads\n"
+        "2026-05-18,100000,10,10,1,0\n"
+        "2026-05-19,70000,8,3,8,18500\n"
+    )
+    delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="dry-run-daily", error=None),
+        DeliveryResult(success=True, message_id="dry-run-case-brief", error=None),
+    ]
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    result = reports_script.run_forced_report(
+        business=make_csv_business(str(csv_path)),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    assert result.case_brief_dispatch is not None
+    assert result.case_brief_dispatch.status == "sent"
+    assert result.case_brief_dispatch.idempotency_key == "demo-csv/2026-05-19/owner_case_brief"
+    assert delivery.send_text.call_count == 2
+    _daily_phone, daily_text = delivery.send_text.call_args_list[0].args
+    brief_phone, brief_text = delivery.send_text.call_args_list[1].args
+    assert brief_phone == "+5491100000000"
+    assert "Orvo Brain" in daily_text
+    assert "Brief operativo" in brief_text
+    assert "Caso:" in brief_text
+
+    [run] = run_ledger.list_runs(business_id="demo-csv")
+    assert [out.metadata.get("message_type") for out in run.dispatch_outcomes] == ["daily_report", "owner_case_brief"]
+    assert [out.idempotency_key for out in run.dispatch_outcomes] == [
+        "demo-csv/2026-05-19/daily",
+        "demo-csv/2026-05-19/owner_case_brief",
+    ]
+    assert run.summary_metadata["case_brief_dispatch_status"] == "sent"
+    assert run.status == "succeeded"
+
+
 def make_mercadolibre_business():
     return BusinessConfig(
         business_id="demo-ml",

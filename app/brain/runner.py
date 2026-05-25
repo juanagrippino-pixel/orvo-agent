@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.brain.config import BusinessConfig, ReportSchedule
 from app.brain.delivery import WhatsAppDeliveryClient
-from app.brain.dispatch import IdempotencyStore
+from app.brain.dispatch import IdempotencyStore, dispatch_owner_case_brief
 from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failure, record_pipeline_success
 from app.brain.operational_cases import OperationalCaseStore
 from app.brain.pipeline import PipelineResult, run_enabled_connectors_daily_report_pipeline
@@ -132,7 +132,7 @@ def run_due_daily_reports(
                 summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
             )
             raise
-        record_pipeline_success(
+        case_brief_dispatch = record_pipeline_success(
             run_ledger=run_ledger,
             case_store=case_store,
             run_id=run_id,
@@ -140,7 +140,16 @@ def run_due_daily_reports(
             connector_types=connector_types,
             pipeline=pipeline,
             summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
+            case_brief_dispatcher=lambda cases, business=business, report_date=report_date: dispatch_owner_case_brief(
+                cases,
+                business,
+                report_date,
+                delivery_client,
+                idempotency_store,
+            ),
         )
+        if case_brief_dispatch is not None:
+            pipeline = pipeline.model_copy(update={"case_brief_dispatch": case_brief_dispatch}, deep=True)
         results.append(
             ScheduledPipelineResult(
                 schedule_id=run.schedule_id,

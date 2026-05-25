@@ -1,9 +1,10 @@
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
 from app.brain.config import BusinessConfig
 from app.brain.models import DailyReport, Evidence, Insight, Metric
+from app.brain.operational_cases import OperationalCase, OperationalCaseEvidenceMetric, OperationalCaseEvidenceSnapshot
 
 
 def make_report():
@@ -16,6 +17,45 @@ def make_report():
     )
 
 
+def make_owner_case(case_id: str = "case-1", *, status: str = "open") -> OperationalCase:
+    return OperationalCase(
+        case_id=case_id,
+        business_id="artemea",
+        case_type="stockout_risk",
+        dedupe_key=f"artemea/stockout/{case_id}",
+        title="Stock crítico access_token=raw_dispatch_secret",
+        status=status,  # type: ignore[arg-type]
+        severity="critical",
+        priority_score=95,
+        entity_scope={"kind": "product", "id": "sku-1"},
+        opened_at=datetime(2026, 5, 19, 9, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 5, 19, 10, tzinfo=timezone.utc),
+        resolved_at=datetime(2026, 5, 19, 11, tzinfo=timezone.utc) if status == "resolved" else None,
+        evidence_snapshots=[
+            OperationalCaseEvidenceSnapshot(
+                snapshot_key=f"run-1/evidence/{case_id}",
+                captured_at=datetime(2026, 5, 19, 9, tzinfo=timezone.utc),
+                run_id="run-1",
+                evidence_ref="evidence://tiendanube/stock?access_token=raw_dispatch_secret",
+                source="tiendanube",
+                source_label="Tiendanube",
+                case_type="stockout_risk",
+                summary="Quedan pocas unidades Bearer raw_dispatch_secret",
+                freshness_state="fresh",
+                metrics=[
+                    OperationalCaseEvidenceMetric(
+                        metric_key="commerce.inventory.available_units",
+                        label="Stock disponible",
+                        value=2,
+                        unit="units",
+                    )
+                ],
+            )
+        ],
+        metadata={"recommended_action": "Reponer stock hoy.", "token": "raw_dispatch_secret"},
+    )
+
+
 def make_business():
     return BusinessConfig(
         business_id="artemea",
@@ -24,6 +64,68 @@ def make_business():
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
     )
+
+
+def test_dispatch_owner_case_brief_sends_case_backed_text_with_separate_idempotency_key():
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.case", error=None)
+    idempotency = InMemoryIdempotencyStore()
+
+    result = dispatch_owner_case_brief(
+        cases=[make_owner_case(), make_owner_case("resolved", status="resolved")],
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=idempotency,
+    )
+
+    assert result is not None
+    assert result.status == "sent"
+    assert result.idempotency_key == "artemea/2026-05-19/owner_case_brief"
+    assert idempotency.has(result.idempotency_key)
+    phone, text = delivery_client.send_text.call_args.args
+    assert phone == "+5491112345678"
+    assert "Stock crítico" in text
+    assert "case-1" in text
+    assert "resolved" not in text
+    assert "raw_dispatch_secret" not in text
+
+
+def test_dispatch_owner_case_brief_skips_without_actionable_cases():
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+
+    result = dispatch_owner_case_brief(
+        cases=[make_owner_case("resolved", status="resolved")],
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+
+    assert result is None
+    delivery_client.send_text.assert_not_called()
+
+
+def test_dispatch_owner_case_brief_skips_duplicate_key():
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.case", error=None)
+    idempotency = InMemoryIdempotencyStore()
+    cases = [make_owner_case()]
+
+    first = dispatch_owner_case_brief(cases, make_business(), date(2026, 5, 19), delivery_client, idempotency)
+    second = dispatch_owner_case_brief(cases, make_business(), date(2026, 5, 19), delivery_client, idempotency)
+
+    assert first is not None and first.status == "sent"
+    assert second is not None and second.status == "skipped_duplicate"
+    assert delivery_client.send_text.call_count == 1
 
 
 def test_dispatch_daily_report_sends_composed_text_once():
