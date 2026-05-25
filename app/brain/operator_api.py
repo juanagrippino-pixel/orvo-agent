@@ -18,7 +18,7 @@ from app.brain.operational_cases import (
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 
-CaseActionKey = Literal["acknowledge_case", "resolve_case"]
+CaseActionKey = Literal["acknowledge_case", "resolve_case", "add_comment"]
 _ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
@@ -263,15 +263,31 @@ def apply_case_action(
     business_id: str,
     case_id: str,
     action_key: str,
-    actor_ref: str,
+    actor_ref: str | None = None,
+    actor: str | None = None,
     reason: str | None = None,
+    comment: Any = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if action_key not in _ALLOWED_CASE_ACTIONS:
         raise OperatorAPIError("unknown_action_key", f"unknown action_key: {action_key}", status_code=400)
-    if not actor_ref:
+    effective_actor_ref = actor_ref if actor_ref is not None else actor
+    if not effective_actor_ref:
         raise OperatorAPIError("missing_operator_actor", "operator actor is required", status_code=400)
 
     case = get_scoped_case(store, business_id=business_id, case_id=case_id)
+    if action_key == "add_comment":
+        if not isinstance(comment, str) or not comment.strip():
+            raise OperatorAPIError("invalid_comment", "comment must be a non-empty string", status_code=400)
+        updated = store.add_comment(
+            case.case_id,
+            actor_type="operator",
+            actor_ref=effective_actor_ref,
+            comment=comment.strip(),
+            metadata=metadata,
+        )
+        return {"case": case_detail(updated)}
+
     target_status: OperationalCaseStatus = "acknowledged" if action_key == "acknowledge_case" else "resolved"
     default_reason = "Acknowledged by operator." if action_key == "acknowledge_case" else "Resolved by operator."
     try:
@@ -279,7 +295,7 @@ def apply_case_action(
             case.case_id,
             status=target_status,
             actor_type="operator",
-            actor_ref=actor_ref,
+            actor_ref=effective_actor_ref,
             reason=reason or default_reason,
         )
     except OperationalCaseStatusError as exc:

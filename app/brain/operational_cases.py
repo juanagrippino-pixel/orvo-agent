@@ -29,7 +29,14 @@ OperationalCaseType = Literal[
 ]
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
-TimelineEventType = Literal["case_opened", "case_updated", "case_reopened", "status_changed", "evidence_attached"]
+TimelineEventType = Literal[
+    "case_opened",
+    "case_updated",
+    "case_reopened",
+    "status_changed",
+    "evidence_attached",
+    "operator_comment",
+]
 ActorType = Literal["system", "operator"]
 
 _CASE_STATUS_TRANSITIONS: dict[str, set[str]] = {
@@ -397,6 +404,17 @@ class OperationalCaseStore(Protocol):
         transitioned_at: datetime | None = None,
     ) -> OperationalCase: ...
 
+    def add_comment(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        comment: str,
+        metadata: dict[str, Any] | None = None,
+        commented_at: datetime | None = None,
+    ) -> OperationalCase: ...
+
     def get_case(self, case_id: str) -> OperationalCase | None: ...
     def find_by_dedupe_key(self, business_id: str, dedupe_key: str) -> OperationalCase | None: ...
     def list_cases(
@@ -546,6 +564,40 @@ class _OperationalCaseMutations:
         if status == "resolved":
             update["resolved_at"] = transitioned_at
         updated = record.model_copy(update=update, deep=True)
+        updated = OperationalCase.model_validate(updated.model_dump())
+        self._persist(updated)
+        return updated.model_copy(deep=True)
+
+    def add_comment(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        comment: str,
+        metadata: dict[str, Any] | None = None,
+        commented_at: datetime | None = None,
+    ) -> OperationalCase:
+        record = self._load_for_update(case_id)
+        commented_at = _as_utc(commented_at) if commented_at is not None else _now_utc()
+        updated = record.model_copy(
+            update={
+                "updated_at": commented_at,
+                "timeline": [
+                    *record.timeline,
+                    OperationalCaseTimelineEvent(
+                        event_type="operator_comment",
+                        actor_type=actor_type,
+                        actor_ref=actor_ref,
+                        case_id=record.case_id,
+                        created_at=commented_at,
+                        summary=comment,
+                        metadata=metadata or {},
+                    ),
+                ],
+            },
+            deep=True,
+        )
         updated = OperationalCase.model_validate(updated.model_dump())
         self._persist(updated)
         return updated.model_copy(deep=True)

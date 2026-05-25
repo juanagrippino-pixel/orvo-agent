@@ -205,6 +205,8 @@ def internal_brain_case_action(business_id: str, case_id: str):
                 action_key=str(payload.get("action_key", "")),
                 actor_ref=actor_ref,
                 reason=payload.get("reason"),
+                comment=payload.get("comment"),
+                metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
             ),
         ),
     )
