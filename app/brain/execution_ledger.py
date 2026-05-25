@@ -111,6 +111,41 @@ def _dispatch_outcome(
     )
 
 
+def _failed_connector_outcomes(
+    *,
+    business: BusinessConfig | None,
+    connector_types: Sequence[str] | None,
+    error_summary: str,
+    failed_at: datetime,
+) -> list[ConnectorRunOutcome]:
+    """Build exact failed connector outcomes when the failed connector is unambiguous."""
+
+    if business is None or not connector_types:
+        return []
+
+    exact_types = list(dict.fromkeys(connector_types))
+    matching_connectors = [
+        connector
+        for connector in business.connectors
+        if connector.enabled and connector.connector_type in exact_types
+    ]
+    if len(exact_types) != 1 or len(matching_connectors) != 1:
+        return []
+
+    connector = matching_connectors[0]
+    return [
+        ConnectorRunOutcome(
+            connector_id=connector.connector_id,
+            connector_type=connector.connector_type,
+            status="failed",
+            started_at=failed_at,
+            finished_at=failed_at,
+            error_summary=error_summary,
+            metadata={"label": connector.label, "failure_stage": "pre_dispatch"},
+        )
+    ]
+
+
 def record_pipeline_success(
     *,
     run_ledger: RunLedger | None,
@@ -230,11 +265,12 @@ def record_pipeline_failure(
     case_store: OperationalCaseStore | None = None,
     run_id: str | None,
     error: BaseException,
+    business: BusinessConfig | None = None,
     business_id: str | None = None,
     connector_types: Sequence[str] | None = None,
     summary_metadata: dict[str, Any] | None = None,
 ) -> None:
-    """Mark a running ledger record as failed and open/update data_stale cases."""
+    """Record failed connector context, mark run failed, and open/update data_stale cases."""
 
     error_summary = f"{type(error).__name__}: {error}"
     case_summary = upsert_data_stale_cases(
@@ -246,10 +282,18 @@ def record_pipeline_failure(
     )
     if run_ledger is None or run_id is None:
         return
+    failed_at = _now_utc()
+    for outcome in _failed_connector_outcomes(
+        business=business,
+        connector_types=connector_types,
+        error_summary=error_summary,
+        failed_at=failed_at,
+    ):
+        run_ledger.append_connector_outcome(run_id, outcome)
     run_ledger.update_run(
         run_id,
         status="failed",
-        finished_at=_now_utc(),
+        finished_at=failed_at,
         summary_metadata={
             "cases_opened": case_summary.opened_count,
             "cases_updated": case_summary.updated_count,

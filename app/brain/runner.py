@@ -127,6 +127,7 @@ def run_due_daily_reports(
                 case_store=case_store,
                 run_id=run_id,
                 error=exc,
+                business=business,
                 business_id=business.business_id,
                 connector_types=connector_types,
                 summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},

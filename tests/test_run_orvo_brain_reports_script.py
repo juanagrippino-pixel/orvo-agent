@@ -195,8 +195,20 @@ def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():
 
     [run] = run_ledger.list_runs(business_id="demo-shop")
     assert run.status == "failed"
+    assert len(run.connector_outcomes) == 1
+    failed_connector = run.connector_outcomes[0]
+    assert failed_connector.connector_id == "demo-tiendanube"
+    assert failed_connector.connector_type == "tiendanube"
+    assert failed_connector.status == "failed"
+    assert failed_connector.finished_at is not None
+    assert failed_connector.error_summary is not None
+    assert "raw_failure_secret" not in failed_connector.error_summary
+    assert run.artifacts == []
+    assert run.dispatch_outcomes == []
     assert run.summary_metadata["cases_opened"] == 1
     assert run.summary_metadata["cases_updated"] == 0
+    assert "raw_failure_secret" not in run.model_dump_json()
+    delivery.send_text.assert_not_called()
 
 
 def test_force_report_persists_operational_cases_and_links_ledger_artifact(tmp_path):

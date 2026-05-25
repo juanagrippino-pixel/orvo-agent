@@ -143,6 +143,7 @@ def run_forced_report(
             case_store=case_store,
             run_id=run_id,
             error=exc,
+            business=business,
             business_id=business.business_id,
             connector_types=executed_connector_types,
             summary_metadata={"report_type": "daily"},

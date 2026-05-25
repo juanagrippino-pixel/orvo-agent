@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
@@ -120,6 +122,59 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.dispatch_outcomes[0].status == "sent"
     assert record.dispatch_outcomes[0].message_id == "wamid.ledger"
     assert record.artifacts[0].artifact_type == "daily_report"
+
+
+def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_failure():
+    from app.brain.runner import run_due_daily_reports
+
+    class FailingExecute:
+        def execute(self):
+            raise RuntimeError("sheets 500 access_token=raw_failure_secret")
+
+    class FailingValues:
+        def get(self, spreadsheetId, range):
+            return FailingExecute()
+
+    class FailingSpreadsheets:
+        def values(self):
+            return FailingValues()
+
+    class FailingSheetsService:
+        def spreadsheets(self):
+            return FailingSpreadsheets()
+
+    delivery = MagicMock()
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(RuntimeError, match="raw_failure_secret"):
+        run_due_daily_reports(
+            config_store=make_store(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            delivery_client=delivery,
+            sheets_service=FailingSheetsService(),
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+            run_ledger=run_ledger,
+            case_store=case_store,
+        )
+
+    [run] = run_ledger.list_runs(business_id="artemea")
+    assert run.status == "failed"
+    assert run.finished_at is not None
+    assert len(run.connector_outcomes) == 1
+    failed_connector = run.connector_outcomes[0]
+    assert failed_connector.connector_id == "sheet"
+    assert failed_connector.connector_type == "google_sheets"
+    assert failed_connector.status == "failed"
+    assert failed_connector.finished_at is not None
+    assert failed_connector.error_summary is not None
+    assert "raw_failure_secret" not in failed_connector.error_summary
+    assert run.artifacts == []
+    assert run.dispatch_outcomes == []
+    assert run.summary_metadata["schedule_id"] == "artemea-daily-report"
+    assert run.summary_metadata["report_type"] == "daily"
+    assert "raw_failure_secret" not in run.model_dump_json()
+    delivery.send_text.assert_not_called()
 
 
 def test_run_due_daily_reports_persists_operational_cases_and_links_ledger_artifact():
