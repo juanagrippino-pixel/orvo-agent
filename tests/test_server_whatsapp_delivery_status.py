@@ -201,6 +201,121 @@ def test_internal_delivery_statuses_redacts_failed_error_metadata(monkeypatch, t
     assert any(e["status"] == "failed" for e in events)
 
 
+def test_webhook_persists_all_events_from_batched_multi_entry_payload(monkeypatch, tmp_path):
+    """End-to-end regression: a Meta webhook delivery that batches lifecycle
+    transitions across multiple ``entry[]`` and ``changes[]`` items must
+    persist every status event. A future refactor of
+    ``_persist_delivery_status_events`` that took ``entry[0].changes[0]`` —
+    mirroring the inbound message branch — would pass parser unit tests but
+    silently drop dispatch observability for batched deliveries.
+    """
+    client, db_path = _client(monkeypatch, tmp_path)
+    batched = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA-1",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {"id": "wamid.A", "status": "sent", "timestamp": "1748100000", "recipient_id": "5491150380097"},
+                                {"id": "wamid.A", "status": "delivered", "timestamp": "1748100005", "recipient_id": "5491150380097"},
+                                {"id": "wamid.A", "status": "read", "timestamp": "1748100010", "recipient_id": "5491150380097"},
+                            ],
+                        },
+                    },
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {"id": "wamid.B", "status": "delivered", "timestamp": "1748100020", "recipient_id": "5491150380097"},
+                            ],
+                        },
+                    },
+                ],
+            },
+            {
+                "id": "WABA-2",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {"id": "wamid.C", "status": "failed", "timestamp": "1748100030", "recipient_id": "5491150380097"},
+                            ],
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+    assert client.post("/webhook", json=batched).status_code == 200
+    rows = _read_status_rows(db_path)
+    assert len(rows) == 5
+    pairs = {(message_id, status) for message_id, status, _recipient, _provider in rows}
+    assert pairs == {
+        ("wamid.A", "sent"),
+        ("wamid.A", "delivered"),
+        ("wamid.A", "read"),
+        ("wamid.B", "delivered"),
+        ("wamid.C", "failed"),
+    }
+
+
+def test_webhook_persists_status_when_template_update_precedes_messages_change(monkeypatch, tmp_path):
+    """End-to-end regression: when a non-``messages`` change (e.g. a
+    ``message_template_status_update``) sits at ``changes[0]`` and a real
+    ``messages`` change with ``statuses[]`` sits at ``changes[1]``, the webhook
+    must still persist the status event without 500 or silent loss.
+    """
+    client, db_path = _client(monkeypatch, tmp_path)
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA",
+                "changes": [
+                    {
+                        "field": "message_template_status_update",
+                        "value": {
+                            "event": "APPROVED",
+                            "message_template_name": "daily_report",
+                        },
+                    },
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {
+                                    "id": "wamid.MIX",
+                                    "status": "delivered",
+                                    "timestamp": "1748100100",
+                                    "recipient_id": "5491150380097",
+                                }
+                            ],
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    response = client.post("/webhook", json=payload)
+    assert response.status_code == 200
+    rows = _read_status_rows(db_path)
+    assert len(rows) == 1
+    message_id, status, recipient_id, provider = rows[0]
+    assert message_id == "wamid.MIX"
+    assert status == "delivered"
+    assert recipient_id == "5491150380097"
+    assert provider == "meta_cloud"
+
+
 def test_internal_delivery_statuses_respects_limit_bounds(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     for i in range(6):
