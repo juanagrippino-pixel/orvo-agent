@@ -45,6 +45,7 @@ Start here:
 - [`docs/product/report-design.md`](product/report-design.md)
 - [`docs/product/feedback-design.md`](product/feedback-design.md)
 - [`docs/gtm/d2c-packaging-and-messaging.md`](gtm/d2c-packaging-and-messaging.md)
+- [`docs/research/2026-05-26-product-market-intel-tiendanube-control-plane.md`](research/2026-05-26-product-market-intel-tiendanube-control-plane.md)
 
 ## Operations and autonomous workers
 
