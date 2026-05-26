@@ -294,3 +294,134 @@ def test_parse_meta_status_payload_skips_status_entries_missing_id_or_status():
     events = parse_meta_status_payload(payload)
     assert len(events) == 1
     assert events[0].message_id == "wamid.Y"
+
+
+def test_parse_meta_status_payload_extracts_all_statuses_from_batched_payload():
+    """Meta batches lifecycle transitions (sent/delivered/read) for one or more
+    messages into a single webhook delivery. The parser must walk every status
+    entry, every changes entry, and every entry; a regression that takes ``[0]``
+    anywhere would silently drop dispatch observability events.
+    """
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA-1",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {
+                                    "id": "wamid.A",
+                                    "status": "sent",
+                                    "timestamp": "1748000000",
+                                    "recipient_id": "5491150380097",
+                                },
+                                {
+                                    "id": "wamid.A",
+                                    "status": "delivered",
+                                    "timestamp": "1748000005",
+                                    "recipient_id": "5491150380097",
+                                },
+                                {
+                                    "id": "wamid.A",
+                                    "status": "read",
+                                    "timestamp": "1748000010",
+                                    "recipient_id": "5491150380097",
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {
+                                    "id": "wamid.B",
+                                    "status": "delivered",
+                                    "timestamp": "1748000020",
+                                    "recipient_id": "5491150380097",
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            {
+                "id": "WABA-2",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {
+                                    "id": "wamid.C",
+                                    "status": "failed",
+                                    "timestamp": "1748000030",
+                                    "recipient_id": "5491150380097",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+    events = parse_meta_status_payload(payload)
+    assert len(events) == 5
+    pairs = {(e.message_id, e.status) for e in events}
+    assert pairs == {
+        ("wamid.A", "sent"),
+        ("wamid.A", "delivered"),
+        ("wamid.A", "read"),
+        ("wamid.B", "delivered"),
+        ("wamid.C", "failed"),
+    }
+    # Distinct event keys so the append-only store does not dedupe legitimate batched events.
+    assert len({e.event_key() for e in events}) == 5
+
+
+def test_parse_meta_status_payload_ignores_non_message_fields_in_changes():
+    """Meta sends non-``messages`` change fields (e.g. ``message_template_status_update``)
+    in the same webhook. They have no ``statuses[]`` array and must be skipped silently,
+    while sibling ``messages`` changes still emit events.
+    """
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA",
+                "changes": [
+                    {
+                        "field": "message_template_status_update",
+                        "value": {
+                            "event": "APPROVED",
+                            "message_template_name": "daily_report",
+                        },
+                    },
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {
+                                    "id": "wamid.OK",
+                                    "status": "delivered",
+                                    "timestamp": "1748000100",
+                                    "recipient_id": "5491150380097",
+                                }
+                            ],
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    events = parse_meta_status_payload(payload)
+    assert len(events) == 1
+    assert events[0].message_id == "wamid.OK"
+    assert events[0].status == "delivered"
