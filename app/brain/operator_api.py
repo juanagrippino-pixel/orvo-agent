@@ -10,10 +10,12 @@ from typing import Any, Literal, get_args
 from datetime import datetime, timezone
 
 from app.brain.operational_cases import (
+    ActorType,
     OperationalCase,
     OperationalCaseStatus,
     OperationalCaseStatusError,
     OperationalCaseStore,
+    TimelineEventType,
 )
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
@@ -22,6 +24,8 @@ CaseActionKey = Literal["acknowledge_case", "resolve_case", "add_comment"]
 _ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
+_ALLOWED_TIMELINE_EVENT_TYPES: set[str] = set(get_args(TimelineEventType))
+_ALLOWED_TIMELINE_ACTOR_TYPES: set[str] = set(get_args(ActorType))
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 50
 
@@ -73,6 +77,30 @@ def parse_case_status(value: str | None) -> OperationalCaseStatus | None:
         return None
     if value not in _ALLOWED_CASE_STATUSES:
         raise OperatorAPIError("invalid_case_status", f"unsupported case status: {value}", status_code=400)
+    return value  # type: ignore[return-value]
+
+
+def parse_timeline_event_type(value: str | None) -> TimelineEventType | None:
+    if value in (None, ""):
+        return None
+    if value not in _ALLOWED_TIMELINE_EVENT_TYPES:
+        raise OperatorAPIError(
+            "invalid_timeline_event_type",
+            f"unsupported timeline event_type: {value}",
+            status_code=400,
+        )
+    return value  # type: ignore[return-value]
+
+
+def parse_timeline_actor_type(value: str | None) -> ActorType | None:
+    if value in (None, ""):
+        return None
+    if value not in _ALLOWED_TIMELINE_ACTOR_TYPES:
+        raise OperatorAPIError(
+            "invalid_timeline_actor_type",
+            f"unsupported timeline actor_type: {value}",
+            status_code=400,
+        )
     return value  # type: ignore[return-value]
 
 
@@ -248,6 +276,42 @@ def get_scoped_case(store: OperationalCaseStore, *, business_id: str, case_id: s
 
 def get_case_projection(store: OperationalCaseStore, *, business_id: str, case_id: str) -> dict[str, Any]:
     return {"case": case_detail(get_scoped_case(store, business_id=business_id, case_id=case_id))}
+
+
+def list_case_timeline(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    case_id: str,
+    event_type: str | None = None,
+    actor_type: str | None = None,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    parsed_event_type = parse_timeline_event_type(event_type)
+    parsed_actor_type = parse_timeline_actor_type(actor_type)
+    parsed_limit = parse_limit(limit)
+    case = get_scoped_case(store, business_id=business_id, case_id=case_id)
+    events = list(case.timeline)
+    if parsed_event_type is not None:
+        events = [event for event in events if event.event_type == parsed_event_type]
+    if parsed_actor_type is not None:
+        events = [event for event in events if event.actor_type == parsed_actor_type]
+    total = len(events)
+    limited = events[-parsed_limit:] if total > parsed_limit else events
+    return redact_secrets(
+        {
+            "case_id": case.case_id,
+            "case_status": case.status,
+            "filters": {
+                "event_type": parsed_event_type,
+                "actor_type": parsed_actor_type,
+            },
+            "events": [timeline_event_projection(case, event) for event in limited],
+            "limit": parsed_limit,
+            "count": len(limited),
+            "total": total,
+        }
+    )
 
 
 def list_builtin_case_views() -> dict[str, Any]:
