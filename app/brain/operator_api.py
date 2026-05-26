@@ -486,6 +486,54 @@ def summarize_case_workflow_throughput(
     )
 
 
+def summarize_case_workflow_throughput_by_severity(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Severity-split lifecycle latency aggregates for cases in a business.
+
+    Mirrors :func:`summarize_case_workflow_throughput` but groups every count
+    and latency aggregate by case severity (info/warning/critical). Operator
+    surfaces use this to spot SLA pressure where a few slow info-level cases
+    would otherwise mask fast acknowledgment on criticals. Strictly scoped
+    per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_severity: dict[str, int] = {}
+    ack_by_severity: dict[str, int] = {}
+    resolve_by_severity: dict[str, int] = {}
+    ack_latencies_by_severity: dict[str, list[int]] = {}
+    resolve_latencies_by_severity: dict[str, list[int]] = {}
+    for case in cases:
+        severity = case.severity
+        totals_by_severity[severity] = totals_by_severity.get(severity, 0) + 1
+        if case.acknowledged_at is not None:
+            ack_latency = int((case.acknowledged_at - case.opened_at).total_seconds())
+            ack_by_severity[severity] = ack_by_severity.get(severity, 0) + 1
+            ack_latencies_by_severity.setdefault(severity, []).append(ack_latency)
+        if case.resolved_at is not None:
+            resolve_latency = int((case.resolved_at - case.opened_at).total_seconds())
+            resolve_by_severity[severity] = resolve_by_severity.get(severity, 0) + 1
+            resolve_latencies_by_severity.setdefault(severity, []).append(resolve_latency)
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "totals_by_severity": totals_by_severity,
+            "acknowledged_by_severity": ack_by_severity,
+            "resolved_by_severity": resolve_by_severity,
+            "time_to_acknowledge_seconds_by_severity": {
+                severity: _latency_summary(values)
+                for severity, values in ack_latencies_by_severity.items()
+            },
+            "time_to_resolve_seconds_by_severity": {
+                severity: _latency_summary(values)
+                for severity, values in resolve_latencies_by_severity.items()
+            },
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
