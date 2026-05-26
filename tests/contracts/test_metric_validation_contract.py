@@ -55,6 +55,26 @@ def test_advisory_metric_validation_accepts_canonical_keys_and_registered_aliase
     assert validate_metrics(metrics) == []
 
 
+def test_legacy_revenue_baseline_alias_resolves_to_canonical_baseline_metric():
+    from app.brain.semantics.metric_registry import default_metric_registry, validate_metrics
+
+    registry = default_metric_registry()
+    canonical_key = registry.resolve_key("revenue_baseline")
+    definition = registry.get("revenue_baseline")
+
+    assert canonical_key == "commerce.revenue.baseline"
+    assert definition.family == "commerce.revenue"
+    assert definition.case_allowed is True
+    assert "google_sheets" in definition.allowed_sources
+    assert "csv" in definition.allowed_sources
+    assert "sample" in definition.allowed_sources
+
+    metrics = [
+        Metric(key="revenue_baseline", label="Promedio reciente", value=120000, unit="ARS", evidence=[_evidence("google_sheets")]),
+    ]
+    assert validate_metrics(metrics) == []
+
+
 def test_strict_metric_validation_raises_on_unknown_metric_without_mutating_input():
     from app.brain.semantics.metric_registry import UnknownMetricError, validate_metrics
 

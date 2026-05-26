@@ -270,6 +270,16 @@ DEFAULT_METRIC_DEFINITIONS: tuple[MetricDefinition, ...] = (
         case_allowed=True,
     ),
     _definition(
+        key="commerce.revenue.baseline",
+        family="commerce.revenue",
+        label="Revenue baseline",
+        unit="money",
+        allowed_sources=("csv", "google_sheets", "sample"),
+        aliases=("revenue_baseline",),
+        aggregation="average",
+        case_allowed=True,
+    ),
+    _definition(
         key="commerce.inventory.available_units",
         family="commerce.inventory",
         label="Available inventory units",

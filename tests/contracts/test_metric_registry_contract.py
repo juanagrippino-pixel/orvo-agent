@@ -4,6 +4,7 @@ import pytest
 REQUIRED_CANONICAL_KEYS = {
     "commerce.orders.count",
     "commerce.revenue.total",
+    "commerce.revenue.baseline",
     "commerce.inventory.available_units",
     "commerce.fulfillment.pending_count",
     "commerce.fulfillment.oldest_pending_age_hours",
@@ -23,6 +24,7 @@ REQUIRED_CANONICAL_KEYS = {
 
 REQUIRED_ALIASES = {
     "revenue_today": "commerce.revenue.total",
+    "revenue_baseline": "commerce.revenue.baseline",
     "orders_today": "commerce.orders.count",
     "stock_units": "commerce.inventory.available_units",
     "unanswered_conversations": "support.conversations.unanswered_count",
