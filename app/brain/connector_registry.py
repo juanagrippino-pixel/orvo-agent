@@ -400,6 +400,7 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             "commerce.orders",
             "commerce.revenue",
             "commerce.inventory",
+            "commerce.average_order_value",
             "runtime.freshness",
             "runtime.data_quality",
         ),
