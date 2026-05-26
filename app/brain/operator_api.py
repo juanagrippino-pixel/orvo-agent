@@ -314,6 +314,48 @@ def list_case_timeline(
     )
 
 
+_ACTIONABLE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"open", "acknowledged"})
+
+
+def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> dict[str, Any]:
+    """Deterministic counts over the case queue for a single business.
+
+    Scoped projection: never returns cases from other tenants and never reads
+    raw payloads beyond what the case store already exposes. Counts cover the
+    full lifecycle (open/acknowledged/resolved); actionable totals isolate the
+    in-flight slice that operator surfaces typically lead with.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    by_status: dict[str, int] = {}
+    by_severity: dict[str, int] = {}
+    by_case_type: dict[str, int] = {}
+    actionable_by_severity: dict[str, int] = {}
+    actionable_total = 0
+    actionable_degraded = 0
+    for case in cases:
+        by_status[case.status] = by_status.get(case.status, 0) + 1
+        by_severity[case.severity] = by_severity.get(case.severity, 0) + 1
+        by_case_type[case.case_type] = by_case_type.get(case.case_type, 0) + 1
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_severity[case.severity] = actionable_by_severity.get(case.severity, 0) + 1
+            if _is_degraded(case):
+                actionable_degraded += 1
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "by_status": by_status,
+            "by_severity": by_severity,
+            "by_case_type": by_case_type,
+            "actionable_total": actionable_total,
+            "actionable_by_severity": actionable_by_severity,
+            "actionable_degraded": actionable_degraded,
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
