@@ -356,6 +356,55 @@ def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> di
     )
 
 
+def _latency_summary(seconds: list[int]) -> dict[str, int]:
+    if not seconds:
+        return {}
+    sorted_seconds = sorted(seconds)
+    count = len(sorted_seconds)
+    midpoint = count // 2
+    if count % 2 == 1:
+        median = sorted_seconds[midpoint]
+    else:
+        median = (sorted_seconds[midpoint - 1] + sorted_seconds[midpoint]) // 2
+    return {
+        "min": sorted_seconds[0],
+        "max": sorted_seconds[-1],
+        "avg": sum(sorted_seconds) // count,
+        "median": median,
+    }
+
+
+def summarize_case_workflow_throughput(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Deterministic lifecycle latency aggregates for cases in a business.
+
+    Computes time-to-acknowledge (opened_at -> acknowledged_at) and
+    time-to-resolve (opened_at -> resolved_at) in whole seconds for cases
+    that have reached those lifecycle states. Open-only cases contribute to
+    ``total`` but not to the latency aggregates. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    ack_latencies: list[int] = []
+    resolve_latencies: list[int] = []
+    for case in cases:
+        if case.acknowledged_at is not None:
+            ack_latencies.append(int((case.acknowledged_at - case.opened_at).total_seconds()))
+        if case.resolved_at is not None:
+            resolve_latencies.append(int((case.resolved_at - case.opened_at).total_seconds()))
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "acknowledged_count": len(ack_latencies),
+            "resolved_count": len(resolve_latencies),
+            "time_to_acknowledge_seconds": _latency_summary(ack_latencies),
+            "time_to_resolve_seconds": _latency_summary(resolve_latencies),
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
