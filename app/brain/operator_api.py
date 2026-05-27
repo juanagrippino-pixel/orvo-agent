@@ -824,6 +824,55 @@ def list_recently_resolved_cases(
     )
 
 
+def list_recently_opened_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-opened cases that have not yet been acknowledged.
+
+    Symmetric to :func:`list_recently_acknowledged_cases` and
+    :func:`list_recently_resolved_cases`: surfaces the inflow side of the
+    workflow so operator surfaces can render a "Just landed" panel and pick up
+    fresh work before it goes stale. Only cases currently in ``open`` status
+    are included; once acknowledged they belong to the recently-acknowledged
+    projection. Ordered by ``opened_at`` DESC with ``case_id`` ASC as a
+    deterministic tie-breaker. Strictly scoped per tenant; the projection
+    reads ``opened_at`` directly from the case store, so it needs no ``now``
+    parameter.
+    """
+
+    parsed_limit = parse_limit(limit)
+    opened: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="open", limit=None):
+        opened.append((case.opened_at.astimezone(timezone.utc), case.case_id, case))
+
+    # Most recently opened first; tie-break by case_id ASC for deterministic order.
+    opened.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = opened[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+        }
+        for _opened_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "open_total": len(opened),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def list_recently_acknowledged_cases(
     store: OperationalCaseStore,
     *,
