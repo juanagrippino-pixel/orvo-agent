@@ -316,6 +316,160 @@ def test_webhook_persists_status_when_template_update_precedes_messages_change(m
     assert provider == "meta_cloud"
 
 
+def test_webhook_buffers_inbound_text_when_status_change_precedes_messages_change(monkeypatch, tmp_path):
+    """Regression: Meta batches multiple ``changes[]`` in one webhook delivery.
+    When ``changes[0]`` carries an outbound delivery ``statuses[]`` ack and
+    ``changes[1]`` carries the inbound text reply, the legacy
+    ``data["entry"][0]["changes"][0]["value"]`` shortcut silently drops the
+    inbound message — no timer is scheduled, no buffer is populated, no error
+    is logged. The webhook must walk every change to find the inbound
+    ``messages[]`` array.
+    """
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    import server
+
+    scheduled: list[tuple] = []
+
+    class _FakeTimer:
+        def __init__(self, interval, function, args=None, kwargs=None):
+            scheduled.append((interval, function, tuple(args or ())))
+
+        def start(self) -> None:
+            pass
+
+        def cancel(self) -> None:
+            pass
+
+    monkeypatch.setattr(server.threading, "Timer", _FakeTimer)
+
+    mixed = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {
+                                    "id": "wamid.OUTBOUND",
+                                    "status": "delivered",
+                                    "timestamp": "1748200000",
+                                    "recipient_id": "5491150380097",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "messages": [
+                                {
+                                    "from": "5491150380097",
+                                    "id": "wamid.INBOUND",
+                                    "type": "text",
+                                    "text": {"body": "hola, quiero info"},
+                                }
+                            ],
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    response = client.post("/webhook", json=mixed)
+    assert response.status_code == 200
+    assert len(scheduled) == 1, "expected exactly one buffered-process timer for the inbound reply"
+    _interval, _function, args = scheduled[0]
+    assert args == ("5491150380097",)
+    assert server._buffers.get("5491150380097") == ["hola, quiero info"]
+    # Cleanup module-global state so we don't leak into other tests.
+    server._buffers.pop("5491150380097", None)
+    server._timers.pop("5491150380097", None)
+
+
+def test_webhook_buffers_inbound_text_when_inbound_lives_in_second_entry(monkeypatch, tmp_path):
+    """Regression: Meta can batch separate WABAs in ``entry[]``. When the
+    inbound reply lives at ``entry[1].changes[0]``, the legacy
+    ``data["entry"][0]"]`` shortcut silently drops it.
+    """
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    import server
+
+    scheduled: list[tuple] = []
+
+    class _FakeTimer:
+        def __init__(self, interval, function, args=None, kwargs=None):
+            scheduled.append((interval, function, tuple(args or ())))
+
+        def start(self) -> None:
+            pass
+
+        def cancel(self) -> None:
+            pass
+
+    monkeypatch.setattr(server.threading, "Timer", _FakeTimer)
+
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA-1",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "statuses": [
+                                {
+                                    "id": "wamid.OUT",
+                                    "status": "read",
+                                    "timestamp": "1748200500",
+                                    "recipient_id": "5491150380098",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            {
+                "id": "WABA-2",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "messages": [
+                                {
+                                    "from": "5491150380099",
+                                    "id": "wamid.INBOUND2",
+                                    "type": "text",
+                                    "text": {"body": "necesito ayuda"},
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+
+    response = client.post("/webhook", json=payload)
+    assert response.status_code == 200
+    assert len(scheduled) == 1
+    _interval, _function, args = scheduled[0]
+    assert args == ("5491150380099",)
+    assert server._buffers.get("5491150380099") == ["necesito ayuda"]
+    server._buffers.pop("5491150380099", None)
+    server._timers.pop("5491150380099", None)
+
+
 def test_internal_delivery_statuses_respects_limit_bounds(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     for i in range(6):

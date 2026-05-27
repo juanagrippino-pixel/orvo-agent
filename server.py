@@ -469,11 +469,9 @@ def webhook():
     except Exception as e:
         print(f"[webhook] Failed to persist delivery statuses: {e}")
     try:
-        value = data["entry"][0]["changes"][0]["value"]
-        messages = value.get("messages")
-        if not messages:
+        msg = _first_inbound_message(data)
+        if msg is None:
             return "ok", 200
-        msg = messages[0]
         phone = msg["from"]
         if msg.get("type") != "text":
             _send(phone, "Por ahora solo puedo responder mensajes de texto.")
@@ -489,6 +487,34 @@ def webhook():
     except (KeyError, IndexError, TypeError) as e:
         print(f"[webhook] Unexpected payload shape: {e}")
     return "ok", 200
+
+
+def _first_inbound_message(data: dict) -> dict | None:
+    """Return the first inbound ``messages[]`` entry across any ``entry[]`` /
+    ``changes[]`` element, or ``None`` if there is no inbound message.
+
+    Meta batches multiple ``changes`` (and sometimes multiple ``entry`` items)
+    into one webhook delivery — a sibling outbound delivery ack at
+    ``changes[0]`` must not silently drop an inbound reply at ``changes[1]``.
+    """
+    if not isinstance(data, dict):
+        return None
+    for entry in data.get("entry") or ():
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes") or ():
+            if not isinstance(change, dict):
+                continue
+            value = change.get("value")
+            if not isinstance(value, dict):
+                continue
+            messages = value.get("messages")
+            if not isinstance(messages, list) or not messages:
+                continue
+            first = messages[0]
+            if isinstance(first, dict) and "from" in first:
+                return first
+    return None
 
 
 def _persist_delivery_status_events(data: dict) -> None:
