@@ -25,7 +25,10 @@ from unittest.mock import MagicMock
 from app.brain.adapters.mercadolibre import build_daily_report_from_mercadolibre
 from app.brain.adapters.meta_ads import build_daily_report_from_meta_ads
 from app.brain.adapters.tiendanube import build_daily_report_from_tiendanube
-from app.brain.connector_registry import get_connector_spec
+from app.brain.connector_registry import (
+    get_connector_spec,
+    validate_emitted_metric_objects_for_connector,
+)
 from app.brain.semantics.metric_registry import (
     default_metric_registry,
     find_source_envelope_violations,
@@ -176,3 +179,58 @@ def test_mercadolibre_adapter_emits_only_registry_resolvable_metrics_inside_conn
         (metric.key for metric in report.metrics), "mercadolibre"
     )
     assert validate_metrics(report.metrics) == []
+
+
+def test_tiendanube_adapter_emitted_metric_objects_pass_unified_envelope_validator():
+    """The unified validator composes unknown_metric + disallowed_source +
+    undeclared_family + evidence_source_mismatch in one call. Pinning adapter
+    output to this single entry point protects the runtime/control-plane from
+    drifting between the piecemeal helpers and the composed validator.
+    """
+
+    report = build_daily_report_from_tiendanube(
+        business_name="Contract Store",
+        store_id="123",
+        access_token="tn_test_token",
+        report_date=date(2025, 1, 15),
+        http_client=_tiendanube_session(),
+        include_stock=True,
+    )
+
+    assert report.metrics
+    assert (
+        validate_emitted_metric_objects_for_connector("tiendanube", report.metrics)
+        == []
+    )
+
+
+def test_meta_ads_adapter_emitted_metric_objects_pass_unified_envelope_validator():
+    report = build_daily_report_from_meta_ads(
+        business_name="Contract Store",
+        report_date=date(2025, 1, 15),
+        ad_account_id="act_12345",
+        access_token="meta_test_token",
+        http_client=_meta_ads_session(),
+    )
+
+    assert report.metrics
+    assert (
+        validate_emitted_metric_objects_for_connector("meta_ads", report.metrics)
+        == []
+    )
+
+
+def test_mercadolibre_adapter_emitted_metric_objects_pass_unified_envelope_validator():
+    report = build_daily_report_from_mercadolibre(
+        business_name="Contract Store",
+        report_date=date(2025, 1, 15),
+        seller_id="42",
+        access_token="ml_test_token",
+        http_client=_mercadolibre_session(),
+    )
+
+    assert report.metrics
+    assert (
+        validate_emitted_metric_objects_for_connector("mercadolibre", report.metrics)
+        == []
+    )
