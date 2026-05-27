@@ -250,3 +250,137 @@ def test_family_envelope_helper_rejects_empty_connector_type_declared_families_o
             connector_type="tiendanube",
             declared_families=("commerce.orders",),
         )
+
+
+def test_evidence_source_helper_flags_evidence_sources_outside_canonical_allowed_sources():
+    from app.brain.semantics.metric_registry import find_evidence_source_violations
+
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            evidence=[_evidence("tiendanube")],
+        ),
+        Metric(
+            key="ad_spend_today",
+            label="Ad spend",
+            value=1500,
+            unit="ARS",
+            evidence=[_evidence("tiendanube")],
+        ),
+    ]
+
+    violations = find_evidence_source_violations(metrics)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("evidence_source_mismatch", "ad_spend_today", 1, "warning")
+    ]
+    assert "tiendanube" in violations[0].message
+    assert "ads.spend.total" in violations[0].message
+    assert "meta_ads" in violations[0].message
+
+
+def test_evidence_source_helper_resolves_aliases_before_checking_allowed_sources():
+    from app.brain.semantics.metric_registry import find_evidence_source_violations
+
+    metrics = [
+        Metric(
+            key="revenue_baseline",
+            label="Promedio reciente",
+            value=120000,
+            unit="ARS",
+            evidence=[_evidence("mercadolibre")],
+        ),
+    ]
+
+    violations = find_evidence_source_violations(metrics)
+    assert len(violations) == 1
+    assert violations[0].key == "revenue_baseline"
+    assert "commerce.revenue.baseline" in violations[0].message
+
+
+def test_evidence_source_helper_returns_empty_when_all_evidence_sources_allowed():
+    from app.brain.semantics.metric_registry import find_evidence_source_violations
+
+    metrics = [
+        Metric(
+            key="revenue_today",
+            label="Revenue",
+            value=90000,
+            unit="ARS",
+            evidence=[_evidence("tiendanube"), _evidence("mercadolibre")],
+        ),
+    ]
+    assert find_evidence_source_violations(metrics) == []
+
+
+def test_evidence_source_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_evidence_source_violations
+
+    metrics = [
+        Metric(
+            key="mystery_metric",
+            label="Mystery",
+            value=1,
+            evidence=[_evidence("never_seen_source")],
+        ),
+    ]
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so all four diagnostics compose without overlap.
+    assert find_evidence_source_violations(metrics) == []
+
+
+def test_evidence_source_helper_reports_each_disallowed_source_once_per_metric_in_input_order():
+    from app.brain.semantics.metric_registry import find_evidence_source_violations
+
+    metrics = [
+        Metric(
+            key="ads.spend.total",
+            label="Ad spend",
+            value=1500,
+            unit="ARS",
+            evidence=[
+                _evidence("tiendanube"),
+                _evidence("mercadolibre"),
+                _evidence("tiendanube"),
+                _evidence("meta_ads"),
+            ],
+        ),
+    ]
+
+    violations = find_evidence_source_violations(metrics)
+    # tiendanube appears twice but should be reported once; meta_ads is allowed
+    # so should not appear; mercadolibre is also disallowed.
+    assert [(issue.code, issue.index, "src=" in issue.message) for issue in violations] == [
+        ("evidence_source_mismatch", 0, True),
+        ("evidence_source_mismatch", 0, True),
+    ]
+    sources_reported = [issue.message.split("src=", 1)[1].split(";", 1)[0] for issue in violations]
+    assert sources_reported == ["tiendanube", "mercadolibre"]
+
+
+def test_evidence_source_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_evidence_source_violations
+
+    metrics = [
+        Metric(
+            key="ad_spend_today",
+            label="Ad spend",
+            value=1500,
+            unit="ARS",
+            evidence=[_evidence("tiendanube"), _evidence("mercadolibre")],
+        ),
+    ]
+    first = find_evidence_source_violations(metrics)
+    second = find_evidence_source_violations(metrics)
+    assert first == second
+
+
+def test_evidence_source_helper_rejects_metrics_missing_key_or_evidence():
+    from app.brain.semantics.metric_registry import find_evidence_source_violations
+
+    with pytest.raises(ValueError, match="key"):
+        find_evidence_source_violations([{"label": "no key", "evidence": []}])
+
+    with pytest.raises(ValueError, match="evidence"):
+        find_evidence_source_violations([{"key": "ad_spend_today"}])

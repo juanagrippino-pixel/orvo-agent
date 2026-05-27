@@ -443,6 +443,33 @@ def _metric_key(metric: Any) -> str:
     return key
 
 
+def _metric_evidence_sources(metric: Any) -> tuple[str, ...]:
+    if isinstance(metric, Mapping):
+        if "evidence" not in metric:
+            raise ValueError(
+                "Metrics passed to evidence-source validation must expose an evidence collection"
+            )
+        evidence = metric.get("evidence")
+    else:
+        if not hasattr(metric, "evidence"):
+            raise ValueError(
+                "Metrics passed to evidence-source validation must expose an evidence collection"
+            )
+        evidence = getattr(metric, "evidence")
+    sources: list[str] = []
+    for item in evidence or ():
+        if isinstance(item, Mapping):
+            source = item.get("source")
+        else:
+            source = getattr(item, "source", None)
+        if not isinstance(source, str) or not source:
+            raise ValueError(
+                "Evidence entries passed to evidence-source validation must expose a non-empty string source"
+            )
+        sources.append(source)
+    return tuple(sources)
+
+
 def find_source_envelope_violations(
     metric_keys: Iterable[str],
     *,
@@ -548,6 +575,55 @@ def find_family_envelope_violations(
     return issues
 
 
+def find_evidence_source_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for evidence sources outside the canonical
+    metric's ``allowed_sources``.
+
+    Each metric must expose a non-empty string ``key`` and a non-``None``
+    ``evidence`` collection whose entries expose a non-empty string ``source``.
+    Unknown (unresolved) keys are intentionally skipped so this diagnostic
+    composes with :func:`validate_metrics` (unknown keys),
+    :func:`find_source_envelope_violations` (connector_type), and
+    :func:`find_family_envelope_violations` (declared families). Within one
+    metric, each disallowed source is reported at most once and in
+    first-appearance order; across metrics, results follow input order.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        sources = _metric_evidence_sources(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        allowed = definition.allowed_sources
+        seen: set[str] = set()
+        for source in sources:
+            if source in allowed or source in seen:
+                continue
+            seen.add(source)
+            issues.append(
+                MetricValidationIssue(
+                    code="evidence_source_mismatch",
+                    key=key,
+                    message=(
+                        f"Metric key '{key}' (canonical '{canonical}') received "
+                        f"evidence src={source}; allowed_sources="
+                        f"{list(allowed)}"
+                    ),
+                    severity="warning",
+                    index=index,
+                )
+            )
+    return issues
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -590,6 +666,7 @@ __all__ = [
     "MetricValidationIssue",
     "UnknownMetricError",
     "default_metric_registry",
+    "find_evidence_source_violations",
     "find_family_envelope_violations",
     "find_source_envelope_violations",
     "validate_metrics",
