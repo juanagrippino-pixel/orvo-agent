@@ -20,6 +20,7 @@ from typing import Iterable, Mapping
 from app.brain.semantics.metric_registry import (
     MetricRegistry,
     MetricValidationIssue,
+    find_evidence_source_violations,
     find_family_envelope_violations,
     find_source_envelope_violations,
     validate_metrics,
@@ -49,6 +50,20 @@ RUNTIME_MODE_HEALTH_CHECK = "health_check"
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
+
+
+def _metric_object_key(metric: object) -> str:
+    """Extract a metric key from a Metric-shaped object or mapping."""
+
+    if isinstance(metric, Mapping):
+        key = metric.get("key")
+    else:
+        key = getattr(metric, "key", None)
+    if not isinstance(key, str) or not key:
+        raise ValueError(
+            "validate_emitted_metric_objects requires metrics with a non-empty string key"
+        )
+    return key
 
 
 class UnknownConnectorError(ValueError):
@@ -303,6 +318,42 @@ class ConnectorSpec:
             registry=registry,
         )
         return [*unknown_issues, *source_issues, *family_issues]
+
+    def validate_emitted_metric_objects(
+        self,
+        metrics: Iterable[object],
+        *,
+        registry: MetricRegistry | None = None,
+    ) -> list[MetricValidationIssue]:
+        """Compose all four envelope diagnostics for emitted metric objects.
+
+        Symmetric extension of :meth:`validate_emitted_metrics` that operates
+        on metric-shaped objects (each exposing ``key`` and ``evidence``). The
+        fixed concatenation order ``unknown_metric`` -> ``disallowed_source``
+        -> ``undeclared_family`` -> ``evidence_source_mismatch`` lets the
+        runtime treat object-level validation as a superset of key-level
+        validation: when no evidence sources are out of envelope the result
+        equals ``validate_emitted_metrics`` over the same keys.
+        """
+
+        materialized = list(metrics)
+        unknown_issues = validate_metrics(materialized, registry=registry)
+        keys = [_metric_object_key(metric) for metric in materialized]
+        source_issues = find_source_envelope_violations(
+            keys,
+            connector_type=self.connector_type,
+            registry=registry,
+        )
+        family_issues = find_family_envelope_violations(
+            keys,
+            connector_type=self.connector_type,
+            declared_families=self.emitted_metric_families,
+            registry=registry,
+        )
+        evidence_issues = find_evidence_source_violations(
+            materialized, registry=registry
+        )
+        return [*unknown_issues, *source_issues, *family_issues, *evidence_issues]
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:
         """Return legacy inline execution-param errors without logging credentials.
@@ -580,4 +631,21 @@ def validate_emitted_metrics_for_connector(
 
     return get_connector_spec(connector_type).validate_emitted_metrics(
         metric_keys, registry=registry
+    )
+
+
+def validate_emitted_metric_objects_for_connector(
+    connector_type: str,
+    metrics: Iterable[object],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Convenience wrapper around ``ConnectorSpec.validate_emitted_metric_objects``.
+
+    Raises ``UnknownConnectorError`` when ``connector_type`` is not registered
+    so callers cannot silently skip the four-diagnostic composition.
+    """
+
+    return get_connector_spec(connector_type).validate_emitted_metric_objects(
+        metrics, registry=registry
     )
