@@ -557,6 +557,67 @@ def list_top_actionable_cases_by_age(
     )
 
 
+def list_top_actionable_cases_by_priority(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Top-N highest-priority actionable cases for a business.
+
+    Counterpart to :func:`list_top_actionable_cases_by_age`: operators triage
+    by priority as often as by age, so this projection ranks open and
+    acknowledged cases by ``priority_score`` DESC. Ties on priority are broken
+    by ``case_id`` ASC for deterministic ordering. ``age_seconds`` is included
+    on each row for context but does not influence ordering. ``now`` is
+    injectable for tests and defaults to current UTC. Strictly scoped per
+    tenant.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    parsed_limit = parse_limit(limit)
+    actionable: list[tuple[int, str, int, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        actionable.append((case.priority_score, case.case_id, age_seconds, case))
+
+    # Highest priority first; tie-break by case_id ASC for deterministic order.
+    actionable.sort(key=lambda item: (-item[0], item[1]))
+    limited = actionable[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "age_seconds": age_seconds,
+        }
+        for priority_score, _case_id, age_seconds, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_total": len(actionable),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}
