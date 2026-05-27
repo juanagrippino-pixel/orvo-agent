@@ -56,3 +56,88 @@ def test_sample_connector_is_not_declared_as_forced_or_scheduled_daily_runtime()
 
     assert CAPABILITY_DAILY_REPORT not in sample.capabilities
     assert sample.executor.supported_runtime_modes == ("preview", "operator_triggered")
+
+
+def test_connector_spec_validate_emitted_metrics_composes_unknown_source_and_family_diagnostics():
+    """ConnectorSpec.validate_emitted_metrics must compose the three semantic
+    envelope diagnostics deterministically so the runtime/control-plane can
+    rely on one call to inspect adapter output against a connector envelope.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    issues = tiendanube.validate_emitted_metrics(
+        (
+            "orders_today",
+            "mystery_metric",
+            "ad_spend_today",
+            "ad_roas_today",
+        )
+    )
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "ad_spend_today", 2),
+        ("disallowed_source", "ad_roas_today", 3),
+        ("undeclared_family", "ad_spend_today", 2),
+        ("undeclared_family", "ad_roas_today", 3),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
+def test_connector_spec_validate_emitted_metrics_returns_empty_for_in_envelope_keys():
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    assert tiendanube.validate_emitted_metrics(
+        ("orders_today", "revenue_today", "stock_units")
+    ) == []
+
+
+def test_connector_spec_validate_emitted_metrics_is_deterministic_across_runs():
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+    keys = ("ad_spend_today", "orders_today", "mystery_metric")
+
+    first = meta_ads.validate_emitted_metrics(keys)
+    second = meta_ads.validate_emitted_metrics(keys)
+    assert first == second
+
+
+def test_validate_emitted_metrics_for_connector_module_function_matches_spec_method():
+    from app.brain.connector_registry import (
+        get_connector_spec,
+        validate_emitted_metrics_for_connector,
+    )
+
+    keys = ("orders_today", "ad_spend_today", "mystery_metric")
+    spec_result = get_connector_spec("tiendanube").validate_emitted_metrics(keys)
+    free_result = validate_emitted_metrics_for_connector("tiendanube", keys)
+
+    assert free_result == spec_result
+
+
+def test_validate_emitted_metrics_for_connector_raises_for_unknown_connector_type():
+    import pytest
+
+    from app.brain.connector_registry import (
+        UnknownConnectorError,
+        validate_emitted_metrics_for_connector,
+    )
+
+    with pytest.raises(UnknownConnectorError):
+        validate_emitted_metrics_for_connector("not_a_connector", ("orders_today",))
+
+
+def test_semantics_package_reexports_family_envelope_helper_for_runtime_callers():
+    """Runtime callers depend on `app.brain.semantics` as the public surface."""
+
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_family_envelope_violations")
+    assert "find_family_envelope_violations" in semantics.__all__

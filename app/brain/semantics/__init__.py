@@ -8,6 +8,7 @@ from app.brain.semantics.metric_registry import (
     MetricValidationIssue,
     UnknownMetricError,
     default_metric_registry,
+    find_family_envelope_violations,
     find_source_envelope_violations,
     validate_metrics,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "MetricValidationIssue",
     "UnknownMetricError",
     "default_metric_registry",
+    "find_family_envelope_violations",
     "find_source_envelope_violations",
     "validate_metrics",
 ]

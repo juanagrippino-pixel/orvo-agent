@@ -15,7 +15,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import Iterable, Mapping
+
+from app.brain.semantics.metric_registry import (
+    MetricRegistry,
+    MetricValidationIssue,
+    find_family_envelope_violations,
+    find_source_envelope_violations,
+    validate_metrics,
+)
 
 CONNECTOR_TYPE_CSV = "csv"
 CONNECTOR_TYPE_GOOGLE_SHEETS = "google_sheets"
@@ -261,6 +269,40 @@ class ConnectorSpec:
                     )
 
         return issues
+
+    def validate_emitted_metrics(
+        self,
+        metric_keys: Iterable[str],
+        *,
+        registry: MetricRegistry | None = None,
+    ) -> list[MetricValidationIssue]:
+        """Compose unknown-metric + source-envelope + family-envelope diagnostics
+        for keys emitted under this connector's envelope.
+
+        The three diagnostics are independently deterministic and composable by
+        design. Concatenating them in the fixed order ``unknown_metric`` ->
+        ``disallowed_source`` -> ``undeclared_family`` yields a stable result
+        the runtime/control-plane can compare across runs without overlap:
+        ``find_*_envelope_violations`` already skip unknown keys.
+        """
+
+        materialized = list(metric_keys)
+        unknown_issues = validate_metrics(
+            [{"key": key} for key in materialized],
+            registry=registry,
+        )
+        source_issues = find_source_envelope_violations(
+            materialized,
+            connector_type=self.connector_type,
+            registry=registry,
+        )
+        family_issues = find_family_envelope_violations(
+            materialized,
+            connector_type=self.connector_type,
+            declared_families=self.emitted_metric_families,
+            registry=registry,
+        )
+        return [*unknown_issues, *source_issues, *family_issues]
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:
         """Return legacy inline execution-param errors without logging credentials.
@@ -521,4 +563,21 @@ def validate_connector_control_plane_config(
         params=params,
         secret_refs=secret_refs,
         strict=strict,
+    )
+
+
+def validate_emitted_metrics_for_connector(
+    connector_type: str,
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Convenience wrapper around ``ConnectorSpec.validate_emitted_metrics``.
+
+    Raises ``UnknownConnectorError`` when ``connector_type`` is not registered
+    so callers fail loudly instead of silently skipping envelope diagnostics.
+    """
+
+    return get_connector_spec(connector_type).validate_emitted_metrics(
+        metric_keys, registry=registry
     )
