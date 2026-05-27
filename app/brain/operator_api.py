@@ -618,6 +618,94 @@ def list_top_actionable_cases_by_priority(
     )
 
 
+_FRESHNESS_RANK: dict[str, int] = {
+    "fresh": 0,
+    "unknown": 1,
+    "stale": 2,
+    "degraded": 3,
+    "missing": 4,
+}
+
+
+def _worst_freshness_state(case: OperationalCase) -> str | None:
+    worst: str | None = None
+    worst_rank = -1
+    for snapshot in case.evidence_snapshots:
+        rank = _FRESHNESS_RANK.get(snapshot.freshness_state, -1)
+        if rank > worst_rank:
+            worst_rank = rank
+            worst = snapshot.freshness_state
+    return worst
+
+
+def list_top_actionable_degraded_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Top-N actionable cases whose evidence snapshots are not fresh.
+
+    Drills into the ``actionable_degraded`` counter exposed by
+    :func:`summarize_case_queue`: surfaces which urgent cases are stuck on
+    stale, degraded, or missing evidence so operators know which connector to
+    re-run. Ordered by ``priority_score`` DESC with ``case_id`` ASC as a
+    deterministic tie-breaker. Each row includes the worst freshness state,
+    latest evidence capture time, and contributing source connectors so the
+    operator surface can render triage hints without extra lookups. ``now`` is
+    injectable for tests and defaults to current UTC. Strictly scoped per
+    tenant.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    parsed_limit = parse_limit(limit)
+    degraded: list[tuple[int, str, int, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        if not _is_degraded(case):
+            continue
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        degraded.append((case.priority_score, case.case_id, age_seconds, case))
+
+    # Highest priority first; tie-break by case_id ASC for deterministic order.
+    degraded.sort(key=lambda item: (-item[0], item[1]))
+    limited = degraded[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "age_seconds": age_seconds,
+            "freshness_state": _worst_freshness_state(case),
+            "latest_evidence_at": _iso(_latest_evidence_at(case)),
+            "source_connectors": _source_connectors(case),
+        }
+        for priority_score, _case_id, age_seconds, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_degraded_total": len(degraded),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}
