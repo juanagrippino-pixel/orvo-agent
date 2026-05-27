@@ -141,3 +141,112 @@ def test_strict_metric_validation_raises_on_unknown_metric_without_mutating_inpu
         validate_metrics(metrics, strict=True)
 
     assert metrics[0].model_dump(mode="json") == original_dump
+
+
+def test_family_envelope_helper_flags_metrics_outside_connector_declared_families():
+    from app.brain.semantics.metric_registry import find_family_envelope_violations
+
+    # tiendanube connector declares commerce.* + runtime.* families but does
+    # not declare ads.spend; emitting ad_spend_today through tiendanube should
+    # be flagged as outside the connector's declared family envelope.
+    violations = find_family_envelope_violations(
+        ("orders_today", "ad_spend_today"),
+        connector_type="tiendanube",
+        declared_families=(
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ),
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("undeclared_family", "ad_spend_today", 1, "warning")
+    ]
+    assert "tiendanube" in violations[0].message
+    assert "ads.spend" in violations[0].message
+    assert "ads.spend.total" in violations[0].message
+
+
+def test_family_envelope_helper_returns_empty_when_all_metrics_inside_envelope():
+    from app.brain.semantics.metric_registry import find_family_envelope_violations
+
+    assert (
+        find_family_envelope_violations(
+            ("orders_today", "revenue_today", "stock_units"),
+            connector_type="tiendanube",
+            declared_families=(
+                "commerce.orders",
+                "commerce.revenue",
+                "commerce.inventory",
+            ),
+        )
+        == []
+    )
+
+
+def test_family_envelope_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_family_envelope_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so the three diagnostics compose without overlap.
+    assert (
+        find_family_envelope_violations(
+            ("never_registered_metric",),
+            connector_type="tiendanube",
+            declared_families=("commerce.orders",),
+        )
+        == []
+    )
+
+
+def test_family_envelope_helper_resolves_aliases_before_checking_declared_families():
+    from app.brain.semantics.metric_registry import find_family_envelope_violations
+
+    # revenue_baseline resolves to commerce.revenue.baseline whose family is
+    # commerce.revenue. If the caller only declares commerce.orders, the
+    # alias-resolved family is reported as undeclared.
+    violations = find_family_envelope_violations(
+        ("revenue_baseline",),
+        connector_type="csv",
+        declared_families=("commerce.orders",),
+    )
+    assert len(violations) == 1
+    assert violations[0].key == "revenue_baseline"
+    assert "commerce.revenue.baseline" in violations[0].message
+    assert "commerce.revenue" in violations[0].message
+
+    assert (
+        find_family_envelope_violations(
+            ("revenue_baseline",),
+            connector_type="csv",
+            declared_families=("commerce.revenue",),
+        )
+        == []
+    )
+
+
+def test_family_envelope_helper_rejects_empty_connector_type_declared_families_or_keys():
+    from app.brain.semantics.metric_registry import find_family_envelope_violations
+
+    with pytest.raises(ValueError, match="connector_type"):
+        find_family_envelope_violations(
+            ("orders_today",),
+            connector_type="",
+            declared_families=("commerce.orders",),
+        )
+
+    with pytest.raises(ValueError, match="declared_families"):
+        find_family_envelope_violations(
+            ("orders_today",),
+            connector_type="tiendanube",
+            declared_families=(),
+        )
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_family_envelope_violations(
+            ("",),
+            connector_type="tiendanube",
+            declared_families=("commerce.orders",),
+        )

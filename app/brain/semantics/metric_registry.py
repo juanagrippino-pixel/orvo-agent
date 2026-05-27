@@ -490,6 +490,64 @@ def find_source_envelope_violations(
     return issues
 
 
+def find_family_envelope_violations(
+    metric_keys: Iterable[str],
+    *,
+    connector_type: str,
+    declared_families: Iterable[str],
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical family is
+    not in the connector spec's declared ``emitted_metric_families``.
+
+    The caller passes ``declared_families`` (typically a connector spec's
+    ``emitted_metric_families``) so this helper stays independent of the
+    connector registry. Unknown (unresolved) keys are intentionally skipped so
+    this diagnostic composes cleanly with :func:`validate_metrics` (unknown
+    keys) and :func:`find_source_envelope_violations` (disallowed sources).
+    Result order matches input order and is deterministic.
+    """
+
+    if not connector_type:
+        raise ValueError("find_family_envelope_violations requires a non-empty connector_type")
+
+    declared = tuple(declared_families)
+    if not declared:
+        raise ValueError(
+            "find_family_envelope_violations requires non-empty declared_families"
+        )
+    declared_set = set(declared)
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_family_envelope_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        family = active_registry.get(canonical).family
+        if family in declared_set:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="undeclared_family",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has family "
+                    f"'{family}' which is not declared in connector "
+                    f"'{connector_type}' emitted_metric_families="
+                    f"{list(declared)}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -532,6 +590,7 @@ __all__ = [
     "MetricValidationIssue",
     "UnknownMetricError",
     "default_metric_registry",
+    "find_family_envelope_violations",
     "find_source_envelope_violations",
     "validate_metrics",
 ]
