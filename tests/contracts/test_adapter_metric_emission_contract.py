@@ -26,7 +26,11 @@ from app.brain.adapters.mercadolibre import build_daily_report_from_mercadolibre
 from app.brain.adapters.meta_ads import build_daily_report_from_meta_ads
 from app.brain.adapters.tiendanube import build_daily_report_from_tiendanube
 from app.brain.connector_registry import get_connector_spec
-from app.brain.semantics.metric_registry import default_metric_registry, validate_metrics
+from app.brain.semantics.metric_registry import (
+    default_metric_registry,
+    find_source_envelope_violations,
+    validate_metrics,
+)
 
 
 def _response(data, status: int = 200, link: str = ""):
@@ -95,9 +99,10 @@ def _assert_metrics_match_connector_envelope(
     spec = get_connector_spec(connector_type)
     declared_families = set(spec.emitted_metric_families)
 
+    materialized_keys = list(metric_keys)
     unresolved: list[str] = []
     family_mismatches: list[str] = []
-    for key in metric_keys:
+    for key in materialized_keys:
         canonical = registry.try_resolve_key(key)
         if canonical is None:
             unresolved.append(key)
@@ -112,6 +117,15 @@ def _assert_metrics_match_connector_envelope(
     assert family_mismatches == [], (
         f"{connector_type} adapter emits metric families not declared in "
         f"connector spec emitted_metric_families: {family_mismatches}"
+    )
+
+    source_violations = find_source_envelope_violations(
+        materialized_keys, connector_type=connector_type
+    )
+    assert source_violations == [], (
+        f"{connector_type} adapter emitted metrics whose canonical "
+        f"allowed_sources excludes '{connector_type}': "
+        f"{[issue.message for issue in source_violations]}"
     )
 
 

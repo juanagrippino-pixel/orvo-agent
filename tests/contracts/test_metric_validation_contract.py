@@ -75,6 +75,62 @@ def test_legacy_revenue_baseline_alias_resolves_to_canonical_baseline_metric():
     assert validate_metrics(metrics) == []
 
 
+def test_source_envelope_helper_flags_metrics_emitted_by_unauthorized_connector_types():
+    from app.brain.semantics.metric_registry import find_source_envelope_violations
+
+    violations = find_source_envelope_violations(
+        ("ad_spend_today",), connector_type="mercadolibre"
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("disallowed_source", "ad_spend_today", 0, "warning")
+    ]
+    assert "mercadolibre" in violations[0].message
+    assert "ads.spend.total" in violations[0].message
+
+    assert find_source_envelope_violations(
+        ("ad_spend_today",), connector_type="meta_ads"
+    ) == []
+
+
+def test_source_envelope_helper_resolves_aliases_before_checking_allowed_sources():
+    from app.brain.semantics.metric_registry import find_source_envelope_violations
+
+    # revenue_baseline is an alias for commerce.revenue.baseline whose
+    # allowed_sources are csv/google_sheets/sample; mercadolibre is excluded.
+    violations = find_source_envelope_violations(
+        ("revenue_baseline",), connector_type="mercadolibre"
+    )
+    assert len(violations) == 1
+    assert violations[0].key == "revenue_baseline"
+    assert "commerce.revenue.baseline" in violations[0].message
+
+    assert find_source_envelope_violations(
+        ("revenue_baseline",), connector_type="google_sheets"
+    ) == []
+
+
+def test_source_envelope_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_source_envelope_violations
+
+    # Unknown keys are owned by validate_metrics; they are intentionally
+    # skipped here so the two diagnostics can be composed without overlap.
+    assert find_source_envelope_violations(
+        ("never_registered_metric",), connector_type="meta_ads"
+    ) == []
+
+
+def test_source_envelope_helper_rejects_empty_connector_type_and_empty_keys():
+    import pytest
+
+    from app.brain.semantics.metric_registry import find_source_envelope_violations
+
+    with pytest.raises(ValueError, match="connector_type"):
+        find_source_envelope_violations(("ad_spend_today",), connector_type="")
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_source_envelope_violations(("",), connector_type="meta_ads")
+
+
 def test_strict_metric_validation_raises_on_unknown_metric_without_mutating_input():
     from app.brain.semantics.metric_registry import UnknownMetricError, validate_metrics
 

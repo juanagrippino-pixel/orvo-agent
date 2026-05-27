@@ -443,6 +443,53 @@ def _metric_key(metric: Any) -> str:
     return key
 
 
+def find_source_envelope_violations(
+    metric_keys: Iterable[str],
+    *,
+    connector_type: str,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys emitted by an unauthorized source.
+
+    A "source envelope" violation means a metric key resolved to a canonical
+    definition whose ``allowed_sources`` does not include ``connector_type``.
+    Unknown (unresolved) keys are intentionally skipped so this diagnostic
+    composes cleanly with :func:`validate_metrics`, which already pins unknown
+    keys. Result order matches input order and is deterministic.
+    """
+
+    if not connector_type:
+        raise ValueError("find_source_envelope_violations requires a non-empty connector_type")
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_source_envelope_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if connector_type in definition.allowed_sources:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="disallowed_source",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') is not allowed "
+                    f"from connector source '{connector_type}'; allowed_sources="
+                    f"{list(definition.allowed_sources)}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -485,5 +532,6 @@ __all__ = [
     "MetricValidationIssue",
     "UnknownMetricError",
     "default_metric_registry",
+    "find_source_envelope_violations",
     "validate_metrics",
 ]
