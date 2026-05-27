@@ -1072,6 +1072,55 @@ def summarize_case_workflow_throughput_by_case_type(
     )
 
 
+def summarize_case_workflow_throughput_by_entity_kind(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Entity-kind-split lifecycle latency aggregates for cases in a business.
+
+    Mirrors :func:`summarize_case_workflow_throughput` but groups every count
+    and latency aggregate by ``entity_scope.kind`` (product/channel/business/etc.).
+    Operator surfaces use this to spot which scopes are draining acknowledgment
+    or resolution time — for example, a slow per-product backlog hidden inside
+    healthy channel-level numbers. Cases missing a ``kind`` are bucketed under
+    ``"unknown"`` so totals never silently drop. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_entity_kind: dict[str, int] = {}
+    ack_by_entity_kind: dict[str, int] = {}
+    resolve_by_entity_kind: dict[str, int] = {}
+    ack_latencies_by_entity_kind: dict[str, list[int]] = {}
+    resolve_latencies_by_entity_kind: dict[str, list[int]] = {}
+    for case in cases:
+        entity_kind = case.entity_scope.get("kind") or "unknown"
+        totals_by_entity_kind[entity_kind] = totals_by_entity_kind.get(entity_kind, 0) + 1
+        if case.acknowledged_at is not None:
+            ack_latency = int((case.acknowledged_at - case.opened_at).total_seconds())
+            ack_by_entity_kind[entity_kind] = ack_by_entity_kind.get(entity_kind, 0) + 1
+            ack_latencies_by_entity_kind.setdefault(entity_kind, []).append(ack_latency)
+        if case.resolved_at is not None:
+            resolve_latency = int((case.resolved_at - case.opened_at).total_seconds())
+            resolve_by_entity_kind[entity_kind] = resolve_by_entity_kind.get(entity_kind, 0) + 1
+            resolve_latencies_by_entity_kind.setdefault(entity_kind, []).append(resolve_latency)
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "totals_by_entity_kind": totals_by_entity_kind,
+            "acknowledged_by_entity_kind": ack_by_entity_kind,
+            "resolved_by_entity_kind": resolve_by_entity_kind,
+            "time_to_acknowledge_seconds_by_entity_kind": {
+                entity_kind: _latency_summary(values)
+                for entity_kind, values in ack_latencies_by_entity_kind.items()
+            },
+            "time_to_resolve_seconds_by_entity_kind": {
+                entity_kind: _latency_summary(values)
+                for entity_kind, values in resolve_latencies_by_entity_kind.items()
+            },
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
