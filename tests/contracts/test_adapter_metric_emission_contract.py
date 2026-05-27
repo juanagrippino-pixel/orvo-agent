@@ -23,6 +23,7 @@ from typing import Iterable
 from unittest.mock import MagicMock
 
 from app.brain.adapters.mercadolibre import build_daily_report_from_mercadolibre
+from app.brain.adapters.meta_ads import build_daily_report_from_meta_ads
 from app.brain.adapters.tiendanube import build_daily_report_from_tiendanube
 from app.brain.connector_registry import get_connector_spec
 from app.brain.semantics.metric_registry import default_metric_registry, validate_metrics
@@ -55,6 +56,22 @@ def _tiendanube_session() -> MagicMock:
         raise AssertionError(f"unexpected URL in contract test: {url}")
 
     session.get.side_effect = fake_get
+    return session
+
+
+def _meta_ads_session() -> MagicMock:
+    body = {
+        "data": [
+            {
+                "spend": "1500.75",
+                "impressions": "20000",
+                "clicks": "350",
+                "purchase_roas": [{"action_type": "omni_purchase", "value": "3.20"}],
+            }
+        ]
+    }
+    session = MagicMock()
+    session.get.return_value = _response(body)
     return session
 
 
@@ -111,6 +128,22 @@ def test_tiendanube_adapter_emits_only_registry_resolvable_metrics_inside_connec
     assert report.metrics, "Tiendanube adapter must emit at least one metric for the contract test"
     _assert_metrics_match_connector_envelope(
         (metric.key for metric in report.metrics), "tiendanube"
+    )
+    assert validate_metrics(report.metrics) == []
+
+
+def test_meta_ads_adapter_emits_only_registry_resolvable_metrics_inside_connector_envelope():
+    report = build_daily_report_from_meta_ads(
+        business_name="Contract Store",
+        report_date=date(2025, 1, 15),
+        ad_account_id="act_12345",
+        access_token="meta_test_token",
+        http_client=_meta_ads_session(),
+    )
+
+    assert report.metrics, "Meta Ads adapter must emit at least one metric for the contract test"
+    _assert_metrics_match_connector_envelope(
+        (metric.key for metric in report.metrics), "meta_ads"
     )
     assert validate_metrics(report.metrics) == []
 

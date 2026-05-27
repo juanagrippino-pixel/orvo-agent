@@ -426,6 +426,7 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         emitted_metric_families=(
             "ads.spend",
             "ads.delivery",
+            "ads.roas",
             "runtime.freshness",
             "runtime.data_quality",
         ),
