@@ -534,6 +534,54 @@ def summarize_case_workflow_throughput_by_severity(
     )
 
 
+def summarize_case_workflow_throughput_by_case_type(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Case-type-split lifecycle latency aggregates for cases in a business.
+
+    Mirrors :func:`summarize_case_workflow_throughput` but groups every count
+    and latency aggregate by case type (sales_drop/stockout_risk/etc.). Lets
+    operator surfaces spot which case families are draining acknowledgment or
+    resolution time even when severity counts look balanced. Strictly scoped
+    per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_case_type: dict[str, int] = {}
+    ack_by_case_type: dict[str, int] = {}
+    resolve_by_case_type: dict[str, int] = {}
+    ack_latencies_by_case_type: dict[str, list[int]] = {}
+    resolve_latencies_by_case_type: dict[str, list[int]] = {}
+    for case in cases:
+        case_type = case.case_type
+        totals_by_case_type[case_type] = totals_by_case_type.get(case_type, 0) + 1
+        if case.acknowledged_at is not None:
+            ack_latency = int((case.acknowledged_at - case.opened_at).total_seconds())
+            ack_by_case_type[case_type] = ack_by_case_type.get(case_type, 0) + 1
+            ack_latencies_by_case_type.setdefault(case_type, []).append(ack_latency)
+        if case.resolved_at is not None:
+            resolve_latency = int((case.resolved_at - case.opened_at).total_seconds())
+            resolve_by_case_type[case_type] = resolve_by_case_type.get(case_type, 0) + 1
+            resolve_latencies_by_case_type.setdefault(case_type, []).append(resolve_latency)
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "totals_by_case_type": totals_by_case_type,
+            "acknowledged_by_case_type": ack_by_case_type,
+            "resolved_by_case_type": resolve_by_case_type,
+            "time_to_acknowledge_seconds_by_case_type": {
+                case_type: _latency_summary(values)
+                for case_type, values in ack_latencies_by_case_type.items()
+            },
+            "time_to_resolve_seconds_by_case_type": {
+                case_type: _latency_summary(values)
+                for case_type, values in resolve_latencies_by_case_type.items()
+            },
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
