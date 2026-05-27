@@ -706,6 +706,58 @@ def list_top_actionable_degraded_cases(
     )
 
 
+def list_recently_resolved_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-resolved cases for a business.
+
+    Complements the actionable projections (`list_top_actionable_cases_by_age`
+    and friends) by surfacing the closed-flow side: operator surfaces use this
+    for "Recently closed" panels and post-mortem hand-offs. Ordered by
+    ``resolved_at`` DESC with ``case_id`` ASC as a deterministic tie-breaker.
+    Each row includes ``resolution_seconds`` (opened_at -> resolved_at) so the
+    surface can render time-to-resolve without extra lookups. Strictly scoped
+    per tenant; the projection reads ``resolved_at`` directly from the case
+    store, so it needs no ``now`` parameter.
+    """
+
+    parsed_limit = parse_limit(limit)
+    resolved: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="resolved", limit=None):
+        if case.resolved_at is None:
+            continue
+        resolved.append((case.resolved_at.astimezone(timezone.utc), case.case_id, case))
+
+    # Most recently resolved first; tie-break by case_id ASC for deterministic order.
+    resolved.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = resolved[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "resolved_at": case.resolved_at.isoformat(),
+            "resolution_seconds": int((case.resolved_at - case.opened_at).total_seconds()),
+        }
+        for _resolved_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "resolved_total": len(resolved),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}
