@@ -499,6 +499,64 @@ def summarize_case_queue_aging_by_case_type(
     )
 
 
+def list_top_actionable_cases_by_age(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Top-N oldest actionable cases for a business, ordered oldest first.
+
+    Complements :func:`summarize_case_queue_aging`, which only exposes a single
+    ``oldest_actionable`` case. Operator triage surfaces use this list to pick
+    the next handful of cases to work, scoped strictly per tenant. Ties on age
+    are broken by ``case_id`` ASC for deterministic ordering. ``now`` is
+    injectable for tests and defaults to current UTC.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    parsed_limit = parse_limit(limit)
+    actionable: list[tuple[int, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        actionable.append((age_seconds, case.case_id, case))
+
+    # Oldest first (age DESC); tie-break by case_id ASC for deterministic order.
+    actionable.sort(key=lambda item: (-item[0], item[1]))
+    limited = actionable[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "opened_at": case.opened_at.isoformat(),
+            "age_seconds": age_seconds,
+        }
+        for age_seconds, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_total": len(actionable),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}
