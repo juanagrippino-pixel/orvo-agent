@@ -824,6 +824,60 @@ def list_recently_resolved_cases(
     )
 
 
+def list_recently_acknowledged_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-acknowledged cases that are still in flight.
+
+    Symmetric to :func:`list_recently_resolved_cases`: surfaces the ack side of
+    the workflow so operator surfaces can render a "Just picked up" panel and
+    confirm ownership churn. Only cases currently in ``acknowledged`` status are
+    included; resolved cases have moved on and are owned by the recently-resolved
+    projection. Ordered by ``acknowledged_at`` DESC with ``case_id`` ASC as a
+    deterministic tie-breaker. Each row includes ``acknowledgment_seconds``
+    (opened_at -> acknowledged_at) so the surface can render time-to-acknowledge
+    without extra lookups. Strictly scoped per tenant; the projection reads
+    ``acknowledged_at`` directly from the case store, so it needs no ``now``
+    parameter.
+    """
+
+    parsed_limit = parse_limit(limit)
+    acknowledged: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="acknowledged", limit=None):
+        if case.acknowledged_at is None:
+            continue
+        acknowledged.append((case.acknowledged_at.astimezone(timezone.utc), case.case_id, case))
+
+    # Most recently acknowledged first; tie-break by case_id ASC for deterministic order.
+    acknowledged.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = acknowledged[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "acknowledged_at": case.acknowledged_at.isoformat(),
+            "acknowledgment_seconds": int((case.acknowledged_at - case.opened_at).total_seconds()),
+        }
+        for _acknowledged_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "acknowledged_total": len(acknowledged),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}
