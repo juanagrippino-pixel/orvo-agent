@@ -700,6 +700,51 @@ def find_value_kind_violations(
     return issues
 
 
+def find_report_allowed_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical definition
+    is not allowed in user-facing report output.
+
+    A ``report_not_allowed`` violation means a metric key resolved to a canonical
+    definition whose ``report_allowed`` flag is ``False`` (control-plane signals
+    such as ``runtime.freshness.*`` or ``runtime.connector.status``). Unknown
+    (unresolved) keys are intentionally skipped so this diagnostic composes
+    cleanly with :func:`validate_metrics` and the envelope helpers. Result order
+    matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_report_allowed_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.report_allowed:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="report_not_allowed",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"report_allowed=False and must not appear in user-facing "
+                    f"report output"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -744,6 +789,7 @@ __all__ = [
     "default_metric_registry",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
+    "find_report_allowed_violations",
     "find_source_envelope_violations",
     "find_value_kind_violations",
     "validate_metrics",

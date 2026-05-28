@@ -582,3 +582,102 @@ def test_value_kind_helper_is_reexported_from_semantics_public_surface():
 
     assert hasattr(semantics, "find_value_kind_violations")
     assert "find_value_kind_violations" in semantics.__all__
+
+
+def test_report_allowed_helper_flags_metrics_whose_canonical_definition_is_not_report_allowed():
+    from app.brain.semantics.metric_registry import find_report_allowed_violations
+
+    # runtime.freshness.* and runtime.connector.status are report_allowed=False;
+    # they back control-plane health signals and must never reach a user-facing
+    # report path. revenue_today is report_allowed=True and must not be flagged.
+    metric_keys = (
+        "revenue_today",
+        "runtime.freshness.last_success_at",
+        "runtime.connector.status",
+    )
+
+    violations = find_report_allowed_violations(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("report_not_allowed", "runtime.freshness.last_success_at", 1, "warning"),
+        ("report_not_allowed", "runtime.connector.status", 2, "warning"),
+    ]
+    assert "runtime.freshness.last_success_at" in violations[0].message
+    assert "report_allowed" in violations[0].message
+
+
+def test_report_allowed_helper_returns_empty_when_all_keys_report_allowed():
+    from app.brain.semantics.metric_registry import find_report_allowed_violations
+
+    assert find_report_allowed_violations(
+        ("orders_today", "revenue_today", "stock_units", "ad_spend_today")
+    ) == []
+
+
+def test_report_allowed_helper_resolves_aliases_before_checking_report_allowed():
+    from app.brain.semantics.metric_registry import find_report_allowed_violations
+
+    # All current aliases resolve to report_allowed=True canonical metrics, so
+    # add a synthetic report_not_allowed metric exposed only via an alias to
+    # prove alias resolution feeds into the report_allowed check.
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="runtime.health.score",
+                family="runtime.health",
+                label="Runtime health score",
+                unit="percent",
+                allowed_sources=("sample",),
+                aliases=("runtime_health_score_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+            ),
+        )
+    )
+
+    violations = find_report_allowed_violations(
+        ("runtime_health_score_legacy",), registry=registry
+    )
+    assert len(violations) == 1
+    assert violations[0].key == "runtime_health_score_legacy"
+    assert "runtime.health.score" in violations[0].message
+
+
+def test_report_allowed_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_report_allowed_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so it can compose cleanly with the existing envelope helpers.
+    assert find_report_allowed_violations(("never_registered_metric",)) == []
+
+
+def test_report_allowed_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_report_allowed_violations
+
+    metric_keys = (
+        "revenue_today",
+        "runtime.freshness.age_seconds",
+        "runtime.connector.status",
+    )
+    first = find_report_allowed_violations(metric_keys)
+    second = find_report_allowed_violations(metric_keys)
+    assert first == second
+
+
+def test_report_allowed_helper_rejects_empty_metric_keys():
+    from app.brain.semantics.metric_registry import find_report_allowed_violations
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_report_allowed_violations(("",))
+
+
+def test_report_allowed_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_report_allowed_violations")
+    assert "find_report_allowed_violations" in semantics.__all__
