@@ -504,7 +504,6 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         emitted_metric_families=(
             "commerce.orders",
             "commerce.revenue",
-            "commerce.inventory",
             "commerce.average_order_value",
             "runtime.freshness",
             "runtime.data_quality",
