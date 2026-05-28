@@ -745,6 +745,33 @@ def find_report_allowed_violations(
     return issues
 
 
+def validate_report_metric_keys(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown-metric + report-not-allowed diagnostics for keys
+    destined for a user-facing report stage.
+
+    Parallel to ``ConnectorSpec.validate_emitted_metrics`` but on the report
+    side: connector emission may legitimately surface ``report_allowed=False``
+    runtime keys (e.g. ``runtime.freshness.*``); the report renderer must not.
+    The fixed concatenation order ``unknown_metric`` -> ``report_not_allowed``
+    keeps the result deterministic and free of overlap because
+    :func:`find_report_allowed_violations` already skips unknown keys.
+    """
+
+    materialized = list(metric_keys)
+    unknown_issues = validate_metrics(
+        [{"key": key} for key in materialized],
+        registry=registry,
+    )
+    report_issues = find_report_allowed_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *report_issues]
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -793,4 +820,5 @@ __all__ = [
     "find_source_envelope_violations",
     "find_value_kind_violations",
     "validate_metrics",
+    "validate_report_metric_keys",
 ]

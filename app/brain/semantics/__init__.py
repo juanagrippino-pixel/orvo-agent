@@ -14,6 +14,7 @@ from app.brain.semantics.metric_registry import (
     find_source_envelope_violations,
     find_value_kind_violations,
     validate_metrics,
+    validate_report_metric_keys,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "find_source_envelope_violations",
     "find_value_kind_violations",
     "validate_metrics",
+    "validate_report_metric_keys",
 ]

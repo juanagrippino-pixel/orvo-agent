@@ -681,3 +681,94 @@ def test_report_allowed_helper_is_reexported_from_semantics_public_surface():
 
     assert hasattr(semantics, "find_report_allowed_violations")
     assert "find_report_allowed_violations" in semantics.__all__
+
+
+def test_validate_report_metric_keys_composes_unknown_then_report_not_allowed_diagnostics():
+    from app.brain.semantics.metric_registry import validate_report_metric_keys
+
+    # Mixed bag: one canonical report-allowed key, one report_not_allowed
+    # runtime key, and one unknown key. The composition must report unknowns
+    # first (owned by validate_metrics) and then report_not_allowed (owned by
+    # find_report_allowed_violations). Each diagnostic preserves its own
+    # input-order index.
+    metric_keys = (
+        "revenue_today",
+        "runtime.connector.status",
+        "custom.unknown_report_metric",
+    )
+
+    issues = validate_report_metric_keys(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 2, "warning"),
+        ("report_not_allowed", "runtime.connector.status", 1, "warning"),
+    ]
+
+
+def test_validate_report_metric_keys_returns_empty_when_all_keys_are_canonical_report_allowed():
+    from app.brain.semantics.metric_registry import validate_report_metric_keys
+
+    assert validate_report_metric_keys(
+        ("orders_today", "revenue_today", "stock_units", "ad_spend_today")
+    ) == []
+
+
+def test_validate_report_metric_keys_threads_custom_registry_into_both_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_report_metric_keys,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="runtime.health.score",
+                family="runtime.health",
+                label="Runtime health score",
+                unit="percent",
+                allowed_sources=("sample",),
+                aliases=("runtime_health_score_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+            ),
+        )
+    )
+
+    issues = validate_report_metric_keys(
+        ("runtime_health_score_legacy", "revenue_today"), registry=registry
+    )
+    # revenue_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a report_not_allowed canonical metric.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "revenue_today", 1),
+        ("report_not_allowed", "runtime_health_score_legacy", 0),
+    ]
+
+
+def test_validate_report_metric_keys_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_report_metric_keys
+
+    metric_keys = (
+        "revenue_today",
+        "runtime.freshness.age_seconds",
+        "custom.unknown_report_metric",
+        "runtime.connector.status",
+    )
+    first = validate_report_metric_keys(metric_keys)
+    second = validate_report_metric_keys(metric_keys)
+    assert first == second
+
+
+def test_validate_report_metric_keys_rejects_empty_keys():
+    from app.brain.semantics.metric_registry import validate_report_metric_keys
+
+    with pytest.raises(ValueError):
+        validate_report_metric_keys(("",))
+
+
+def test_validate_report_metric_keys_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_report_metric_keys")
+    assert "validate_report_metric_keys" in semantics.__all__
