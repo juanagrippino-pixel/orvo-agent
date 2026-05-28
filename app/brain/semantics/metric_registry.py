@@ -443,6 +443,36 @@ def _metric_key(metric: Any) -> str:
     return key
 
 
+def _metric_value(metric: Any) -> Any:
+    if isinstance(metric, Mapping):
+        if "value" not in metric:
+            raise ValueError(
+                "Metrics passed to value-kind validation must expose a value field"
+            )
+        return metric.get("value")
+    if not hasattr(metric, "value"):
+        raise ValueError(
+            "Metrics passed to value-kind validation must expose a value field"
+        )
+    return getattr(metric, "value")
+
+
+_NUMERIC_UNIT_KINDS = frozenset({"money", "count", "percent", "duration"})
+
+
+def _value_matches_unit_kind(value: Any, unit_kind: str) -> bool:
+    if unit_kind == "boolean":
+        return isinstance(value, bool)
+    if unit_kind == "timestamp":
+        return isinstance(value, str)
+    if unit_kind in _NUMERIC_UNIT_KINDS:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    # Unknown unit kinds should never reach here because MetricDefinition
+    # validates ``unit`` against ``_METRIC_UNITS``; treat as opaque rather than
+    # raising so the diagnostic remains advisory and never crashes a run.
+    return True
+
+
 def _metric_evidence_sources(metric: Any) -> tuple[str, ...]:
     if isinstance(metric, Mapping):
         if "evidence" not in metric:
@@ -624,6 +654,52 @@ def find_evidence_source_violations(
     return issues
 
 
+def find_value_kind_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric values whose runtime type does
+    not match the canonical metric's unit kind.
+
+    Numeric unit kinds (``money``, ``count``, ``percent``, ``duration``) require
+    ``int`` or ``float`` (and reject ``bool``, even though ``bool`` is a subclass
+    of ``int`` in Python). ``boolean`` requires ``bool``. ``timestamp`` requires
+    ``str``. Each metric must expose a non-empty string ``key`` and a ``value``
+    attribute (or mapping field). Unknown (unresolved) keys are intentionally
+    skipped so this diagnostic composes cleanly with :func:`validate_metrics`,
+    :func:`find_source_envelope_violations`, :func:`find_family_envelope_violations`,
+    and :func:`find_evidence_source_violations`. Result order matches input
+    order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        value = _metric_value(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if _value_matches_unit_kind(value, definition.unit):
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="value_kind_mismatch",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') expects unit "
+                    f"kind '{definition.unit}' but received value of type "
+                    f"{type(value).__name__}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -669,5 +745,6 @@ __all__ = [
     "find_evidence_source_violations",
     "find_family_envelope_violations",
     "find_source_envelope_violations",
+    "find_value_kind_violations",
     "validate_metrics",
 ]

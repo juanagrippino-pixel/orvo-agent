@@ -384,3 +384,201 @@ def test_evidence_source_helper_rejects_metrics_missing_key_or_evidence():
 
     with pytest.raises(ValueError, match="evidence"):
         find_evidence_source_violations([{"key": "ad_spend_today"}])
+
+
+def test_value_kind_helper_flags_string_value_for_numeric_money_metric():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    metrics = [
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=90000,
+            unit="ARS",
+            evidence=[_evidence("tiendanube")],
+        ),
+        Metric(
+            key="ad_spend_today",
+            label="Ad spend",
+            value="1500.75",
+            unit="ARS",
+            evidence=[_evidence("meta_ads")],
+        ),
+    ]
+
+    violations = find_value_kind_violations(metrics)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("value_kind_mismatch", "ad_spend_today", 1, "warning"),
+    ]
+    assert "ads.spend.total" in violations[0].message
+    assert "money" in violations[0].message
+    assert "str" in violations[0].message
+
+
+def test_value_kind_helper_resolves_aliases_before_checking_unit_kind():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    # revenue_baseline resolves to commerce.revenue.baseline whose unit is
+    # "money"; a string value should be flagged via the alias path.
+    metrics = [
+        Metric(
+            key="revenue_baseline",
+            label="Promedio reciente",
+            value="120000",
+            unit="ARS",
+            evidence=[_evidence("google_sheets")],
+        ),
+    ]
+    violations = find_value_kind_violations(metrics)
+    assert len(violations) == 1
+    assert violations[0].key == "revenue_baseline"
+    assert "commerce.revenue.baseline" in violations[0].message
+
+
+def test_value_kind_helper_returns_empty_when_all_values_match_canonical_unit_kind():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            evidence=[_evidence("tiendanube")],
+        ),
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=90000.5,
+            unit="ARS",
+            evidence=[_evidence("tiendanube")],
+        ),
+        Metric(
+            key="ads.delivery.impressions",
+            label="Impressions",
+            value=20000,
+            evidence=[_evidence("meta_ads")],
+        ),
+    ]
+    assert find_value_kind_violations(metrics) == []
+
+
+def test_value_kind_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so all five diagnostics can compose without overlap.
+    metrics = [
+        Metric(
+            key="mystery_metric",
+            label="Mystery",
+            value="not a number",
+            evidence=[_evidence("sample")],
+        ),
+    ]
+    assert find_value_kind_violations(metrics) == []
+
+
+def test_value_kind_helper_treats_bool_as_disallowed_for_numeric_units():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    # bool is a subclass of int in Python, but a count/money/percent/duration
+    # metric should reject bools so a True/False does not silently pose as a
+    # numeric measurement. Use mapping form here because the Pydantic Metric
+    # union ``float | int | str`` coerces True to 1.0 before validation.
+    metrics = [
+        {"key": "commerce.orders.count", "value": True},
+    ]
+    violations = find_value_kind_violations(metrics)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("value_kind_mismatch", "commerce.orders.count", 0),
+    ]
+    assert "count" in violations[0].message
+    assert "bool" in violations[0].message
+
+
+def test_value_kind_helper_flags_non_bool_for_boolean_units():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    # runtime.connector.status is canonical unit "boolean"; an int (1) must not
+    # silently pose as a status flag. Use mapping form so we control the value
+    # type directly (Pydantic Metric coerces int to float through the union).
+    metrics = [
+        {"key": "runtime.connector.status", "value": 1},
+    ]
+    violations = find_value_kind_violations(metrics)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("value_kind_mismatch", "runtime.connector.status", 0),
+    ]
+    assert "boolean" in violations[0].message
+    assert "int" in violations[0].message
+
+    # And a real bool through the mapping form passes.
+    assert find_value_kind_violations(
+        [{"key": "runtime.connector.status", "value": True}]
+    ) == []
+
+
+def test_value_kind_helper_flags_numeric_for_timestamp_units():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    # runtime.freshness.last_success_at is canonical unit "timestamp"; numeric
+    # epoch-style values must not silently pose as ISO timestamps.
+    metrics = [
+        Metric(
+            key="runtime.freshness.last_success_at",
+            label="Last sync",
+            value=1700000000,
+            evidence=[_evidence("tiendanube")],
+        ),
+        Metric(
+            key="runtime.freshness.last_success_at",
+            label="Last sync",
+            value="2025-01-15T12:00:00+00:00",
+            evidence=[_evidence("tiendanube")],
+        ),
+    ]
+    violations = find_value_kind_violations(metrics)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("value_kind_mismatch", "runtime.freshness.last_success_at", 0),
+    ]
+    assert "timestamp" in violations[0].message
+
+
+def test_value_kind_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    metrics = [
+        Metric(
+            key="ad_spend_today",
+            label="Ad spend",
+            value="1500",
+            unit="ARS",
+            evidence=[_evidence("meta_ads")],
+        ),
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            evidence=[_evidence("tiendanube")],
+        ),
+    ]
+    first = find_value_kind_violations(metrics)
+    second = find_value_kind_violations(metrics)
+    assert first == second
+
+
+def test_value_kind_helper_rejects_metrics_missing_key_or_value():
+    from app.brain.semantics.metric_registry import find_value_kind_violations
+
+    with pytest.raises(ValueError, match="key"):
+        find_value_kind_violations([{"label": "no key", "value": 1}])
+
+    with pytest.raises(ValueError, match="value"):
+        find_value_kind_violations([{"key": "ad_spend_today"}])
+
+
+def test_value_kind_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_value_kind_violations")
+    assert "find_value_kind_violations" in semantics.__all__
