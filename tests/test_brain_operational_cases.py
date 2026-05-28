@@ -534,3 +534,141 @@ def test_detect_cases_skips_info_severity_even_when_title_matches_case_family():
     )
 
     assert detections == []
+
+
+# Contract regression for `upsert_data_stale_cases`, the production entrypoint
+# called from `record_pipeline_failure` when one or more connectors fail in a
+# single pipeline run. The dedupe key embeds {connector_type}; dropping it
+# would silently collapse N stale-connector cases into one and blind operators
+# to per-connector failures without breaking the existing single-connector
+# test at `test_upsert_data_stale_detection_uses_catalog_dedupe_key`.
+def test_upsert_data_stale_cases_isolates_per_connector_type_and_pins_severity_contract():
+    from app.brain.operational_cases import upsert_data_stale_cases
+
+    store = InMemoryOperationalCaseStore()
+
+    summary = upsert_data_stale_cases(
+        case_store=store,
+        business_id="artemea",
+        connector_types=["tiendanube", "meta_ads"],
+        run_id="run-failed-1",
+        error_summary="connector failure",
+    )
+
+    assert summary.opened_count == 2
+    assert summary.updated_count == 0
+    assert len(summary.case_ids) == 2
+    assert len(set(summary.case_ids)) == 2, "each connector failure must mint a distinct case"
+
+    cases = store.list_cases(business_id="artemea")
+    assert len(cases) == 2
+    dedupe_keys = {case.dedupe_key for case in cases}
+    assert dedupe_keys == {
+        "artemea/data_stale/connector/tiendanube/runtime.freshness/daily",
+        "artemea/data_stale/connector/meta_ads/runtime.freshness/daily",
+    }
+    for case in cases:
+        assert case.case_type == "data_stale"
+        assert case.severity == "warning"
+        assert case.priority_score == 80
+        assert case.latest_run_id == "run-failed-1"
+        assert case.entity_scope["kind"] == "connector"
+        assert case.entity_scope["id"] in {"tiendanube", "meta_ads"}
+        assert case.title.startswith("Datos stale o fallidos: ")
+        assert case.title.endswith(case.entity_scope["id"])
+
+
+def test_upsert_data_stale_cases_partitions_open_vs_update_on_partial_rerun_and_redacts_secret_error():
+    from app.brain.operational_cases import upsert_data_stale_cases
+
+    store = InMemoryOperationalCaseStore()
+
+    first = upsert_data_stale_cases(
+        case_store=store,
+        business_id="artemea",
+        connector_types=["tiendanube"],
+        run_id="run-failed-1",
+        error_summary="401 Unauthorized access_token=stale_helper_secret",
+    )
+    assert first.opened_count == 1
+    assert first.updated_count == 0
+
+    second = upsert_data_stale_cases(
+        case_store=store,
+        business_id="artemea",
+        connector_types=["tiendanube", "meta_ads"],
+        run_id="run-failed-2",
+        error_summary="429 rate_limited refresh_token=stale_helper_secret",
+    )
+    assert second.opened_count == 1, "meta_ads case opens fresh"
+    assert second.updated_count == 1, "tiendanube case updates by dedupe_key, not opens a duplicate"
+
+    cases = {case.entity_scope["id"]: case for case in store.list_cases(business_id="artemea")}
+    assert set(cases) == {"tiendanube", "meta_ads"}
+    assert cases["tiendanube"].latest_run_id == "run-failed-2"
+    assert cases["meta_ads"].latest_run_id == "run-failed-2"
+    assert "run-failed-1" in cases["tiendanube"].source_run_ids
+    assert "run-failed-2" in cases["tiendanube"].source_run_ids
+
+    serialized = " ".join(case.model_dump_json() for case in cases.values())
+    assert "stale_helper_secret" not in serialized, (
+        "error_summary must be redacted by the helper before persistence"
+    )
+
+
+def test_upsert_data_stale_cases_falls_back_to_unknown_connector_when_none_provided():
+    from app.brain.operational_cases import upsert_data_stale_cases
+
+    store_none = InMemoryOperationalCaseStore()
+    summary_none = upsert_data_stale_cases(
+        case_store=store_none,
+        business_id="artemea",
+        connector_types=None,
+        run_id="run-failed-x",
+        error_summary="generic failure",
+    )
+    assert summary_none.opened_count == 1
+    [case_none] = store_none.list_cases(business_id="artemea")
+    assert case_none.dedupe_key == "artemea/data_stale/connector/unknown/runtime.freshness/daily"
+    assert case_none.entity_scope["id"] == "unknown"
+
+    store_empty = InMemoryOperationalCaseStore()
+    summary_empty = upsert_data_stale_cases(
+        case_store=store_empty,
+        business_id="artemea",
+        connector_types=[],
+        run_id="run-failed-y",
+        error_summary="generic failure",
+    )
+    assert summary_empty.opened_count == 1
+    [case_empty] = store_empty.list_cases(business_id="artemea")
+    assert case_empty.dedupe_key == "artemea/data_stale/connector/unknown/runtime.freshness/daily"
+
+
+def test_upsert_data_stale_cases_is_noop_when_store_or_business_missing():
+    from app.brain.operational_cases import upsert_data_stale_cases
+
+    store = InMemoryOperationalCaseStore()
+
+    no_store = upsert_data_stale_cases(
+        case_store=None,
+        business_id="artemea",
+        connector_types=["tiendanube"],
+        run_id="run-failed",
+        error_summary="anything",
+    )
+    assert no_store.case_ids == []
+    assert no_store.opened_count == 0
+    assert no_store.updated_count == 0
+
+    no_business = upsert_data_stale_cases(
+        case_store=store,
+        business_id=None,
+        connector_types=["tiendanube"],
+        run_id="run-failed",
+        error_summary="anything",
+    )
+    assert no_business.case_ids == []
+    assert no_business.opened_count == 0
+    assert no_business.updated_count == 0
+    assert store.list_cases() == [], "missing business_id must not persist any case"
