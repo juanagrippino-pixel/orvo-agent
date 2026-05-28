@@ -437,6 +437,77 @@ def summarize_case_queue_aging(
     )
 
 
+def summarize_case_queue_stagnation(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Deterministic idleness histogram for actionable cases in a business.
+
+    Aggregate counterpart to :func:`list_top_stalled_actionable_cases`: buckets
+    actionable (open + acknowledged) cases by ``now - updated_at`` so operator
+    surfaces can see how many cases have not been touched in each time window
+    without paging through a long top-N list. Severity is split per bucket so
+    operators can tell whether old idle work is critical or informational.
+    ``opened_at`` is reported on the most-stalled row for triage context but
+    does not influence bucket assignment. Strictly scoped per tenant; ``now``
+    is injectable for deterministic tests and defaults to current UTC.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    severity_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    actionable_total = 0
+    most_stalled_idle = -1
+    most_stalled_case: OperationalCase | None = None
+    most_stalled_age = 0
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        actionable_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        updated_at = case.updated_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        idle_seconds = max(int((reference - updated_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(idle_seconds)
+        buckets[bucket] += 1
+        severity_counts = severity_by_bucket[bucket]
+        severity_counts[case.severity] = severity_counts.get(case.severity, 0) + 1
+        if idle_seconds > most_stalled_idle:
+            most_stalled_idle = idle_seconds
+            most_stalled_case = case
+            most_stalled_age = age_seconds
+    most_stalled_payload: dict[str, Any] | None = None
+    if most_stalled_case is not None:
+        most_stalled_payload = {
+            "case_id": most_stalled_case.case_id,
+            "case_type": most_stalled_case.case_type,
+            "status": most_stalled_case.status,
+            "severity": most_stalled_case.severity,
+            "opened_at": most_stalled_case.opened_at.isoformat(),
+            "updated_at": most_stalled_case.updated_at.isoformat(),
+            "idle_seconds": most_stalled_idle,
+            "age_seconds": most_stalled_age,
+        }
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_total": actionable_total,
+            "by_idle_bucket": buckets,
+            "by_idle_bucket_severity": severity_by_bucket,
+            "most_stalled_actionable": most_stalled_payload,
+        }
+    )
+
+
 def summarize_case_queue_aging_by_case_type(
     store: OperationalCaseStore,
     *,
