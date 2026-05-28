@@ -1397,6 +1397,63 @@ def summarize_case_workflow_throughput_by_entity_kind(
     )
 
 
+def summarize_case_workflow_throughput_by_source_connector(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Source-connector-split lifecycle latency aggregates for cases in a business.
+
+    Mirrors :func:`summarize_case_workflow_throughput` but groups every count
+    and latency aggregate by source connector (tiendanube/google_sheets/csv/
+    etc.). Operator surfaces use this to spot which connectors' cases drag
+    acknowledgment or resolution time — a stuck connector or noisy data source
+    often shows up as a slow per-source bucket even when severity and case_type
+    counts look healthy. Each case is attributed to a single connector — the
+    alphabetically-first source from its evidence snapshots — so the per-bucket
+    totals always sum exactly to ``total``. Cases without any evidence source
+    are bucketed under ``"unknown"`` so totals never silently drop. Strictly
+    scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_source: dict[str, int] = {}
+    ack_by_source: dict[str, int] = {}
+    resolve_by_source: dict[str, int] = {}
+    ack_latencies_by_source: dict[str, list[int]] = {}
+    resolve_latencies_by_source: dict[str, list[int]] = {}
+    for case in cases:
+        sources = _source_connectors(case)
+        # _source_connectors returns sorted unique sources; pick the first as
+        # the case's primary connector so each case contributes to exactly one
+        # bucket and per-bucket counts sum to ``total``.
+        primary_source = sources[0] if sources else "unknown"
+        totals_by_source[primary_source] = totals_by_source.get(primary_source, 0) + 1
+        if case.acknowledged_at is not None:
+            ack_latency = int((case.acknowledged_at - case.opened_at).total_seconds())
+            ack_by_source[primary_source] = ack_by_source.get(primary_source, 0) + 1
+            ack_latencies_by_source.setdefault(primary_source, []).append(ack_latency)
+        if case.resolved_at is not None:
+            resolve_latency = int((case.resolved_at - case.opened_at).total_seconds())
+            resolve_by_source[primary_source] = resolve_by_source.get(primary_source, 0) + 1
+            resolve_latencies_by_source.setdefault(primary_source, []).append(resolve_latency)
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "totals_by_source_connector": totals_by_source,
+            "acknowledged_by_source_connector": ack_by_source,
+            "resolved_by_source_connector": resolve_by_source,
+            "time_to_acknowledge_seconds_by_source_connector": {
+                source: _latency_summary(values)
+                for source, values in ack_latencies_by_source.items()
+            },
+            "time_to_resolve_seconds_by_source_connector": {
+                source: _latency_summary(values)
+                for source, values in resolve_latencies_by_source.items()
+            },
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
