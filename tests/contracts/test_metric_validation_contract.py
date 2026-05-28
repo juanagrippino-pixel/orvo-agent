@@ -937,3 +937,134 @@ def test_validate_case_metric_keys_is_reexported_from_semantics_public_surface()
 
     assert hasattr(semantics, "validate_case_metric_keys")
     assert "validate_case_metric_keys" in semantics.__all__
+
+
+def _metric(key: str, *sources: str, value: float | int | str = 1, unit: str | None = None) -> Metric:
+    return Metric(
+        key=key,
+        label=key,
+        value=value,
+        unit=unit,
+        evidence=[_evidence(source) for source in sources],
+    )
+
+
+def test_validate_report_metric_objects_composes_unknown_then_report_then_evidence_then_value_kind():
+    """Parallel to ``ConnectorSpec.validate_emitted_metric_objects`` but on the
+    report-rendering side: the four-diagnostic composition must report
+    unknown_metric first, then report_not_allowed, then
+    evidence_source_mismatch, and finally value_kind_mismatch. Each diagnostic
+    preserves its own input-order index.
+    """
+
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("revenue_today", "tiendanube"),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+        _metric("ad_spend_today", "whatsapp"),
+        _metric("orders_today", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_report_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
+        ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
+        ("value_kind_mismatch", "orders_today", 4, "warning"),
+    ]
+
+
+def test_validate_report_metric_objects_returns_empty_for_clean_report_metrics():
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("stock_units", "tiendanube", value=42),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+    ]
+
+    assert validate_report_metric_objects(metrics) == []
+
+
+def test_validate_report_metric_objects_matches_key_path_when_no_object_violations():
+    """When every metric object has in-envelope evidence sources and the value
+    type matches the canonical unit kind, the object-level result must equal
+    ``validate_report_metric_keys`` over the same keys so callers can freely
+    upgrade from keys to objects without a behavior change."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_report_metric_keys,
+        validate_report_metric_objects,
+    )
+
+    metrics = [
+        _metric("revenue_today", "tiendanube", value=120000),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+    ]
+    keys = [metric.key for metric in metrics]
+
+    assert validate_report_metric_objects(metrics) == validate_report_metric_keys(keys)
+
+
+def test_validate_report_metric_objects_threads_custom_registry_into_all_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_report_metric_objects,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="runtime.health.score",
+                family="runtime.health",
+                label="Runtime health score",
+                unit="percent",
+                allowed_sources=("sample",),
+                aliases=("runtime_health_score_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+            ),
+        )
+    )
+
+    metrics = [
+        _metric("runtime_health_score_legacy", "sample", value=0.95),
+        _metric("revenue_today", "tiendanube", value=120000),
+    ]
+
+    issues = validate_report_metric_objects(metrics, registry=registry)
+    # revenue_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a report_not_allowed canonical metric.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "revenue_today", 1),
+        ("report_not_allowed", "runtime_health_score_legacy", 0),
+    ]
+
+
+def test_validate_report_metric_objects_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("revenue_today", "tiendanube", value=120000),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+        _metric("ad_spend_today", "whatsapp"),
+    ]
+
+    first = validate_report_metric_objects(metrics)
+    second = validate_report_metric_objects(metrics)
+    assert first == second
+
+
+def test_validate_report_metric_objects_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_report_metric_objects")
+    assert "validate_report_metric_objects" in semantics.__all__
