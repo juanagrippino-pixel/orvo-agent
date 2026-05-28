@@ -273,3 +273,34 @@ def test_connector_spec_validate_emitted_metric_objects_matches_key_path_when_no
     key_issues = tiendanube.validate_emitted_metrics(keys)
 
     assert object_issues == key_issues
+
+
+def test_connector_spec_validate_emitted_metric_objects_appends_value_kind_after_evidence():
+    """ConnectorSpec.validate_emitted_metric_objects must append
+    value_kind_mismatch as the fifth diagnostic in the fixed composition order
+    so the runtime can detect canonical unit/value-type mismatches alongside
+    the four envelope diagnostics in a single call.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+
+    metrics = [
+        _metric("ad_spend_today", "meta_ads"),
+        _metric("mystery_metric", "meta_ads"),
+        _metric("orders_today", "meta_ads"),
+        _metric("ad_roas_today", "meta_ads", value="0.5"),
+    ]
+
+    issues = meta_ads.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "orders_today", 2),
+        ("undeclared_family", "orders_today", 2),
+        ("evidence_source_mismatch", "orders_today", 2),
+        ("value_kind_mismatch", "ad_roas_today", 3),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)

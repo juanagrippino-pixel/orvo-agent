@@ -23,6 +23,7 @@ from app.brain.semantics.metric_registry import (
     find_evidence_source_violations,
     find_family_envelope_violations,
     find_source_envelope_violations,
+    find_value_kind_violations,
     validate_metrics,
 )
 
@@ -325,15 +326,17 @@ class ConnectorSpec:
         *,
         registry: MetricRegistry | None = None,
     ) -> list[MetricValidationIssue]:
-        """Compose all four envelope diagnostics for emitted metric objects.
+        """Compose all five envelope diagnostics for emitted metric objects.
 
         Symmetric extension of :meth:`validate_emitted_metrics` that operates
-        on metric-shaped objects (each exposing ``key`` and ``evidence``). The
-        fixed concatenation order ``unknown_metric`` -> ``disallowed_source``
-        -> ``undeclared_family`` -> ``evidence_source_mismatch`` lets the
-        runtime treat object-level validation as a superset of key-level
-        validation: when no evidence sources are out of envelope the result
-        equals ``validate_emitted_metrics`` over the same keys.
+        on metric-shaped objects (each exposing ``key``, ``value``, and
+        ``evidence``). The fixed concatenation order ``unknown_metric`` ->
+        ``disallowed_source`` -> ``undeclared_family`` ->
+        ``evidence_source_mismatch`` -> ``value_kind_mismatch`` lets the runtime
+        treat object-level validation as a superset of key-level validation:
+        when no evidence sources are out of envelope and every value type
+        matches the canonical unit kind, the result equals
+        ``validate_emitted_metrics`` over the same keys.
         """
 
         materialized = list(metrics)
@@ -353,7 +356,16 @@ class ConnectorSpec:
         evidence_issues = find_evidence_source_violations(
             materialized, registry=registry
         )
-        return [*unknown_issues, *source_issues, *family_issues, *evidence_issues]
+        value_kind_issues = find_value_kind_violations(
+            materialized, registry=registry
+        )
+        return [
+            *unknown_issues,
+            *source_issues,
+            *family_issues,
+            *evidence_issues,
+            *value_kind_issues,
+        ]
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:
         """Return legacy inline execution-param errors without logging credentials.
