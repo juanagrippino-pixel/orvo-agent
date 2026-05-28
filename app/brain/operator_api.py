@@ -649,6 +649,87 @@ def summarize_case_queue_stagnation_by_entity_kind(
     )
 
 
+def summarize_case_queue_stagnation_by_source_connector(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Source-connector-split idleness histogram for actionable cases in a business.
+
+    Mirrors :func:`summarize_case_queue_stagnation` but groups each idleness
+    bucket by source connector (tiendanube/google_sheets/csv/etc.), so operator
+    surfaces can see which connectors dominate the un-touched backlog at every
+    idleness horizon — for example, a Tiendanube ingestion incident often shows
+    up as a cluster of idle cases skewed to a single source even when severity
+    and case_type distributions look balanced. Each case is attributed to a
+    single connector — the alphabetically-first source from its evidence
+    snapshots, matching
+    :func:`summarize_case_queue_aging_by_source_connector` and
+    :func:`summarize_case_workflow_throughput_by_source_connector` — so the
+    per-bucket totals always sum exactly to ``actionable_total``. Cases without
+    any evidence source are bucketed under ``"unknown"`` so totals never
+    silently drop. ``opened_at`` is reported on the most-stalled row for triage
+    context but does not influence bucket assignment. Strictly scoped per
+    tenant; ``now`` is injectable for deterministic tests and defaults to
+    current UTC.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    source_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    actionable_total = 0
+    most_stalled_idle = -1
+    most_stalled_case: OperationalCase | None = None
+    most_stalled_age = 0
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        actionable_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        updated_at = case.updated_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        idle_seconds = max(int((reference - updated_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(idle_seconds)
+        buckets[bucket] += 1
+        sources = _source_connectors(case)
+        primary_source = sources[0] if sources else "unknown"
+        source_counts = source_by_bucket[bucket]
+        source_counts[primary_source] = source_counts.get(primary_source, 0) + 1
+        if idle_seconds > most_stalled_idle:
+            most_stalled_idle = idle_seconds
+            most_stalled_case = case
+            most_stalled_age = age_seconds
+    most_stalled_payload: dict[str, Any] | None = None
+    if most_stalled_case is not None:
+        most_stalled_payload = {
+            "case_id": most_stalled_case.case_id,
+            "case_type": most_stalled_case.case_type,
+            "status": most_stalled_case.status,
+            "severity": most_stalled_case.severity,
+            "opened_at": most_stalled_case.opened_at.isoformat(),
+            "updated_at": most_stalled_case.updated_at.isoformat(),
+            "idle_seconds": most_stalled_idle,
+            "age_seconds": most_stalled_age,
+        }
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_total": actionable_total,
+            "by_idle_bucket": buckets,
+            "by_idle_bucket_source_connector": source_by_bucket,
+            "most_stalled_actionable": most_stalled_payload,
+        }
+    )
+
+
 def summarize_case_queue_aging_by_case_type(
     store: OperationalCaseStore,
     *,
