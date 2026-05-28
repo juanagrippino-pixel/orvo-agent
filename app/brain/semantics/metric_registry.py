@@ -745,6 +745,78 @@ def find_report_allowed_violations(
     return issues
 
 
+def find_case_allowed_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical definition
+    is not allowed to back Operational Case detections.
+
+    A ``case_not_allowed`` violation means a metric key resolved to a canonical
+    definition whose ``case_allowed`` flag is ``False`` (analytical signals such
+    as ``commerce.average_order_value`` or ``ads.delivery.*`` that may inform
+    reports but must not drive case lifecycle). Unknown (unresolved) keys are
+    intentionally skipped so this diagnostic composes cleanly with
+    :func:`validate_metrics` and the envelope helpers. Result order matches
+    input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_case_allowed_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.case_allowed:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="case_not_allowed",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"case_allowed=False and must not back Operational Case "
+                    f"detections"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def validate_case_metric_keys(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown-metric + case-not-allowed diagnostics for keys destined
+    for an Operational Case detection stage.
+
+    Parallel to :func:`validate_report_metric_keys` but on the case side:
+    detection inputs must be both registered and case-allowed. The fixed
+    concatenation order ``unknown_metric`` -> ``case_not_allowed`` keeps the
+    result deterministic and free of overlap because
+    :func:`find_case_allowed_violations` already skips unknown keys.
+    """
+
+    materialized = list(metric_keys)
+    unknown_issues = validate_metrics(
+        [{"key": key} for key in materialized],
+        registry=registry,
+    )
+    case_issues = find_case_allowed_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *case_issues]
+
+
 def validate_report_metric_keys(
     metric_keys: Iterable[str],
     *,
@@ -814,11 +886,13 @@ __all__ = [
     "MetricValidationIssue",
     "UnknownMetricError",
     "default_metric_registry",
+    "find_case_allowed_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
     "find_report_allowed_violations",
     "find_source_envelope_violations",
     "find_value_kind_violations",
+    "validate_case_metric_keys",
     "validate_metrics",
     "validate_report_metric_keys",
 ]

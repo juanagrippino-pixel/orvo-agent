@@ -772,3 +772,168 @@ def test_validate_report_metric_keys_is_reexported_from_semantics_public_surface
 
     assert hasattr(semantics, "validate_report_metric_keys")
     assert "validate_report_metric_keys" in semantics.__all__
+
+
+def test_case_allowed_helper_flags_metrics_whose_canonical_definition_is_not_case_allowed():
+    from app.brain.semantics.metric_registry import find_case_allowed_violations
+
+    # commerce.average_order_value and ads.delivery.* are case_allowed=False;
+    # they must not back Operational Case detections. commerce.orders.count is
+    # case_allowed=True and must not be flagged.
+    metric_keys = (
+        "commerce.orders.count",
+        "avg_order_value",
+        "ad_impressions_today",
+    )
+
+    violations = find_case_allowed_violations(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("case_not_allowed", "avg_order_value", 1, "warning"),
+        ("case_not_allowed", "ad_impressions_today", 2, "warning"),
+    ]
+    assert "commerce.average_order_value" in violations[0].message
+    assert "case_allowed" in violations[0].message
+
+
+def test_case_allowed_helper_returns_empty_when_all_keys_case_allowed():
+    from app.brain.semantics.metric_registry import find_case_allowed_violations
+
+    assert find_case_allowed_violations(
+        ("orders_today", "revenue_today", "stock_units", "ad_spend_today")
+    ) == []
+
+
+def test_case_allowed_helper_resolves_aliases_before_checking_case_allowed():
+    from app.brain.semantics.metric_registry import find_case_allowed_violations
+
+    # avg_order_value is an alias for commerce.average_order_value whose
+    # case_allowed=False; the alias path must resolve before the check so
+    # legacy keys are still pinned out of case input.
+    violations = find_case_allowed_violations(("avg_order_value",))
+    assert len(violations) == 1
+    assert violations[0].key == "avg_order_value"
+    assert "commerce.average_order_value" in violations[0].message
+
+
+def test_case_allowed_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_case_allowed_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so it composes cleanly with the existing envelope helpers.
+    assert find_case_allowed_violations(("never_registered_metric",)) == []
+
+
+def test_case_allowed_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_case_allowed_violations
+
+    metric_keys = (
+        "orders_today",
+        "avg_order_value",
+        "ad_impressions_today",
+    )
+    first = find_case_allowed_violations(metric_keys)
+    second = find_case_allowed_violations(metric_keys)
+    assert first == second
+
+
+def test_case_allowed_helper_rejects_empty_metric_keys():
+    from app.brain.semantics.metric_registry import find_case_allowed_violations
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_case_allowed_violations(("",))
+
+
+def test_case_allowed_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_case_allowed_violations")
+    assert "find_case_allowed_violations" in semantics.__all__
+
+
+def test_validate_case_metric_keys_composes_unknown_then_case_not_allowed_diagnostics():
+    from app.brain.semantics.metric_registry import validate_case_metric_keys
+
+    # Mixed bag: one canonical case-allowed key, one case_not_allowed key, and
+    # one unknown key. The composition must report unknowns first (owned by
+    # validate_metrics) then case_not_allowed (owned by find_case_allowed_violations).
+    # Each diagnostic preserves its own input-order index.
+    metric_keys = (
+        "orders_today",
+        "avg_order_value",
+        "custom.unknown_case_metric",
+    )
+
+    issues = validate_case_metric_keys(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_case_metric", 2, "warning"),
+        ("case_not_allowed", "avg_order_value", 1, "warning"),
+    ]
+
+
+def test_validate_case_metric_keys_returns_empty_when_all_keys_are_canonical_case_allowed():
+    from app.brain.semantics.metric_registry import validate_case_metric_keys
+
+    assert validate_case_metric_keys(
+        ("orders_today", "revenue_today", "stock_units", "ad_spend_today")
+    ) == []
+
+
+def test_validate_case_metric_keys_threads_custom_registry_into_both_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_case_metric_keys,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="ads.delivery.legacy_impressions",
+                family="ads.delivery",
+                label="Legacy ad impressions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("legacy_impressions",),
+                aggregation="sum",
+                case_allowed=False,
+            ),
+        )
+    )
+
+    issues = validate_case_metric_keys(
+        ("legacy_impressions", "orders_today"), registry=registry
+    )
+    # orders_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a case_not_allowed canonical metric.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "orders_today", 1),
+        ("case_not_allowed", "legacy_impressions", 0),
+    ]
+
+
+def test_validate_case_metric_keys_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_case_metric_keys
+
+    metric_keys = (
+        "orders_today",
+        "avg_order_value",
+        "custom.unknown_case_metric",
+        "ad_impressions_today",
+    )
+    first = validate_case_metric_keys(metric_keys)
+    second = validate_case_metric_keys(metric_keys)
+    assert first == second
+
+
+def test_validate_case_metric_keys_rejects_empty_keys():
+    from app.brain.semantics.metric_registry import validate_case_metric_keys
+
+    with pytest.raises(ValueError):
+        validate_case_metric_keys(("",))
+
+
+def test_validate_case_metric_keys_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_case_metric_keys")
+    assert "validate_case_metric_keys" in semantics.__all__
