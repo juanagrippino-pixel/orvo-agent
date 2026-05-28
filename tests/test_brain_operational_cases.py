@@ -406,3 +406,131 @@ def test_detect_cases_from_report_maps_actionable_insights_to_deterministic_dedu
     assert detections[0].dedupe_key == "artemea/stockout_risk/business/monitored/commerce.inventory/daily"
     assert detections[0].evidence_refs == ["evidence://tiendanube/2026-05-24/stockout_risk"]
     assert detections[0].metadata["insight_title"] == "Stock crítico"
+
+
+# Contract regression: every production insight title produced by
+# `app.brain.insights` must continue to map to a stable case_type so that
+# rewording an insight cannot silently drop a case family or its dedupe key.
+# Includes title-precedence rules (stock-first, then spend-without-orders
+# tokens, conversations, channel, generic ventas). Info-severity always wins.
+_PRODUCTION_INSIGHT_CASE_MAPPING = [
+    # (id, severity, title, expected_case_type, expected_dedupe_suffix)
+    (
+        "ventas-drop",
+        "warning",
+        "Ventas 18% debajo del promedio",
+        "sales_drop",
+        "sales_drop/channel/all/commerce.revenue/daily",
+    ),
+    (
+        "stock-critico",
+        "critical",
+        "Stock crítico",
+        "stockout_risk",
+        "stockout_risk/business/monitored/commerce.inventory/daily",
+    ),
+    (
+        "conversaciones-sin-responder",
+        "warning",
+        "Conversaciones sin responder",
+        "unanswered_conversations",
+        "unanswered_conversations/channel/whatsapp/support.conversations/daily",
+    ),
+    (
+        "canal-tiendanube",
+        "warning",
+        "Canal Tiendanube posiblemente sub-rendimiento",
+        "channel_mix_shift",
+        "channel_mix_shift/business/all_channels/commerce.revenue/daily",
+    ),
+    (
+        "roas-bajo",
+        "warning",
+        "ROAS bajo: 1.4x (mínimo recomendado 3.0x)",
+        "spend_without_orders",
+        "spend_without_orders/channel/meta_ads/ads.spend/daily",
+    ),
+    (
+        "gastas-sin-ventas",
+        "critical",
+        "Gastás en ads pero sin ventas hoy",
+        "spend_without_orders",
+        "spend_without_orders/channel/meta_ads/ads.spend/daily",
+    ),
+    (
+        "ads-con-stock-bajo-routes-to-stockout",
+        "critical",
+        "Ads activos con stock bajo — pausar campañas",
+        "stockout_risk",
+        "stockout_risk/business/monitored/commerce.inventory/daily",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("severity", "title", "expected_case_type", "expected_dedupe_suffix"),
+    [(item[1], item[2], item[3], item[4]) for item in _PRODUCTION_INSIGHT_CASE_MAPPING],
+    ids=[item[0] for item in _PRODUCTION_INSIGHT_CASE_MAPPING],
+)
+def test_detect_cases_locks_production_insight_titles_to_case_types(
+    severity, title, expected_case_type, expected_dedupe_suffix
+):
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        insights=[
+            Insight(
+                severity=severity,
+                title=title,
+                explanation="Detalle determinístico.",
+                recommended_action="Acción operativa.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    assert len(detections) == 1, f"insight {title!r} unexpectedly dropped"
+    assert detections[0].case_type == expected_case_type
+    assert detections[0].dedupe_key == f"artemea/{expected_dedupe_suffix}"
+    assert detections[0].metadata["insight_title"] == title
+
+
+def test_detect_cases_skips_info_severity_even_when_title_matches_case_family():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        insights=[
+            Insight(
+                severity="info",
+                title="Stock crítico (solo informativo)",
+                explanation="Dato informativo.",
+                recommended_action="Monitorear.",
+                evidence=[source],
+            ),
+            Insight(
+                severity="info",
+                title="Canal Tiendanube — informativo",
+                explanation="Dato informativo.",
+                recommended_action="Monitorear.",
+                evidence=[source],
+            ),
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    assert detections == []
