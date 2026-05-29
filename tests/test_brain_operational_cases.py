@@ -645,6 +645,48 @@ def test_upsert_data_stale_cases_falls_back_to_unknown_connector_when_none_provi
     assert case_empty.dedupe_key == "artemea/data_stale/connector/unknown/runtime.freshness/daily"
 
 
+def test_case_stores_isolate_tenants_when_dedupe_keys_collide_across_business_ids(conn):
+    """Locks the multi-tenant isolation contract for find_by_dedupe_key/upsert_detection.
+
+    Catalog dedupe keys today embed business_id, so collisions are unlikely in
+    production. But the OperationalCaseStore contract accepts an arbitrary
+    dedupe_key string — if a future refactor or operator-supplied detection ever
+    drops the business_id prefix, two tenants could silently merge cases. Both
+    InMemory and SQLite stores must scope find/list by business_id.
+    """
+
+    shared_dedupe_key = "shared/stockout_risk/business/monitored/commerce.inventory/daily"
+
+    def detection_for(business_id: str, *, run_id: str) -> OperationalCaseDetection:
+        return make_stockout_detection(run_id=run_id).model_copy(
+            update={"business_id": business_id, "dedupe_key": shared_dedupe_key}
+        )
+
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        artemea_case = store.upsert_detection(detection_for("artemea", run_id="run-a-1"), detected_at=utc_dt(8))
+        tienda_b_case = store.upsert_detection(detection_for("tienda_b", run_id="run-b-1"), detected_at=utc_dt(8))
+
+        assert artemea_case.case_id != tienda_b_case.case_id, f"{label}: colliding dedupe_keys must yield distinct case_ids per tenant"
+        assert store.find_by_dedupe_key("artemea", shared_dedupe_key).case_id == artemea_case.case_id, f"{label}: find_by_dedupe_key must be scoped to business_id"
+        assert store.find_by_dedupe_key("tienda_b", shared_dedupe_key).case_id == tienda_b_case.case_id, f"{label}: find_by_dedupe_key must be scoped to business_id"
+        assert store.find_by_dedupe_key("unknown", shared_dedupe_key) is None, f"{label}: unrelated tenant must not see colliding case"
+
+        assert [case.case_id for case in store.list_cases(business_id="artemea")] == [artemea_case.case_id], f"{label}: list_cases must isolate by business_id"
+        assert [case.case_id for case in store.list_cases(business_id="tienda_b")] == [tienda_b_case.case_id], f"{label}: list_cases must isolate by business_id"
+
+        rerun = store.upsert_detection(detection_for("artemea", run_id="run-a-2"), detected_at=utc_dt(9))
+        assert rerun.case_id == artemea_case.case_id, f"{label}: tenant A re-upsert must reuse tenant A case"
+        assert rerun.source_run_ids == ["run-a-1", "run-a-2"], f"{label}: tenant A re-upsert must accumulate only its own runs"
+
+        unchanged_b = store.find_by_dedupe_key("tienda_b", shared_dedupe_key)
+        assert unchanged_b.case_id == tienda_b_case.case_id, f"{label}: tenant B case must be untouched"
+        assert unchanged_b.source_run_ids == ["run-b-1"], f"{label}: tenant B runs must not leak from tenant A re-upsert"
+        assert unchanged_b.latest_run_id == "run-b-1", f"{label}: tenant B latest_run_id must be untouched"
+
+
 def test_upsert_data_stale_cases_is_noop_when_store_or_business_missing():
     from app.brain.operational_cases import upsert_data_stale_cases
 
