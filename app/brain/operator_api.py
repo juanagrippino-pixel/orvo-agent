@@ -1800,6 +1800,79 @@ def summarize_case_resolution_latency_histogram_by_entity_kind(
     )
 
 
+def summarize_case_resolution_latency_histogram_by_source_connector(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Source-connector-split deterministic histogram of time-to-resolve.
+
+    Mirrors :func:`summarize_case_resolution_latency_histogram_by_entity_kind`
+    but groups each resolution-latency bucket by source connector
+    (tiendanube/google_sheets/csv/etc.), so operator surfaces can see which
+    connectors dominate long-tail resolution time — for example, a Tiendanube
+    ingestion incident often shows up as resolved cases skewed to a single
+    source even when severity and case_type distributions look balanced. Each
+    case is attributed to a single connector — the alphabetically-first source
+    from its evidence snapshots, matching
+    :func:`summarize_case_queue_aging_by_source_connector` and
+    :func:`summarize_case_workflow_throughput_by_source_connector` — so the
+    per-bucket totals always sum exactly to ``resolved_total``. Cases without
+    any evidence source are bucketed under ``"unknown"`` so totals never
+    silently drop. Open and acknowledged-only cases are excluded;
+    ``resolved_total`` only counts cases that reached ``resolved`` state.
+    Strictly scoped per tenant.
+    """
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    source_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    resolved_total = 0
+    fastest_seconds = -1
+    fastest_case: OperationalCase | None = None
+    slowest_seconds = -1
+    slowest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.resolved_at is None:
+            continue
+        resolved_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        resolved_at = case.resolved_at.astimezone(timezone.utc)
+        time_to_resolve = max(int((resolved_at - opened_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(time_to_resolve)
+        buckets[bucket] += 1
+        sources = _source_connectors(case)
+        primary_source = sources[0] if sources else "unknown"
+        source_counts = source_by_bucket[bucket]
+        source_counts[primary_source] = source_counts.get(primary_source, 0) + 1
+        if fastest_seconds < 0 or time_to_resolve < fastest_seconds:
+            fastest_seconds = time_to_resolve
+            fastest_case = case
+        if time_to_resolve > slowest_seconds:
+            slowest_seconds = time_to_resolve
+            slowest_case = case
+
+    def _payload(case: OperationalCase | None, seconds: int) -> dict[str, Any] | None:
+        if case is None or case.resolved_at is None:
+            return None
+        return {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "severity": case.severity,
+            "opened_at": case.opened_at.isoformat(),
+            "resolved_at": case.resolved_at.isoformat(),
+            "time_to_resolve_seconds": seconds,
+        }
+
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "resolved_total": resolved_total,
+            "by_resolution_bucket": buckets,
+            "by_resolution_bucket_source_connector": source_by_bucket,
+            "fastest_resolved": _payload(fastest_case, fastest_seconds),
+            "slowest_resolved": _payload(slowest_case, slowest_seconds),
+        }
+    )
+
+
 def summarize_case_acknowledgment_latency_histogram(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
