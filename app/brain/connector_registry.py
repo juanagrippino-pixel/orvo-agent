@@ -20,6 +20,7 @@ from typing import Iterable, Mapping
 from app.brain.semantics.metric_registry import (
     MetricRegistry,
     MetricValidationIssue,
+    find_evidence_required_violations,
     find_evidence_source_violations,
     find_family_envelope_violations,
     find_source_envelope_violations,
@@ -326,17 +327,23 @@ class ConnectorSpec:
         *,
         registry: MetricRegistry | None = None,
     ) -> list[MetricValidationIssue]:
-        """Compose all five envelope diagnostics for emitted metric objects.
+        """Compose all six envelope diagnostics for emitted metric objects.
 
         Symmetric extension of :meth:`validate_emitted_metrics` that operates
         on metric-shaped objects (each exposing ``key``, ``value``, and
         ``evidence``). The fixed concatenation order ``unknown_metric`` ->
-        ``disallowed_source`` -> ``undeclared_family`` ->
-        ``evidence_source_mismatch`` -> ``value_kind_mismatch`` lets the runtime
-        treat object-level validation as a superset of key-level validation:
-        when no evidence sources are out of envelope and every value type
-        matches the canonical unit kind, the result equals
-        ``validate_emitted_metrics`` over the same keys.
+        ``disallowed_source`` -> ``undeclared_family`` -> ``evidence_missing``
+        -> ``evidence_source_mismatch`` -> ``value_kind_mismatch`` lets the
+        runtime treat object-level validation as a superset of key-level
+        validation: when every required metric carries non-empty evidence with
+        in-envelope sources and every value type matches the canonical unit
+        kind, the result equals ``validate_emitted_metrics`` over the same
+        keys. ``evidence_missing`` slots between ``undeclared_family`` and
+        ``evidence_source_mismatch`` so structural ``no evidence at all``
+        diagnostics surface before content diagnostics about wrong-source
+        evidence; this mirrors the slot reserved by
+        :func:`validate_report_metric_objects` and
+        :func:`validate_case_metric_objects`.
         """
 
         materialized = list(metrics)
@@ -353,6 +360,9 @@ class ConnectorSpec:
             declared_families=self.emitted_metric_families,
             registry=registry,
         )
+        evidence_missing_issues = find_evidence_required_violations(
+            materialized, registry=registry
+        )
         evidence_issues = find_evidence_source_violations(
             materialized, registry=registry
         )
@@ -363,6 +373,7 @@ class ConnectorSpec:
             *unknown_issues,
             *source_issues,
             *family_issues,
+            *evidence_missing_issues,
             *evidence_issues,
             *value_kind_issues,
         ]

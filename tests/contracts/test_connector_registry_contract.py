@@ -304,3 +304,63 @@ def test_connector_spec_validate_emitted_metric_objects_appends_value_kind_after
         ("value_kind_mismatch", "ad_roas_today", 3),
     ]
     assert all(issue.severity == "warning" for issue in issues)
+
+
+def test_connector_spec_validate_emitted_metric_objects_slots_evidence_missing_between_family_and_evidence_source():
+    """ConnectorSpec.validate_emitted_metric_objects must slot evidence_missing
+    immediately after undeclared_family and before evidence_source_mismatch so
+    structural ``no evidence at all`` diagnostics surface before content
+    diagnostics about wrong-source evidence. This mirrors the slot reserved by
+    :func:`validate_report_metric_objects` and :func:`validate_case_metric_objects`
+    and keeps the connector composition shaped as ``unknown_metric`` ->
+    ``disallowed_source`` -> ``undeclared_family`` -> ``evidence_missing`` ->
+    ``evidence_source_mismatch`` -> ``value_kind_mismatch``. Mapping form is
+    required for the evidence-missing entry because Pydantic ``Metric`` enforces
+    ``min_length=1`` on evidence and cannot represent the missing case directly.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    metrics = [
+        {
+            "key": "orders_today",
+            "value": 12,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "mystery_metric",
+            "value": 1,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "evidence": [{"source": "meta_ads", "label": "ads run"}],
+        },
+        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {
+            "key": "revenue_today",
+            "value": 90000,
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {
+            "key": "orders_today",
+            "value": "not a number",
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+    ]
+
+    issues = tiendanube.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "ad_spend_today", 2),
+        ("undeclared_family", "ad_spend_today", 2),
+        ("evidence_missing", "commerce.revenue.total", 3),
+        ("evidence_source_mismatch", "revenue_today", 4),
+        ("value_kind_mismatch", "orders_today", 5),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
