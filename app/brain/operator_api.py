@@ -1606,6 +1606,72 @@ def summarize_case_workflow_throughput_by_source_connector(
     )
 
 
+def summarize_case_resolution_latency_histogram(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Deterministic histogram of time-to-resolve for resolved cases.
+
+    Complements :func:`summarize_case_workflow_throughput`, which only reports
+    central-tendency stats (min/max/avg/median): this projection buckets each
+    resolved case's ``resolved_at - opened_at`` latency into the same age
+    horizons used by :func:`summarize_case_queue_aging` so operator surfaces
+    can see the *shape* of resolution time — e.g. catching a long tail of
+    over-7d resolutions that a healthy median would otherwise mask. Severity
+    is split per bucket so SLA pressure on critical work is visible even when
+    informational backlog dominates the histogram. Open and acknowledged-only
+    cases are excluded; ``resolved_total`` only counts cases that reached
+    ``resolved`` state. Strictly scoped per tenant.
+    """
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    severity_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    resolved_total = 0
+    fastest_seconds = -1
+    fastest_case: OperationalCase | None = None
+    slowest_seconds = -1
+    slowest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.resolved_at is None:
+            continue
+        resolved_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        resolved_at = case.resolved_at.astimezone(timezone.utc)
+        time_to_resolve = max(int((resolved_at - opened_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(time_to_resolve)
+        buckets[bucket] += 1
+        severity_counts = severity_by_bucket[bucket]
+        severity_counts[case.severity] = severity_counts.get(case.severity, 0) + 1
+        if fastest_seconds < 0 or time_to_resolve < fastest_seconds:
+            fastest_seconds = time_to_resolve
+            fastest_case = case
+        if time_to_resolve > slowest_seconds:
+            slowest_seconds = time_to_resolve
+            slowest_case = case
+
+    def _payload(case: OperationalCase | None, seconds: int) -> dict[str, Any] | None:
+        if case is None or case.resolved_at is None:
+            return None
+        return {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "severity": case.severity,
+            "opened_at": case.opened_at.isoformat(),
+            "resolved_at": case.resolved_at.isoformat(),
+            "time_to_resolve_seconds": seconds,
+        }
+
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "resolved_total": resolved_total,
+            "by_resolution_bucket": buckets,
+            "by_resolution_bucket_severity": severity_by_bucket,
+            "fastest_resolved": _payload(fastest_case, fastest_seconds),
+            "slowest_resolved": _payload(slowest_case, slowest_seconds),
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
