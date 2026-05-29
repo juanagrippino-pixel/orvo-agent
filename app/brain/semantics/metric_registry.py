@@ -605,6 +605,72 @@ def find_family_envelope_violations(
     return issues
 
 
+def _metric_evidence_count(metric: Any) -> int:
+    if isinstance(metric, Mapping):
+        if "evidence" not in metric:
+            raise ValueError(
+                "Metrics passed to evidence-required validation must expose an evidence collection"
+            )
+        evidence = metric.get("evidence")
+    else:
+        if not hasattr(metric, "evidence"):
+            raise ValueError(
+                "Metrics passed to evidence-required validation must expose an evidence collection"
+            )
+        evidence = getattr(metric, "evidence")
+    if evidence is None:
+        return 0
+    return sum(1 for _ in evidence)
+
+
+def find_evidence_required_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric objects whose canonical
+    definition requires evidence but whose evidence collection is empty.
+
+    An ``evidence_missing`` violation means a metric key resolved to a canonical
+    definition whose ``evidence_required`` flag is ``True`` but the runtime
+    object exposed zero evidence entries. ``None`` and empty iterables are
+    treated the same so transitional draft envelopes do not crash the sweep.
+    Each metric must expose a non-empty string ``key`` and an ``evidence``
+    attribute (or mapping field); a missing field raises ``ValueError``.
+    Unknown (unresolved) keys are intentionally skipped so this diagnostic
+    composes cleanly with :func:`validate_metrics` and the existing envelope
+    helpers. Result order matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        count = _metric_evidence_count(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if not definition.evidence_required:
+            continue
+        if count > 0:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="evidence_missing",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"evidence_required=True but received zero evidence "
+                    f"entries"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_evidence_source_violations(
     metrics: Iterable[Any],
     *,
@@ -960,6 +1026,7 @@ __all__ = [
     "UnknownMetricError",
     "default_metric_registry",
     "find_case_allowed_violations",
+    "find_evidence_required_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
     "find_report_allowed_violations",

@@ -1187,3 +1187,145 @@ def test_validate_case_metric_objects_is_reexported_from_semantics_public_surfac
 
     assert hasattr(semantics, "validate_case_metric_objects")
     assert "validate_case_metric_objects" in semantics.__all__
+
+
+def test_evidence_required_helper_flags_metric_with_empty_evidence_collection():
+    from app.brain.semantics.metric_registry import find_evidence_required_violations
+
+    # commerce.revenue.total has evidence_required=True (the default). A metric
+    # with a zero-entry evidence collection must be reported as missing
+    # evidence. Use the mapping form because Pydantic Metric enforces
+    # min_length=1 on evidence and cannot represent this state directly.
+    metrics = [
+        {"key": "commerce.orders.count", "value": 12, "evidence": [{"source": "tiendanube", "label": "tn run"}]},
+        {"key": "commerce.revenue.total", "value": 120000, "evidence": []},
+    ]
+
+    violations = find_evidence_required_violations(metrics)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("evidence_missing", "commerce.revenue.total", 1, "warning"),
+    ]
+    assert "commerce.revenue.total" in violations[0].message
+    assert "evidence_required" in violations[0].message
+
+
+def test_evidence_required_helper_resolves_aliases_before_checking_evidence_required():
+    from app.brain.semantics.metric_registry import find_evidence_required_violations
+
+    # revenue_baseline is an alias for commerce.revenue.baseline whose
+    # evidence_required=True; an empty evidence collection via the alias path
+    # must be reported and the canonical key surfaced in the message.
+    metrics = [{"key": "revenue_baseline", "value": 90000, "evidence": []}]
+    violations = find_evidence_required_violations(metrics)
+    assert len(violations) == 1
+    assert violations[0].key == "revenue_baseline"
+    assert "commerce.revenue.baseline" in violations[0].message
+
+
+def test_evidence_required_helper_returns_empty_when_all_metrics_carry_evidence():
+    from app.brain.semantics.metric_registry import find_evidence_required_violations
+
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            evidence=[_evidence("tiendanube")],
+        ),
+        Metric(
+            key="revenue_today",
+            label="Revenue",
+            value=90000,
+            unit="ARS",
+            evidence=[_evidence("tiendanube"), _evidence("mercadolibre")],
+        ),
+    ]
+    assert find_evidence_required_violations(metrics) == []
+
+
+def test_evidence_required_helper_treats_none_evidence_as_empty_collection():
+    from app.brain.semantics.metric_registry import find_evidence_required_violations
+
+    # Some intermediate runtime states (e.g., draft metric envelopes) may
+    # carry ``evidence=None``. The helper must treat None as a zero-entry
+    # collection rather than raising, so it can compose with the rest of the
+    # metric-validation surface during a control-plane sweep.
+    metrics = [{"key": "commerce.orders.count", "value": 12, "evidence": None}]
+    violations = find_evidence_required_violations(metrics)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("evidence_missing", "commerce.orders.count", 0),
+    ]
+
+
+def test_evidence_required_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_evidence_required_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so it can compose cleanly with the existing helpers without
+    # double-reporting.
+    metrics = [{"key": "never_registered_metric", "value": 1, "evidence": []}]
+    assert find_evidence_required_violations(metrics) == []
+
+
+def test_evidence_required_helper_skips_metrics_whose_canonical_definition_does_not_require_evidence():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_evidence_required_violations,
+    )
+
+    # No canonical metric in the default registry currently sets
+    # evidence_required=False, so prove the flag is honored via a custom
+    # registry. An empty evidence collection on a non-evidence-required metric
+    # must not be flagged.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="runtime.health.score",
+                family="runtime.health",
+                label="Runtime health score",
+                unit="percent",
+                allowed_sources=("sample",),
+                aliases=("runtime_health_score_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+                evidence_required=False,
+            ),
+        )
+    )
+
+    metrics = [
+        {"key": "runtime.health.score", "value": 0.95, "evidence": []},
+        {"key": "runtime_health_score_legacy", "value": 0.91, "evidence": []},
+    ]
+    assert find_evidence_required_violations(metrics, registry=registry) == []
+
+
+def test_evidence_required_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_evidence_required_violations
+
+    metrics = [
+        {"key": "commerce.orders.count", "value": 12, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+    ]
+    first = find_evidence_required_violations(metrics)
+    second = find_evidence_required_violations(metrics)
+    assert first == second
+
+
+def test_evidence_required_helper_rejects_metrics_missing_key_or_evidence_field():
+    from app.brain.semantics.metric_registry import find_evidence_required_violations
+
+    with pytest.raises(ValueError, match="key"):
+        find_evidence_required_violations([{"label": "no key", "evidence": []}])
+
+    with pytest.raises(ValueError, match="evidence"):
+        find_evidence_required_violations([{"key": "commerce.orders.count"}])
+
+
+def test_evidence_required_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_evidence_required_violations")
+    assert "find_evidence_required_violations" in semantics.__all__
