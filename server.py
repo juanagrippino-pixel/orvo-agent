@@ -49,6 +49,7 @@ from app.brain.operator_api import (
     list_case_timeline,
     list_run_history,
     summarize_case_queue,
+    summarize_case_queue_aging,
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 from app.brain.delivery_status import (
@@ -181,6 +182,21 @@ def internal_brain_cases_summary(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_queue(case_store, business_id=business_id),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/aging")
+def internal_brain_cases_aging(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_aging(
+                case_store,
+                business_id=business_id,
+                now=datetime.now(timezone.utc),
+            ),
         ),
     )
 
