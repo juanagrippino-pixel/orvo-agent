@@ -1068,3 +1068,122 @@ def test_validate_report_metric_objects_is_reexported_from_semantics_public_surf
 
     assert hasattr(semantics, "validate_report_metric_objects")
     assert "validate_report_metric_objects" in semantics.__all__
+
+
+def test_validate_case_metric_objects_composes_unknown_then_case_then_evidence_then_value_kind():
+    """Parallel to :func:`validate_report_metric_objects` but on the case
+    detection side: the four-diagnostic composition must report unknown_metric
+    first, then case_not_allowed, then evidence_source_mismatch, and finally
+    value_kind_mismatch. Each diagnostic preserves its own input-order index.
+    """
+
+    from app.brain.semantics.metric_registry import validate_case_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_case_metric", "tiendanube"),
+        _metric("avg_order_value", "tiendanube", value=7500),
+        _metric("ad_spend_today", "whatsapp", value=1500),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_case_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_case_metric", 1, "warning"),
+        ("case_not_allowed", "avg_order_value", 2, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 4, "warning"),
+    ]
+
+
+def test_validate_case_metric_objects_returns_empty_for_clean_case_metrics():
+    from app.brain.semantics.metric_registry import validate_case_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("stock_units", "tiendanube", value=42),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+    ]
+
+    assert validate_case_metric_objects(metrics) == []
+
+
+def test_validate_case_metric_objects_matches_key_path_when_no_object_violations():
+    """When every metric object has in-envelope evidence sources and the value
+    type matches the canonical unit kind, the object-level result must equal
+    ``validate_case_metric_keys`` over the same keys so callers can freely
+    upgrade from keys to objects without a behavior change."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_case_metric_keys,
+        validate_case_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_case_metric", "tiendanube"),
+        _metric("avg_order_value", "tiendanube", value=7500),
+    ]
+    keys = [metric.key for metric in metrics]
+
+    assert validate_case_metric_objects(metrics) == validate_case_metric_keys(keys)
+
+
+def test_validate_case_metric_objects_threads_custom_registry_into_all_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_case_metric_objects,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="ads.delivery.legacy_impressions",
+                family="ads.delivery",
+                label="Legacy ad impressions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("legacy_impressions",),
+                aggregation="sum",
+                case_allowed=False,
+            ),
+        )
+    )
+
+    metrics = [
+        _metric("legacy_impressions", "sample", value=20000),
+        _metric("orders_today", "tiendanube", value=12),
+    ]
+
+    issues = validate_case_metric_objects(metrics, registry=registry)
+    # orders_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a case_not_allowed canonical metric.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "orders_today", 1),
+        ("case_not_allowed", "legacy_impressions", 0),
+    ]
+
+
+def test_validate_case_metric_objects_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_case_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_case_metric", "tiendanube"),
+        _metric("avg_order_value", "tiendanube", value=7500),
+        _metric("ad_spend_today", "whatsapp", value=1500),
+    ]
+
+    first = validate_case_metric_objects(metrics)
+    second = validate_case_metric_objects(metrics)
+    assert first == second
+
+
+def test_validate_case_metric_objects_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_case_metric_objects")
+    assert "validate_case_metric_objects" in semantics.__all__

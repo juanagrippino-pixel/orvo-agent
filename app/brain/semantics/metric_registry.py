@@ -854,6 +854,42 @@ def validate_report_metric_objects(
     ]
 
 
+def validate_case_metric_objects(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + case_not_allowed + evidence_source_mismatch +
+    value_kind_mismatch diagnostics for metric-shaped objects bound for an
+    Operational Case detection stage.
+
+    Parallel to :func:`validate_report_metric_objects` but on the case side:
+    detection inputs must be both registered and case-allowed, and they must
+    also pass evidence/value-kind sanity checks. The fixed concatenation order
+    ``unknown_metric`` -> ``case_not_allowed`` -> ``evidence_source_mismatch``
+    -> ``value_kind_mismatch`` keeps the result deterministic and free of
+    overlap because the case/evidence/value-kind helpers each skip unknown
+    keys.
+    """
+
+    materialized = list(metrics)
+    unknown_issues = validate_metrics(materialized, registry=registry)
+    keys = [_metric_key(metric) for metric in materialized]
+    case_issues = find_case_allowed_violations(keys, registry=registry)
+    evidence_issues = find_evidence_source_violations(
+        materialized, registry=registry
+    )
+    value_kind_issues = find_value_kind_violations(
+        materialized, registry=registry
+    )
+    return [
+        *unknown_issues,
+        *case_issues,
+        *evidence_issues,
+        *value_kind_issues,
+    ]
+
+
 def validate_report_metric_keys(
     metric_keys: Iterable[str],
     *,
@@ -930,6 +966,7 @@ __all__ = [
     "find_source_envelope_violations",
     "find_value_kind_violations",
     "validate_case_metric_keys",
+    "validate_case_metric_objects",
     "validate_metrics",
     "validate_report_metric_keys",
     "validate_report_metric_objects",
