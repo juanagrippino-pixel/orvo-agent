@@ -4,6 +4,7 @@ import pytest
 REQUIRED_CANONICAL_KEYS = {
     "commerce.orders.count",
     "commerce.revenue.total",
+    "commerce.revenue.baseline",
     "commerce.inventory.available_units",
     "commerce.fulfillment.pending_count",
     "commerce.fulfillment.oldest_pending_age_hours",
@@ -23,6 +24,7 @@ REQUIRED_CANONICAL_KEYS = {
 
 REQUIRED_ALIASES = {
     "revenue_today": "commerce.revenue.total",
+    "revenue_baseline": "commerce.revenue.baseline",
     "orders_today": "commerce.orders.count",
     "stock_units": "commerce.inventory.available_units",
     "unanswered_conversations": "support.conversations.unanswered_count",
@@ -169,3 +171,43 @@ def test_connector_emitted_metric_families_are_registered_or_explicitly_compatib
             missing.append(f"{connector.connector_type}:{family}")
 
     assert missing == []
+
+
+def test_connector_specs_only_declare_families_with_a_canonical_metric_for_that_source():
+    """Each declared emitted family must be backed by at least one canonical
+    metric whose ``allowed_sources`` includes the connector type. A connector
+    cannot legitimately emit metrics in a family the registry forbids it from,
+    so declaring such a family in ``emitted_metric_families`` is meaningless
+    and lets the unified envelope validator drift from the registry's source
+    contract. Families resolved through ``CONNECTOR_FAMILY_COMPATIBILITY`` are
+    intentionally exempt because they are transitional envelopes (e.g.
+    ``manual.payload``) without a direct canonical family of their own.
+    """
+
+    from app.brain.connector_registry import list_connector_specs
+    from app.brain.semantics.metric_registry import (
+        CONNECTOR_FAMILY_COMPATIBILITY,
+        default_metric_registry,
+    )
+
+    registry = default_metric_registry()
+
+    sources_by_family: dict[str, set[str]] = {}
+    for definition in registry.definitions():
+        sources_by_family.setdefault(definition.family, set()).update(definition.allowed_sources)
+
+    unsupported: list[str] = []
+    for connector in list_connector_specs():
+        for family in connector.emitted_metric_families:
+            if family in CONNECTOR_FAMILY_COMPATIBILITY:
+                continue
+            allowed_sources = sources_by_family.get(family, set())
+            if connector.connector_type in allowed_sources:
+                continue
+            unsupported.append(f"{connector.connector_type}:{family}")
+
+    assert unsupported == [], (
+        "Connector specs declare emitted_metric_families that have no canonical "
+        "metric authorizing the connector as a source. Either remove the family "
+        "or extend allowed_sources on a canonical metric: " + ", ".join(unsupported)
+    )

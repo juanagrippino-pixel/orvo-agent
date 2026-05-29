@@ -270,6 +270,16 @@ DEFAULT_METRIC_DEFINITIONS: tuple[MetricDefinition, ...] = (
         case_allowed=True,
     ),
     _definition(
+        key="commerce.revenue.baseline",
+        family="commerce.revenue",
+        label="Revenue baseline",
+        unit="money",
+        allowed_sources=("csv", "google_sheets", "sample"),
+        aliases=("revenue_baseline",),
+        aggregation="average",
+        case_allowed=True,
+    ),
+    _definition(
         key="commerce.inventory.available_units",
         family="commerce.inventory",
         label="Available inventory units",
@@ -433,6 +443,558 @@ def _metric_key(metric: Any) -> str:
     return key
 
 
+def _metric_value(metric: Any) -> Any:
+    if isinstance(metric, Mapping):
+        if "value" not in metric:
+            raise ValueError(
+                "Metrics passed to value-kind validation must expose a value field"
+            )
+        return metric.get("value")
+    if not hasattr(metric, "value"):
+        raise ValueError(
+            "Metrics passed to value-kind validation must expose a value field"
+        )
+    return getattr(metric, "value")
+
+
+_NUMERIC_UNIT_KINDS = frozenset({"money", "count", "percent", "duration"})
+
+
+def _value_matches_unit_kind(value: Any, unit_kind: str) -> bool:
+    if unit_kind == "boolean":
+        return isinstance(value, bool)
+    if unit_kind == "timestamp":
+        return isinstance(value, str)
+    if unit_kind in _NUMERIC_UNIT_KINDS:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    # Unknown unit kinds should never reach here because MetricDefinition
+    # validates ``unit`` against ``_METRIC_UNITS``; treat as opaque rather than
+    # raising so the diagnostic remains advisory and never crashes a run.
+    return True
+
+
+def _metric_evidence_sources(metric: Any) -> tuple[str, ...]:
+    if isinstance(metric, Mapping):
+        if "evidence" not in metric:
+            raise ValueError(
+                "Metrics passed to evidence-source validation must expose an evidence collection"
+            )
+        evidence = metric.get("evidence")
+    else:
+        if not hasattr(metric, "evidence"):
+            raise ValueError(
+                "Metrics passed to evidence-source validation must expose an evidence collection"
+            )
+        evidence = getattr(metric, "evidence")
+    sources: list[str] = []
+    for item in evidence or ():
+        if isinstance(item, Mapping):
+            source = item.get("source")
+        else:
+            source = getattr(item, "source", None)
+        if not isinstance(source, str) or not source:
+            raise ValueError(
+                "Evidence entries passed to evidence-source validation must expose a non-empty string source"
+            )
+        sources.append(source)
+    return tuple(sources)
+
+
+def find_source_envelope_violations(
+    metric_keys: Iterable[str],
+    *,
+    connector_type: str,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys emitted by an unauthorized source.
+
+    A "source envelope" violation means a metric key resolved to a canonical
+    definition whose ``allowed_sources`` does not include ``connector_type``.
+    Unknown (unresolved) keys are intentionally skipped so this diagnostic
+    composes cleanly with :func:`validate_metrics`, which already pins unknown
+    keys. Result order matches input order and is deterministic.
+    """
+
+    if not connector_type:
+        raise ValueError("find_source_envelope_violations requires a non-empty connector_type")
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_source_envelope_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if connector_type in definition.allowed_sources:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="disallowed_source",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') is not allowed "
+                    f"from connector source '{connector_type}'; allowed_sources="
+                    f"{list(definition.allowed_sources)}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def find_family_envelope_violations(
+    metric_keys: Iterable[str],
+    *,
+    connector_type: str,
+    declared_families: Iterable[str],
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical family is
+    not in the connector spec's declared ``emitted_metric_families``.
+
+    The caller passes ``declared_families`` (typically a connector spec's
+    ``emitted_metric_families``) so this helper stays independent of the
+    connector registry. Unknown (unresolved) keys are intentionally skipped so
+    this diagnostic composes cleanly with :func:`validate_metrics` (unknown
+    keys) and :func:`find_source_envelope_violations` (disallowed sources).
+    Result order matches input order and is deterministic.
+    """
+
+    if not connector_type:
+        raise ValueError("find_family_envelope_violations requires a non-empty connector_type")
+
+    declared = tuple(declared_families)
+    if not declared:
+        raise ValueError(
+            "find_family_envelope_violations requires non-empty declared_families"
+        )
+    declared_set = set(declared)
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_family_envelope_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        family = active_registry.get(canonical).family
+        if family in declared_set:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="undeclared_family",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has family "
+                    f"'{family}' which is not declared in connector "
+                    f"'{connector_type}' emitted_metric_families="
+                    f"{list(declared)}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def _metric_evidence_count(metric: Any) -> int:
+    if isinstance(metric, Mapping):
+        if "evidence" not in metric:
+            raise ValueError(
+                "Metrics passed to evidence-required validation must expose an evidence collection"
+            )
+        evidence = metric.get("evidence")
+    else:
+        if not hasattr(metric, "evidence"):
+            raise ValueError(
+                "Metrics passed to evidence-required validation must expose an evidence collection"
+            )
+        evidence = getattr(metric, "evidence")
+    if evidence is None:
+        return 0
+    return sum(1 for _ in evidence)
+
+
+def find_evidence_required_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric objects whose canonical
+    definition requires evidence but whose evidence collection is empty.
+
+    An ``evidence_missing`` violation means a metric key resolved to a canonical
+    definition whose ``evidence_required`` flag is ``True`` but the runtime
+    object exposed zero evidence entries. ``None`` and empty iterables are
+    treated the same so transitional draft envelopes do not crash the sweep.
+    Each metric must expose a non-empty string ``key`` and an ``evidence``
+    attribute (or mapping field); a missing field raises ``ValueError``.
+    Unknown (unresolved) keys are intentionally skipped so this diagnostic
+    composes cleanly with :func:`validate_metrics` and the existing envelope
+    helpers. Result order matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        count = _metric_evidence_count(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if not definition.evidence_required:
+            continue
+        if count > 0:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="evidence_missing",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"evidence_required=True but received zero evidence "
+                    f"entries"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def find_evidence_source_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for evidence sources outside the canonical
+    metric's ``allowed_sources``.
+
+    Each metric must expose a non-empty string ``key`` and a non-``None``
+    ``evidence`` collection whose entries expose a non-empty string ``source``.
+    Unknown (unresolved) keys are intentionally skipped so this diagnostic
+    composes with :func:`validate_metrics` (unknown keys),
+    :func:`find_source_envelope_violations` (connector_type), and
+    :func:`find_family_envelope_violations` (declared families). Within one
+    metric, each disallowed source is reported at most once and in
+    first-appearance order; across metrics, results follow input order.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        sources = _metric_evidence_sources(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        allowed = definition.allowed_sources
+        seen: set[str] = set()
+        for source in sources:
+            if source in allowed or source in seen:
+                continue
+            seen.add(source)
+            issues.append(
+                MetricValidationIssue(
+                    code="evidence_source_mismatch",
+                    key=key,
+                    message=(
+                        f"Metric key '{key}' (canonical '{canonical}') received "
+                        f"evidence src={source}; allowed_sources="
+                        f"{list(allowed)}"
+                    ),
+                    severity="warning",
+                    index=index,
+                )
+            )
+    return issues
+
+
+def find_value_kind_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric values whose runtime type does
+    not match the canonical metric's unit kind.
+
+    Numeric unit kinds (``money``, ``count``, ``percent``, ``duration``) require
+    ``int`` or ``float`` (and reject ``bool``, even though ``bool`` is a subclass
+    of ``int`` in Python). ``boolean`` requires ``bool``. ``timestamp`` requires
+    ``str``. Each metric must expose a non-empty string ``key`` and a ``value``
+    attribute (or mapping field). Unknown (unresolved) keys are intentionally
+    skipped so this diagnostic composes cleanly with :func:`validate_metrics`,
+    :func:`find_source_envelope_violations`, :func:`find_family_envelope_violations`,
+    and :func:`find_evidence_source_violations`. Result order matches input
+    order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        value = _metric_value(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if _value_matches_unit_kind(value, definition.unit):
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="value_kind_mismatch",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') expects unit "
+                    f"kind '{definition.unit}' but received value of type "
+                    f"{type(value).__name__}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def find_report_allowed_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical definition
+    is not allowed in user-facing report output.
+
+    A ``report_not_allowed`` violation means a metric key resolved to a canonical
+    definition whose ``report_allowed`` flag is ``False`` (control-plane signals
+    such as ``runtime.freshness.*`` or ``runtime.connector.status``). Unknown
+    (unresolved) keys are intentionally skipped so this diagnostic composes
+    cleanly with :func:`validate_metrics` and the envelope helpers. Result order
+    matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_report_allowed_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.report_allowed:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="report_not_allowed",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"report_allowed=False and must not appear in user-facing "
+                    f"report output"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def find_case_allowed_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical definition
+    is not allowed to back Operational Case detections.
+
+    A ``case_not_allowed`` violation means a metric key resolved to a canonical
+    definition whose ``case_allowed`` flag is ``False`` (analytical signals such
+    as ``commerce.average_order_value`` or ``ads.delivery.*`` that may inform
+    reports but must not drive case lifecycle). Unknown (unresolved) keys are
+    intentionally skipped so this diagnostic composes cleanly with
+    :func:`validate_metrics` and the envelope helpers. Result order matches
+    input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_case_allowed_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.case_allowed:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="case_not_allowed",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"case_allowed=False and must not back Operational Case "
+                    f"detections"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def validate_case_metric_keys(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown-metric + case-not-allowed diagnostics for keys destined
+    for an Operational Case detection stage.
+
+    Parallel to :func:`validate_report_metric_keys` but on the case side:
+    detection inputs must be both registered and case-allowed. The fixed
+    concatenation order ``unknown_metric`` -> ``case_not_allowed`` keeps the
+    result deterministic and free of overlap because
+    :func:`find_case_allowed_violations` already skips unknown keys.
+    """
+
+    materialized = list(metric_keys)
+    unknown_issues = validate_metrics(
+        [{"key": key} for key in materialized],
+        registry=registry,
+    )
+    case_issues = find_case_allowed_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *case_issues]
+
+
+def validate_report_metric_objects(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + report_not_allowed + evidence_missing +
+    evidence_source_mismatch + value_kind_mismatch diagnostics for
+    metric-shaped objects bound for a user-facing report stage.
+
+    Parallel to :meth:`ConnectorSpec.validate_emitted_metric_objects` but on the
+    report-rendering side: the report renderer must reject report_not_allowed
+    canonical metrics and surface evidence/value-kind mismatches that the
+    key-only :func:`validate_report_metric_keys` cannot see. The fixed
+    concatenation order ``unknown_metric`` -> ``report_not_allowed`` ->
+    ``evidence_missing`` -> ``evidence_source_mismatch`` ->
+    ``value_kind_mismatch`` keeps the result deterministic and free of overlap
+    because each downstream helper skips unknown keys and the two evidence
+    diagnostics are mutually exclusive (evidence_missing fires only on zero
+    entries, evidence_source_mismatch only on non-empty collections).
+    """
+
+    materialized = list(metrics)
+    unknown_issues = validate_metrics(materialized, registry=registry)
+    keys = [_metric_key(metric) for metric in materialized]
+    report_issues = find_report_allowed_violations(keys, registry=registry)
+    evidence_missing_issues = find_evidence_required_violations(
+        materialized, registry=registry
+    )
+    evidence_issues = find_evidence_source_violations(
+        materialized, registry=registry
+    )
+    value_kind_issues = find_value_kind_violations(
+        materialized, registry=registry
+    )
+    return [
+        *unknown_issues,
+        *report_issues,
+        *evidence_missing_issues,
+        *evidence_issues,
+        *value_kind_issues,
+    ]
+
+
+def validate_case_metric_objects(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + case_not_allowed + evidence_missing +
+    evidence_source_mismatch + value_kind_mismatch diagnostics for
+    metric-shaped objects bound for an Operational Case detection stage.
+
+    Parallel to :func:`validate_report_metric_objects` but on the case side:
+    detection inputs must be both registered and case-allowed, and they must
+    also pass evidence/value-kind sanity checks. The fixed concatenation order
+    ``unknown_metric`` -> ``case_not_allowed`` -> ``evidence_missing`` ->
+    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys and the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch
+    only on non-empty collections).
+    """
+
+    materialized = list(metrics)
+    unknown_issues = validate_metrics(materialized, registry=registry)
+    keys = [_metric_key(metric) for metric in materialized]
+    case_issues = find_case_allowed_violations(keys, registry=registry)
+    evidence_missing_issues = find_evidence_required_violations(
+        materialized, registry=registry
+    )
+    evidence_issues = find_evidence_source_violations(
+        materialized, registry=registry
+    )
+    value_kind_issues = find_value_kind_violations(
+        materialized, registry=registry
+    )
+    return [
+        *unknown_issues,
+        *case_issues,
+        *evidence_missing_issues,
+        *evidence_issues,
+        *value_kind_issues,
+    ]
+
+
+def validate_report_metric_keys(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown-metric + report-not-allowed diagnostics for keys
+    destined for a user-facing report stage.
+
+    Parallel to ``ConnectorSpec.validate_emitted_metrics`` but on the report
+    side: connector emission may legitimately surface ``report_allowed=False``
+    runtime keys (e.g. ``runtime.freshness.*``); the report renderer must not.
+    The fixed concatenation order ``unknown_metric`` -> ``report_not_allowed``
+    keeps the result deterministic and free of overlap because
+    :func:`find_report_allowed_violations` already skips unknown keys.
+    """
+
+    materialized = list(metric_keys)
+    unknown_issues = validate_metrics(
+        [{"key": key} for key in materialized],
+        registry=registry,
+    )
+    report_issues = find_report_allowed_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *report_issues]
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -475,5 +1037,16 @@ __all__ = [
     "MetricValidationIssue",
     "UnknownMetricError",
     "default_metric_registry",
+    "find_case_allowed_violations",
+    "find_evidence_required_violations",
+    "find_evidence_source_violations",
+    "find_family_envelope_violations",
+    "find_report_allowed_violations",
+    "find_source_envelope_violations",
+    "find_value_kind_violations",
+    "validate_case_metric_keys",
+    "validate_case_metric_objects",
     "validate_metrics",
+    "validate_report_metric_keys",
+    "validate_report_metric_objects",
 ]
