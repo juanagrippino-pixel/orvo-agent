@@ -931,23 +931,28 @@ def validate_case_metric_objects(
     *,
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown_metric + case_not_allowed + evidence_source_mismatch +
-    value_kind_mismatch diagnostics for metric-shaped objects bound for an
-    Operational Case detection stage.
+    """Compose unknown_metric + case_not_allowed + evidence_missing +
+    evidence_source_mismatch + value_kind_mismatch diagnostics for
+    metric-shaped objects bound for an Operational Case detection stage.
 
     Parallel to :func:`validate_report_metric_objects` but on the case side:
     detection inputs must be both registered and case-allowed, and they must
     also pass evidence/value-kind sanity checks. The fixed concatenation order
-    ``unknown_metric`` -> ``case_not_allowed`` -> ``evidence_source_mismatch``
-    -> ``value_kind_mismatch`` keeps the result deterministic and free of
-    overlap because the case/evidence/value-kind helpers each skip unknown
-    keys.
+    ``unknown_metric`` -> ``case_not_allowed`` -> ``evidence_missing`` ->
+    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys and the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch
+    only on non-empty collections).
     """
 
     materialized = list(metrics)
     unknown_issues = validate_metrics(materialized, registry=registry)
     keys = [_metric_key(metric) for metric in materialized]
     case_issues = find_case_allowed_violations(keys, registry=registry)
+    evidence_missing_issues = find_evidence_required_violations(
+        materialized, registry=registry
+    )
     evidence_issues = find_evidence_source_violations(
         materialized, registry=registry
     )
@@ -957,6 +962,7 @@ def validate_case_metric_objects(
     return [
         *unknown_issues,
         *case_issues,
+        *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
     ]

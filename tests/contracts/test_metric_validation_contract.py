@@ -1151,6 +1151,58 @@ def test_validate_case_metric_objects_composes_unknown_then_case_then_evidence_t
     ]
 
 
+def test_validate_case_metric_objects_slots_evidence_missing_between_case_and_evidence_source():
+    """Mixed bag exercising the evidence_missing slot. The composition order
+    inside :func:`validate_case_metric_objects` must put evidence_missing
+    immediately after case_not_allowed and before evidence_source_mismatch
+    so structural ``no evidence at all`` diagnostics surface before content
+    diagnostics about wrong-source evidence. Each diagnostic preserves its own
+    input-order index. Mapping form is required because Pydantic ``Metric``
+    enforces ``min_length=1`` on evidence and cannot represent the missing
+    case directly."""
+
+    from app.brain.semantics.metric_registry import validate_case_metric_objects
+
+    metrics = [
+        {
+            "key": "orders_today",
+            "value": 12,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "custom.unknown_case_metric",
+            "value": 1,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "avg_order_value",
+            "value": 7500,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {
+            "key": "commerce.orders.count",
+            "value": "not a number",
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+    ]
+
+    issues = validate_case_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_case_metric", 1, "warning"),
+        ("case_not_allowed", "avg_order_value", 2, "warning"),
+        ("evidence_missing", "commerce.revenue.total", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 5, "warning"),
+    ]
+
+
 def test_validate_case_metric_objects_returns_empty_for_clean_case_metrics():
     from app.brain.semantics.metric_registry import validate_case_metric_objects
 
