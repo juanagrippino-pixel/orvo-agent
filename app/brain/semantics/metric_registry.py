@@ -888,24 +888,29 @@ def validate_report_metric_objects(
     *,
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown_metric + report_not_allowed + evidence_source_mismatch +
-    value_kind_mismatch diagnostics for metric-shaped objects bound for a
-    user-facing report stage.
+    """Compose unknown_metric + report_not_allowed + evidence_missing +
+    evidence_source_mismatch + value_kind_mismatch diagnostics for
+    metric-shaped objects bound for a user-facing report stage.
 
     Parallel to :meth:`ConnectorSpec.validate_emitted_metric_objects` but on the
     report-rendering side: the report renderer must reject report_not_allowed
     canonical metrics and surface evidence/value-kind mismatches that the
     key-only :func:`validate_report_metric_keys` cannot see. The fixed
     concatenation order ``unknown_metric`` -> ``report_not_allowed`` ->
-    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` keeps the result
-    deterministic and free of overlap because the report/evidence/value-kind
-    helpers each skip unknown keys.
+    ``evidence_missing`` -> ``evidence_source_mismatch`` ->
+    ``value_kind_mismatch`` keeps the result deterministic and free of overlap
+    because each downstream helper skips unknown keys and the two evidence
+    diagnostics are mutually exclusive (evidence_missing fires only on zero
+    entries, evidence_source_mismatch only on non-empty collections).
     """
 
     materialized = list(metrics)
     unknown_issues = validate_metrics(materialized, registry=registry)
     keys = [_metric_key(metric) for metric in materialized]
     report_issues = find_report_allowed_violations(keys, registry=registry)
+    evidence_missing_issues = find_evidence_required_violations(
+        materialized, registry=registry
+    )
     evidence_issues = find_evidence_source_violations(
         materialized, registry=registry
     )
@@ -915,6 +920,7 @@ def validate_report_metric_objects(
     return [
         *unknown_issues,
         *report_issues,
+        *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
     ]
