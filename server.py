@@ -7,7 +7,7 @@ import os
 import sqlite3
 import threading
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import uuid4
 import requests
 from flask import Flask, request, jsonify
@@ -42,6 +42,7 @@ from app.brain.operator_api import (
     apply_case_action,
     execute_builtin_case_view,
     get_case_projection,
+    get_operator_dashboard,
     get_run_projection,
     list_builtin_case_views,
     list_case_queue,
@@ -166,6 +167,24 @@ def internal_brain_cases(business_id: str):
                 status=request.args.get("status"),
                 limit=request.args.get("limit"),
                 jql=request.args.get("jql"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/dashboard")
+def internal_brain_dashboard(business_id: str):
+    limit = request.args.get("limit")
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            get_operator_dashboard(
+                case_store,
+                run_ledger,
+                business_id=business_id,
+                now=datetime.now(timezone.utc),
+                limit=int(limit) if limit else 10,
             ),
         ),
     )
