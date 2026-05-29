@@ -128,6 +128,81 @@ def test_dispatch_owner_case_brief_skips_duplicate_key():
     assert delivery_client.send_text.call_count == 1
 
 
+def test_dispatch_owner_case_brief_failed_send_does_not_mark_key_and_allows_retry():
+    """A failed owner case brief send must surface the error, leave the idempotency
+    key unmarked, and allow a subsequent attempt to succeed.
+
+    This locks the parity with dispatch_daily_report's failure contract so the
+    operator-facing case brief is not silently dropped after a transient delivery
+    error.
+    """
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.side_effect = [
+        DeliveryResult(success=False, message_id=None, error="HTTP 502"),
+        DeliveryResult(success=True, message_id="wamid.case-retry", error=None),
+    ]
+    idempotency = InMemoryIdempotencyStore()
+    cases = [make_owner_case()]
+
+    first = dispatch_owner_case_brief(
+        cases=cases,
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=idempotency,
+    )
+
+    assert first is not None
+    assert first.status == "failed"
+    assert first.error == "HTTP 502"
+    assert first.idempotency_key == "artemea/2026-05-19/owner_case_brief"
+    assert not idempotency.has(first.idempotency_key)
+
+    second = dispatch_owner_case_brief(
+        cases=cases,
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=idempotency,
+    )
+
+    assert second is not None
+    assert second.status == "sent"
+    assert idempotency.has(second.idempotency_key)
+    assert delivery_client.send_text.call_count == 2
+
+
+def test_dispatch_owner_case_brief_failed_emits_warning_log(caplog):
+    """Failed owner case brief sends must emit a warning-level structured log so
+    operators can see why the brief was not delivered.
+    """
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(
+        success=False, message_id=None, error="HTTP 502"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.brain.dispatch"):
+        dispatch_owner_case_brief(
+            cases=[make_owner_case()],
+            business=make_business(),
+            report_date=date(2026, 5, 19),
+            delivery_client=delivery_client,
+            idempotency_store=InMemoryIdempotencyStore(),
+        )
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any(
+        "failed" in r.getMessage() and "artemea/2026-05-19/owner_case_brief" in r.getMessage()
+        for r in warnings
+    )
+
+
 def test_dispatch_daily_report_sends_composed_text_once():
     from app.brain.delivery import DeliveryResult
     from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_daily_report
