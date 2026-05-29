@@ -46,6 +46,7 @@ from app.brain.operator_api import (
     get_run_projection,
     list_builtin_case_views,
     list_case_queue,
+    list_case_timeline,
     list_run_history,
     summarize_case_queue,
 )
@@ -233,6 +234,24 @@ def internal_brain_case_detail(business_id: str, case_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             get_case_projection(case_store, business_id=business_id, case_id=case_id),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/<case_id>/timeline")
+def internal_brain_case_timeline(business_id: str, case_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_case_timeline(
+                case_store,
+                business_id=business_id,
+                case_id=case_id,
+                event_type=request.args.get("event_type"),
+                actor_type=request.args.get("actor_type"),
+                limit=request.args.get("limit"),
+            ),
         ),
     )
 
