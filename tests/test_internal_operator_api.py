@@ -275,6 +275,58 @@ def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkey
     assert cross.get_json()["error"]["code"] == "run_not_found"
 
 
+def test_internal_case_queue_summary_returns_status_severity_and_actionable_counts(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    critical = _case_detection(run_id="run-artemea-critical")
+    warning = _case_detection(
+        case_type="sales_drop",
+        dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        priority=70,
+        severity="warning",
+        title="Ventas bajaron",
+        run_id="run-artemea-warn",
+    )
+    other = _case_detection(business_id="other", run_id="run-other")
+    _seed_case(db_path, critical)
+    _seed_case(db_path, warning)
+    _seed_case(db_path, other)
+
+    response = client.get("/internal/brain/businesses/artemea/cases/summary", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    # Only artemea cases counted (2), not the 'other' business one
+    assert summary["total"] == 2
+    assert summary["by_severity"]["critical"] == 1
+    assert summary["by_severity"]["warning"] == 1
+    assert summary["by_case_type"]["stockout_risk"] == 1
+    assert summary["by_case_type"]["sales_drop"] == 1
+    # Both are open (actionable)
+    assert summary["actionable_total"] == 2
+    assert summary["actionable_by_severity"]["critical"] == 1
+    assert summary["actionable_by_severity"]["warning"] == 1
+
+
+def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/cases/summary", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    summary = body["data"]
+    assert summary["total"] == 0
+    assert summary["actionable_total"] == 0
+    assert summary["actionable_degraded"] == 0
+    assert summary["by_status"] == {}
+    assert summary["by_severity"] == {}
+
+
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())

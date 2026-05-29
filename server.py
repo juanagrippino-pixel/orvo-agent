@@ -47,6 +47,7 @@ from app.brain.operator_api import (
     list_builtin_case_views,
     list_case_queue,
     list_run_history,
+    summarize_case_queue,
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 from app.brain.delivery_status import (
@@ -168,6 +169,17 @@ def internal_brain_cases(business_id: str):
                 limit=request.args.get("limit"),
                 jql=request.args.get("jql"),
             ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/summary")
+def internal_brain_cases_summary(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue(case_store, business_id=business_id),
         ),
     )
 
