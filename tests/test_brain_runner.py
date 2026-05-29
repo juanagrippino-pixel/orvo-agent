@@ -635,6 +635,72 @@ def test_run_due_daily_reports_dispatches_due_meta_ads_report_with_scheduled_dat
     delivery.send_text.assert_called_once()
 
 
+def make_artemea_22h00_meta_store():
+    """Late-night schedule: 22:00 Buenos Aires = 01:00 UTC the next calendar day."""
+    store = InMemoryConfigStore()
+    store.save_business_config(
+        BusinessConfig(
+            business_id="artemea-late",
+            business_name="Artemea Late",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="meta",
+                    connector_type="meta_ads",
+                    label="Meta Ads Artemea Late",
+                    params={"ad_account_id": "act_12345", "access_token": "meta_test_token"},
+                )
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="artemea-late-daily-report",
+            business_id="artemea-late",
+            cron_expression="0 22 * * *",
+            report_type="daily",
+        )
+    )
+    return store
+
+
+def test_run_due_daily_reports_report_date_follows_business_local_calendar_for_late_night_schedule():
+    """A 22:00 Buenos Aires schedule fires at 01:00 UTC the next UTC day. The owner's
+    local calendar date is still May 19, so the report header, idempotency key, and
+    Meta Ads time_range must all be stamped May 19 — not May 20 (UTC).
+
+    Locks the runtime contract that ``report_date`` reflects the business owner's
+    local calendar day, not the UTC instant of the scheduler tick. Without this,
+    end-of-day reports get duplicate or wrong-day idempotency keys and ad metrics
+    are pulled for a day the owner has not yet lived.
+    """
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.late", error=None)
+    http_client = FakeMetaAdsClient()
+
+    # 01:00 UTC on 2026-05-20 == 22:00 Buenos Aires on 2026-05-19.
+    now = datetime(2026, 5, 20, 1, 0, tzinfo=timezone.utc)
+
+    results = run_due_daily_reports(
+        config_store=make_artemea_22h00_meta_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        meta_ads_http_client=http_client,
+        now=now,
+    )
+
+    assert len(results) == 1
+    pipeline = results[0].pipeline
+    assert pipeline.report.report_date.isoformat() == "2026-05-19"
+    assert pipeline.dispatch.idempotency_key == "artemea-late/2026-05-19/daily"
+    assert http_client.params is not None
+    assert json.loads(http_client.params["time_range"]) == {"since": "2026-05-19", "until": "2026-05-19"}
+
+
 def make_artemea_08h00_store():
     """ARTEMEA production store: 08:00 Buenos Aires schedule = 11:00 UTC."""
     store = InMemoryConfigStore()

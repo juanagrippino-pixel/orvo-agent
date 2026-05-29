@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
@@ -99,7 +100,7 @@ def run_due_daily_reports(
             runtime_metadata=runtime_run_metadata(runtime),
             summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
         )
-        report_date = run.run_at.astimezone(timezone.utc).date()
+        report_date = run.run_at.astimezone(ZoneInfo(business.timezone)).date()
         connector_types = runtime.execution_plan.daily_connector_types
         _log.info(
             "runner starting business_id=%s schedule_id=%s report_date=%s connectors=%s",
