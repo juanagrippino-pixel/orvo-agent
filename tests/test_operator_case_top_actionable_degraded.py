@@ -178,27 +178,37 @@ def test_orders_by_priority_desc_then_case_id_asc_and_filters_to_actionable_degr
     assert result["actionable_degraded_total"] == 3
     assert result["limit"] == 50
     assert result["count"] == 3
-    # priority 100 -> 70 (run-b case_id < run-c case_id by deterministic creation order;
-    # we assert via case_type ordering since dedupe-derived case_ids are stable per run).
+    # Priority 100 first; tie-break on priority 70 is case_id ASC (random UUIDs, so
+    # we compare per-case_type rather than by index for the tied group).
     cases = result["cases"]
-    assert [case["case_type"] for case in cases] == [
-        "stockout_risk",
-        "sales_drop",
-        "data_stale",
-    ]
-    assert [case["priority_score"] for case in cases] == [100, 70, 70]
-    assert [case["status"] for case in cases] == ["open", "open", "acknowledged"]
-    assert [case["freshness_state"] for case in cases] == ["degraded", "stale", "missing"]
-    # age_seconds derived from now (12:00) - opened_at; opened equals detected_at.
+    assert cases[0]["case_type"] == "stockout_risk"
+    assert cases[0]["priority_score"] == 100
+    assert [c["priority_score"] for c in cases] == [100, 70, 70]
+
+    # Build a lookup by case_type for the two tied cases (order-independent).
+    by_type = {c["case_type"]: c for c in cases[1:]}
+    assert set(by_type) == {"sales_drop", "data_stale"}
+
+    sd = by_type["sales_drop"]
+    ds = by_type["data_stale"]
+    assert sd["status"] == "open"
+    assert sd["freshness_state"] == "stale"
+    assert sd["age_seconds"] == 3 * 3600
+    assert sd["source_connectors"] == ["meta_ads"]
+    assert sd["latest_evidence_at"] == "2026-05-24T06:00:00Z"
+
+    assert ds["status"] == "acknowledged"
+    assert ds["freshness_state"] == "missing"
+    assert ds["age_seconds"] == 2 * 3600
+    assert ds["source_connectors"] == ["tiendanube"]
+    assert ds["latest_evidence_at"] == "2026-05-24T05:00:00Z"
+
+    # Top case attributes verified directly by index.
+    assert cases[0]["status"] == "open"
+    assert cases[0]["freshness_state"] == "degraded"
     assert cases[0]["age_seconds"] == 4 * 3600
-    assert cases[1]["age_seconds"] == 3 * 3600
-    assert cases[2]["age_seconds"] == 2 * 3600
     assert cases[0]["source_connectors"] == ["tiendanube"]
-    assert cases[1]["source_connectors"] == ["meta_ads"]
-    assert cases[2]["source_connectors"] == ["tiendanube"]
     assert cases[0]["latest_evidence_at"] == "2026-05-24T07:00:00Z"
-    assert cases[1]["latest_evidence_at"] == "2026-05-24T06:00:00Z"
-    assert cases[2]["latest_evidence_at"] == "2026-05-24T05:00:00Z"
 
 
 def test_freshness_state_collapses_to_most_severe_when_multiple_snapshots():
