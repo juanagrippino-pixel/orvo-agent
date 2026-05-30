@@ -833,6 +833,65 @@ def find_pii_class_violations(
     return issues
 
 
+def find_freshness_companion_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for freshness_required metric keys emitted
+    without a ``runtime.freshness`` family companion metric in the same payload.
+
+    A ``freshness_companion_missing`` violation means a metric key resolved to a
+    canonical definition whose ``freshness_required`` flag is ``True`` while no
+    other key in the same input resolves to the ``runtime.freshness`` family
+    (canonical ``runtime.freshness.last_success_at`` or
+    ``runtime.freshness.age_seconds``, or any alias of theirs). When at least
+    one ``runtime.freshness`` companion is present the diagnostic is suppressed
+    for every freshness_required key in the input. Unknown (unresolved) keys
+    are intentionally skipped so this diagnostic composes cleanly with
+    :func:`validate_metrics` and the existing envelope/pii helpers. Result
+    order matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    materialized = list(metric_keys)
+    for key in materialized:
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_freshness_companion_violations requires non-empty string metric keys"
+            )
+
+    for key in materialized:
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        if active_registry.get(canonical).family == "runtime.freshness":
+            return []
+
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(materialized):
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if not definition.freshness_required:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="freshness_companion_missing",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"freshness_required=True but no runtime.freshness metric "
+                    f"accompanies it in the payload"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_report_allowed_violations(
     metric_keys: Iterable[str],
     *,
@@ -1194,6 +1253,7 @@ __all__ = [
     "find_evidence_required_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
+    "find_freshness_companion_violations",
     "find_pii_class_violations",
     "find_report_allowed_violations",
     "find_source_envelope_violations",

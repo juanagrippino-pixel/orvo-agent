@@ -1910,3 +1910,162 @@ def test_validate_surface_metric_objects_is_reexported_from_semantics_public_sur
 
     assert hasattr(semantics, "validate_surface_metric_objects")
     assert "validate_surface_metric_objects" in semantics.__all__
+
+
+def test_freshness_companion_helper_flags_freshness_required_keys_without_runtime_freshness_companion():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # Business metrics (freshness_required=True) without any runtime.freshness
+    # companion metric in the same payload must be flagged once each, in
+    # input order. commerce.average_order_value also defaults to
+    # freshness_required=True so it surfaces alongside the other business keys.
+    metric_keys = (
+        "commerce.orders.count",
+        "ad_spend_today",
+        "avg_order_value",
+    )
+
+    issues = find_freshness_companion_violations(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("freshness_companion_missing", "commerce.orders.count", 0, "warning"),
+        ("freshness_companion_missing", "ad_spend_today", 1, "warning"),
+        ("freshness_companion_missing", "avg_order_value", 2, "warning"),
+    ]
+    assert "runtime.freshness" in issues[0].message
+    assert "commerce.orders.count" in issues[0].message
+
+
+def test_freshness_companion_helper_returns_empty_when_runtime_freshness_companion_present():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # Any runtime.freshness family metric (canonical or alias-resolved) in the
+    # payload satisfies the companion requirement and suppresses the diagnostic
+    # for every freshness_required key, regardless of where it appears.
+    assert (
+        find_freshness_companion_violations(
+            (
+                "commerce.orders.count",
+                "runtime.freshness.last_success_at",
+                "ad_spend_today",
+            )
+        )
+        == []
+    )
+
+    assert (
+        find_freshness_companion_violations(
+            (
+                "commerce.orders.count",
+                "runtime.freshness.age_seconds",
+            )
+        )
+        == []
+    )
+
+
+def test_freshness_companion_helper_skips_metrics_whose_canonical_definition_does_not_require_freshness():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # runtime.connector.status, runtime.data_quality.*, and the runtime.freshness
+    # metrics themselves are freshness_required=False. A payload composed only of
+    # such control-plane signals does not need a runtime.freshness companion to
+    # pass.
+    assert (
+        find_freshness_companion_violations(
+            (
+                "runtime.connector.status",
+                "runtime.data_quality.completeness_ratio",
+            )
+        )
+        == []
+    )
+
+
+def test_freshness_companion_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so the diagnostics compose without overlap. With no resolvable
+    # metrics in the payload, no freshness_required check can fire.
+    assert (
+        find_freshness_companion_violations(("never_registered_metric",))
+        == []
+    )
+
+
+def test_freshness_companion_helper_resolves_aliases_before_checking_companion_and_freshness_required():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # revenue_today is an alias for commerce.revenue.total (freshness_required=True);
+    # the companion check must resolve aliases on both sides so the diagnostic is
+    # symmetric with the rest of the registry.
+    issues = find_freshness_companion_violations(("revenue_today",))
+    assert [(issue.code, issue.key) for issue in issues] == [
+        ("freshness_companion_missing", "revenue_today")
+    ]
+    assert "commerce.revenue.total" in issues[0].message
+
+
+def test_freshness_companion_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    metric_keys = (
+        "commerce.orders.count",
+        "ad_spend_today",
+        "custom.unknown_metric",
+        "avg_order_value",
+    )
+    first = find_freshness_companion_violations(metric_keys)
+    second = find_freshness_companion_violations(metric_keys)
+    assert first == second
+
+
+def test_freshness_companion_helper_threads_custom_registry_through_resolution():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_freshness_companion_violations,
+    )
+
+    # A custom registry whose only metric requires freshness but offers no
+    # runtime.freshness family must surface the diagnostic regardless of the
+    # default registry's contents.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="commerce.subscriptions.count",
+                family="commerce.subscriptions",
+                label="Active subscriptions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("subscriptions_today",),
+                aggregation="latest",
+                case_allowed=True,
+            ),
+        )
+    )
+
+    issues = find_freshness_companion_violations(
+        ("subscriptions_today",), registry=registry
+    )
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("freshness_companion_missing", "subscriptions_today", 0),
+    ]
+    assert "commerce.subscriptions.count" in issues[0].message
+
+
+def test_freshness_companion_helper_rejects_empty_or_non_string_metric_keys():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_freshness_companion_violations(("",))
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_freshness_companion_violations((123,))
+
+
+def test_freshness_companion_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_freshness_companion_violations")
+    assert "find_freshness_companion_violations" in semantics.__all__
