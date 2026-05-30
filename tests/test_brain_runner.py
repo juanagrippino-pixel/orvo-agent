@@ -359,6 +359,79 @@ def test_run_due_daily_reports_records_partial_when_owner_case_brief_raises():
     assert run.summary_metadata["case_brief_dispatch_status"] == "failed"
 
 
+def test_run_due_daily_reports_records_partial_when_daily_dispatch_fails_and_skips_owner_brief():
+    """A transient WhatsApp 5xx on the daily report dispatch must:
+      - record the run as ``partial`` (data and cases are valid; only delivery failed),
+      - leave the daily idempotency key UNMARKED so the next runner tick can retry,
+      - NOT attempt the owner case brief (its idempotency would otherwise be lost
+        if the daily report is later re-sent on retry — the brief belongs after a
+        successful daily report),
+      - still persist operational cases and the artifact, since the report data is
+        valid even when delivery transiently fails.
+
+    Locks the runtime contract that a delivery transient downgrades the run to
+    ``partial`` without silently dropping the daily report or sending the brief
+    out of order.
+    """
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(
+        success=False, message_id=None, error="HTTP 502"
+    )
+    idempotency = InMemoryIdempotencyStore()
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    results = run_due_daily_reports(
+        config_store=make_store(),
+        idempotency_store=idempotency,
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    assert len(results) == 1
+    pipeline = results[0].pipeline
+    assert pipeline.dispatch.status == "failed"
+    assert pipeline.dispatch.error == "HTTP 502"
+    assert pipeline.dispatch.idempotency_key == "artemea/2026-05-19/daily"
+    assert pipeline.case_brief_dispatch is None
+
+    # Idempotency must remain unmarked on both keys so retry works end-to-end.
+    assert not idempotency.has("artemea/2026-05-19/daily")
+    assert not idempotency.has("artemea/2026-05-19/owner_case_brief")
+    # Owner case brief must NOT have been attempted yet.
+    assert delivery.send_text.call_count == 1
+
+    [run] = run_ledger.list_runs(business_id="artemea")
+    assert run.status == "partial"
+    assert run.finished_at is not None
+    # Connector ran successfully — only the delivery transient downgrades the run.
+    assert [out.status for out in run.connector_outcomes] == ["succeeded"]
+    # The artifact is still produced from the valid report data.
+    assert len(run.artifacts) == 1
+    assert run.artifacts[0].artifact_type == "daily_report"
+    # Only the daily_report dispatch outcome is recorded (owner brief was skipped).
+    assert [out.metadata.get("message_type") for out in run.dispatch_outcomes] == ["daily_report"]
+    assert run.dispatch_outcomes[0].status == "failed"
+    assert run.dispatch_outcomes[0].error_summary == "HTTP 502"
+    # case_brief_dispatch_status must NOT be present since the brief was never attempted.
+    assert "case_brief_dispatch_status" not in run.summary_metadata
+    # Cases derived from the report data are still upserted.
+    assert run.summary_metadata["cases_opened"] == 3
+    assert run.summary_metadata["report_type"] == "daily"
+    assert run.summary_metadata["schedule_id"] == "artemea-daily-report"
+    cases = case_store.list_cases(business_id="artemea")
+    assert {case.case_type for case in cases} == {
+        "sales_drop",
+        "stockout_risk",
+        "unanswered_conversations",
+    }
+
+
 def test_run_due_daily_reports_skips_when_not_due():
     from app.brain.runner import run_due_daily_reports
 
