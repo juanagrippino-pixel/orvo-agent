@@ -196,6 +196,8 @@ Open when unanswered count/age exceeds threshold and source freshness is suffici
 
 ### 7. `channel_mix_shift`
 
+**Current promotion state (2026-05-30): internal/deferred.** The shipped semantic registry does **not** include `channel_mix_shift` in `CASE_FAMILY_METRICS`, and the contract test intentionally covers only the currently registered owner-facing case families. Keep this family in the catalog as a post-pilot design target, but do not project it into owner-facing briefs until the metric-registry promotion packet lands.
+
 **Buyer language:** Sales mix changed abnormally across storefront/marketplace/ad channels.
 
 **Initial sources:** Tiendanube + MercadoLibre + ads once multi-channel confidence is high.
@@ -219,6 +221,13 @@ Open when a channel share shift crosses configured threshold and all included so
 **Evidence:** current mix, comparison mix, connector freshness.
 
 **Initial actions:** inspect channel health, review promotions, rebalance attention/spend.
+
+**Promotion prerequisites specific to this family:**
+
+- define canonical channel-share metrics or an approved deterministic composition over `commerce.orders.count` / `commerce.revenue.total` scoped by channel;
+- add `channel_mix_shift` to `CASE_FAMILY_METRICS` only after those metrics are registered with `case_allowed=true`;
+- add contract tests proving the family cannot emit owner-facing cases when any included channel source is stale or missing;
+- add dedupe tests that keep broad all-channel alerts from hiding distinct channel-specific issues.
 
 ## Promotion gates
 

@@ -306,6 +306,34 @@ Acceptance:
 - WhatsApp remains a projection/delivery surface, not source of truth;
 - docs validation and secret scan pass.
 
+## Packet N — `channel_mix_shift` promotion gate
+
+Goal: promote `channel_mix_shift` from catalog/deferred design target into an implemented owner-facing case family, or explicitly keep it hidden if channel-scoped evidence is not ready.
+
+Dependency: dispatch only after Metric registry v0, case evidence snapshots, and cross-source freshness behavior are green. This packet must not be combined with unrelated operator API or connector rewrites.
+
+Read:
+
+- `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/testing-invariant-matrix.md`
+- `docs/architecture-reviews/2026-05-30-post-merge-architecture-review.md`
+
+Likely files:
+
+- `app/brain/semantics/metric_registry.py`
+- `app/brain/operational_cases.py`
+- `tests/contracts/test_metric_registry_contract.py`
+- `tests/test_brain_operational_cases.py`
+
+Acceptance:
+
+- decision is explicit: either `channel_mix_shift` remains deferred/internal, or it is added to `CASE_FAMILY_METRICS` with registered `case_allowed=true` metric refs;
+- no owner-facing `channel_mix_shift` is emitted from aggregate-only revenue/order metrics;
+- missing or stale channel sources suppress the case or create/update `data_stale`;
+- dedupe/entity-scope tests prove one all-channel key cannot hide distinct channel-specific issues;
+- full suite remains green.
+
 ## Packet output format
 
 Workers must report:

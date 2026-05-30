@@ -88,7 +88,7 @@ The first wave is designed to cover unfinished Atlassian-platform work without b
 
 These came from current code/doc audits and should be prioritized by lanes:
 
-- Verify whether `channel_mix_shift` is intentionally in or out of `CASE_FAMILY_METRICS`; if in, add deterministic evidence contract/tests; if out, keep it hidden/internal and document promotion gates.
+- Keep `channel_mix_shift` deferred/internal until Packet N promotes it with channel-scoped `CASE_FAMILY_METRICS`, stale-source suppression, and dedupe/entity-scope tests.
 - Reduce connector-specific branching by making runtime execution consume registry metadata where safe.
 - Keep operator API endpoints thin: auth, tenant/business scoping, response envelope, action-key whitelist, redaction at boundary.
 - Add coverage-regression guard: workers must not make green suites by deleting tests.

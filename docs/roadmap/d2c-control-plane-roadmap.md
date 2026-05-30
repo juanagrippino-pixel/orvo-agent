@@ -100,12 +100,14 @@ Deliverables:
 - Meta Ads + Tiendanube runtime freshness parity;
 - `spend_without_orders` family;
 - channel/source health surfaced in operator view;
+- `channel_mix_shift` promotion only after channel-scoped metrics, cross-source freshness policy, and owner-facing suppression tests exist;
 - demo/sales examples using redacted data.
 
 Exit criteria:
 
 - Orvo never claims ad/commerce mismatch when either source is stale.
 - Cross-source evidence is inspectable in run ledger/case timeline.
+- `channel_mix_shift`, if enabled, cites channel-scoped evidence and cannot collapse distinct channel issues into one broad all-channel case.
 
 ## Backlog until wedge is real
 

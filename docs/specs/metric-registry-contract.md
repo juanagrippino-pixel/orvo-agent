@@ -104,6 +104,16 @@ Initial mapping:
 | `unanswered_conversations` | `support.conversations.unanswered_count`, `support.conversations.oldest_unanswered_age_minutes` |
 | `spend_without_orders` | `ads.spend.total`, `commerce.orders.count`, `commerce.revenue.total`, freshness metrics for both sources |
 
+### Deferred case-family mappings
+
+`channel_mix_shift` is a designed D2C family, but it is **not** part of the current implemented `CASE_FAMILY_METRICS` owner-facing mapping. Do not add it by reusing only aggregate `commerce.revenue.total`; promotion requires deterministic channel-scoped evidence (for example channel share/current mix plus comparison mix) and stale-source suppression tests across every included channel.
+
+Until that promotion lands:
+
+- product docs may describe `channel_mix_shift` as post-pilot / multi-channel expansion;
+- workers must not treat it as owner-facing merely because it appears in the case-family catalog;
+- the metric-registry contract test should continue to reflect the shipped mapping rather than the aspirational catalog.
+
 ## Required tests
 
 - every metric emitted by enabled connector wrappers validates or is explicitly ignored;
