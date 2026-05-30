@@ -1207,6 +1207,53 @@ def validate_surface_metric_keys(
     return [*unknown_issues, *pii_issues]
 
 
+def validate_freshness_envelope_metric_objects(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + freshness_companion_missing + evidence_missing +
+    evidence_source_mismatch + value_kind_mismatch diagnostics for
+    metric-shaped objects whose freshness envelope must be inspected together.
+
+    Parallel to :func:`validate_freshness_envelope_metric_keys` but on the
+    object side: scheduled runners, connector emitters, and ledger checks that
+    already pass metric objects (with values and evidence) can rely on a single
+    entry point that surfaces the keys-only freshness diagnostic plus the
+    structural evidence/value-kind diagnostics that the keys-only validator
+    cannot see. The fixed concatenation order ``unknown_metric`` ->
+    ``freshness_companion_missing`` -> ``evidence_missing`` ->
+    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys and the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch only
+    on non-empty collections).
+    """
+
+    materialized = list(metrics)
+    unknown_issues = validate_metrics(materialized, registry=registry)
+    keys = [_metric_key(metric) for metric in materialized]
+    freshness_issues = find_freshness_companion_violations(
+        keys, registry=registry
+    )
+    evidence_missing_issues = find_evidence_required_violations(
+        materialized, registry=registry
+    )
+    evidence_issues = find_evidence_source_violations(
+        materialized, registry=registry
+    )
+    value_kind_issues = find_value_kind_violations(
+        materialized, registry=registry
+    )
+    return [
+        *unknown_issues,
+        *freshness_issues,
+        *evidence_missing_issues,
+        *evidence_issues,
+        *value_kind_issues,
+    ]
+
+
 def validate_freshness_envelope_metric_keys(
     metric_keys: Iterable[str],
     *,
@@ -1291,6 +1338,7 @@ __all__ = [
     "validate_case_metric_keys",
     "validate_case_metric_objects",
     "validate_freshness_envelope_metric_keys",
+    "validate_freshness_envelope_metric_objects",
     "validate_metrics",
     "validate_report_metric_keys",
     "validate_report_metric_objects",
