@@ -935,6 +935,74 @@ def summarize_case_queue_aging_by_entity_kind(
     )
 
 
+def summarize_case_queue_aging_by_priority_bracket(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Priority-bracket-split age histogram for actionable cases in a business.
+
+    Mirrors :func:`summarize_case_queue_aging_by_source_connector` but groups
+    each age bucket by deterministic priority bracket (``low`` for
+    ``priority_score < 50``, ``medium`` for ``50..79``, ``high`` for
+    ``80..100``) derived from ``case.priority_score`` instead of source
+    connector. Operator surfaces use it to spot when the in-flight backlog
+    is skewed toward high-priority work even when the overall age
+    distribution and case_type / entity_kind / source-connector splits look
+    healthy. Open and acknowledged cases are both counted as actionable.
+    Strictly scoped per tenant; ``now`` is injectable for deterministic
+    tests and defaults to current UTC.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    bracket_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    actionable_total = 0
+    oldest_age = -1
+    oldest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        actionable_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(age_seconds)
+        buckets[bucket] += 1
+        bracket = _classify_priority_bracket(case.priority_score)
+        bracket_counts = bracket_by_bucket[bucket]
+        bracket_counts[bracket] = bracket_counts.get(bracket, 0) + 1
+        if age_seconds > oldest_age:
+            oldest_age = age_seconds
+            oldest_case = case
+    oldest_payload: dict[str, Any] | None = None
+    if oldest_case is not None:
+        oldest_payload = {
+            "case_id": oldest_case.case_id,
+            "case_type": oldest_case.case_type,
+            "status": oldest_case.status,
+            "severity": oldest_case.severity,
+            "opened_at": oldest_case.opened_at.isoformat(),
+            "age_seconds": oldest_age,
+        }
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_total": actionable_total,
+            "by_age_bucket": buckets,
+            "by_age_bucket_priority_bracket": bracket_by_bucket,
+            "oldest_actionable": oldest_payload,
+        }
+    )
+
+
 def list_top_actionable_cases_by_age(
     store: OperationalCaseStore,
     *,
@@ -2561,6 +2629,75 @@ def summarize_case_handling_latency_histogram_by_source_connector(
             "handled_total": handled_total,
             "by_handling_bucket": buckets,
             "by_handling_bucket_source_connector": source_by_bucket,
+            "fastest_handled": _payload(fastest_case, fastest_seconds),
+            "slowest_handled": _payload(slowest_case, slowest_seconds),
+        }
+    )
+
+
+def summarize_case_handling_latency_histogram_by_priority_bracket(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Priority-bracket-split deterministic histogram of operator handling time.
+
+    Mirrors :func:`summarize_case_handling_latency_histogram_by_source_connector`
+    on the hands-on leg of the workflow (``resolved_at - acknowledged_at``),
+    grouping each handling-latency bucket by deterministic priority bracket
+    (``low`` for ``priority_score < 50``, ``medium`` for ``50..79``, ``high``
+    for ``80..100``) derived from ``case.priority_score`` instead of source
+    connector. Operator surfaces use it to spot when long-tail hands-on
+    resolution time is concentrated in high-priority cases even though the
+    overall median, case_type, entity_kind and source-connector
+    distributions look healthy. Open and acknowledged-only cases are
+    excluded; ``handled_total`` only counts cases that reached ``resolved``
+    state. Strictly scoped per tenant.
+    """
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    bracket_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    handled_total = 0
+    fastest_seconds = -1
+    fastest_case: OperationalCase | None = None
+    slowest_seconds = -1
+    slowest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.resolved_at is None or case.acknowledged_at is None:
+            continue
+        handled_total += 1
+        acknowledged_at = case.acknowledged_at.astimezone(timezone.utc)
+        resolved_at = case.resolved_at.astimezone(timezone.utc)
+        time_to_handle = max(int((resolved_at - acknowledged_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(time_to_handle)
+        buckets[bucket] += 1
+        bracket = _classify_priority_bracket(case.priority_score)
+        bracket_counts = bracket_by_bucket[bucket]
+        bracket_counts[bracket] = bracket_counts.get(bracket, 0) + 1
+        if fastest_seconds < 0 or time_to_handle < fastest_seconds:
+            fastest_seconds = time_to_handle
+            fastest_case = case
+        if time_to_handle > slowest_seconds:
+            slowest_seconds = time_to_handle
+            slowest_case = case
+
+    def _payload(case: OperationalCase | None, seconds: int) -> dict[str, Any] | None:
+        if case is None or case.acknowledged_at is None or case.resolved_at is None:
+            return None
+        return {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "severity": case.severity,
+            "opened_at": case.opened_at.isoformat(),
+            "acknowledged_at": case.acknowledged_at.isoformat(),
+            "resolved_at": case.resolved_at.isoformat(),
+            "time_to_handle_seconds": seconds,
+        }
+
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "handled_total": handled_total,
+            "by_handling_bucket": buckets,
+            "by_handling_bucket_priority_bracket": bracket_by_bucket,
             "fastest_handled": _payload(fastest_case, fastest_seconds),
             "slowest_handled": _payload(slowest_case, slowest_seconds),
         }
