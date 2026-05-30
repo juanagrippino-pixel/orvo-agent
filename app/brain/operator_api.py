@@ -2147,6 +2147,76 @@ def summarize_case_acknowledgment_latency_histogram_by_source_connector(
     )
 
 
+def summarize_case_handling_latency_histogram(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Deterministic histogram of operator handling time for handled cases.
+
+    Handling latency = ``resolved_at - acknowledged_at``: the time between
+    when an operator first picked the case up and when it was resolved. This
+    complements :func:`summarize_case_acknowledgment_latency_histogram`
+    (open->ack, queue wait) and
+    :func:`summarize_case_resolution_latency_histogram` (open->resolve, total
+    lifecycle) by isolating *working* time from *waiting* time — a long
+    open->resolve tail that's actually a queue-wait problem looks very
+    different from one driven by slow hands-on resolution. Buckets reuse the
+    same age horizons as :func:`summarize_case_queue_aging`; severity is
+    split per bucket so SLA pressure on critical work stays visible. Open
+    and acknowledged-only cases are excluded; ``handled_total`` only counts
+    cases that reached ``resolved`` state (which by lifecycle invariant also
+    have ``acknowledged_at`` set). Strictly scoped per tenant.
+    """
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    severity_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    handled_total = 0
+    fastest_seconds = -1
+    fastest_case: OperationalCase | None = None
+    slowest_seconds = -1
+    slowest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.resolved_at is None or case.acknowledged_at is None:
+            continue
+        handled_total += 1
+        acknowledged_at = case.acknowledged_at.astimezone(timezone.utc)
+        resolved_at = case.resolved_at.astimezone(timezone.utc)
+        time_to_handle = max(int((resolved_at - acknowledged_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(time_to_handle)
+        buckets[bucket] += 1
+        severity_counts = severity_by_bucket[bucket]
+        severity_counts[case.severity] = severity_counts.get(case.severity, 0) + 1
+        if fastest_seconds < 0 or time_to_handle < fastest_seconds:
+            fastest_seconds = time_to_handle
+            fastest_case = case
+        if time_to_handle > slowest_seconds:
+            slowest_seconds = time_to_handle
+            slowest_case = case
+
+    def _payload(case: OperationalCase | None, seconds: int) -> dict[str, Any] | None:
+        if case is None or case.acknowledged_at is None or case.resolved_at is None:
+            return None
+        return {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "severity": case.severity,
+            "opened_at": case.opened_at.isoformat(),
+            "acknowledged_at": case.acknowledged_at.isoformat(),
+            "resolved_at": case.resolved_at.isoformat(),
+            "time_to_handle_seconds": seconds,
+        }
+
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "handled_total": handled_total,
+            "by_handling_bucket": buckets,
+            "by_handling_bucket_severity": severity_by_bucket,
+            "fastest_handled": _payload(fastest_case, fastest_seconds),
+            "slowest_handled": _payload(slowest_case, slowest_seconds),
+        }
+    )
+
+
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
