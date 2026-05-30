@@ -1062,6 +1062,39 @@ def validate_report_metric_keys(
     return [*unknown_issues, *report_issues]
 
 
+def validate_surface_metric_keys(
+    metric_keys: Iterable[str],
+    *,
+    allowed_pii_classes: Iterable[str],
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + pii_class_disallowed diagnostics for keys
+    bound for a surface that enforces a PII allowlist.
+
+    Parallel to :func:`validate_report_metric_keys` and
+    :func:`validate_case_metric_keys` but on the surface side: dispatch paths
+    (WhatsApp, owner brief) must reject metrics whose canonical ``pii_class`` is
+    not in ``allowed_pii_classes``. The fixed concatenation order
+    ``unknown_metric`` -> ``pii_class_disallowed`` keeps the result
+    deterministic and free of overlap because :func:`find_pii_class_violations`
+    already skips unknown keys. ``allowed_pii_classes`` is validated by
+    :func:`find_pii_class_violations`, so unsupported classes surface as
+    ``ValueError`` rather than silently passing.
+    """
+
+    materialized = list(metric_keys)
+    unknown_issues = validate_metrics(
+        [{"key": key} for key in materialized],
+        registry=registry,
+    )
+    pii_issues = find_pii_class_violations(
+        materialized,
+        allowed_pii_classes=allowed_pii_classes,
+        registry=registry,
+    )
+    return [*unknown_issues, *pii_issues]
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -1117,4 +1150,5 @@ __all__ = [
     "validate_metrics",
     "validate_report_metric_keys",
     "validate_report_metric_objects",
+    "validate_surface_metric_keys",
 ]

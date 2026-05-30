@@ -1568,3 +1568,129 @@ def test_pii_class_helper_is_reexported_from_semantics_public_surface():
 
     assert hasattr(semantics, "find_pii_class_violations")
     assert "find_pii_class_violations" in semantics.__all__
+
+
+def test_validate_surface_metric_keys_composes_unknown_then_pii_class_disallowed_diagnostics():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    # Mixed bag: one canonical pii-none key, one low-pii canonical key, one
+    # low-pii alias of the same canonical key, and one unknown key. The
+    # composition must report unknowns first (owned by validate_metrics) and
+    # then pii_class_disallowed (owned by find_pii_class_violations). Each
+    # diagnostic preserves its own input-order index.
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "unanswered_conversations",
+        "custom.unknown_surface_metric",
+    )
+
+    issues = validate_surface_metric_keys(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 3, "warning"),
+        ("pii_class_disallowed", "support.conversations.unanswered_count", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+    ]
+
+
+def test_validate_surface_metric_keys_returns_empty_when_all_keys_within_allowed_pii_classes():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    assert (
+        validate_surface_metric_keys(
+            (
+                "commerce.orders.count",
+                "support.conversations.unanswered_count",
+            ),
+            allowed_pii_classes=("none", "low"),
+        )
+        == []
+    )
+
+
+def test_validate_surface_metric_keys_threads_custom_registry_into_both_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_surface_metric_keys,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="support.identity.email",
+                family="support.identity",
+                label="Owner identity email",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("owner_email_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+                pii_class="sensitive",
+            ),
+        )
+    )
+
+    issues = validate_surface_metric_keys(
+        ("owner_email_legacy", "commerce.orders.count"),
+        allowed_pii_classes=("none",),
+        registry=registry,
+    )
+    # commerce.orders.count is unknown under the custom registry; the alias on
+    # the custom registry resolves to a sensitive pii_class.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "commerce.orders.count", 1),
+        ("pii_class_disallowed", "owner_email_legacy", 0),
+    ]
+
+
+def test_validate_surface_metric_keys_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "custom.unknown_surface_metric",
+        "unanswered_conversations",
+    )
+    first = validate_surface_metric_keys(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    second = validate_surface_metric_keys(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    assert first == second
+
+
+def test_validate_surface_metric_keys_rejects_empty_keys_or_allowed_classes():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    with pytest.raises(ValueError, match="allowed_pii_classes"):
+        validate_surface_metric_keys(
+            ("commerce.orders.count",), allowed_pii_classes=()
+        )
+
+    with pytest.raises(ValueError):
+        validate_surface_metric_keys(
+            ("",), allowed_pii_classes=("none",)
+        )
+
+
+def test_validate_surface_metric_keys_rejects_unsupported_pii_class_in_allowed_set():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    with pytest.raises(ValueError, match="pii_class"):
+        validate_surface_metric_keys(
+            ("commerce.orders.count",),
+            allowed_pii_classes=("none", "ultra-secret"),
+        )
+
+
+def test_validate_surface_metric_keys_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_surface_metric_keys")
+    assert "validate_surface_metric_keys" in semantics.__all__
