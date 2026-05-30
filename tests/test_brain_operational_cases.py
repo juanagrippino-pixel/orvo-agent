@@ -332,6 +332,106 @@ def test_resolved_case_reopens_when_same_dedupe_key_recurs():
     assert reopened.timeline[-1].event_type == "case_reopened"
 
 
+# Audit-gap regression: recurrence on a resolved case must preserve the prior
+# lifecycle timeline (case_opened → status_changed[ack] → status_changed[resolved])
+# AND clear acknowledged_at so the operator is forced to re-acknowledge before
+# re-resolving. A future refactor that "cleaned up" timeline on reopen, or that
+# left acknowledged_at stale, would silently violate the audit contract without
+# tripping `test_resolved_case_reopens_when_same_dedupe_key_recurs`.
+def test_recurrence_clears_ack_state_preserves_full_audit_timeline_and_supports_full_lifecycle_restart(conn):
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+        store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+        resolved = store.transition_case(
+            opened.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Stock repuesto",
+            transitioned_at=utc_dt(10),
+        )
+        assert resolved.acknowledged_at == utc_dt(9), f"{label}: pre-recurrence acknowledged_at must be set"
+        pre_recurrence_event_ids = [event.event_id for event in resolved.timeline]
+        pre_recurrence_event_types = [event.event_type for event in resolved.timeline]
+        assert pre_recurrence_event_types == ["case_opened", "status_changed", "status_changed"], (
+            f"{label}: pre-recurrence timeline must contain open + ack + resolve events"
+        )
+
+        reopened = store.upsert_detection(
+            make_stockout_detection(run_id="run-2", evidence_ref="evidence://tn/stock/2026-05-25"),
+            detected_at=utc_dt(11),
+        )
+
+        assert reopened.case_id == opened.case_id, f"{label}: recurrence must reuse case_id, not mint a new case"
+        assert reopened.status == "open", f"{label}: recurrence must reopen status to 'open'"
+        assert reopened.resolved_at is None, f"{label}: recurrence must clear resolved_at"
+        assert reopened.acknowledged_at is None, (
+            f"{label}: recurrence must clear acknowledged_at so operator is forced to re-acknowledge before re-resolving"
+        )
+        # Audit history must be additive: prior open/ack/resolve events stay, new reopen event is appended.
+        reopened_event_types = [event.event_type for event in reopened.timeline]
+        assert reopened_event_types == [
+            "case_opened",
+            "status_changed",
+            "status_changed",
+            "case_reopened",
+        ], f"{label}: recurrence must append case_reopened without dropping prior audit events"
+        assert [event.event_id for event in reopened.timeline[:3]] == pre_recurrence_event_ids, (
+            f"{label}: prior audit timeline event ids must remain identical across recurrence"
+        )
+        assert reopened.source_run_ids == ["run-1", "run-2"], (
+            f"{label}: source_run_ids must accumulate across recurrence for audit traceability"
+        )
+        assert reopened.latest_run_id == "run-2"
+
+        # Full lifecycle must be re-executable on the recurred case without
+        # any short-circuit caused by stale acknowledged_at/resolved_at.
+        re_acked = store.transition_case(
+            reopened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Reviso recurrence",
+            transitioned_at=utc_dt(12),
+        )
+        assert re_acked.status == "acknowledged", f"{label}: recurred case must be re-acknowledgeable"
+        assert re_acked.acknowledged_at == utc_dt(12), (
+            f"{label}: re-acknowledgement must set acknowledged_at to the new transition timestamp"
+        )
+
+        re_resolved = store.transition_case(
+            reopened.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Stock repuesto otra vez",
+            transitioned_at=utc_dt(13),
+        )
+        assert re_resolved.status == "resolved", f"{label}: recurred case must be re-resolvable"
+        assert re_resolved.resolved_at == utc_dt(13)
+        # Final timeline must contain the entire audit: original open+ack+resolve,
+        # recurrence reopen, and the second ack+resolve. Nothing removed.
+        final_event_types = [event.event_type for event in re_resolved.timeline]
+        assert final_event_types == [
+            "case_opened",
+            "status_changed",
+            "status_changed",
+            "case_reopened",
+            "status_changed",
+            "status_changed",
+        ], f"{label}: full recurrence cycle must accumulate audit events without dropping any"
+
+
 def test_open_case_queue_orders_by_priority_then_age():
     store = InMemoryOperationalCaseStore()
     warning = make_stockout_detection(run_id="run-1")
