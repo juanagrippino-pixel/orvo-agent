@@ -376,6 +376,14 @@ def _classify_age_bucket(age_seconds: int) -> str:
     return _AGE_BUCKETS[-1][0]
 
 
+def _classify_priority_bracket(priority_score: int) -> str:
+    if priority_score < 50:
+        return "low"
+    if priority_score < 80:
+        return "medium"
+    return "high"
+
+
 def summarize_case_queue_aging(
     store: OperationalCaseStore,
     *,
@@ -1867,6 +1875,72 @@ def summarize_case_resolution_latency_histogram_by_source_connector(
             "resolved_total": resolved_total,
             "by_resolution_bucket": buckets,
             "by_resolution_bucket_source_connector": source_by_bucket,
+            "fastest_resolved": _payload(fastest_case, fastest_seconds),
+            "slowest_resolved": _payload(slowest_case, slowest_seconds),
+        }
+    )
+
+
+def summarize_case_resolution_latency_histogram_by_priority_bracket(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Priority-bracket-split deterministic histogram of time-to-resolve.
+
+    Mirrors :func:`summarize_case_resolution_latency_histogram_by_source_connector`
+    but groups each resolution-latency bucket by deterministic priority bracket
+    (``low`` for ``priority_score < 50``, ``medium`` for ``50..79``, ``high``
+    for ``80..100``) derived from ``case.priority_score`` instead of source
+    connector. Operator surfaces use it to spot when long-tail resolution time
+    is concentrated in high-priority cases even though the overall median,
+    case_type, entity_kind and source-connector distributions look healthy.
+    Open and acknowledged-only cases are excluded; ``resolved_total`` only
+    counts cases that reached ``resolved`` state. Strictly scoped per tenant.
+    """
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    bracket_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    resolved_total = 0
+    fastest_seconds = -1
+    fastest_case: OperationalCase | None = None
+    slowest_seconds = -1
+    slowest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.resolved_at is None:
+            continue
+        resolved_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        resolved_at = case.resolved_at.astimezone(timezone.utc)
+        time_to_resolve = max(int((resolved_at - opened_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(time_to_resolve)
+        buckets[bucket] += 1
+        bracket = _classify_priority_bracket(case.priority_score)
+        bracket_counts = bracket_by_bucket[bucket]
+        bracket_counts[bracket] = bracket_counts.get(bracket, 0) + 1
+        if fastest_seconds < 0 or time_to_resolve < fastest_seconds:
+            fastest_seconds = time_to_resolve
+            fastest_case = case
+        if time_to_resolve > slowest_seconds:
+            slowest_seconds = time_to_resolve
+            slowest_case = case
+
+    def _payload(case: OperationalCase | None, seconds: int) -> dict[str, Any] | None:
+        if case is None or case.resolved_at is None:
+            return None
+        return {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "severity": case.severity,
+            "opened_at": case.opened_at.isoformat(),
+            "resolved_at": case.resolved_at.isoformat(),
+            "time_to_resolve_seconds": seconds,
+        }
+
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "resolved_total": resolved_total,
+            "by_resolution_bucket": buckets,
+            "by_resolution_bucket_priority_bracket": bracket_by_bucket,
             "fastest_resolved": _payload(fastest_case, fastest_seconds),
             "slowest_resolved": _payload(slowest_case, slowest_seconds),
         }
