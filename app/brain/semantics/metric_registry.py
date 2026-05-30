@@ -1207,6 +1207,36 @@ def validate_surface_metric_keys(
     return [*unknown_issues, *pii_issues]
 
 
+def validate_freshness_envelope_metric_keys(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + freshness_companion_missing diagnostics for a
+    batch of keys whose freshness envelope must be inspected together.
+
+    Parallel to :func:`validate_report_metric_keys`,
+    :func:`validate_case_metric_keys`, and :func:`validate_surface_metric_keys`
+    but on the freshness-envelope side: callers (connector emitters, scheduled
+    runners, ledger checks) can rely on one entry point to flag both
+    unregistered keys and freshness_required keys that are missing a
+    ``runtime.freshness`` family companion in the same payload. The fixed
+    concatenation order ``unknown_metric`` -> ``freshness_companion_missing``
+    keeps the result deterministic and free of overlap because
+    :func:`find_freshness_companion_violations` already skips unknown keys.
+    """
+
+    materialized = list(metric_keys)
+    unknown_issues = validate_metrics(
+        [{"key": key} for key in materialized],
+        registry=registry,
+    )
+    freshness_issues = find_freshness_companion_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *freshness_issues]
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -1260,6 +1290,7 @@ __all__ = [
     "find_value_kind_violations",
     "validate_case_metric_keys",
     "validate_case_metric_objects",
+    "validate_freshness_envelope_metric_keys",
     "validate_metrics",
     "validate_report_metric_keys",
     "validate_report_metric_objects",
