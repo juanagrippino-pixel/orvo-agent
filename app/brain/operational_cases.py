@@ -25,10 +25,16 @@ OperationalCaseType = Literal[
     "stockout_risk",
     "spend_without_orders",
     "data_stale",
+    "fulfillment_backlog",
     "unanswered_conversations",
     "channel_mix_shift",
 ]
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
+# Only case families with semantic-registry evidence contracts are eligible for
+# deterministic insight -> OperationalCase promotion. Additional literals can
+# remain internal/deferred catalog targets until CASE_FAMILY_METRICS is expanded
+# with the required evidence/freshness policy.
+DETECTABLE_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
     "case_opened",
@@ -713,19 +719,22 @@ def _priority_for_severity(severity: OperationalCaseSeverity) -> int:
 
 def _case_type_for_insight(insight: Insight) -> OperationalCaseType | None:
     title = insight.title.lower()
+    candidate: OperationalCaseType | None = None
     if insight.severity == "info":
         return None
     if "stock" in title:
-        return "stockout_risk"
-    if "sin ventas" in title or "roas bajo" in title:
-        return "spend_without_orders"
-    if "conversaciones" in title:
-        return "unanswered_conversations"
-    if "tiendanube" in title or "canal" in title:
-        return "channel_mix_shift"
-    if "ventas" in title:
-        return "sales_drop"
-    return None
+        candidate = "stockout_risk"
+    elif "sin ventas" in title or "roas bajo" in title:
+        candidate = "spend_without_orders"
+    elif "conversaciones" in title:
+        candidate = "unanswered_conversations"
+    elif "tiendanube" in title or "canal" in title:
+        candidate = "channel_mix_shift"
+    elif "ventas" in title:
+        candidate = "sales_drop"
+    if candidate is None or candidate not in DETECTABLE_CASE_TYPES:
+        return None
+    return candidate
 
 
 def _dedupe_key(business_id: str, case_type: OperationalCaseType) -> str:
@@ -734,6 +743,7 @@ def _dedupe_key(business_id: str, case_type: OperationalCaseType) -> str:
         "stockout_risk": "stockout_risk/business/monitored/commerce.inventory/daily",
         "spend_without_orders": "spend_without_orders/channel/meta_ads/ads.spend/daily",
         "data_stale": "data_stale/connector/unknown/runtime.freshness/daily",
+        "fulfillment_backlog": "fulfillment_backlog/channel/all/commerce.fulfillment/daily",
         "unanswered_conversations": "unanswered_conversations/channel/whatsapp/support.conversations/daily",
         "channel_mix_shift": "channel_mix_shift/business/all_channels/commerce.revenue/daily",
     }
@@ -746,6 +756,7 @@ def _entity_scope(case_type: OperationalCaseType) -> dict[str, str]:
         "stockout_risk": {"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
         "spend_without_orders": {"kind": "channel", "id": "meta_ads", "label": "Meta Ads"},
         "data_stale": {"kind": "connector", "id": "unknown", "label": "Unknown connector"},
+        "fulfillment_backlog": {"kind": "channel", "id": "all", "label": "Canales monitoreados"},
         "unanswered_conversations": {"kind": "channel", "id": "whatsapp", "label": "WhatsApp"},
         "channel_mix_shift": {"kind": "business", "id": "all_channels", "label": "Todos los canales"},
     }[case_type]

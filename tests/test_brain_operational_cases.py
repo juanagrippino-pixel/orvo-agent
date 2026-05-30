@@ -537,13 +537,6 @@ _PRODUCTION_INSIGHT_CASE_MAPPING = [
         "unanswered_conversations/channel/whatsapp/support.conversations/daily",
     ),
     (
-        "canal-tiendanube",
-        "warning",
-        "Canal Tiendanube posiblemente sub-rendimiento",
-        "channel_mix_shift",
-        "channel_mix_shift/business/all_channels/commerce.revenue/daily",
-    ),
-    (
         "roas-bajo",
         "warning",
         "ROAS bajo: 1.4x (mínimo recomendado 3.0x)",
@@ -601,6 +594,40 @@ def test_detect_cases_locks_production_insight_titles_to_case_types(
     assert detections[0].case_type == expected_case_type
     assert detections[0].dedupe_key == f"artemea/{expected_dedupe_suffix}"
     assert detections[0].metadata["insight_title"] == title
+
+
+def test_detect_cases_suppresses_channel_mix_until_metric_registry_promotion():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        insights=[
+            Insight(
+                severity="warning",
+                title="Canal Tiendanube posiblemente sub-rendimiento",
+                explanation="Detalle determinístico.",
+                recommended_action="Acción operativa.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    assert detections == []
+
+
+def test_detectable_case_types_must_be_registered_in_case_family_metrics():
+    from app.brain.operational_cases import DETECTABLE_CASE_TYPES
+    from app.brain.semantics.metric_registry import CASE_FAMILY_METRICS
+
+    assert DETECTABLE_CASE_TYPES <= set(CASE_FAMILY_METRICS)
+    assert "channel_mix_shift" not in DETECTABLE_CASE_TYPES
 
 
 def test_detect_cases_skips_info_severity_even_when_title_matches_case_family():
