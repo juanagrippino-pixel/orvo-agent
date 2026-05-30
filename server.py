@@ -51,6 +51,7 @@ from app.brain.operator_api import (
     list_top_actionable_cases_by_priority,
     summarize_case_queue,
     summarize_case_queue_aging,
+    summarize_case_queue_stagnation,
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 from app.brain.delivery_status import (
@@ -194,6 +195,21 @@ def internal_brain_cases_aging(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_queue_aging(
+                case_store,
+                business_id=business_id,
+                now=datetime.now(timezone.utc),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/stagnation")
+def internal_brain_cases_stagnation(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_stagnation(
                 case_store,
                 business_id=business_id,
                 now=datetime.now(timezone.utc),
