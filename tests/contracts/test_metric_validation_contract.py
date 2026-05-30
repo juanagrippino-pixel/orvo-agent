@@ -1694,3 +1694,219 @@ def test_validate_surface_metric_keys_is_reexported_from_semantics_public_surfac
 
     assert hasattr(semantics, "validate_surface_metric_keys")
     assert "validate_surface_metric_keys" in semantics.__all__
+
+
+def test_validate_surface_metric_objects_composes_unknown_then_pii_then_evidence_then_value_kind():
+    """Parallel to :func:`validate_report_metric_objects` and
+    :func:`validate_case_metric_objects` but on the surface dispatch side
+    (WhatsApp, owner brief): the five-diagnostic composition must report
+    unknown_metric first, then pii_class_disallowed, then evidence_missing,
+    then evidence_source_mismatch, and finally value_kind_mismatch. Each
+    diagnostic preserves its own input-order index. This case carries
+    non-empty evidence on every metric so the evidence_missing slot is
+    exercised by a separate dedicated test.
+    """
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+        _metric("ad_spend_today", "whatsapp"),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 4, "warning"),
+    ]
+
+
+def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_evidence_source():
+    """Mixed bag exercising the evidence_missing slot. The composition order
+    inside :func:`validate_surface_metric_objects` must put evidence_missing
+    immediately after pii_class_disallowed and before evidence_source_mismatch
+    so structural ``no evidence at all`` diagnostics surface before content
+    diagnostics about wrong-source evidence. Each diagnostic preserves its own
+    input-order index. Mapping form is required because Pydantic ``Metric``
+    enforces ``min_length=1`` on evidence and cannot represent the missing
+    case directly."""
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        {
+            "key": "orders_today",
+            "value": 12,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "custom.unknown_surface_metric",
+            "value": 1,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "unanswered_conversations",
+            "value": 5,
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {
+            "key": "commerce.orders.count",
+            "value": "not a number",
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+        ("evidence_missing", "commerce.revenue.total", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 5, "warning"),
+    ]
+
+
+def test_validate_surface_metric_objects_returns_empty_for_clean_surface_metrics():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("stock_units", "tiendanube", value=42),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+    ]
+
+    assert (
+        validate_surface_metric_objects(
+            metrics, allowed_pii_classes=("none",)
+        )
+        == []
+    )
+
+
+def test_validate_surface_metric_objects_matches_key_path_when_no_object_violations():
+    """When every metric object has in-envelope evidence sources and the value
+    type matches the canonical unit kind, the object-level result must equal
+    ``validate_surface_metric_keys`` over the same keys so callers can freely
+    upgrade from keys to objects without a behavior change."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_surface_metric_keys,
+        validate_surface_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+    ]
+    keys = [metric.key for metric in metrics]
+
+    assert validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    ) == validate_surface_metric_keys(
+        keys, allowed_pii_classes=("none",)
+    )
+
+
+def test_validate_surface_metric_objects_threads_custom_registry_into_all_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_surface_metric_objects,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="support.identity.email",
+                family="support.identity",
+                label="Owner identity email",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("owner_email_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+                pii_class="sensitive",
+            ),
+        )
+    )
+
+    metrics = [
+        _metric("owner_email_legacy", "sample", value=1),
+        _metric("revenue_today", "tiendanube", value=120000),
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",), registry=registry
+    )
+    # revenue_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a sensitive pii_class.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "revenue_today", 1),
+        ("pii_class_disallowed", "owner_email_legacy", 0),
+    ]
+
+
+def test_validate_surface_metric_objects_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    first = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+    second = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+    assert first == second
+
+
+def test_validate_surface_metric_objects_rejects_empty_allowed_pii_classes():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [_metric("orders_today", "tiendanube", value=12)]
+
+    with pytest.raises(ValueError, match="allowed_pii_classes"):
+        validate_surface_metric_objects(metrics, allowed_pii_classes=())
+
+
+def test_validate_surface_metric_objects_rejects_unsupported_pii_class_in_allowed_set():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [_metric("orders_today", "tiendanube", value=12)]
+
+    with pytest.raises(ValueError, match="pii_class"):
+        validate_surface_metric_objects(
+            metrics, allowed_pii_classes=("none", "ultra-secret")
+        )
+
+
+def test_validate_surface_metric_objects_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_surface_metric_objects")
+    assert "validate_surface_metric_objects" in semantics.__all__

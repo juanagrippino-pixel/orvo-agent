@@ -22,6 +22,7 @@ from app.brain.semantics.metric_registry import (
     validate_report_metric_keys,
     validate_report_metric_objects,
     validate_surface_metric_keys,
+    validate_surface_metric_objects,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "validate_report_metric_keys",
     "validate_report_metric_objects",
     "validate_surface_metric_keys",
+    "validate_surface_metric_objects",
 ]
