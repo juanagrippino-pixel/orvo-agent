@@ -25,6 +25,7 @@ OperationalCaseType = Literal[
     "stockout_risk",
     "spend_without_orders",
     "data_stale",
+    "fulfillment_backlog",
     "unanswered_conversations",
     "channel_mix_shift",
 ]
@@ -734,6 +735,7 @@ def _dedupe_key(business_id: str, case_type: OperationalCaseType) -> str:
         "stockout_risk": "stockout_risk/business/monitored/commerce.inventory/daily",
         "spend_without_orders": "spend_without_orders/channel/meta_ads/ads.spend/daily",
         "data_stale": "data_stale/connector/unknown/runtime.freshness/daily",
+        "fulfillment_backlog": "fulfillment_backlog/channel/all/commerce.fulfillment/daily",
         "unanswered_conversations": "unanswered_conversations/channel/whatsapp/support.conversations/daily",
         "channel_mix_shift": "channel_mix_shift/business/all_channels/commerce.revenue/daily",
     }
@@ -746,6 +748,7 @@ def _entity_scope(case_type: OperationalCaseType) -> dict[str, str]:
         "stockout_risk": {"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
         "spend_without_orders": {"kind": "channel", "id": "meta_ads", "label": "Meta Ads"},
         "data_stale": {"kind": "connector", "id": "unknown", "label": "Unknown connector"},
+        "fulfillment_backlog": {"kind": "channel", "id": "all", "label": "Canales monitoreados"},
         "unanswered_conversations": {"kind": "channel", "id": "whatsapp", "label": "WhatsApp"},
         "channel_mix_shift": {"kind": "business", "id": "all_channels", "label": "Todos los canales"},
     }[case_type]

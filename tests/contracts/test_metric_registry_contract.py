@@ -128,16 +128,12 @@ def test_registry_rejects_duplicate_aliases_and_aliases_that_shadow_canonical_ke
 
 
 def test_case_family_metric_mappings_only_reference_registered_case_allowed_metrics():
+    from typing import get_args
+
+    from app.brain.operational_cases import OperationalCaseType
     from app.brain.semantics.metric_registry import CASE_FAMILY_METRICS, default_metric_registry
 
-    assert set(CASE_FAMILY_METRICS) == {
-        "sales_drop",
-        "stockout_risk",
-        "data_stale",
-        "fulfillment_backlog",
-        "unanswered_conversations",
-        "spend_without_orders",
-    }
+    assert set(CASE_FAMILY_METRICS) == set(get_args(OperationalCaseType))
 
     registry = default_metric_registry()
     for case_family, metric_keys in CASE_FAMILY_METRICS.items():

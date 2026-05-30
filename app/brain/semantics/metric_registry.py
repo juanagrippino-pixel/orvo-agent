@@ -189,6 +189,11 @@ CASE_FAMILY_METRICS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "runtime.freshness.last_success_at",
             "runtime.freshness.age_seconds",
         ),
+        "channel_mix_shift": (
+            "commerce.orders.count",
+            "commerce.revenue.total",
+            "runtime.freshness.age_seconds",
+        ),
     }
 )
 
