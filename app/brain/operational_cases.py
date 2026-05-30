@@ -19,7 +19,7 @@ from app.brain.models import DailyReport, Insight, Metric
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
 
-OperationalCaseStatus = Literal["open", "acknowledged", "resolved"]
+OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved", "dismissed"]
 OperationalCaseType = Literal[
     "sales_drop",
     "stockout_risk",
@@ -41,9 +41,11 @@ TimelineEventType = Literal[
 ActorType = Literal["system", "operator"]
 
 _CASE_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "open": {"acknowledged"},
-    "acknowledged": {"resolved"},
+    "open": {"acknowledged", "in_progress", "dismissed"},
+    "acknowledged": {"in_progress", "resolved", "dismissed"},
+    "in_progress": {"resolved", "dismissed"},
     "resolved": set(),
+    "dismissed": set(),
 }
 
 
@@ -484,7 +486,7 @@ class _OperationalCaseMutations:
                 ],
             )
         else:
-            is_recurrence = existing.status == "resolved"
+            is_recurrence = existing.status in {"resolved", "dismissed"}
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
             merged_snapshots = _unique_snapshots([*existing.evidence_snapshots, *detection_snapshots])
@@ -560,7 +562,7 @@ class _OperationalCaseMutations:
                 ),
             ],
         }
-        if status == "acknowledged":
+        if status in {"acknowledged", "in_progress"}:
             update["acknowledged_at"] = transitioned_at
         if status == "resolved":
             update["resolved_at"] = transitioned_at

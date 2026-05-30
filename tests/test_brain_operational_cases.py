@@ -280,6 +280,51 @@ def test_operational_case_requires_acknowledged_before_resolved():
         )
 
 
+def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reopen():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+
+    in_progress = store.transition_case(
+        opened.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Investigating supplier ETA",
+        transitioned_at=utc_dt(9),
+    )
+    assert in_progress.status == "in_progress"
+    assert in_progress.acknowledged_at == utc_dt(9)
+    assert in_progress.timeline[-1].metadata == {"from_status": "open", "to_status": "in_progress"}
+
+    dismissed = store.transition_case(
+        opened.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="False positive after physical stock count",
+        transitioned_at=utc_dt(10),
+    )
+    assert dismissed.status == "dismissed"
+    assert dismissed.resolved_at is None
+    assert dismissed.timeline[-1].metadata == {"from_status": "in_progress", "to_status": "dismissed"}
+
+    with pytest.raises(OperationalCaseStatusError):
+        store.transition_case(
+            opened.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Cannot resolve a dismissed case manually",
+            transitioned_at=utc_dt(11),
+        )
+
+    reopened = store.upsert_detection(make_stockout_detection(run_id="run-2"), detected_at=utc_dt(12))
+    assert reopened.case_id == opened.case_id
+    assert reopened.status == "open"
+    assert reopened.acknowledged_at is None
+    assert reopened.timeline[-1].event_type == "case_reopened"
+
+
 def test_sqlite_operational_case_store_persists_and_filters_by_status(conn):
     store = SQLiteOperationalCaseStore(conn)
     opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))

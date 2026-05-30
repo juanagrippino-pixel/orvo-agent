@@ -241,7 +241,58 @@ def test_apply_case_action_add_comment_rejects_blank_or_non_string_actor_ref(bad
     assert len(reloaded.timeline) == len(opened.timeline)
 
 
-@pytest.mark.parametrize("action_key", ["acknowledge_case", "resolve_case"])
+def test_apply_case_action_mark_in_progress_and_dismiss_case_update_lifecycle_with_reason():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    in_progress = apply_case_action(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="mark_in_progress",
+        actor_ref="operator@example.com",
+    )
+    assert in_progress["case"]["status"] == "in_progress"
+    assert in_progress["case"]["acknowledged_at"] is not None
+    assert in_progress["case"]["timeline"][-1]["metadata"] == {
+        "from_status": "open",
+        "to_status": "in_progress",
+    }
+
+    dismissed = apply_case_action(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="dismiss_case",
+        actor_ref="operator@example.com",
+        reason="False positive after physical stock count",
+    )
+    assert dismissed["case"]["status"] == "dismissed"
+    assert dismissed["case"]["resolved_at"] is None
+    assert dismissed["case"]["timeline"][-1]["summary"] == "False positive after physical stock count"
+
+
+@pytest.mark.parametrize("bad_reason", [None, "", "   "])
+def test_apply_case_action_dismiss_case_requires_reason(bad_reason: str | None):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="dismiss_case",
+            actor_ref="operator@example.com",
+            reason=bad_reason,
+        )
+
+    assert exc.value.code == "missing_case_action_reason"
+    assert exc.value.status_code == 400
+    assert store.get_case(opened.case_id).status == "open"
+
+
+@pytest.mark.parametrize("action_key", ["acknowledge_case", "mark_in_progress", "resolve_case", "dismiss_case"])
 @pytest.mark.parametrize(
     ("bad_actor", "expected_code"),
     [("   ", "missing_operator_actor"), (123, "invalid_operator_actor")],
