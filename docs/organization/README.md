@@ -11,6 +11,7 @@ This directory is the durable source of truth for the autonomous product organiz
 
 ## Current files
 
+- [Codex 24/7 autonomous operating system](2026-05-30-codex-24-7-autonomous-operating-system.md) — active execution mode after Codex plan renewal.
 - [Orvo operating toolchain blueprint](orvo-operating-toolchain-blueprint.md)
 - [Autonomous organization operating plan](autonomous-org-operating-plan.md)
 - [Autonomous org research v2](autonomous-org-research-v2.md)
