@@ -2069,3 +2069,131 @@ def test_freshness_companion_helper_is_reexported_from_semantics_public_surface(
 
     assert hasattr(semantics, "find_freshness_companion_violations")
     assert "find_freshness_companion_violations" in semantics.__all__
+
+
+def test_validate_freshness_envelope_metric_keys_composes_unknown_then_freshness_companion_missing():
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_keys,
+    )
+
+    # Mixed bag: two canonical freshness_required keys, one unknown key, and no
+    # runtime.freshness companion. The composition must report unknowns first
+    # (owned by validate_metrics) then freshness_companion_missing (owned by
+    # find_freshness_companion_violations). Each diagnostic preserves its own
+    # input-order index.
+    metric_keys = (
+        "orders_today",
+        "custom.unknown_freshness_metric",
+        "ad_spend_today",
+    )
+
+    issues = validate_freshness_envelope_metric_keys(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
+        ("freshness_companion_missing", "orders_today", 0, "warning"),
+        ("freshness_companion_missing", "ad_spend_today", 2, "warning"),
+    ]
+
+
+def test_validate_freshness_envelope_metric_keys_returns_empty_when_companion_present():
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_keys,
+    )
+
+    # When a runtime.freshness.* companion accompanies the freshness_required
+    # business keys, freshness_companion_missing is suppressed for every key.
+    assert (
+        validate_freshness_envelope_metric_keys(
+            (
+                "orders_today",
+                "revenue_today",
+                "runtime.freshness.last_success_at",
+            )
+        )
+        == []
+    )
+
+
+def test_validate_freshness_envelope_metric_keys_returns_empty_when_no_freshness_required_keys():
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_keys,
+    )
+
+    # runtime.connector.status and runtime.data_quality.completeness_ratio are
+    # registered but not freshness_required; with no freshness_required keys in
+    # the payload there is nothing to companion.
+    assert (
+        validate_freshness_envelope_metric_keys(
+            (
+                "runtime.connector.status",
+                "runtime.data_quality.completeness_ratio",
+            )
+        )
+        == []
+    )
+
+
+def test_validate_freshness_envelope_metric_keys_threads_custom_registry_into_both_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_freshness_envelope_metric_keys,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="commerce.subscriptions.count",
+                family="commerce.subscriptions",
+                label="Active subscriptions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("subscriptions_today",),
+                aggregation="latest",
+                case_allowed=True,
+            ),
+        )
+    )
+
+    issues = validate_freshness_envelope_metric_keys(
+        ("subscriptions_today", "orders_today"), registry=registry
+    )
+    # orders_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a freshness_required canonical metric whose
+    # companion runtime.freshness family is absent from the input.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "orders_today", 1),
+        ("freshness_companion_missing", "subscriptions_today", 0),
+    ]
+
+
+def test_validate_freshness_envelope_metric_keys_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_keys,
+    )
+
+    metric_keys = (
+        "orders_today",
+        "custom.unknown_freshness_metric",
+        "ad_spend_today",
+        "avg_order_value",
+    )
+    first = validate_freshness_envelope_metric_keys(metric_keys)
+    second = validate_freshness_envelope_metric_keys(metric_keys)
+    assert first == second
+
+
+def test_validate_freshness_envelope_metric_keys_rejects_empty_keys():
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_keys,
+    )
+
+    with pytest.raises(ValueError):
+        validate_freshness_envelope_metric_keys(("",))
+
+
+def test_validate_freshness_envelope_metric_keys_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_freshness_envelope_metric_keys")
+    assert "validate_freshness_envelope_metric_keys" in semantics.__all__
