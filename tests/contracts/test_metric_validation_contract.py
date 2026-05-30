@@ -1435,3 +1435,136 @@ def test_evidence_required_helper_is_reexported_from_semantics_public_surface():
 
     assert hasattr(semantics, "find_evidence_required_violations")
     assert "find_evidence_required_violations" in semantics.__all__
+
+
+def test_pii_class_helper_flags_metrics_whose_canonical_pii_class_is_not_allowed_on_surface():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    # support.conversations.unanswered_count is pii_class="low" in the default
+    # registry; commerce.orders.count is pii_class="none". A surface that only
+    # allows "none" must flag the low-pii metric but accept the no-pii metric.
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "unanswered_conversations",  # alias of the same low-pii metric
+    )
+
+    violations = find_pii_class_violations(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("pii_class_disallowed", "support.conversations.unanswered_count", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+    ]
+    assert "support.conversations.unanswered_count" in violations[0].message
+    assert "low" in violations[0].message
+    assert "none" in violations[0].message
+
+
+def test_pii_class_helper_returns_empty_when_all_keys_within_allowed_pii_classes():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    # "low" surface accepts both pii_class="none" and pii_class="low" metrics.
+    assert (
+        find_pii_class_violations(
+            (
+                "commerce.orders.count",
+                "support.conversations.unanswered_count",
+            ),
+            allowed_pii_classes=("none", "low"),
+        )
+        == []
+    )
+
+
+def test_pii_class_helper_resolves_aliases_before_checking_pii_class():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_pii_class_violations,
+    )
+
+    # Synthetic sensitive metric exposed only via an alias proves alias
+    # resolution feeds into the pii_class check.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="support.identity.email",
+                family="support.identity",
+                label="Owner identity email",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("owner_email_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+                pii_class="sensitive",
+            ),
+        )
+    )
+
+    violations = find_pii_class_violations(
+        ("owner_email_legacy",),
+        allowed_pii_classes=("none",),
+        registry=registry,
+    )
+    assert len(violations) == 1
+    assert violations[0].key == "owner_email_legacy"
+    assert "support.identity.email" in violations[0].message
+    assert "sensitive" in violations[0].message
+
+
+def test_pii_class_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so it can compose cleanly with the existing envelope helpers.
+    assert (
+        find_pii_class_violations(
+            ("never_registered_metric",),
+            allowed_pii_classes=("none",),
+        )
+        == []
+    )
+
+
+def test_pii_class_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "support.conversations.oldest_unanswered_age_minutes",
+    )
+    first = find_pii_class_violations(metric_keys, allowed_pii_classes=("none",))
+    second = find_pii_class_violations(metric_keys, allowed_pii_classes=("none",))
+    assert first == second
+
+
+def test_pii_class_helper_rejects_empty_metric_keys_or_allowed_classes():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    with pytest.raises(ValueError, match="allowed_pii_classes"):
+        find_pii_class_violations(
+            ("commerce.orders.count",), allowed_pii_classes=()
+        )
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_pii_class_violations(("",), allowed_pii_classes=("none",))
+
+
+def test_pii_class_helper_rejects_unsupported_pii_class_in_allowed_set():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    with pytest.raises(ValueError, match="pii_class"):
+        find_pii_class_violations(
+            ("commerce.orders.count",),
+            allowed_pii_classes=("none", "ultra-secret"),
+        )
+
+
+def test_pii_class_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_pii_class_violations")
+    assert "find_pii_class_violations" in semantics.__all__

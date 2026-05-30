@@ -766,6 +766,73 @@ def find_value_kind_violations(
     return issues
 
 
+def find_pii_class_violations(
+    metric_keys: Iterable[str],
+    *,
+    allowed_pii_classes: Iterable[str],
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical ``pii_class``
+    is not in the surface's ``allowed_pii_classes`` set.
+
+    A ``pii_class_disallowed`` violation means a metric key resolved to a
+    canonical definition whose ``pii_class`` is not declared as allowed for the
+    target surface (for example, a report or operator view that only accepts
+    ``pii_class="none"`` metrics). ``allowed_pii_classes`` is validated against
+    :data:`_PII_CLASSES` so caller typos surface as ``ValueError`` rather than
+    silently passing. Unknown (unresolved) keys are intentionally skipped so
+    this diagnostic composes cleanly with :func:`validate_metrics` and the
+    other envelope helpers. Result order matches input order and is
+    deterministic.
+    """
+
+    allowed = tuple(allowed_pii_classes)
+    if not allowed:
+        raise ValueError(
+            "find_pii_class_violations requires non-empty allowed_pii_classes"
+        )
+    allowed_set: set[str] = set()
+    for value in allowed:
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                "find_pii_class_violations requires non-empty string allowed_pii_classes entries"
+            )
+        if value not in _PII_CLASSES:
+            raise ValueError(
+                f"find_pii_class_violations received unsupported pii_class {value!r}; "
+                f"allowed values are {sorted(_PII_CLASSES)}"
+            )
+        allowed_set.add(value)
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_pii_class_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.pii_class in allowed_set:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="pii_class_disallowed",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"pii_class '{definition.pii_class}' which is not in the "
+                    f"surface's allowed_pii_classes={list(allowed)}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_report_allowed_violations(
     metric_keys: Iterable[str],
     *,
@@ -1041,6 +1108,7 @@ __all__ = [
     "find_evidence_required_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
+    "find_pii_class_violations",
     "find_report_allowed_violations",
     "find_source_envelope_violations",
     "find_value_kind_violations",
