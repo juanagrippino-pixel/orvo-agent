@@ -766,6 +766,132 @@ def find_value_kind_violations(
     return issues
 
 
+def find_pii_class_violations(
+    metric_keys: Iterable[str],
+    *,
+    allowed_pii_classes: Iterable[str],
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys whose canonical ``pii_class``
+    is not in the surface's ``allowed_pii_classes`` set.
+
+    A ``pii_class_disallowed`` violation means a metric key resolved to a
+    canonical definition whose ``pii_class`` is not declared as allowed for the
+    target surface (for example, a report or operator view that only accepts
+    ``pii_class="none"`` metrics). ``allowed_pii_classes`` is validated against
+    :data:`_PII_CLASSES` so caller typos surface as ``ValueError`` rather than
+    silently passing. Unknown (unresolved) keys are intentionally skipped so
+    this diagnostic composes cleanly with :func:`validate_metrics` and the
+    other envelope helpers. Result order matches input order and is
+    deterministic.
+    """
+
+    allowed = tuple(allowed_pii_classes)
+    if not allowed:
+        raise ValueError(
+            "find_pii_class_violations requires non-empty allowed_pii_classes"
+        )
+    allowed_set: set[str] = set()
+    for value in allowed:
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                "find_pii_class_violations requires non-empty string allowed_pii_classes entries"
+            )
+        if value not in _PII_CLASSES:
+            raise ValueError(
+                f"find_pii_class_violations received unsupported pii_class {value!r}; "
+                f"allowed values are {sorted(_PII_CLASSES)}"
+            )
+        allowed_set.add(value)
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_pii_class_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.pii_class in allowed_set:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="pii_class_disallowed",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"pii_class '{definition.pii_class}' which is not in the "
+                    f"surface's allowed_pii_classes={list(allowed)}"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
+def find_freshness_companion_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for freshness_required metric keys emitted
+    without a ``runtime.freshness`` family companion metric in the same payload.
+
+    A ``freshness_companion_missing`` violation means a metric key resolved to a
+    canonical definition whose ``freshness_required`` flag is ``True`` while no
+    other key in the same input resolves to the ``runtime.freshness`` family
+    (canonical ``runtime.freshness.last_success_at`` or
+    ``runtime.freshness.age_seconds``, or any alias of theirs). When at least
+    one ``runtime.freshness`` companion is present the diagnostic is suppressed
+    for every freshness_required key in the input. Unknown (unresolved) keys
+    are intentionally skipped so this diagnostic composes cleanly with
+    :func:`validate_metrics` and the existing envelope/pii helpers. Result
+    order matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    materialized = list(metric_keys)
+    for key in materialized:
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_freshness_companion_violations requires non-empty string metric keys"
+            )
+
+    for key in materialized:
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        if active_registry.get(canonical).family == "runtime.freshness":
+            return []
+
+    issues: list[MetricValidationIssue] = []
+    for index, key in enumerate(materialized):
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if not definition.freshness_required:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="freshness_companion_missing",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"freshness_required=True but no runtime.freshness metric "
+                    f"accompanies it in the payload"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_report_allowed_violations(
     metric_keys: Iterable[str],
     *,
@@ -995,6 +1121,92 @@ def validate_report_metric_keys(
     return [*unknown_issues, *report_issues]
 
 
+def validate_surface_metric_objects(
+    metrics: Iterable[Any],
+    *,
+    allowed_pii_classes: Iterable[str],
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + pii_class_disallowed + evidence_missing +
+    evidence_source_mismatch + value_kind_mismatch diagnostics for
+    metric-shaped objects bound for a surface (WhatsApp dispatch, owner brief)
+    that enforces a PII allowlist.
+
+    Parallel to :func:`validate_report_metric_objects` and
+    :func:`validate_case_metric_objects` but on the surface side: dispatch
+    paths must reject metrics whose canonical ``pii_class`` is not in
+    ``allowed_pii_classes`` and must also surface evidence/value-kind
+    mismatches that the key-only :func:`validate_surface_metric_keys` cannot
+    see. The fixed concatenation order ``unknown_metric`` ->
+    ``pii_class_disallowed`` -> ``evidence_missing`` ->
+    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys and the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch
+    only on non-empty collections). ``allowed_pii_classes`` is validated by
+    :func:`find_pii_class_violations`, so unsupported classes surface as
+    ``ValueError`` rather than silently passing.
+    """
+
+    materialized = list(metrics)
+    unknown_issues = validate_metrics(materialized, registry=registry)
+    keys = [_metric_key(metric) for metric in materialized]
+    pii_issues = find_pii_class_violations(
+        keys,
+        allowed_pii_classes=allowed_pii_classes,
+        registry=registry,
+    )
+    evidence_missing_issues = find_evidence_required_violations(
+        materialized, registry=registry
+    )
+    evidence_issues = find_evidence_source_violations(
+        materialized, registry=registry
+    )
+    value_kind_issues = find_value_kind_violations(
+        materialized, registry=registry
+    )
+    return [
+        *unknown_issues,
+        *pii_issues,
+        *evidence_missing_issues,
+        *evidence_issues,
+        *value_kind_issues,
+    ]
+
+
+def validate_surface_metric_keys(
+    metric_keys: Iterable[str],
+    *,
+    allowed_pii_classes: Iterable[str],
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Compose unknown_metric + pii_class_disallowed diagnostics for keys
+    bound for a surface that enforces a PII allowlist.
+
+    Parallel to :func:`validate_report_metric_keys` and
+    :func:`validate_case_metric_keys` but on the surface side: dispatch paths
+    (WhatsApp, owner brief) must reject metrics whose canonical ``pii_class`` is
+    not in ``allowed_pii_classes``. The fixed concatenation order
+    ``unknown_metric`` -> ``pii_class_disallowed`` keeps the result
+    deterministic and free of overlap because :func:`find_pii_class_violations`
+    already skips unknown keys. ``allowed_pii_classes`` is validated by
+    :func:`find_pii_class_violations`, so unsupported classes surface as
+    ``ValueError`` rather than silently passing.
+    """
+
+    materialized = list(metric_keys)
+    unknown_issues = validate_metrics(
+        [{"key": key} for key in materialized],
+        registry=registry,
+    )
+    pii_issues = find_pii_class_violations(
+        materialized,
+        allowed_pii_classes=allowed_pii_classes,
+        registry=registry,
+    )
+    return [*unknown_issues, *pii_issues]
+
+
 def validate_metrics(
     metrics: Iterable[Any],
     *,
@@ -1041,6 +1253,8 @@ __all__ = [
     "find_evidence_required_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
+    "find_freshness_companion_violations",
+    "find_pii_class_violations",
     "find_report_allowed_violations",
     "find_source_envelope_violations",
     "find_value_kind_violations",
@@ -1049,4 +1263,6 @@ __all__ = [
     "validate_metrics",
     "validate_report_metric_keys",
     "validate_report_metric_objects",
+    "validate_surface_metric_keys",
+    "validate_surface_metric_objects",
 ]

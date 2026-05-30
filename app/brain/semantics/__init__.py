@@ -12,6 +12,8 @@ from app.brain.semantics.metric_registry import (
     find_evidence_required_violations,
     find_evidence_source_violations,
     find_family_envelope_violations,
+    find_freshness_companion_violations,
+    find_pii_class_violations,
     find_report_allowed_violations,
     find_source_envelope_violations,
     find_value_kind_violations,
@@ -20,6 +22,8 @@ from app.brain.semantics.metric_registry import (
     validate_metrics,
     validate_report_metric_keys,
     validate_report_metric_objects,
+    validate_surface_metric_keys,
+    validate_surface_metric_objects,
 )
 
 __all__ = [
@@ -34,6 +38,8 @@ __all__ = [
     "find_evidence_required_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
+    "find_freshness_companion_violations",
+    "find_pii_class_violations",
     "find_report_allowed_violations",
     "find_source_envelope_violations",
     "find_value_kind_violations",
@@ -42,4 +48,6 @@ __all__ = [
     "validate_metrics",
     "validate_report_metric_keys",
     "validate_report_metric_objects",
+    "validate_surface_metric_keys",
+    "validate_surface_metric_objects",
 ]

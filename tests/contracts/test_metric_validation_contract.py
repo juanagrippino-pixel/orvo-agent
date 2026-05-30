@@ -1435,3 +1435,637 @@ def test_evidence_required_helper_is_reexported_from_semantics_public_surface():
 
     assert hasattr(semantics, "find_evidence_required_violations")
     assert "find_evidence_required_violations" in semantics.__all__
+
+
+def test_pii_class_helper_flags_metrics_whose_canonical_pii_class_is_not_allowed_on_surface():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    # support.conversations.unanswered_count is pii_class="low" in the default
+    # registry; commerce.orders.count is pii_class="none". A surface that only
+    # allows "none" must flag the low-pii metric but accept the no-pii metric.
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "unanswered_conversations",  # alias of the same low-pii metric
+    )
+
+    violations = find_pii_class_violations(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("pii_class_disallowed", "support.conversations.unanswered_count", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+    ]
+    assert "support.conversations.unanswered_count" in violations[0].message
+    assert "low" in violations[0].message
+    assert "none" in violations[0].message
+
+
+def test_pii_class_helper_returns_empty_when_all_keys_within_allowed_pii_classes():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    # "low" surface accepts both pii_class="none" and pii_class="low" metrics.
+    assert (
+        find_pii_class_violations(
+            (
+                "commerce.orders.count",
+                "support.conversations.unanswered_count",
+            ),
+            allowed_pii_classes=("none", "low"),
+        )
+        == []
+    )
+
+
+def test_pii_class_helper_resolves_aliases_before_checking_pii_class():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_pii_class_violations,
+    )
+
+    # Synthetic sensitive metric exposed only via an alias proves alias
+    # resolution feeds into the pii_class check.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="support.identity.email",
+                family="support.identity",
+                label="Owner identity email",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("owner_email_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+                pii_class="sensitive",
+            ),
+        )
+    )
+
+    violations = find_pii_class_violations(
+        ("owner_email_legacy",),
+        allowed_pii_classes=("none",),
+        registry=registry,
+    )
+    assert len(violations) == 1
+    assert violations[0].key == "owner_email_legacy"
+    assert "support.identity.email" in violations[0].message
+    assert "sensitive" in violations[0].message
+
+
+def test_pii_class_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so it can compose cleanly with the existing envelope helpers.
+    assert (
+        find_pii_class_violations(
+            ("never_registered_metric",),
+            allowed_pii_classes=("none",),
+        )
+        == []
+    )
+
+
+def test_pii_class_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "support.conversations.oldest_unanswered_age_minutes",
+    )
+    first = find_pii_class_violations(metric_keys, allowed_pii_classes=("none",))
+    second = find_pii_class_violations(metric_keys, allowed_pii_classes=("none",))
+    assert first == second
+
+
+def test_pii_class_helper_rejects_empty_metric_keys_or_allowed_classes():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    with pytest.raises(ValueError, match="allowed_pii_classes"):
+        find_pii_class_violations(
+            ("commerce.orders.count",), allowed_pii_classes=()
+        )
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_pii_class_violations(("",), allowed_pii_classes=("none",))
+
+
+def test_pii_class_helper_rejects_unsupported_pii_class_in_allowed_set():
+    from app.brain.semantics.metric_registry import find_pii_class_violations
+
+    with pytest.raises(ValueError, match="pii_class"):
+        find_pii_class_violations(
+            ("commerce.orders.count",),
+            allowed_pii_classes=("none", "ultra-secret"),
+        )
+
+
+def test_pii_class_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_pii_class_violations")
+    assert "find_pii_class_violations" in semantics.__all__
+
+
+def test_validate_surface_metric_keys_composes_unknown_then_pii_class_disallowed_diagnostics():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    # Mixed bag: one canonical pii-none key, one low-pii canonical key, one
+    # low-pii alias of the same canonical key, and one unknown key. The
+    # composition must report unknowns first (owned by validate_metrics) and
+    # then pii_class_disallowed (owned by find_pii_class_violations). Each
+    # diagnostic preserves its own input-order index.
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "unanswered_conversations",
+        "custom.unknown_surface_metric",
+    )
+
+    issues = validate_surface_metric_keys(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 3, "warning"),
+        ("pii_class_disallowed", "support.conversations.unanswered_count", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+    ]
+
+
+def test_validate_surface_metric_keys_returns_empty_when_all_keys_within_allowed_pii_classes():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    assert (
+        validate_surface_metric_keys(
+            (
+                "commerce.orders.count",
+                "support.conversations.unanswered_count",
+            ),
+            allowed_pii_classes=("none", "low"),
+        )
+        == []
+    )
+
+
+def test_validate_surface_metric_keys_threads_custom_registry_into_both_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_surface_metric_keys,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="support.identity.email",
+                family="support.identity",
+                label="Owner identity email",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("owner_email_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+                pii_class="sensitive",
+            ),
+        )
+    )
+
+    issues = validate_surface_metric_keys(
+        ("owner_email_legacy", "commerce.orders.count"),
+        allowed_pii_classes=("none",),
+        registry=registry,
+    )
+    # commerce.orders.count is unknown under the custom registry; the alias on
+    # the custom registry resolves to a sensitive pii_class.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "commerce.orders.count", 1),
+        ("pii_class_disallowed", "owner_email_legacy", 0),
+    ]
+
+
+def test_validate_surface_metric_keys_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    metric_keys = (
+        "commerce.orders.count",
+        "support.conversations.unanswered_count",
+        "custom.unknown_surface_metric",
+        "unanswered_conversations",
+    )
+    first = validate_surface_metric_keys(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    second = validate_surface_metric_keys(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    assert first == second
+
+
+def test_validate_surface_metric_keys_rejects_empty_keys_or_allowed_classes():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    with pytest.raises(ValueError, match="allowed_pii_classes"):
+        validate_surface_metric_keys(
+            ("commerce.orders.count",), allowed_pii_classes=()
+        )
+
+    with pytest.raises(ValueError):
+        validate_surface_metric_keys(
+            ("",), allowed_pii_classes=("none",)
+        )
+
+
+def test_validate_surface_metric_keys_rejects_unsupported_pii_class_in_allowed_set():
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    with pytest.raises(ValueError, match="pii_class"):
+        validate_surface_metric_keys(
+            ("commerce.orders.count",),
+            allowed_pii_classes=("none", "ultra-secret"),
+        )
+
+
+def test_validate_surface_metric_keys_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_surface_metric_keys")
+    assert "validate_surface_metric_keys" in semantics.__all__
+
+
+def test_validate_surface_metric_objects_composes_unknown_then_pii_then_evidence_then_value_kind():
+    """Parallel to :func:`validate_report_metric_objects` and
+    :func:`validate_case_metric_objects` but on the surface dispatch side
+    (WhatsApp, owner brief): the five-diagnostic composition must report
+    unknown_metric first, then pii_class_disallowed, then evidence_missing,
+    then evidence_source_mismatch, and finally value_kind_mismatch. Each
+    diagnostic preserves its own input-order index. This case carries
+    non-empty evidence on every metric so the evidence_missing slot is
+    exercised by a separate dedicated test.
+    """
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+        _metric("ad_spend_today", "whatsapp"),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 4, "warning"),
+    ]
+
+
+def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_evidence_source():
+    """Mixed bag exercising the evidence_missing slot. The composition order
+    inside :func:`validate_surface_metric_objects` must put evidence_missing
+    immediately after pii_class_disallowed and before evidence_source_mismatch
+    so structural ``no evidence at all`` diagnostics surface before content
+    diagnostics about wrong-source evidence. Each diagnostic preserves its own
+    input-order index. Mapping form is required because Pydantic ``Metric``
+    enforces ``min_length=1`` on evidence and cannot represent the missing
+    case directly."""
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        {
+            "key": "orders_today",
+            "value": 12,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "custom.unknown_surface_metric",
+            "value": 1,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "unanswered_conversations",
+            "value": 5,
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {
+            "key": "commerce.orders.count",
+            "value": "not a number",
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+        ("evidence_missing", "commerce.revenue.total", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 5, "warning"),
+    ]
+
+
+def test_validate_surface_metric_objects_returns_empty_for_clean_surface_metrics():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("stock_units", "tiendanube", value=42),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+    ]
+
+    assert (
+        validate_surface_metric_objects(
+            metrics, allowed_pii_classes=("none",)
+        )
+        == []
+    )
+
+
+def test_validate_surface_metric_objects_matches_key_path_when_no_object_violations():
+    """When every metric object has in-envelope evidence sources and the value
+    type matches the canonical unit kind, the object-level result must equal
+    ``validate_surface_metric_keys`` over the same keys so callers can freely
+    upgrade from keys to objects without a behavior change."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_surface_metric_keys,
+        validate_surface_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+    ]
+    keys = [metric.key for metric in metrics]
+
+    assert validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    ) == validate_surface_metric_keys(
+        keys, allowed_pii_classes=("none",)
+    )
+
+
+def test_validate_surface_metric_objects_threads_custom_registry_into_all_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_surface_metric_objects,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="support.identity.email",
+                family="support.identity",
+                label="Owner identity email",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("owner_email_legacy",),
+                aggregation="latest",
+                case_allowed=False,
+                report_allowed=False,
+                pii_class="sensitive",
+            ),
+        )
+    )
+
+    metrics = [
+        _metric("owner_email_legacy", "sample", value=1),
+        _metric("revenue_today", "tiendanube", value=120000),
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",), registry=registry
+    )
+    # revenue_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a sensitive pii_class.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "revenue_today", 1),
+        ("pii_class_disallowed", "owner_email_legacy", 0),
+    ]
+
+
+def test_validate_surface_metric_objects_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    first = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+    second = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+    assert first == second
+
+
+def test_validate_surface_metric_objects_rejects_empty_allowed_pii_classes():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [_metric("orders_today", "tiendanube", value=12)]
+
+    with pytest.raises(ValueError, match="allowed_pii_classes"):
+        validate_surface_metric_objects(metrics, allowed_pii_classes=())
+
+
+def test_validate_surface_metric_objects_rejects_unsupported_pii_class_in_allowed_set():
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [_metric("orders_today", "tiendanube", value=12)]
+
+    with pytest.raises(ValueError, match="pii_class"):
+        validate_surface_metric_objects(
+            metrics, allowed_pii_classes=("none", "ultra-secret")
+        )
+
+
+def test_validate_surface_metric_objects_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_surface_metric_objects")
+    assert "validate_surface_metric_objects" in semantics.__all__
+
+
+def test_freshness_companion_helper_flags_freshness_required_keys_without_runtime_freshness_companion():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # Business metrics (freshness_required=True) without any runtime.freshness
+    # companion metric in the same payload must be flagged once each, in
+    # input order. commerce.average_order_value also defaults to
+    # freshness_required=True so it surfaces alongside the other business keys.
+    metric_keys = (
+        "commerce.orders.count",
+        "ad_spend_today",
+        "avg_order_value",
+    )
+
+    issues = find_freshness_companion_violations(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("freshness_companion_missing", "commerce.orders.count", 0, "warning"),
+        ("freshness_companion_missing", "ad_spend_today", 1, "warning"),
+        ("freshness_companion_missing", "avg_order_value", 2, "warning"),
+    ]
+    assert "runtime.freshness" in issues[0].message
+    assert "commerce.orders.count" in issues[0].message
+
+
+def test_freshness_companion_helper_returns_empty_when_runtime_freshness_companion_present():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # Any runtime.freshness family metric (canonical or alias-resolved) in the
+    # payload satisfies the companion requirement and suppresses the diagnostic
+    # for every freshness_required key, regardless of where it appears.
+    assert (
+        find_freshness_companion_violations(
+            (
+                "commerce.orders.count",
+                "runtime.freshness.last_success_at",
+                "ad_spend_today",
+            )
+        )
+        == []
+    )
+
+    assert (
+        find_freshness_companion_violations(
+            (
+                "commerce.orders.count",
+                "runtime.freshness.age_seconds",
+            )
+        )
+        == []
+    )
+
+
+def test_freshness_companion_helper_skips_metrics_whose_canonical_definition_does_not_require_freshness():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # runtime.connector.status, runtime.data_quality.*, and the runtime.freshness
+    # metrics themselves are freshness_required=False. A payload composed only of
+    # such control-plane signals does not need a runtime.freshness companion to
+    # pass.
+    assert (
+        find_freshness_companion_violations(
+            (
+                "runtime.connector.status",
+                "runtime.data_quality.completeness_ratio",
+            )
+        )
+        == []
+    )
+
+
+def test_freshness_companion_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # Unknown keys are owned by validate_metrics; this helper intentionally
+    # skips them so the diagnostics compose without overlap. With no resolvable
+    # metrics in the payload, no freshness_required check can fire.
+    assert (
+        find_freshness_companion_violations(("never_registered_metric",))
+        == []
+    )
+
+
+def test_freshness_companion_helper_resolves_aliases_before_checking_companion_and_freshness_required():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    # revenue_today is an alias for commerce.revenue.total (freshness_required=True);
+    # the companion check must resolve aliases on both sides so the diagnostic is
+    # symmetric with the rest of the registry.
+    issues = find_freshness_companion_violations(("revenue_today",))
+    assert [(issue.code, issue.key) for issue in issues] == [
+        ("freshness_companion_missing", "revenue_today")
+    ]
+    assert "commerce.revenue.total" in issues[0].message
+
+
+def test_freshness_companion_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    metric_keys = (
+        "commerce.orders.count",
+        "ad_spend_today",
+        "custom.unknown_metric",
+        "avg_order_value",
+    )
+    first = find_freshness_companion_violations(metric_keys)
+    second = find_freshness_companion_violations(metric_keys)
+    assert first == second
+
+
+def test_freshness_companion_helper_threads_custom_registry_through_resolution():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_freshness_companion_violations,
+    )
+
+    # A custom registry whose only metric requires freshness but offers no
+    # runtime.freshness family must surface the diagnostic regardless of the
+    # default registry's contents.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="commerce.subscriptions.count",
+                family="commerce.subscriptions",
+                label="Active subscriptions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("subscriptions_today",),
+                aggregation="latest",
+                case_allowed=True,
+            ),
+        )
+    )
+
+    issues = find_freshness_companion_violations(
+        ("subscriptions_today",), registry=registry
+    )
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("freshness_companion_missing", "subscriptions_today", 0),
+    ]
+    assert "commerce.subscriptions.count" in issues[0].message
+
+
+def test_freshness_companion_helper_rejects_empty_or_non_string_metric_keys():
+    from app.brain.semantics.metric_registry import find_freshness_companion_violations
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_freshness_companion_violations(("",))
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_freshness_companion_violations((123,))
+
+
+def test_freshness_companion_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_freshness_companion_violations")
+    assert "find_freshness_companion_violations" in semantics.__all__
