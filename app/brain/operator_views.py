@@ -77,6 +77,7 @@ _FIELD_SPECS: dict[str, FieldSpec] = {
     "entity.id": FieldSpec("string"),
     "entity.label": FieldSpec("string", None, frozenset({"=", "!="})),
     "latest_run_id": FieldSpec("string"),
+    "source_connector": FieldSpec("string"),
     "dedupe_key": FieldSpec("string", None, frozenset({"=", "!="})),
     "opened_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
     "updated_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
@@ -294,6 +295,9 @@ def _matches(case: OperationalCase, clauses: tuple[CaseJQLClause, ...]) -> bool:
 
 
 def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
+    if clause.field == "source_connector":
+        return _matches_source_connector(case, clause)
+
     actual = _case_field_value(case, clause.field)
     if clause.operator == "IN":
         return actual in clause.values
@@ -312,6 +316,22 @@ def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
         return actual < expected
     if clause.operator == "<=":
         return actual <= expected
+    raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
+
+
+def _case_source_connectors(case: OperationalCase) -> tuple[str, ...]:
+    return tuple(sorted({snapshot.source for snapshot in case.evidence_snapshots if snapshot.source}))
+
+
+def _matches_source_connector(case: OperationalCase, clause: CaseJQLClause) -> bool:
+    sources = _case_source_connectors(case)
+    if clause.operator == "IN":
+        return any(source in clause.values for source in sources)
+    expected = clause.values[0]
+    if clause.operator == "=":
+        return expected in sources
+    if clause.operator == "!=":
+        return expected not in sources
     raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
 
 
