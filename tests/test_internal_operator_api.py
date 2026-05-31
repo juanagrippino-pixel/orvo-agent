@@ -382,3 +382,98 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
     assert missing.status_code == 401
     assert wrong.status_code == 401
     assert missing.get_json()["error"]["code"] == "unauthorized"
+
+
+def test_internal_auth_denials_are_audited_without_token_values(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    raw_wrong_token = "raw_wrong_internal_token"
+
+    missing = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={"X-Orvo-Operator": "operator:juan", "X-Request-ID": "req-missing-auth"},
+    )
+    wrong = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            "Authorization": f"Bearer {raw_wrong_token}",
+            "X-Orvo-Operator": "operator:juan",
+            "X-Request-ID": "req-wrong-auth",
+        },
+    )
+
+    assert missing.status_code == 401
+    assert wrong.status_code == 401
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 2
+    assert raw_wrong_token not in repr(rows)
+    assert [row[0] for row in rows] == ["artemea", "artemea"]
+    assert [row[1] for row in rows] == ["operator:juan", "operator:juan"]
+    assert [row[2] for row in rows] == ["internal_operator_auth_failed", "internal_operator_auth_failed"]
+    assert [row[3] for row in rows] == ["internal_operator_api", "internal_operator_api"]
+    assert [row[4] for row in rows] == ["/internal/brain/businesses/artemea/cases"] * 2
+    assert [row[5] for row in rows] == ["req-missing-auth", "req-wrong-auth"]
+    first_data = json.loads(rows[0][6])
+    second_data = json.loads(rows[1][6])
+    assert first_data == {
+        "presented": False,
+        "method": "GET",
+        "reason": "missing_authorization",
+        "status": "denied",
+        "status_code": 401,
+    }
+    assert second_data == {
+        "presented": True,
+        "method": "GET",
+        "reason": "invalid_token",
+        "status": "denied",
+        "status_code": 401,
+    }
+
+
+def test_internal_auth_not_configured_is_audited(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORVO_INTERNAL_OPERATOR_TOKEN", raising=False)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            "Authorization": "Bearer presented-but-not-evaluated",
+            "X-Orvo-Operator": "operator:juan",
+            "X-Request-ID": "req-auth-not-configured",
+        },
+    )
+
+    assert response.status_code == 503
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    business_id, actor_ref, event_type, target_type, target_id, request_id, raw_data = rows[0]
+    assert business_id == "artemea"
+    assert actor_ref == "operator:juan"
+    assert event_type == "internal_operator_auth_not_configured"
+    assert target_type == "internal_operator_api"
+    assert target_id == "/internal/brain/businesses/artemea/cases"
+    assert request_id == "req-auth-not-configured"
+    assert "presented-but-not-evaluated" not in raw_data
+    assert json.loads(raw_data) == {
+        "presented": True,
+        "method": "GET",
+        "reason": "internal_auth_not_configured",
+        "status": "denied",
+        "status_code": 503,
+    }

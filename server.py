@@ -131,9 +131,45 @@ def _public_error_response(payload: dict, status_code: int):
     return jsonify(redact_secrets(payload)), status_code
 
 
+def _record_internal_auth_denial(business_id: str, *, reason: str, status_code: int) -> None:
+    """Best-effort audit record for denied internal operator API access."""
+
+    try:
+        with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+            init_schema(conn)
+            SQLiteOperatorAuditStore(conn).append_event(
+                business_id=business_id,
+                actor_ref=request.headers.get("X-Orvo-Operator") or "anonymous",
+                event_type=(
+                    "internal_operator_auth_not_configured"
+                    if reason == "internal_auth_not_configured"
+                    else "internal_operator_auth_failed"
+                ),
+                target_type="internal_operator_api",
+                target_id=request.path,
+                request_id=_internal_request_id(),
+                data={
+                    "status": "denied",
+                    "reason": reason,
+                    "status_code": status_code,
+                    "method": request.method,
+                    "presented": bool(request.headers.get("Authorization")),
+                },
+            )
+    except sqlite3.Error:
+        # Do not leak database details or convert auth denials into 500s. The
+        # request still fails closed; audit storage health is monitored by tests.
+        return
+
+
 def _authorize_internal_operator(business_id: str):
     expected = os.environ.get("ORVO_INTERNAL_OPERATOR_TOKEN", "")
     if not expected:
+        _record_internal_auth_denial(
+            business_id,
+            reason="internal_auth_not_configured",
+            status_code=503,
+        )
         return _internal_error(
             business_id,
             "internal_auth_not_configured",
@@ -142,6 +178,11 @@ def _authorize_internal_operator(business_id: str):
         )
     supplied = request.headers.get("Authorization", "")
     if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+        _record_internal_auth_denial(
+            business_id,
+            reason="invalid_token" if supplied else "missing_authorization",
+            status_code=401,
+        )
         return _internal_error(business_id, "unauthorized", "Unauthorized", status_code=401)
     return None
 
