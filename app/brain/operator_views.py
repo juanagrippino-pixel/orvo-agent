@@ -19,6 +19,7 @@ from app.brain.operational_cases import (
     OperationalCaseType,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
+from app.brain.operator_case_projections import is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets
 
 _MAX_JQL_LENGTH = 512
@@ -30,7 +31,7 @@ _ALLOWED_STATUS = set(get_args(OperationalCaseStatus))
 _ALLOWED_CASE_TYPES = set(get_args(OperationalCaseType))
 _ALLOWED_SEVERITY = set(get_args(OperationalCaseSeverity))
 
-FieldType = Literal["enum", "int", "string", "datetime"]
+FieldType = Literal["bool", "enum", "int", "string", "datetime"]
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,8 @@ _FIELD_SPECS: dict[str, FieldSpec] = {
     "entity.id": FieldSpec("string"),
     "entity.label": FieldSpec("string", None, frozenset({"=", "!="})),
     "latest_run_id": FieldSpec("string"),
+    "source_connector": FieldSpec("string"),
+    "degraded": FieldSpec("bool", None, frozenset({"=", "!="})),
     "dedupe_key": FieldSpec("string", None, frozenset({"=", "!="})),
     "opened_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
     "updated_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
@@ -134,6 +137,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "jql": "case_type = stockout_risk AND status IN (open, acknowledged, in_progress) ORDER BY priority_score DESC",
         "readonly": True,
     },
+    {
+        "view_id": "connector_degraded",
+        "label": "Connector degraded",
+        "description": "Actionable cases whose evidence is stale, degraded, or missing.",
+        "jql": "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC",
+        "readonly": True,
+    },
 )
 
 
@@ -184,6 +194,7 @@ def query_case_queue(
     parsed_limit = parse_limit(limit)
     candidates = store.list_cases(business_id=business_id, limit=None)
     filtered = [case for case in candidates if _matches(case, parsed.clauses)]
+    total = len(filtered)
     filtered = _sort_cases(filtered, parsed.order_by)
     limited = filtered[:parsed_limit]
     data: dict[str, Any] = {
@@ -192,6 +203,8 @@ def query_case_queue(
         "cases": [case_queue_item(case) for case in limited],
         "limit": parsed_limit,
         "count": len(limited),
+        "total": total,
+        "truncated": total > len(limited),
     }
     if view is not None:
         data["view"] = {key: view[key] for key in ("view_id", "label", "readonly")}
@@ -274,6 +287,10 @@ def _coerce_value(field: str, raw_value: str, spec: FieldSpec) -> Any:
         if parsed_dt.tzinfo is None or parsed_dt.utcoffset() is None:
             raise OperatorAPIError("unsupported_jql_value", f"Expected timezone-aware ISO datetime for {field}", status_code=400)
         return parsed_dt
+    if spec.value_type == "bool":
+        if value not in {"true", "false"}:
+            raise OperatorAPIError("unsupported_jql_value", f"Expected boolean for {field}", status_code=400)
+        return value == "true"
     return value
 
 
@@ -286,6 +303,8 @@ def _unquote(value: str) -> str:
 def _format_value(value: Any) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, bool):
+        return "true" if value else "false"
     return str(value)
 
 
@@ -294,6 +313,9 @@ def _matches(case: OperationalCase, clauses: tuple[CaseJQLClause, ...]) -> bool:
 
 
 def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
+    if clause.field == "source_connector":
+        return _matches_source_connector(case, clause)
+
     actual = _case_field_value(case, clause.field)
     if clause.operator == "IN":
         return actual in clause.values
@@ -315,6 +337,22 @@ def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
     raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
 
 
+def _case_source_connectors(case: OperationalCase) -> tuple[str, ...]:
+    return tuple(source_connectors(case))
+
+
+def _matches_source_connector(case: OperationalCase, clause: CaseJQLClause) -> bool:
+    sources = _case_source_connectors(case)
+    if clause.operator == "IN":
+        return any(source in clause.values for source in sources)
+    expected = clause.values[0]
+    if clause.operator == "=":
+        return expected in sources
+    if clause.operator == "!=":
+        return expected not in sources
+    raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
+
+
 def _case_field_value(case: OperationalCase, field: str) -> Any:
     if field == "entity.kind":
         return case.entity_scope.get("kind")
@@ -322,6 +360,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case.entity_scope.get("id")
     if field == "entity.label":
         return case.entity_scope.get("label")
+    if field == "degraded":
+        return is_case_degraded(case)
     return getattr(case, field)
 
 

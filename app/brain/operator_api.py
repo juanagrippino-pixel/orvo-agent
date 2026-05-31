@@ -19,6 +19,11 @@ from app.brain.operational_cases import (
     OperationalCaseStore,
     TimelineEventType,
 )
+from app.brain.operator_case_projections import (
+    is_case_degraded as _is_degraded,
+    latest_evidence_at as _latest_evidence_at,
+    source_connectors as _source_connectors,
+)
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 
@@ -53,20 +58,6 @@ def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _latest_evidence_at(case: OperationalCase) -> datetime | None:
-    if not case.evidence_snapshots:
-        return None
-    return max(snapshot.captured_at for snapshot in case.evidence_snapshots)
-
-
-def _source_connectors(case: OperationalCase) -> list[str]:
-    return sorted({snapshot.source for snapshot in case.evidence_snapshots if snapshot.source})
-
-
-def _is_degraded(case: OperationalCase) -> bool:
-    return any(snapshot.freshness_state in {"stale", "degraded", "missing"} for snapshot in case.evidence_snapshots)
 
 
 def parse_limit(value: str | None, *, default: int = _DEFAULT_LIMIT, max_limit: int = _MAX_LIMIT) -> int:
