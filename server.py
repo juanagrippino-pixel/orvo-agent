@@ -48,6 +48,7 @@ from app.brain.operator_api import (
     list_case_queue,
     list_case_timeline,
     list_run_history,
+    list_service_management_case_projection,
     list_top_actionable_cases_by_priority,
     summarize_case_queue,
     summarize_case_queue_aging,
@@ -175,6 +176,22 @@ def internal_brain_cases(business_id: str):
                 status=request.args.get("status"),
                 limit=request.args.get("limit"),
                 jql=request.args.get("jql"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/service-management/cases")
+def internal_brain_service_management_cases(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_service_management_case_projection(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+                now=datetime.now(timezone.utc),
             ),
         ),
     )
