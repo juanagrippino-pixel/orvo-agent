@@ -427,6 +427,56 @@ def summarize_case_queue_by_priority_bracket(
     )
 
 
+def summarize_case_queue_by_source_connector(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Source-connector-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but groups lifecycle, actionable, and
+    actionable-degraded counts by source connector (tiendanube / google_sheets
+    / csv / etc.) derived from the alphabetically-first evidence-snapshot
+    source via :func:`_source_connectors`, matching the attribution used by
+    :func:`summarize_case_queue_aging_by_source_connector` and
+    :func:`summarize_case_workflow_throughput_by_source_connector`. Lets
+    operator surfaces lead with which ingestion path dominates the in-flight
+    backlog even when severity / case_type distributions look balanced — a
+    Tiendanube ingestion incident often shows up as a cluster of actionable
+    cases skewed to a single source. Cases without any evidence source are
+    bucketed under ``"unknown"`` so totals never silently drop. ``total``
+    counts the full lifecycle (open + acknowledged + resolved); ``actionable_*``
+    counts isolate the in-flight slice. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_source: dict[str, int] = {}
+    actionable_by_source: dict[str, int] = {}
+    actionable_degraded_by_source: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        sources = _source_connectors(case)
+        primary_source = sources[0] if sources else "unknown"
+        totals_by_source[primary_source] = totals_by_source.get(primary_source, 0) + 1
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_source[primary_source] = (
+                actionable_by_source.get(primary_source, 0) + 1
+            )
+            if _is_degraded(case):
+                actionable_degraded_by_source[primary_source] = (
+                    actionable_degraded_by_source.get(primary_source, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_source_connector": totals_by_source,
+            "actionable_by_source_connector": actionable_by_source,
+            "actionable_degraded_by_source_connector": actionable_degraded_by_source,
+        }
+    )
+
+
 def summarize_case_queue_aging(
     store: OperationalCaseStore,
     *,
