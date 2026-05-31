@@ -51,6 +51,7 @@ from app.brain.operator_api import (
     list_top_actionable_cases_by_priority,
     summarize_case_queue,
     summarize_case_queue_by_case_type,
+    summarize_case_queue_by_entity_kind,
     summarize_case_queue_by_priority_bracket,
     summarize_case_queue_by_source_connector,
     summarize_case_queue_aging,
@@ -213,6 +214,17 @@ def internal_brain_cases_summary_by_case_type(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_queue_by_case_type(case_store, business_id=business_id),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/summary/by-entity-kind")
+def internal_brain_cases_summary_by_entity_kind(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_by_entity_kind(case_store, business_id=business_id),
         ),
     )
 
