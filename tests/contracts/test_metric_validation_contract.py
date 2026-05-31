@@ -2324,7 +2324,7 @@ def test_validate_freshness_envelope_metric_objects_composes_unknown_then_freshn
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
         _metric("custom.unknown_freshness_metric", "tiendanube"),
-        _metric("ad_spend_today", "whatsapp", value=1500),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
         _metric("commerce.orders.count", "tiendanube", value="not a number"),
     ]
 
@@ -2358,22 +2358,26 @@ def test_validate_freshness_envelope_metric_objects_slots_evidence_missing_betwe
         {
             "key": "orders_today",
             "value": 12,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "custom.unknown_freshness_metric",
             "value": 1,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
-        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
         {
             "key": "ad_spend_today",
             "value": 1500,
+            "unit": "ARS",
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
             "key": "commerce.orders.count",
             "value": "not a number",
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
     ]
@@ -2392,6 +2396,40 @@ def test_validate_freshness_envelope_metric_objects_slots_evidence_missing_betwe
     ]
 
 
+def test_validate_freshness_envelope_metric_objects_appends_money_currency_missing_after_value_kind():
+    """The six-diagnostic composition inside
+    :func:`validate_freshness_envelope_metric_objects` must place
+    money_currency_missing after value_kind_mismatch: structural, freshness, and
+    value-type diagnostics surface before the rendering-metadata diagnostic that
+    money metrics must carry a currency string for the runtime/control-plane to
+    interpret values unambiguously. Each diagnostic preserves its own
+    input-order index, and a single metric that is both value-kind invalid and
+    missing currency must surface in both slots."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_freshness_metric", "tiendanube"),
+        _metric("commerce.revenue.baseline", "google_sheets", value=80000),
+        _metric("ad_spend_today", "meta_ads", value="invalid"),
+    ]
+
+    issues = validate_freshness_envelope_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
+        ("freshness_companion_missing", "orders_today", 0, "warning"),
+        ("freshness_companion_missing", "commerce.revenue.baseline", 2, "warning"),
+        ("freshness_companion_missing", "ad_spend_today", 3, "warning"),
+        ("value_kind_mismatch", "ad_spend_today", 3, "warning"),
+        ("money_currency_missing", "commerce.revenue.baseline", 2, "warning"),
+        ("money_currency_missing", "ad_spend_today", 3, "warning"),
+    ]
+
+
 def test_validate_freshness_envelope_metric_objects_returns_empty_when_companion_present_and_all_clean():
     from app.brain.semantics.metric_registry import (
         validate_freshness_envelope_metric_objects,
@@ -2399,7 +2437,7 @@ def test_validate_freshness_envelope_metric_objects_returns_empty_when_companion
 
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
-        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("revenue_today", "mercadolibre", value=120000, unit="ARS"),
         _metric(
             "runtime.freshness.last_success_at",
             "tiendanube",
@@ -2424,7 +2462,7 @@ def test_validate_freshness_envelope_metric_objects_matches_key_path_when_no_obj
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
         _metric("custom.unknown_freshness_metric", "tiendanube"),
-        _metric("ad_spend_today", "meta_ads", value=1500),
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
     ]
     keys = [metric.key for metric in metrics]
 
