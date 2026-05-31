@@ -143,6 +143,64 @@ def _sla_projection(case: OperationalCase, *, reference: datetime) -> dict[str, 
     }
 
 
+def _escalation_reasons(
+    case: OperationalCase,
+    *,
+    owner_status: dict[str, str],
+    sla: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Return deterministic service-management escalation reasons.
+
+    These are read-only labels for operator triage and do not mutate case
+    priority, status, SLA clocks, or workflow lifecycle.
+    """
+
+    reasons: list[dict[str, str]] = []
+    if case.severity == "critical" and case.status == "open":
+        reasons.append(
+            {
+                "code": "critical_case_unacknowledged",
+                "label_es": "Caso crítico sin acuse",
+                "source": "case_status",
+            }
+        )
+    first_response = sla["first_response"]
+    if first_response["breached"] and not first_response["completed"]:
+        reasons.append(
+            {
+                "code": "first_response_sla_breached",
+                "label_es": "SLA de primera respuesta vencido",
+                "source": "sla.first_response",
+            }
+        )
+    resolution = sla["resolution"]
+    if resolution["breached"] and not resolution["completed"]:
+        reasons.append(
+            {
+                "code": "resolution_sla_breached",
+                "label_es": "SLA de resolución vencido",
+                "source": "sla.resolution",
+            }
+        )
+    if owner_status["code"] == "waiting_external":
+        reasons.append(
+            {
+                "code": "waiting_external",
+                "label_es": "Bloqueado por un tercero",
+                "source": "owner_status",
+            }
+        )
+    elif owner_status["code"] == "waiting_owner":
+        reasons.append(
+            {
+                "code": "waiting_owner",
+                "label_es": "Esperando decisión del dueño",
+                "source": "owner_status",
+            }
+        )
+    return reasons
+
+
 def service_management_case_item(case: OperationalCase, *, now: datetime | None = None) -> dict[str, Any]:
     """Project one OperationalCase into a service-management case row.
 
@@ -151,6 +209,9 @@ def service_management_case_item(case: OperationalCase, *, now: datetime | None 
     """
 
     reference = _normalize_reference_time(now)
+    owner_status = _owner_status(case)
+    sla = _sla_projection(case, reference=reference)
+    escalation_reasons = _escalation_reasons(case, owner_status=owner_status, sla=sla)
     return redact_secrets(
         {
             "case_id": case.case_id,
@@ -161,13 +222,15 @@ def service_management_case_item(case: OperationalCase, *, now: datetime | None 
             "priority_score": case.priority_score,
             "entity_scope": case.entity_scope,
             "service_record_type": _service_record_type(case),
-            "owner_status": _owner_status(case),
+            "owner_status": owner_status,
             "opened_at": _iso(case.opened_at),
             "updated_at": _iso(case.updated_at),
             "acknowledged_at": _iso(case.acknowledged_at),
             "resolved_at": _iso(case.resolved_at),
             "latest_run_id": case.latest_run_id,
-            "sla": _sla_projection(case, reference=reference),
+            "sla": sla,
+            "needs_escalation": bool(escalation_reasons),
+            "escalation_reasons": escalation_reasons,
         }
     )
 
