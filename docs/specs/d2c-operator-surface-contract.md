@@ -108,6 +108,14 @@ Minimum additional fields per case:
     "status_category": "waiting",
     "source_status": "acknowledged"
   },
+  "needs_escalation": true,
+  "escalation_reasons": [
+    {
+      "code": "waiting_external",
+      "label_es": "Bloqueado por un tercero",
+      "source": "owner_status"
+    }
+  ],
   "sla": {
     "first_response": {
       "policy_key": "first_response_warning_240m",
@@ -129,6 +137,7 @@ Projection rules:
 - map case families to Atlassian-like record labels (`incident`, `service_request`, `problem`, `change`) deterministically;
 - derive `waiting_owner` and `waiting_external` from case metadata only for active `acknowledged`/`in_progress` cases;
 - include first-response and resolution SLA clocks as deterministic UTC timers;
+- expose deterministic `escalation_reasons` for unacknowledged critical cases, active SLA breaches, and active waiting-on-owner/external blockers without changing priority or lifecycle state;
 - redact secret-shaped values at the projection boundary;
 - preserve explicit tenant scope and stable internal response envelopes.
 
