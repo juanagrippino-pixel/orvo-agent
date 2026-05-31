@@ -384,6 +384,49 @@ def _classify_priority_bracket(priority_score: int) -> str:
     return "high"
 
 
+def summarize_case_queue_by_priority_bracket(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Priority-bracket-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but groups lifecycle, actionable, and
+    actionable-degraded counts by deterministic priority bracket (``low`` for
+    ``priority_score < 50``, ``medium`` for ``50..79``, ``high`` for
+    ``80..100``) derived from ``case.priority_score`` via
+    :func:`_classify_priority_bracket`. Lets operator surfaces lead with how
+    much of the in-flight backlog is high-priority work even when the existing
+    severity / case_type counts look healthy. ``total`` counts the full
+    lifecycle (open + acknowledged + resolved); ``actionable_*`` counts isolate
+    the in-flight slice. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_bracket: dict[str, int] = {}
+    actionable_by_bracket: dict[str, int] = {}
+    actionable_degraded_by_bracket: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        bracket = _classify_priority_bracket(case.priority_score)
+        totals_by_bracket[bracket] = totals_by_bracket.get(bracket, 0) + 1
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_bracket[bracket] = actionable_by_bracket.get(bracket, 0) + 1
+            if _is_degraded(case):
+                actionable_degraded_by_bracket[bracket] = (
+                    actionable_degraded_by_bracket.get(bracket, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_priority_bracket": totals_by_bracket,
+            "actionable_by_priority_bracket": actionable_by_bracket,
+            "actionable_degraded_by_priority_bracket": actionable_degraded_by_bracket,
+        }
+    )
+
+
 def summarize_case_queue_aging(
     store: OperationalCaseStore,
     *,
