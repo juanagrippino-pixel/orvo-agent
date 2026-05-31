@@ -31,6 +31,8 @@ def _case_detection(
     severity: OperationalCaseSeverity = "critical",
     title: str = "Stock crítico",
     run_id: str = "run-artemea-1",
+    source: str = "tiendanube",
+    source_label: str = "Tiendanube access_token=raw_snapshot_secret",
 ) -> OperationalCaseDetection:
     return OperationalCaseDetection(
         business_id=business_id,
@@ -50,8 +52,8 @@ def _case_detection(
                 run_id=run_id,
                 artifact_ref=f"ledger://runs/{run_id}/daily-report?access_token=raw_snapshot_secret",
                 evidence_ref=f"evidence://{business_id}/{run_id}/{case_type}?api_key=raw_snapshot_secret",
-                source="tiendanube",
-                source_label="Tiendanube access_token=raw_snapshot_secret",
+                source=source,
+                source_label=source_label,
                 case_type=case_type,
                 entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado"},
                 summary="Snapshot Bearer raw_snapshot_secret",
@@ -196,6 +198,33 @@ def test_internal_case_detail_cannot_cross_business_scope(monkeypatch, tmp_path)
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_action_cannot_cross_business_scope_or_mutate_foreign_case(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    other_case = _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{other_case.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "acknowledge_case"},
+    )
+
+    assert response.status_code == 404
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "case_not_found"
+    assert body["redaction_applied"] is True
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(other_case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.business_id == "other"
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(other_case.timeline)
+    assert all(event.actor_ref != "operator:juan" for event in reloaded.timeline)
+
+
 def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
@@ -249,6 +278,37 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
     assert reloaded.status == "resolved"
     assert reloaded.timeline[-1].actor_ref == "operator:juan"
     assert "raw_action_secret" not in reloaded.model_dump_json()
+
+
+def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "assign_owner", "owner_ref": "dueña access_token=raw_owner_secret"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_owner_secret" not in raw_body
+    body = response.get_json()
+    assigned = body["data"]["case"]
+    assert assigned["status"] == "open"
+    assert assigned["assignee_ref"] == "dueña access_token=[REDACTED]"
+    assert assigned["assigned_at"] is not None
+    assert assigned["timeline"][-1]["event_type"] == "case_assigned"
+    assert assigned["timeline"][-1]["metadata"] == {"assignee_ref": "dueña access_token=[REDACTED]"}
+    assert body["redaction_applied"] is True
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.assignee_ref == "dueña access_token=[REDACTED]"
+    assert reloaded.status == "open"
+    assert "raw_owner_secret" not in reloaded.model_dump_json()
 
 
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):
@@ -325,6 +385,113 @@ def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch
     assert summary["actionable_degraded"] == 0
     assert summary["by_status"] == {}
     assert summary["by_severity"] == {}
+
+
+def test_internal_case_queue_summary_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-high", priority=95))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-medium",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-high", priority=95))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-priority-bracket",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_priority_bracket"] == {"high": 1, "medium": 1}
+    assert summary["actionable_by_priority_bracket"] == {"high": 1, "medium": 1}
+    assert summary["actionable_degraded_by_priority_bracket"] == {}
+
+
+def test_internal_case_queue_summary_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-stockout"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-sales-drop",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-stockout"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert summary["actionable_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert summary["actionable_degraded_by_case_type"] == {}
+
+
+def test_internal_case_queue_summary_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-tn", source="tiendanube"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-sheets",
+            source="google_sheets",
+            source_label="Google Sheets",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-tn", source="tiendanube"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-source-connector",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_source_connector"] == {"tiendanube": 1, "google_sheets": 1}
+    assert summary["actionable_by_source_connector"] == {"tiendanube": 1, "google_sheets": 1}
+    assert summary["actionable_degraded_by_source_connector"] == {}
 
 
 def test_internal_case_queue_aging_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):

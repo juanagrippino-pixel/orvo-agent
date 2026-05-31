@@ -241,6 +241,155 @@ def test_apply_case_action_add_comment_rejects_blank_or_non_string_actor_ref(bad
     assert len(reloaded.timeline) == len(opened.timeline)
 
 
+def test_store_assign_case_sets_assignee_timeline_event_preserves_status_redacts_and_persists(conn):
+    sqlite_store = SQLiteOperationalCaseStore(conn)
+    opened = sqlite_store.upsert_detection(case_detection(), detected_at=utc(8))
+    memory_store = InMemoryOperationalCaseStore()
+    memory_opened = memory_store.upsert_detection(case_detection(run_id="run-memory"), detected_at=utc(8))
+
+    memory_assigned = memory_store.assign_case(
+        memory_opened.case_id,
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        assignee_ref="owner access_token=raw_assignee_secret",
+        assigned_at=utc(9),
+    )
+    sqlite_assigned = sqlite_store.assign_case(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        assignee_ref="owner access_token=raw_assignee_secret",
+        assigned_at=utc(9),
+    )
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(opened.case_id)
+
+    for assigned in (memory_assigned, sqlite_assigned, reloaded):
+        assert assigned is not None
+        assert assigned.status == "open"
+        assert assigned.assignee_ref == "owner access_token=[REDACTED]"
+        assert assigned.assigned_at == utc(9)
+        assert assigned.updated_at == utc(9)
+        event = assigned.timeline[-1]
+        assert event.event_type == "case_assigned"
+        assert event.actor_type == "operator"
+        assert event.actor_ref == "operator@example.com"
+        assert event.case_id == assigned.case_id
+        assert event.created_at == utc(9)
+        assert event.metadata == {"assignee_ref": "owner access_token=[REDACTED]"}
+        assert "raw_assignee_secret" not in assigned.model_dump_json()
+
+
+def test_apply_case_action_assign_owner_updates_projection_and_keeps_lifecycle_status():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    result = apply_case_action(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="assign_owner",
+        actor_ref="operator@example.com",
+        assignee_ref="  owner access_token=raw_assignee_secret  ",
+    )
+
+    detail = result["case"]
+    assert detail["case_id"] == opened.case_id
+    assert detail["status"] == "open"
+    assert detail["assignee_ref"] == "owner access_token=[REDACTED]"
+    assert detail["assigned_at"] is not None
+    event = detail["timeline"][-1]
+    assert event["event_type"] == "case_assigned"
+    assert event["actor_type"] == "operator"
+    assert event["actor_ref"] == "operator@example.com"
+    assert event["metadata"] == {"assignee_ref": "owner access_token=[REDACTED]"}
+    assert "raw_assignee_secret" not in str(result)
+
+
+@pytest.mark.parametrize("bad_assignee", [None, "", "   ", 123, {"owner": "juan"}])
+def test_apply_case_action_assign_owner_rejects_missing_blank_or_non_string_assignee_ref(bad_assignee: Any):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="assign_owner",
+            actor_ref="operator@example.com",
+            assignee_ref=bad_assignee,
+        )
+
+    assert exc.value.code == "invalid_assignee_ref"
+    assert exc.value.status_code == 400
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.assignee_ref is None
+    assert len(reloaded.timeline) == len(opened.timeline)
+
+
+@pytest.mark.parametrize("bad_assignee", ["", "   "])
+def test_store_assign_case_rejects_blank_assignee_ref_without_mutation(bad_assignee: str):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(ValueError, match="assignee_ref must be non-empty"):
+        store.assign_case(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="operator@example.com",
+            assignee_ref=bad_assignee,
+            assigned_at=utc(9),
+        )
+
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.assignee_ref is None
+    assert reloaded.assigned_at is None
+    assert len(reloaded.timeline) == len(opened.timeline)
+
+
+@pytest.mark.parametrize("terminal_action", ["resolve_case", "dismiss_case"])
+def test_apply_case_action_assign_owner_rejects_terminal_cases_without_mutation(terminal_action: str):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    terminal = apply_case_action(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="dismiss_case" if terminal_action == "dismiss_case" else "acknowledge_case",
+        actor_ref="operator@example.com",
+        reason="No action needed" if terminal_action == "dismiss_case" else None,
+    )["case"]
+    if terminal_action == "resolve_case":
+        terminal = apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="resolve_case",
+            actor_ref="operator@example.com",
+        )["case"]
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="assign_owner",
+            actor_ref="operator@example.com",
+            assignee_ref="owner@example.com",
+        )
+
+    assert exc.value.code == "invalid_case_transition"
+    assert exc.value.status_code == 409
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.status == terminal["status"]
+    assert reloaded.assignee_ref is None
+    assert reloaded.assigned_at is None
+    assert len(reloaded.timeline) == len(terminal["timeline"])
+
+
 def test_apply_case_action_mark_in_progress_and_dismiss_case_update_lifecycle_with_reason():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))

@@ -25,36 +25,52 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ## Current next recommendations train
 
-After the 2026-05-25 runtime/ledger/metric/operator-comment integrations, the next safe train should stay inside the existing control-plane path and avoid owner-facing delivery changes until each projection is evidence-backed.
+### 2026-05-31 status checkpoint
+
+The 2026-05-31 integration cycle merged the two architecture-review branches that were marked merge-ready:
+
+- `codex/work-management` landed richer OperationalCase workflow/status/action behavior, including `in_progress`, assignment, source-connector-aware case projections, and queue/workflow summary endpoints.
+- `codex/connector-platform` landed registry-driven daily-report factory metadata and the registry path used by `run_enabled_connectors_daily_report_pipeline`.
+- Follow-on runtime/semantics and case-workflow commits added money/currency metric diagnostics and source/priority split operator summaries.
+
+The same review explicitly did **not** clear `codex/trust-admin-security` as Trust/Admin/Security-complete. Treat its gaps as the next integration train's first blocking item, not as a completed platform capability.
+
+Evidence checked for this checkpoint:
+
+- Git history on `feat/orvo-brain-control-plane`: `4d979c9` merged `codex/connector-platform`; `9ad3c8b` and `f3576c9` merged `codex/work-management`; later `claude/runtime-semantics` and `claude/case-workflow` merges landed through `4456d0e`; head was `4ffcc02` during this docs sync.
+- `app/brain/operational_cases.py` defines `open`, `acknowledged`, `in_progress`, `resolved`, `dismissed`, deterministic transition rules, `case_assigned`, and actionable statuses.
+- `app/brain/operator_api.py` exposes whitelisted case action keys including `assign_owner` and `mark_in_progress`, plus source connector projections derived from evidence snapshots.
+- `app/brain/connector_registry.py` defines allowlisted `ConnectorFactoryParam` / `ConnectorExecutorMetadata`; `app/brain/pipeline.py` routes multi-connector daily report execution through `_build_daily_report_for_connector_type`.
 
 Recommended order:
 
-1. **Metric registry adoption gate**
-   - Wire canonical metric validation into case detection/report generation in advisory mode first.
-   - Keep legacy aliases accepted and do not change owner-facing wording.
-   - Gate: metric registry contract tests, case-family compatibility tests, and full suite.
+1. **Trust/Admin/Security audit and authorization closure**
+   - Convert the 2026-05-31 architecture-review blockers into implementation packets before claiming Trust/Admin/Security readiness.
+   - Audit failed/denied case actions and auth failures, not only successful mutations.
+   - Add a minimal action-scope/RBAC boundary or explicitly document the branch as audit-foundation-only.
+   - Gate: internal operator API tests for rejected action keys, invalid transitions, scope failures, and auth failures proving redacted audit events are written where an actor/business can be derived.
 
-2. **Evidence snapshot canonicalization**
-   - Ensure case timeline events reference canonical persisted evidence snapshot IDs, not ad-hoc refs from transient detection inputs.
-   - Keep snapshot payloads redacted before persistence and response projection.
-   - Gate: raw SQLite/store reload assertions for snapshot/timeline IDs and secret-shaped refs.
+2. **Work-management contract cleanup after merge**
+   - Reconcile the merged workflow with the written Operational Case contract: manual `resolve_case` must require a reason, and the removal of direct `open -> resolved` needs an explicit release/contract note.
+   - Keep Jira-like follow-ups tracked but scoped: project abstraction, issue-type registry/versioning, and status categories should be separate packets rather than opportunistic central-model edits.
+   - Gate: lifecycle/action tests around resolve reasons and transition-table contract assertions.
 
-3. **Case-backed owner/operator brief dry projection**
-   - Build a dry projection from actionable Operational Cases for owner/operator review, without enabling automatic WhatsApp delivery.
-   - Exclude resolved cases, include evidence freshness, and keep total open-case counts truthful when truncating displayed cases.
-   - Gate: golden brief tests for healthy, degraded, stale-data, and truncated queues.
+3. **Connector registry runtime hardening**
+   - Move from transitional inline secret params toward runtime secret-ref resolution for Tiendanube/MercadoLibre/Meta Ads before promoting registry execution as compiled-runtime complete.
+   - Keep registry executor metadata allowlisted and avoid tenant-controlled import paths.
+   - Gate: connector registry tests proving required secret refs resolve at runtime, runtime hashes do not include secret values, and redacted failures open/update `data_stale` rather than leaking credentials.
 
-4. **Operator search/view hardening**
-   - Keep built-in case views read-only before any saved-view persistence.
-   - Align docs, route enums, JQL allowlist, business scoping, limits, and redacted error envelopes.
-   - Gate: built-in views match equivalent direct queries and SQL-looking input never reaches storage as SQL.
+4. **Semantic registry / connector family alignment**
+   - Replace typo-prone string drift in connector `emitted_metric_families` with shared semantic registry family identifiers or equivalent contract tests.
+   - Keep `channel_mix_shift` deferred/internal until channel-scoped metrics, stale-source suppression, and dedupe/entity-scope tests are green.
+   - Gate: tests fail when a connector declares a family absent from the semantic registry or emits a report/case metric outside its declared families.
 
 5. **Pilot-readiness runbook refresh**
-   - Update the Tiendanube/WhatsApp-first pilot checklist to reflect the real runtime, ledger, case, evidence, and operator-comment capabilities.
+   - Update the Tiendanube/WhatsApp-first pilot checklist to reflect the real merged runtime, ledger, case, evidence, operator-action, and source-split summary surfaces.
    - Keep WhatsApp as a projection/delivery surface, not the source of truth.
    - Gate: docs link validation, secret scan, and one dry-run operator report artifact.
 
-Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, and evidence.
+Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, and evidence and until Trust/Admin/Security blockers are either fixed or explicitly scoped out of live use.
 
 ## Branch rules
 

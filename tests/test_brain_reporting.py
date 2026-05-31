@@ -327,6 +327,56 @@ def test_alerts_sorted_by_severity_critical_first():
     assert pos_critical < pos_warning < pos_info
 
 
+def test_compose_daily_report_redacts_inline_secrets_from_labels_and_insights():
+    """Daily WhatsApp reports are dispatched artifacts and must be redacted at the
+    composition boundary, mirroring compose_owner_case_brief.
+
+    Reason: if an upstream connector or insight builder accidentally bakes a
+    bearer/access_token into a metric label, insight title, action, or evidence
+    label, the daily WhatsApp dispatch (which only truncates) would leak the raw
+    value to the owner's phone.
+    """
+    from app.brain.reporting import compose_daily_report_text
+
+    leaky_source = Evidence(
+        source="tiendanube",
+        label="Tiendanube access_token=raw_label_secret_1",
+    )
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(
+                key="revenue_today",
+                label="Ventas access_token=raw_metric_secret_2",
+                value=12000,
+                unit="ARS",
+                evidence=[leaky_source],
+            ),
+        ],
+        insights=[
+            Insight(
+                severity="warning",
+                title="ROAS bajo Bearer raw_insight_secret_3",
+                explanation="ROAS por debajo Bearer raw_insight_secret_4.",
+                recommended_action="Revisar Bearer raw_insight_secret_5.",
+                evidence=[leaky_source],
+            )
+        ],
+    )
+
+    text = compose_daily_report_text(report)
+
+    assert "raw_label_secret_1" not in text
+    assert "raw_metric_secret_2" not in text
+    assert "raw_insight_secret_3" not in text
+    assert "raw_insight_secret_4" not in text
+    assert "raw_insight_secret_5" not in text
+    # Structural surroundings should still survive redaction.
+    assert "Orvo Brain — Artemea" in text
+    assert "ROAS bajo" in text
+
+
 def test_full_report_under_1000_chars():
     """A realistic dual-channel + ads report should fit within 1000 chars."""
     from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp

@@ -71,6 +71,9 @@ Minimum fields:
   "entity_scope": {"kind": "sku", "id": "SKU-123", "label": "Campera X"},
   "opened_at": "2026-05-24T08:00:00-03:00",
   "updated_at": "2026-05-24T08:00:00-03:00",
+  "acknowledged_at": null,
+  "assigned_at": null,
+  "assignee_ref": null,
   "evidence_count": 2,
   "latest_run_id": "run_...",
   "degraded": false
@@ -98,6 +101,7 @@ Minimum events:
 - evidence attached;
 - priority updated;
 - status transition;
+- owner/operator assignment;
 - operator comment;
 - action requested/approved/completed/failed;
 - run/degraded-state reference;
