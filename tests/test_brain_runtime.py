@@ -59,6 +59,22 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
     assert [connector.connector_id for connector in runtime.connectors] == ["sheet", "tn"]
     assert runtime.connectors[0].required_params == ["spreadsheet_id", "range_name"]
     assert runtime.connectors[1].secret_param_names == ["access_token"]
+    assert runtime.connectors[1].health_policy == {
+        "readiness_check": "metadata_only",
+        "supports_health_check": False,
+        "degraded_state": "degraded",
+    }
+    assert runtime.connectors[1].required_scopes == ["orders.read", "products.read"]
+    assert runtime.connectors[1].rate_limit_policy == {
+        "default_timeout_seconds": 30,
+        "requests_per_minute": 120,
+        "retry_policy": "adapter_default",
+    }
+    assert runtime.connectors[1].lifecycle == {
+        "status": "active",
+        "owner": "orvo-brain",
+        "version": "phase-a",
+    }
     assert runtime.execution_plan.daily_connector_types == ["google_sheets", "tiendanube"]
     assert runtime.execution_plan.report_types == ["daily"]
 
@@ -81,6 +97,31 @@ def test_compile_business_runtime_rejects_missing_required_connector_params():
         compile_business_runtime(business)
 
     assert excinfo.value.errors == ["connector sheet (google_sheets) missing required params: range_name"]
+
+
+def test_compile_business_runtime_enforces_registry_supported_runtime_modes():
+    from app.brain.runtime import RuntimeCompileError, compile_business_runtime
+
+    business = make_business(
+        connectors=[
+            ConnectorConfig(
+                connector_id="sample",
+                connector_type="sample",
+                label="Manual sample",
+                params={},
+            )
+        ]
+    )
+
+    with pytest.raises(RuntimeCompileError) as excinfo:
+        compile_business_runtime(business, run_mode="scheduled")
+
+    assert excinfo.value.errors == [
+        "connector sample (sample) does not support runtime mode scheduled; supported modes: preview, operator_triggered"
+    ]
+
+    preview_runtime = compile_business_runtime(business, run_mode="preview")
+    assert preview_runtime.connectors[0].supported_runtime_modes == ["preview", "operator_triggered"]
 
 
 def test_compile_business_runtime_rejects_no_enabled_supported_connectors():
