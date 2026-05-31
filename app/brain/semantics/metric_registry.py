@@ -1148,18 +1148,26 @@ def validate_case_metric_objects(
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
     """Compose unknown_metric + case_not_allowed + evidence_missing +
-    evidence_source_mismatch + value_kind_mismatch diagnostics for
-    metric-shaped objects bound for an Operational Case detection stage.
+    evidence_source_mismatch + value_kind_mismatch + money_currency_missing
+    diagnostics for metric-shaped objects bound for an Operational Case
+    detection stage.
 
     Parallel to :func:`validate_report_metric_objects` but on the case side:
     detection inputs must be both registered and case-allowed, and they must
-    also pass evidence/value-kind sanity checks. The fixed concatenation order
-    ``unknown_metric`` -> ``case_not_allowed`` -> ``evidence_missing`` ->
-    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` keeps the result
+    also pass evidence/value-kind/currency sanity checks. The fixed
+    concatenation order ``unknown_metric`` -> ``case_not_allowed`` ->
+    ``evidence_missing`` -> ``evidence_source_mismatch`` ->
+    ``value_kind_mismatch`` -> ``money_currency_missing`` keeps the result
     deterministic and free of overlap because each downstream helper skips
-    unknown keys and the two evidence diagnostics are mutually exclusive
-    (evidence_missing fires only on zero entries, evidence_source_mismatch
-    only on non-empty collections).
+    unknown keys, the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch only
+    on non-empty collections), and money_currency_missing is scoped to a
+    disjoint canonical population (only ``unit="money"`` metrics) from
+    value_kind_mismatch (any unit kind). Money-currency lands last so
+    structural and value-type diagnostics surface before the rendering-metadata
+    diagnostic that money metrics must carry a currency string for case
+    detections to compare values unambiguously, mirroring the slot reserved by
+    :func:`validate_report_metric_objects`.
     """
 
     materialized = list(metrics)
@@ -1175,12 +1183,16 @@ def validate_case_metric_objects(
     value_kind_issues = find_value_kind_violations(
         materialized, registry=registry
     )
+    money_currency_issues = find_money_currency_violations(
+        materialized, registry=registry
+    )
     return [
         *unknown_issues,
         *case_issues,
         *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
+        *money_currency_issues,
     ]
 
 
