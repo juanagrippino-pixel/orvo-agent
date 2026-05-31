@@ -1,0 +1,27 @@
+# Worker handoff manifest — codex/contract-resolve-reason-20260531
+
+- task_id: codex-contract-resolve-reason-20260531
+- objective: Enforce the Operational Case contract that manual `resolve_case` requires a non-empty reason while preserving the strict lifecycle transition table.
+- bounded_context: Work Management Core / Operator Surfaces contract cleanup
+- worktree_path: /root/orvo-agent-worktrees/codex-contract-resolve-reason-20260531
+- branch: codex/contract-resolve-reason-20260531
+- base_sha: be281b33b8d8b8099312dc8bdd8a18696399e2ac
+- head_sha: recorded by git commit for this branch
+- status: committed
+- files_changed:
+  - app/brain/operator_api.py
+  - tests/test_operator_case_actions.py
+  - docs/workers/codex-contract-resolve-reason-20260531.md
+- tests_run:
+  - `pytest tests/test_operator_case_actions.py -q` => pass, 40 passed
+  - `pytest tests/test_operator_case_actions.py tests/test_internal_operator_api.py tests/test_brain_operational_cases.py -q` => pass, 83 passed
+  - `pytest -q` => pass, 1060 passed
+  - reviewer pass via delegated read-only review => pass, no changes requested
+- docs_updated:
+  - docs/workers/codex-contract-resolve-reason-20260531.md
+- risks:
+  - Low behavior change: operator/API callers of `resolve_case` must now provide a reason before valid transitions can resolve cases.
+  - Existing direct store-level deterministic transitions are unchanged; this slice only tightens the operator action surface.
+- secrets_checked: yes; changed files contain no tokens/secrets and test literals use safe placeholder identities/reasons only.
+- integration_notes: Based on current `feat/orvo-brain-control-plane`; supersedes the stale/divergent `codex/require-resolve-reason-20260531` branch for this narrow contract fix. Merge after review; no migrations or rollout steps required.
+- recommended_next_action: merge
