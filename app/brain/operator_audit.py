@@ -63,3 +63,55 @@ class SQLiteOperatorAuditStore:
         )
         self._conn.commit()
         return event_id
+
+    def list_events(self, *, business_id: str, limit: int) -> list[dict[str, Any]]:
+        """Return newest audit events for one business with payloads redacted.
+
+        The store keeps reads scoped by ``business_id`` so operator/API callers
+        cannot accidentally page across tenant boundaries. ``limit`` is expected
+        to be validated by the service layer before it reaches storage.
+        """
+
+        rows = self._conn.execute(
+            """
+            SELECT event_id, business_id, actor_ref, event_type, target_type,
+                   target_id, request_id, created_at, data
+            FROM operator_audit_events
+            WHERE business_id = ?
+            ORDER BY created_at DESC, event_id DESC
+            LIMIT ?
+            """,
+            (business_id, limit),
+        ).fetchall()
+        events: list[dict[str, Any]] = []
+        for (
+            event_id,
+            row_business_id,
+            actor_ref,
+            event_type,
+            target_type,
+            target_id,
+            request_id,
+            created_at,
+            raw_data,
+        ) in rows:
+            try:
+                data = json.loads(raw_data)
+            except (TypeError, json.JSONDecodeError):
+                data = {"value": raw_data}
+            events.append(
+                redact_secrets(
+                    {
+                        "event_id": event_id,
+                        "business_id": row_business_id,
+                        "actor_ref": actor_ref,
+                        "event_type": event_type,
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "request_id": request_id,
+                        "created_at": created_at,
+                        "data": data,
+                    }
+                )
+            )
+        return events

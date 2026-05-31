@@ -69,6 +69,16 @@ POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 
 Actions must use registered action keys and append timeline events.
 
+### Audit events
+
+```http
+GET /internal/brain/businesses/{business_id}/audit-events
+```
+
+Returns newest internal operator audit events for the requested business only,
+bounded by `limit`, redacted at the API boundary, and never including raw request
+credentials or cross-business rows.
+
 ## Response envelope
 
 ```json
@@ -118,4 +128,5 @@ Before exposing beyond local/dev:
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - case action rejects unknown action keys;
+- audit event list is business-scoped, bounded, and redacted;
 - responses include `redaction_applied=true`.

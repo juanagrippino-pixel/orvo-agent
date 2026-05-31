@@ -47,6 +47,7 @@ from app.brain.operator_api import (
     list_builtin_case_views,
     list_case_queue,
     list_case_timeline,
+    list_operator_audit_events,
     list_run_history,
     list_top_actionable_cases_by_priority,
     summarize_case_queue,
@@ -438,6 +439,22 @@ def internal_brain_case_action(business_id: str, case_id: str):
         return _internal_success(business_id, result)
 
     return _with_internal_stores(business_id, _handle, include_audit=True)
+
+
+@app.get("/internal/brain/businesses/<business_id>/audit-events")
+def internal_brain_audit_events(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger, audit_store: _internal_success(
+            business_id,
+            list_operator_audit_events(
+                audit_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+            ),
+        ),
+        include_audit=True,
+    )
 
 
 @app.get("/internal/brain/businesses/<business_id>/runs")

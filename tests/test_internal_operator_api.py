@@ -12,6 +12,7 @@ from app.brain.operational_cases import (
     OperationalCaseType,
     SQLiteOperationalCaseStore,
 )
+from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, RunStatus, SQLiteRunLedger
 from app.brain.storage import init_schema
 
@@ -592,3 +593,86 @@ def test_internal_viewer_role_can_read_operator_projections(monkeypatch, tmp_pat
 
     assert response.status_code == 200
     assert response.get_json()["data"]["cases"][0]["business_id"] == "artemea"
+
+
+def test_internal_audit_events_endpoint_is_business_scoped_limited_and_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    audit_store = SQLiteOperatorAuditStore(conn)
+    raw_audit_secret = "raw_audit_export_secret"
+    older_event = audit_store.append_event(
+        business_id="artemea",
+        actor_ref="operator:ana",
+        event_type="case_action_applied",
+        target_type="operational_case",
+        target_id="case-old",
+        request_id="req-old",
+        created_at=_utc(7),
+        data={"comment": f"Authorization: Bearer {raw_audit_secret}", "status": "succeeded"},
+    )
+    newest_event = audit_store.append_event(
+        business_id="artemea",
+        actor_ref="operator:juan",
+        event_type="internal_operator_authorization_denied",
+        target_type="operational_case",
+        target_id="case-new",
+        request_id="req-new",
+        created_at=_utc(8),
+        data={"api_key": raw_audit_secret, "status": "denied"},
+    )
+    audit_store.append_event(
+        business_id="other",
+        actor_ref="operator:evil",
+        event_type="case_action_applied",
+        target_type="operational_case",
+        target_id="case-other",
+        request_id="req-other",
+        created_at=_utc(9),
+        data={"comment": raw_audit_secret},
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/audit-events?limit=1",
+        headers={**AUTH, "X-Orvo-Role": "viewer", "X-Request-ID": "req-audit-list"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert raw_audit_secret not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["request_id"] == "req-audit-list"
+    assert body["redaction_applied"] is True
+    assert body["data"]["limit"] == 1
+    assert body["data"]["has_more"] is True
+    assert body["data"]["events"] == [
+        {
+            "event_id": newest_event,
+            "business_id": "artemea",
+            "actor_ref": "operator:juan",
+            "event_type": "internal_operator_authorization_denied",
+            "target_type": "operational_case",
+            "target_id": "case-new",
+            "request_id": "req-new",
+            "created_at": "2026-05-24T08:00:00Z",
+            "data": {"api_key": "[REDACTED]", "status": "denied"},
+        }
+    ]
+    assert older_event not in raw_body
+
+
+def test_internal_audit_events_endpoint_rejects_invalid_limit(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/audit-events?limit=0",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"]["code"] == "invalid_limit"
+    assert body["redaction_applied"] is True

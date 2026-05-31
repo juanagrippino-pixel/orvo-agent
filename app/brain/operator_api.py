@@ -2785,6 +2785,26 @@ def get_run_projection(ledger: RunLedger, *, business_id: str, run_id: str) -> d
     return {"run": run_detail(get_scoped_run(ledger, business_id=business_id, run_id=run_id))}
 
 
+def list_operator_audit_events(audit_store: Any, *, business_id: str, limit: str | None) -> dict[str, Any]:
+    """Return a bounded, business-scoped audit event projection.
+
+    Audit storage is the source of truth; this service only validates the public
+    query boundary, reads one extra row for a deterministic ``has_more`` flag,
+    and redacts again before returning an operator-facing payload.
+    """
+
+    parsed_limit = parse_limit(limit)
+    events = audit_store.list_events(business_id=business_id, limit=parsed_limit + 1)
+    visible_events = events[:parsed_limit]
+    return redact_secrets(
+        {
+            "events": visible_events,
+            "limit": parsed_limit,
+            "has_more": len(events) > parsed_limit,
+        }
+    )
+
+
 def get_operator_dashboard(
     store: OperationalCaseStore,
     ledger: RunLedger,
