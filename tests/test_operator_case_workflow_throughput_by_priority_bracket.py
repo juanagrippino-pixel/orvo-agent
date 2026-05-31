@@ -90,6 +90,7 @@ def test_summarize_case_workflow_throughput_by_priority_bracket_splits_latencies
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(12),
     )
     # high B: opened 08:00, acknowledged 09:00 (+1h) only.
@@ -133,6 +134,7 @@ def test_summarize_case_workflow_throughput_by_priority_bracket_splits_latencies
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(18),
     )
     # low D: opened 08:00 and still open — counts toward totals only.

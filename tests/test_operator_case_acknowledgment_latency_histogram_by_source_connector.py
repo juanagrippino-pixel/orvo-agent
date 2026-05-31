@@ -238,6 +238,7 @@ def test_acknowledgment_latency_histogram_by_source_connector_includes_resolved_
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=opened_at + timedelta(hours=6),
     )
 

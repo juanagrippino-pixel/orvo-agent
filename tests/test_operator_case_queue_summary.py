@@ -128,6 +128,7 @@ def _seed_mixed_queue() -> InMemoryOperationalCaseStore:
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(12),
     )
     # Cross-business case must be excluded by scoping.

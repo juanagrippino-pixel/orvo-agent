@@ -62,6 +62,7 @@ def _resolve(
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=resolved_at,
     )
 
