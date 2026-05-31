@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
+    TERMINAL_OPERATIONAL_CASE_STATUSES,
     ActorType,
     OperationalCase,
     OperationalCaseStatus,
@@ -236,6 +237,7 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "assigned_at": _iso(case.assigned_at),
             "assignee_ref": case.assignee_ref,
             "resolved_at": _iso(case.resolved_at),
+            "dismissed_at": _iso(case.dismissed_at),
             "latest_run_id": case.latest_run_id,
             "source_run_ids": case.source_run_ids,
             "evidence_refs": case.evidence_refs,
@@ -3264,15 +3266,20 @@ def apply_case_action(
         "dismiss_case": ("dismissed", "Dismissed by operator."),
     }
     target_status, default_reason = action_targets[action_key]
-    if action_key == "dismiss_case" and (not isinstance(reason, str) or not reason.strip()):
-        raise OperatorAPIError("missing_case_action_reason", "dismiss_case requires a non-empty reason", status_code=400)
+    provided_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
+    if target_status in TERMINAL_OPERATIONAL_CASE_STATUSES and provided_reason is None:
+        raise OperatorAPIError(
+            "missing_case_action_reason",
+            f"{action_key} requires a non-empty reason",
+            status_code=400,
+        )
     try:
         updated = store.transition_case(
             case.case_id,
             status=target_status,
             actor_type="operator",
             actor_ref=effective_actor_ref,
-            reason=reason.strip() if isinstance(reason, str) and reason.strip() else default_reason,
+            reason=provided_reason or default_reason,
         )
     except OperationalCaseStatusError as exc:
         raise OperatorAPIError("invalid_case_transition", str(exc), status_code=409) from exc

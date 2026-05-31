@@ -200,6 +200,7 @@ def test_summarize_case_queue_stagnation_by_severity_excludes_resolved_cases():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved during severity stagnation fixture setup.",
         transitioned_at=NOW - timedelta(days=18),
     )
 

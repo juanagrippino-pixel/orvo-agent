@@ -197,6 +197,7 @@ def test_list_top_stalled_actionable_cases_excludes_resolved_cases():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=NOW - timedelta(days=18),
     )
 
