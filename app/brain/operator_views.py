@@ -19,6 +19,7 @@ from app.brain.operational_cases import (
     OperationalCaseType,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
+from app.brain.operator_case_projections import is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets
 
 _MAX_JQL_LENGTH = 512
@@ -30,7 +31,7 @@ _ALLOWED_STATUS = set(get_args(OperationalCaseStatus))
 _ALLOWED_CASE_TYPES = set(get_args(OperationalCaseType))
 _ALLOWED_SEVERITY = set(get_args(OperationalCaseSeverity))
 
-FieldType = Literal["enum", "int", "string", "datetime"]
+FieldType = Literal["bool", "enum", "int", "string", "datetime"]
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ _FIELD_SPECS: dict[str, FieldSpec] = {
     "entity.label": FieldSpec("string", None, frozenset({"=", "!="})),
     "latest_run_id": FieldSpec("string"),
     "source_connector": FieldSpec("string"),
+    "degraded": FieldSpec("bool", None, frozenset({"=", "!="})),
     "dedupe_key": FieldSpec("string", None, frozenset({"=", "!="})),
     "opened_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
     "updated_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
@@ -133,6 +135,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "label": "Stock risks",
         "description": "Open, acknowledged, or in-progress stockout risk cases.",
         "jql": "case_type = stockout_risk AND status IN (open, acknowledged, in_progress) ORDER BY priority_score DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "connector_degraded",
+        "label": "Connector degraded",
+        "description": "Actionable cases whose evidence is stale, degraded, or missing.",
+        "jql": "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC",
         "readonly": True,
     },
 )
@@ -275,6 +284,10 @@ def _coerce_value(field: str, raw_value: str, spec: FieldSpec) -> Any:
         if parsed_dt.tzinfo is None or parsed_dt.utcoffset() is None:
             raise OperatorAPIError("unsupported_jql_value", f"Expected timezone-aware ISO datetime for {field}", status_code=400)
         return parsed_dt
+    if spec.value_type == "bool":
+        if value not in {"true", "false"}:
+            raise OperatorAPIError("unsupported_jql_value", f"Expected boolean for {field}", status_code=400)
+        return value == "true"
     return value
 
 
@@ -287,6 +300,8 @@ def _unquote(value: str) -> str:
 def _format_value(value: Any) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, bool):
+        return "true" if value else "false"
     return str(value)
 
 
@@ -320,7 +335,7 @@ def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
 
 
 def _case_source_connectors(case: OperationalCase) -> tuple[str, ...]:
-    return tuple(sorted({snapshot.source for snapshot in case.evidence_snapshots if snapshot.source}))
+    return tuple(source_connectors(case))
 
 
 def _matches_source_connector(case: OperationalCase, clause: CaseJQLClause) -> bool:
@@ -342,6 +357,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case.entity_scope.get("id")
     if field == "entity.label":
         return case.entity_scope.get("label")
+    if field == "degraded":
+        return is_case_degraded(case)
     return getattr(case, field)
 
 
