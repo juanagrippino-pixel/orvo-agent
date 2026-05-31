@@ -672,6 +672,58 @@ def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envel
     assert data["most_stalled_actionable"]["case_type"] == "stockout_risk"
 
 
+def test_internal_top_actionable_by_age_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    newest = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-newest",
+            dedupe_suffix="stockout_risk/product/sku-newest/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    oldest = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            run_id="run-artemea-oldest",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=4),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-oldest",
+            dedupe_suffix="stockout_risk/product/sku-other/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=20),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/top-by-age?limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["limit"] == 1
+    assert data["count"] == 1
+    assert data["cases"][0]["case_id"] == oldest.case_id
+    assert data["cases"][0]["case_type"] == "sales_drop"
+    assert newest.case_id not in {case["case_id"] for case in data["cases"]}
+
+
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())
