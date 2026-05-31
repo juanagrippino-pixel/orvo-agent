@@ -452,6 +452,104 @@ def summarize_case_queue_by_priority_bracket(
     )
 
 
+def summarize_case_queue_by_case_type(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Case-type-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but groups lifecycle, actionable, and
+    actionable-degraded counts by ``case.case_type``
+    (stockout_risk/sales_drop/data_stale/etc.), matching the attribution used
+    by :func:`summarize_case_queue_aging_by_case_type` and
+    :func:`summarize_case_workflow_throughput_by_case_type`. Lets operator
+    surfaces lead with which case family dominates the in-flight backlog even
+    when severity / priority distributions look balanced — a stockout_risk
+    wave or a data_stale spike often hides inside healthy aggregate counts.
+    ``total`` counts the full lifecycle (open + acknowledged + resolved);
+    ``actionable_*`` counts isolate the in-flight slice. Strictly scoped per
+    tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_case_type: dict[str, int] = {}
+    actionable_by_case_type: dict[str, int] = {}
+    actionable_degraded_by_case_type: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        case_type = case.case_type
+        totals_by_case_type[case_type] = totals_by_case_type.get(case_type, 0) + 1
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_case_type[case_type] = (
+                actionable_by_case_type.get(case_type, 0) + 1
+            )
+            if _is_degraded(case):
+                actionable_degraded_by_case_type[case_type] = (
+                    actionable_degraded_by_case_type.get(case_type, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_case_type": totals_by_case_type,
+            "actionable_by_case_type": actionable_by_case_type,
+            "actionable_degraded_by_case_type": actionable_degraded_by_case_type,
+        }
+    )
+
+
+def summarize_case_queue_by_entity_kind(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Entity-kind-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but groups lifecycle, actionable, and
+    actionable-degraded counts by ``entity_scope.kind`` (product / channel /
+    business / connector / etc.), matching the attribution used by
+    :func:`summarize_case_queue_aging_by_entity_kind`,
+    :func:`summarize_case_queue_stagnation_by_entity_kind`, and
+    :func:`summarize_case_workflow_throughput_by_entity_kind`. Lets operator
+    surfaces lead with which scope dominates the in-flight backlog even when
+    severity / case_type / source distributions look balanced — for example, a
+    wave of product-scoped stockouts often hides inside healthy aggregate
+    counts. Cases whose ``entity_scope`` lacks a ``kind`` are bucketed under
+    ``"unknown"`` so totals never silently drop. ``total`` counts the full
+    lifecycle (open + acknowledged + resolved); ``actionable_*`` counts isolate
+    the in-flight slice. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_entity_kind: dict[str, int] = {}
+    actionable_by_entity_kind: dict[str, int] = {}
+    actionable_degraded_by_entity_kind: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        entity_kind = case.entity_scope.get("kind") or "unknown"
+        totals_by_entity_kind[entity_kind] = (
+            totals_by_entity_kind.get(entity_kind, 0) + 1
+        )
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_entity_kind[entity_kind] = (
+                actionable_by_entity_kind.get(entity_kind, 0) + 1
+            )
+            if _is_degraded(case):
+                actionable_degraded_by_entity_kind[entity_kind] = (
+                    actionable_degraded_by_entity_kind.get(entity_kind, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_entity_kind": totals_by_entity_kind,
+            "actionable_by_entity_kind": actionable_by_entity_kind,
+            "actionable_degraded_by_entity_kind": actionable_degraded_by_entity_kind,
+        }
+    )
+
+
 def summarize_case_queue_by_source_connector(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
@@ -1193,6 +1291,75 @@ def summarize_case_queue_aging_by_priority_bracket(
             "actionable_total": actionable_total,
             "by_age_bucket": buckets,
             "by_age_bucket_priority_bracket": bracket_by_bucket,
+            "oldest_actionable": oldest_payload,
+        }
+    )
+
+
+def summarize_case_queue_aging_by_severity(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Severity-split age histogram for actionable cases in a business.
+
+    Mirrors :func:`summarize_case_queue_aging_by_priority_bracket` but groups
+    each age bucket by case severity (info / warning / critical) instead of
+    priority bracket, matching the attribution used by
+    :func:`summarize_case_workflow_throughput_by_severity`. Operator surfaces
+    use it to spot when criticals are aging dangerously even when the overall
+    age distribution and case_type / entity_kind / source-connector /
+    priority-bracket splits look healthy — a single old ``critical`` hiding in
+    ``over_7d`` is materially different from an old ``info`` there. Open and
+    acknowledged cases are both counted as actionable. Strictly scoped per
+    tenant; ``now`` is injectable for deterministic tests and defaults to
+    current UTC.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    severity_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    actionable_total = 0
+    oldest_age = -1
+    oldest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        actionable_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(age_seconds)
+        buckets[bucket] += 1
+        severity = case.severity
+        severity_counts = severity_by_bucket[bucket]
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        if age_seconds > oldest_age:
+            oldest_age = age_seconds
+            oldest_case = case
+    oldest_payload: dict[str, Any] | None = None
+    if oldest_case is not None:
+        oldest_payload = {
+            "case_id": oldest_case.case_id,
+            "case_type": oldest_case.case_type,
+            "status": oldest_case.status,
+            "severity": oldest_case.severity,
+            "opened_at": oldest_case.opened_at.isoformat(),
+            "age_seconds": oldest_age,
+        }
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_total": actionable_total,
+            "by_age_bucket": buckets,
+            "by_age_bucket_severity": severity_by_bucket,
             "oldest_actionable": oldest_payload,
         }
     )
