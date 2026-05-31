@@ -3191,7 +3191,7 @@ def list_case_action_catalog(*, business_id: str) -> dict[str, Any]:
             "mode": "manual_operator_mutation",
             "api_enabled": "resolve_case" in enabled,
             "status_effect": "resolved",
-            "requires_reason": False,
+            "requires_reason": True,
             "requires_comment": False,
             "approval_required": False,
         },
@@ -3295,8 +3295,12 @@ def apply_case_action(
         "dismiss_case": ("dismissed", "Dismissed by operator."),
     }
     target_status, default_reason = action_targets[action_key]
-    if action_key == "dismiss_case" and (not isinstance(reason, str) or not reason.strip()):
-        raise OperatorAPIError("missing_case_action_reason", "dismiss_case requires a non-empty reason", status_code=400)
+    if action_key in {"resolve_case", "dismiss_case"} and (not isinstance(reason, str) or not reason.strip()):
+        raise OperatorAPIError(
+            "missing_case_action_reason",
+            f"{action_key} requires a non-empty reason",
+            status_code=400,
+        )
     try:
         updated = store.transition_case(
             case.case_id,

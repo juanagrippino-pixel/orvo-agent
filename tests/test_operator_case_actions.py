@@ -368,6 +368,7 @@ def test_apply_case_action_assign_owner_rejects_terminal_cases_without_mutation(
             case_id=opened.case_id,
             action_key="resolve_case",
             actor_ref="operator@example.com",
+            reason="Recovered after owner follow-up",
         )["case"]
 
     with pytest.raises(OperatorAPIError) as exc:
@@ -421,24 +422,36 @@ def test_apply_case_action_mark_in_progress_and_dismiss_case_update_lifecycle_wi
     assert dismissed["case"]["timeline"][-1]["summary"] == "False positive after physical stock count"
 
 
+@pytest.mark.parametrize("terminal_action", ["resolve_case", "dismiss_case"])
 @pytest.mark.parametrize("bad_reason", [None, "", "   "])
-def test_apply_case_action_dismiss_case_requires_reason(bad_reason: str | None):
+def test_apply_case_action_terminal_actions_require_reason(terminal_action: str, bad_reason: str | None):
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    if terminal_action == "resolve_case":
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="acknowledge_case",
+            actor_ref="operator@example.com",
+        )
 
     with pytest.raises(OperatorAPIError) as exc:
         apply_case_action(
             store,
             business_id="artemea",
             case_id=opened.case_id,
-            action_key="dismiss_case",
+            action_key=terminal_action,
             actor_ref="operator@example.com",
             reason=bad_reason,
         )
 
     assert exc.value.code == "missing_case_action_reason"
     assert exc.value.status_code == 400
-    assert store.get_case(opened.case_id).status == "open"
+    expected_status = "acknowledged" if terminal_action == "resolve_case" else "open"
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.status == expected_status
 
 
 @pytest.mark.parametrize("action_key", ["acknowledge_case", "mark_in_progress", "resolve_case", "dismiss_case"])

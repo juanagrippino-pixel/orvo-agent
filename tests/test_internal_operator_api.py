@@ -700,6 +700,7 @@ def test_internal_case_action_catalog_returns_auth_scoped_redacted_action_contra
     assert actions["assign_owner"]["api_enabled"] is True
     assert actions["assign_owner"]["input_fields"] == ["assignee_ref"]
     assert actions["assign_owner"]["status_effect"] is None
+    assert actions["resolve_case"]["requires_reason"] is True
     assert actions["dismiss_case"]["requires_reason"] is True
     assert actions["request_external_action"]["approval_required"] is True
     assert actions["request_external_action"]["api_enabled"] is False
