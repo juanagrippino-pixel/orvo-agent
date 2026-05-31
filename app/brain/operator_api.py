@@ -20,7 +20,14 @@ from app.brain.operational_cases import (
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 
-CaseActionKey = Literal["acknowledge_case", "mark_in_progress", "resolve_case", "dismiss_case", "add_comment"]
+CaseActionKey = Literal[
+    "acknowledge_case",
+    "assign_owner",
+    "mark_in_progress",
+    "resolve_case",
+    "dismiss_case",
+    "add_comment",
+]
 _ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
@@ -124,6 +131,18 @@ def normalize_operator_actor(actor_ref: Any, actor: Any) -> str:
     return normalized
 
 
+def normalize_case_assignee(assignee_ref: Any, owner_ref: Any) -> str:
+    effective_assignee_ref = assignee_ref if assignee_ref is not None else owner_ref
+    if effective_assignee_ref is None:
+        raise OperatorAPIError("invalid_assignee_ref", "assignee_ref must be a non-empty string", status_code=400)
+    if not isinstance(effective_assignee_ref, str):
+        raise OperatorAPIError("invalid_assignee_ref", "assignee_ref must be a non-empty string", status_code=400)
+    normalized = effective_assignee_ref.strip()
+    if not normalized:
+        raise OperatorAPIError("invalid_assignee_ref", "assignee_ref must be a non-empty string", status_code=400)
+    return normalized
+
+
 def case_queue_item(case: OperationalCase) -> dict[str, Any]:
     return redact_secrets(
         {
@@ -137,6 +156,9 @@ def case_queue_item(case: OperationalCase) -> dict[str, Any]:
             "entity_scope": case.entity_scope,
             "opened_at": case.opened_at.isoformat(),
             "updated_at": case.updated_at.isoformat(),
+            "acknowledged_at": _iso(case.acknowledged_at),
+            "assigned_at": _iso(case.assigned_at),
+            "assignee_ref": case.assignee_ref,
             "evidence_count": len(case.evidence_refs),
             "evidence_snapshot_count": len(case.evidence_snapshots),
             "latest_evidence_at": _iso(_latest_evidence_at(case)),
@@ -210,6 +232,8 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "opened_at": _iso(case.opened_at),
             "updated_at": _iso(case.updated_at),
             "acknowledged_at": _iso(case.acknowledged_at),
+            "assigned_at": _iso(case.assigned_at),
+            "assignee_ref": case.assignee_ref,
             "resolved_at": _iso(case.resolved_at),
             "latest_run_id": case.latest_run_id,
             "source_run_ids": case.source_run_ids,
@@ -2811,6 +2835,8 @@ def apply_case_action(
     reason: str | None = None,
     comment: Any = None,
     metadata: dict[str, Any] | None = None,
+    assignee_ref: Any = None,
+    owner_ref: Any = None,
 ) -> dict[str, Any]:
     if action_key not in _ALLOWED_CASE_ACTIONS:
         raise OperatorAPIError("unknown_action_key", f"unknown action_key: {action_key}", status_code=400)
@@ -2827,6 +2853,19 @@ def apply_case_action(
             comment=comment.strip(),
             metadata=metadata,
         )
+        return {"case": case_detail(updated)}
+
+    if action_key == "assign_owner":
+        normalized_assignee_ref = normalize_case_assignee(assignee_ref, owner_ref)
+        try:
+            updated = store.assign_case(
+                case.case_id,
+                actor_type="operator",
+                actor_ref=effective_actor_ref,
+                assignee_ref=normalized_assignee_ref,
+            )
+        except OperationalCaseStatusError as exc:
+            raise OperatorAPIError("invalid_case_transition", str(exc), status_code=409) from exc
         return {"case": case_detail(updated)}
 
     action_targets: dict[str, tuple[OperationalCaseStatus, str]] = {

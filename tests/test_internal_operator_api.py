@@ -251,6 +251,37 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
     assert "raw_action_secret" not in reloaded.model_dump_json()
 
 
+def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "assign_owner", "owner_ref": "dueña access_token=raw_owner_secret"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_owner_secret" not in raw_body
+    body = response.get_json()
+    assigned = body["data"]["case"]
+    assert assigned["status"] == "open"
+    assert assigned["assignee_ref"] == "dueña access_token=[REDACTED]"
+    assert assigned["assigned_at"] is not None
+    assert assigned["timeline"][-1]["event_type"] == "case_assigned"
+    assert assigned["timeline"][-1]["metadata"] == {"assignee_ref": "dueña access_token=[REDACTED]"}
+    assert body["redaction_applied"] is True
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.assignee_ref == "dueña access_token=[REDACTED]"
+    assert reloaded.status == "open"
+    assert "raw_owner_secret" not in reloaded.model_dump_json()
+
+
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_run(db_path, business_id="artemea", run_id="run-artemea")
