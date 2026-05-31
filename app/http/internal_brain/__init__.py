@@ -7,6 +7,7 @@ from .cases_summary import register_case_summary_routes
 from .dashboard_views import register_dashboard_view_routes
 from .operator_audit import register_operator_audit_routes
 from .runs_delivery import register_run_delivery_routes
+from .service_management import register_service_management_routes
 from .session import register_session_routes
 
 
@@ -19,3 +20,4 @@ def register_internal_brain_routes(app):
     register_dashboard_view_routes(app)
     register_operator_audit_routes(app)
     register_run_delivery_routes(app)
+    register_service_management_routes(app)
