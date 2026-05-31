@@ -198,6 +198,33 @@ def test_internal_case_detail_cannot_cross_business_scope(monkeypatch, tmp_path)
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_action_cannot_cross_business_scope_or_mutate_foreign_case(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    other_case = _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{other_case.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "acknowledge_case"},
+    )
+
+    assert response.status_code == 404
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "case_not_found"
+    assert body["redaction_applied"] is True
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(other_case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.business_id == "other"
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(other_case.timeline)
+    assert all(event.actor_ref != "operator:juan" for event in reloaded.timeline)
+
+
 def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
