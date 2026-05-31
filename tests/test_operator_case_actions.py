@@ -422,6 +422,25 @@ def test_apply_case_action_mark_in_progress_and_dismiss_case_update_lifecycle_wi
     assert dismissed["case"]["timeline"][-1]["summary"] == "False positive after physical stock count"
 
 
+def test_apply_case_action_resolve_case_still_requires_acknowledged_state_with_reason():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="resolve_case",
+            actor_ref="operator@example.com",
+            reason="Resolved after owner follow-up",
+        )
+
+    assert exc.value.code == "invalid_case_transition"
+    assert exc.value.status_code == 409
+    assert store.get_case(opened.case_id) == opened
+
+
 @pytest.mark.parametrize("action_key", ["resolve_case", "dismiss_case"])
 @pytest.mark.parametrize("bad_reason", [None, "", "   "])
 def test_apply_case_action_terminal_actions_require_reason(action_key: str, bad_reason: str | None):
