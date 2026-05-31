@@ -1759,6 +1759,56 @@ def summarize_case_workflow_throughput_by_source_connector(
     )
 
 
+def summarize_case_workflow_throughput_by_priority_bracket(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Priority-bracket-split lifecycle latency aggregates for cases in a business.
+
+    Mirrors :func:`summarize_case_workflow_throughput_by_source_connector` but
+    groups every count and latency aggregate by deterministic priority bracket
+    (low / medium / high) derived from ``case.priority_score`` via
+    :func:`_classify_priority_bracket`. Operator surfaces use this to spot when
+    high-priority cases drag acknowledgment or resolution time even though
+    severity, case_type, entity_kind and source-connector aggregates look
+    healthy. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_bracket: dict[str, int] = {}
+    ack_by_bracket: dict[str, int] = {}
+    resolve_by_bracket: dict[str, int] = {}
+    ack_latencies_by_bracket: dict[str, list[int]] = {}
+    resolve_latencies_by_bracket: dict[str, list[int]] = {}
+    for case in cases:
+        bracket = _classify_priority_bracket(case.priority_score)
+        totals_by_bracket[bracket] = totals_by_bracket.get(bracket, 0) + 1
+        if case.acknowledged_at is not None:
+            ack_latency = int((case.acknowledged_at - case.opened_at).total_seconds())
+            ack_by_bracket[bracket] = ack_by_bracket.get(bracket, 0) + 1
+            ack_latencies_by_bracket.setdefault(bracket, []).append(ack_latency)
+        if case.resolved_at is not None:
+            resolve_latency = int((case.resolved_at - case.opened_at).total_seconds())
+            resolve_by_bracket[bracket] = resolve_by_bracket.get(bracket, 0) + 1
+            resolve_latencies_by_bracket.setdefault(bracket, []).append(resolve_latency)
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "totals_by_priority_bracket": totals_by_bracket,
+            "acknowledged_by_priority_bracket": ack_by_bracket,
+            "resolved_by_priority_bracket": resolve_by_bracket,
+            "time_to_acknowledge_seconds_by_priority_bracket": {
+                bracket: _latency_summary(values)
+                for bracket, values in ack_latencies_by_bracket.items()
+            },
+            "time_to_resolve_seconds_by_priority_bracket": {
+                bracket: _latency_summary(values)
+                for bracket, values in resolve_latencies_by_bracket.items()
+            },
+        }
+    )
+
+
 def summarize_case_resolution_latency_histogram(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
