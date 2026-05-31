@@ -2383,3 +2383,235 @@ def test_validate_freshness_envelope_metric_objects_is_reexported_from_semantics
 
     assert hasattr(semantics, "validate_freshness_envelope_metric_objects")
     assert "validate_freshness_envelope_metric_objects" in semantics.__all__
+
+
+def test_money_currency_helper_flags_money_metric_missing_currency_context():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # commerce.revenue.total has canonical unit="money"; runtime metric objects
+    # must carry a non-empty unit (currency code) so reports can render the
+    # value with currency context. A missing unit must be reported.
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=120000,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+    ]
+
+    violations = find_money_currency_violations(metrics)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("money_currency_missing", "commerce.revenue.total", 1, "warning"),
+    ]
+    assert "commerce.revenue.total" in violations[0].message
+    assert "money" in violations[0].message
+
+
+def test_money_currency_helper_resolves_aliases_before_checking_unit_kind():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # revenue_today is an alias for commerce.revenue.total (unit="money"); the
+    # diagnostic must resolve the alias and surface the canonical key in the
+    # message.
+    metrics = [
+        Metric(
+            key="revenue_today",
+            label="Ventas",
+            value=90000,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+    ]
+    violations = find_money_currency_violations(metrics)
+    assert len(violations) == 1
+    assert violations[0].key == "revenue_today"
+    assert "commerce.revenue.total" in violations[0].message
+
+
+def test_money_currency_helper_returns_empty_when_money_metrics_carry_currency():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    metrics = [
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=120000,
+            unit="ARS",
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="ad_spend_today",
+            label="Spend",
+            value=1500,
+            unit="USD",
+            evidence=[_evidence("meta_ads")],
+        ),
+    ]
+    assert find_money_currency_violations(metrics) == []
+
+
+def test_money_currency_helper_skips_non_money_metrics():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # commerce.orders.count (unit="count") and runtime.freshness.age_seconds
+    # (unit="duration") have non-money unit kinds; their unit field is
+    # irrelevant to the money-currency check and must never be flagged.
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="runtime.freshness.age_seconds",
+            label="Freshness",
+            value=300,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+    ]
+    assert find_money_currency_violations(metrics) == []
+
+
+def test_money_currency_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    metrics = [
+        {
+            "key": "never_registered_metric",
+            "value": 1000,
+            "unit": None,
+            "evidence": [{"source": "sample", "label": "s"}],
+        },
+    ]
+    assert find_money_currency_violations(metrics) == []
+
+
+def test_money_currency_helper_treats_empty_string_unit_as_missing():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # An empty-string unit is semantically the same as no currency context for
+    # a money metric; both must produce a diagnostic.
+    metrics = [
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": "",
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": "   ",
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+    ]
+    violations = find_money_currency_violations(metrics)
+    assert [(issue.code, issue.index) for issue in violations] == [
+        ("money_currency_missing", 0),
+        ("money_currency_missing", 1),
+    ]
+
+
+def test_money_currency_helper_rejects_non_string_unit():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # A non-string unit on a money metric is a contract violation the helper
+    # must surface explicitly rather than silently coercing.
+    metrics = [
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": 123,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+    ]
+    with pytest.raises(ValueError, match="unit"):
+        find_money_currency_violations(metrics)
+
+
+def test_money_currency_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    metrics = [
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": None,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "unit": None,
+            "evidence": [{"source": "meta_ads", "label": "ma"}],
+        },
+    ]
+    first = find_money_currency_violations(metrics)
+    second = find_money_currency_violations(metrics)
+    assert first == second
+    assert [issue.key for issue in first] == [
+        "commerce.revenue.total",
+        "ad_spend_today",
+    ]
+
+
+def test_money_currency_helper_rejects_metrics_missing_key_field():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    with pytest.raises(ValueError, match="key"):
+        find_money_currency_violations(
+            [{"label": "no key", "value": 1, "unit": "ARS", "evidence": []}]
+        )
+
+
+def test_money_currency_helper_threads_custom_registry_into_alias_resolution():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_money_currency_violations,
+    )
+
+    # A custom registry can declare new money metrics; the helper must use the
+    # passed registry rather than the process-wide default for resolution.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="custom.margin.total",
+                family="custom.margin",
+                label="Margin",
+                unit="money",
+                allowed_sources=("sample",),
+                aliases=("margin_today",),
+                aggregation="sum",
+                case_allowed=False,
+                report_allowed=True,
+            ),
+        )
+    )
+
+    metrics = [
+        {"key": "custom.margin.total", "value": 5000, "unit": None, "evidence": []},
+        {"key": "margin_today", "value": 4000, "unit": "ARS", "evidence": []},
+    ]
+    violations = find_money_currency_violations(metrics, registry=registry)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("money_currency_missing", "custom.margin.total", 0),
+    ]
+
+
+def test_money_currency_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_money_currency_violations")
+    assert "find_money_currency_violations" in semantics.__all__
