@@ -55,6 +55,7 @@ from app.brain.operator_api import (
     summarize_case_queue_stagnation,
     summarize_case_queue_stagnation_by_priority_bracket,
     summarize_case_workflow_throughput,
+    summarize_case_workflow_throughput_by_priority_bracket,
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 from app.brain.delivery_status import (
@@ -258,6 +259,20 @@ def internal_brain_workflow_throughput(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_workflow_throughput(
+                case_store,
+                business_id=business_id,
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/workflow/throughput/by-priority-bracket")
+def internal_brain_workflow_throughput_by_priority_bracket(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_workflow_throughput_by_priority_bracket(
                 case_store,
                 business_id=business_id,
             ),
