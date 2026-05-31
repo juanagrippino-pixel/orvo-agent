@@ -56,6 +56,12 @@ from app.brain.operator_api import (
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 from app.brain.operator_audit import SQLiteOperatorAuditStore
+from app.brain.operator_auth import (
+    CASE_ACTION_PERMISSION,
+    InternalOperatorAuthorizationError,
+    build_internal_operator_principal,
+    require_internal_permission,
+)
 from app.brain.delivery_status import (
     SQLiteWhatsAppDeliveryStatusStore,
     parse_meta_status_payload,
@@ -373,6 +379,32 @@ def internal_brain_case_action(business_id: str, case_id: str):
     action_key = str(payload.get("action_key", ""))
 
     def _handle(case_store, run_ledger, audit_store):
+        try:
+            principal = build_internal_operator_principal(
+                actor_ref=actor_ref,
+                role=request.headers.get("X-Orvo-Role"),
+            )
+            require_internal_permission(principal, CASE_ACTION_PERMISSION)
+        except InternalOperatorAuthorizationError as exc:
+            audit_store.append_event(
+                business_id=business_id,
+                actor_ref=actor_ref or "anonymous",
+                event_type="internal_operator_authorization_denied",
+                target_type="operational_case",
+                target_id=case_id,
+                request_id=_internal_request_id(),
+                data={
+                    "status": "denied",
+                    "reason": exc.code,
+                    "status_code": exc.status_code,
+                    "method": request.method,
+                    "role": exc.role,
+                    "permission": exc.permission,
+                    "action_key": action_key,
+                },
+            )
+            raise OperatorAPIError("forbidden", "Forbidden", status_code=403) from exc
+
         result = apply_case_action(
             case_store,
             business_id=business_id,

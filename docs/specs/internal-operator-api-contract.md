@@ -105,6 +105,8 @@ Before exposing beyond local/dev:
 - authenticate operator identity;
 - scope access to business/tenant;
 - log mutating actions with actor ref;
+- enforce role/scope authorization for mutating endpoints (initial roles: `viewer` is read-only, `operator`/`admin` may apply case actions; legacy authenticated callers without a role header default to `operator` until full RBAC is migrated);
+- audit authorization denials without persisting request payload secrets;
 - rate-limit force-run endpoints;
 - require approval for external side effects;
 - keep raw artifacts behind explicit privileged inspection.
