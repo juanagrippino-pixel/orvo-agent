@@ -151,3 +151,90 @@ def test_pipeline_fails_if_connector_missing_sheet_params():
             idempotency_store=InMemoryIdempotencyStore(),
             sheets_service=MagicMock(),
         )
+
+
+def test_registry_driven_builder_uses_executor_factory_metadata(monkeypatch):
+    from app.brain.models import DailyReport, Evidence, Metric
+    from app.brain.pipeline import _build_daily_report_for_connector_type
+
+    captured = {}
+
+    def fake_csv_report_factory(**kwargs):
+        captured.update(kwargs)
+        return DailyReport(
+            business_name=kwargs["business_name"],
+            report_date=kwargs["report_date"],
+            metrics=[
+                Metric(
+                    key="orders_today",
+                    label="Pedidos",
+                    value=1,
+                    unit="orders",
+                    evidence=[Evidence(source="csv", label="Daily CSV")],
+                )
+            ],
+            insights=[],
+        )
+
+    monkeypatch.setattr(
+        "app.brain.adapters.csv_file.build_daily_report_from_csv_file",
+        fake_csv_report_factory,
+    )
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="csv-main",
+                connector_type="csv",
+                label="CSV Artemea",
+                params={"csv_path": "/tmp/orders.csv", "source_label": "Daily CSV"},
+            )
+        ],
+    )
+
+    report = _build_daily_report_for_connector_type(
+        connector_type="csv",
+        business=business,
+        report_date=date(2026, 5, 19),
+    )
+
+    assert report.business_name == "Artemea"
+    assert captured == {
+        "business_name": "Artemea",
+        "report_date": date(2026, 5, 19),
+        "csv_path": "/tmp/orders.csv",
+        "source_label": "Daily CSV",
+        "insight_thresholds": business.insight_thresholds,
+    }
+
+
+def test_registry_driven_builder_rejects_non_daily_report_connector():
+    import pytest
+    from app.brain.pipeline import _build_daily_report_for_connector_type
+
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="sample-main",
+                connector_type="sample",
+                label="Sample payload",
+                params={},
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Unsupported connector type for daily report: sample"):
+        _build_daily_report_for_connector_type(
+            connector_type="sample",
+            business=business,
+            report_date=date(2026, 5, 19),
+        )
