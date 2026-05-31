@@ -166,6 +166,7 @@ def test_orders_by_priority_desc_then_case_id_asc_and_filters_to_actionable_degr
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(9),
     )
 

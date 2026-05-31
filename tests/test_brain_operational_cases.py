@@ -280,6 +280,38 @@ def test_operational_case_requires_acknowledged_before_resolved():
         )
 
 
+@pytest.mark.parametrize("terminal_status", ["resolved", "dismissed"])
+@pytest.mark.parametrize("bad_reason", [None, "", "   "])
+def test_operator_terminal_transition_requires_non_empty_reason_without_mutation(terminal_status, bad_reason):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    if terminal_status == "resolved":
+        store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+
+    before = store.get_case(opened.case_id)
+    assert before is not None
+
+    with pytest.raises(OperationalCaseStatusError, match="requires a non-empty reason"):
+        store.transition_case(
+            opened.case_id,
+            status=terminal_status,
+            actor_type="operator",
+            actor_ref="juan",
+            reason=bad_reason,
+            transitioned_at=utc_dt(10),
+        )
+
+    after = store.get_case(opened.case_id)
+    assert after == before
+
+
 def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reopen():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))

@@ -23,6 +23,7 @@ OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved
 ACTIONABLE_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset(
     {"open", "acknowledged", "in_progress"}
 )
+TERMINAL_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"resolved", "dismissed"})
 OperationalCaseType = Literal[
     "sales_drop",
     "stockout_risk",
@@ -574,6 +575,9 @@ class _OperationalCaseMutations:
             raise OperationalCaseStatusError(f"case {case_id} already has status {status}")
         if status not in _CASE_STATUS_TRANSITIONS[record.status]:
             raise OperationalCaseStatusError(f"case {case_id} cannot transition from {record.status} to {status}")
+        normalized_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
+        if actor_type == "operator" and status in TERMINAL_OPERATIONAL_CASE_STATUSES and normalized_reason is None:
+            raise OperationalCaseStatusError(f"operator transition to {status} requires a non-empty reason")
         transitioned_at = _as_utc(transitioned_at) if transitioned_at is not None else _now_utc()
         update: dict[str, Any] = {
             "status": status,
@@ -586,7 +590,7 @@ class _OperationalCaseMutations:
                     actor_ref=actor_ref,
                     case_id=record.case_id,
                     created_at=transitioned_at,
-                    summary=reason or f"Status changed from {record.status} to {status}.",
+                    summary=normalized_reason or f"Status changed from {record.status} to {status}.",
                     metadata={"from_status": record.status, "to_status": status},
                 ),
             ],

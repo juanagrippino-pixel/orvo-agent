@@ -182,6 +182,7 @@ def test_excludes_acknowledged_and_resolved_cases():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=NOW - timedelta(hours=2),
     )
 

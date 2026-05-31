@@ -78,6 +78,7 @@ def test_summarize_case_workflow_throughput_by_case_type_splits_latencies_per_ca
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(12),
     )
     # sales_drop B: opened 08:00, acknowledged 13:00, resolved 18:00.
@@ -103,6 +104,7 @@ def test_summarize_case_workflow_throughput_by_case_type_splits_latencies_per_ca
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(18),
     )
     # sales_drop C: opened 08:00, acknowledged 09:00 only.
