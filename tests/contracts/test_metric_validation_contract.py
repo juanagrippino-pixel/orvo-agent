@@ -962,10 +962,10 @@ def test_validate_report_metric_objects_composes_unknown_then_report_then_eviden
     from app.brain.semantics.metric_registry import validate_report_metric_objects
 
     metrics = [
-        _metric("revenue_today", "tiendanube"),
+        _metric("revenue_today", "tiendanube", unit="ARS"),
         _metric("custom.unknown_report_metric", "tiendanube"),
         _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
-        _metric("ad_spend_today", "whatsapp"),
+        _metric("ad_spend_today", "whatsapp", unit="ARS"),
         _metric("orders_today", "tiendanube", value="not a number"),
     ]
 
@@ -995,27 +995,32 @@ def test_validate_report_metric_objects_slots_evidence_missing_between_report_an
         {
             "key": "revenue_today",
             "value": 120000,
+            "unit": "ARS",
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "custom.unknown_report_metric",
             "value": 1,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "runtime.freshness.age_seconds",
             "value": 42,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
-        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
         {
             "key": "ad_spend_today",
             "value": 1500,
+            "unit": "ARS",
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
             "key": "orders_today",
             "value": "not a number",
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
     ]
@@ -1031,14 +1036,44 @@ def test_validate_report_metric_objects_slots_evidence_missing_between_report_an
     ]
 
 
+def test_validate_report_metric_objects_appends_money_currency_missing_after_value_kind():
+    """The six-diagnostic composition inside
+    :func:`validate_report_metric_objects` must place money_currency_missing
+    after value_kind_mismatch: structural and value-type diagnostics surface
+    before the rendering-metadata diagnostic that money metrics must carry a
+    currency string for reports to render unambiguously. Each diagnostic
+    preserves its own input-order index, and a single metric that is both
+    value-kind invalid and missing currency must surface in both slots."""
+
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+        _metric("commerce.revenue.baseline", "google_sheets", value=80000),
+        _metric("ad_spend_today", "meta_ads", value="invalid"),
+    ]
+
+    issues = validate_report_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
+        ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("value_kind_mismatch", "ad_spend_today", 4, "warning"),
+        ("money_currency_missing", "commerce.revenue.baseline", 3, "warning"),
+        ("money_currency_missing", "ad_spend_today", 4, "warning"),
+    ]
+
+
 def test_validate_report_metric_objects_returns_empty_for_clean_report_metrics():
     from app.brain.semantics.metric_registry import validate_report_metric_objects
 
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
-        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("revenue_today", "mercadolibre", value=120000, unit="ARS"),
         _metric("stock_units", "tiendanube", value=42),
-        _metric("ad_spend_today", "meta_ads", value=1500),
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
     ]
 
     assert validate_report_metric_objects(metrics) == []
@@ -1056,7 +1091,7 @@ def test_validate_report_metric_objects_matches_key_path_when_no_object_violatio
     )
 
     metrics = [
-        _metric("revenue_today", "tiendanube", value=120000),
+        _metric("revenue_today", "tiendanube", value=120000, unit="ARS"),
         _metric("custom.unknown_report_metric", "tiendanube"),
         _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
     ]

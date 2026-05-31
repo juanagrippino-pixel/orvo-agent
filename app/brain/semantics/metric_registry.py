@@ -1095,19 +1095,25 @@ def validate_report_metric_objects(
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
     """Compose unknown_metric + report_not_allowed + evidence_missing +
-    evidence_source_mismatch + value_kind_mismatch diagnostics for
-    metric-shaped objects bound for a user-facing report stage.
+    evidence_source_mismatch + value_kind_mismatch + money_currency_missing
+    diagnostics for metric-shaped objects bound for a user-facing report stage.
 
     Parallel to :meth:`ConnectorSpec.validate_emitted_metric_objects` but on the
     report-rendering side: the report renderer must reject report_not_allowed
-    canonical metrics and surface evidence/value-kind mismatches that the
-    key-only :func:`validate_report_metric_keys` cannot see. The fixed
+    canonical metrics and surface evidence/value-kind/currency mismatches that
+    the key-only :func:`validate_report_metric_keys` cannot see. The fixed
     concatenation order ``unknown_metric`` -> ``report_not_allowed`` ->
     ``evidence_missing`` -> ``evidence_source_mismatch`` ->
-    ``value_kind_mismatch`` keeps the result deterministic and free of overlap
-    because each downstream helper skips unknown keys and the two evidence
-    diagnostics are mutually exclusive (evidence_missing fires only on zero
-    entries, evidence_source_mismatch only on non-empty collections).
+    ``value_kind_mismatch`` -> ``money_currency_missing`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys, the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch only
+    on non-empty collections), and money_currency_missing is scoped to a
+    disjoint canonical population (only ``unit="money"`` metrics) from
+    value_kind_mismatch (any unit kind). Money-currency lands last so
+    structural and value-type diagnostics surface before the rendering-metadata
+    diagnostic that money metrics must carry a currency string for reports to
+    render unambiguously.
     """
 
     materialized = list(metrics)
@@ -1123,12 +1129,16 @@ def validate_report_metric_objects(
     value_kind_issues = find_value_kind_violations(
         materialized, registry=registry
     )
+    money_currency_issues = find_money_currency_violations(
+        materialized, registry=registry
+    )
     return [
         *unknown_issues,
         *report_issues,
         *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
+        *money_currency_issues,
     ]
 
 
