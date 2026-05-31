@@ -83,6 +83,31 @@ def test_compile_business_runtime_rejects_missing_required_connector_params():
     assert excinfo.value.errors == ["connector sheet (google_sheets) missing required params: range_name"]
 
 
+def test_compile_business_runtime_enforces_registry_supported_runtime_modes():
+    from app.brain.runtime import RuntimeCompileError, compile_business_runtime
+
+    business = make_business(
+        connectors=[
+            ConnectorConfig(
+                connector_id="sample",
+                connector_type="sample",
+                label="Manual sample",
+                params={},
+            )
+        ]
+    )
+
+    with pytest.raises(RuntimeCompileError) as excinfo:
+        compile_business_runtime(business, run_mode="scheduled")
+
+    assert excinfo.value.errors == [
+        "connector sample (sample) does not support runtime mode scheduled; supported modes: preview, operator_triggered"
+    ]
+
+    preview_runtime = compile_business_runtime(business, run_mode="preview")
+    assert preview_runtime.connectors[0].supported_runtime_modes == ["preview", "operator_triggered"]
+
+
 def test_compile_business_runtime_rejects_no_enabled_supported_connectors():
     from app.brain.runtime import RuntimeCompileError, compile_business_runtime
 

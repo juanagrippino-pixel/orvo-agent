@@ -51,6 +51,7 @@ class CompiledConnectorRuntime(BaseModel):
     legacy_secret_param_names: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     emitted_metric_families: list[str] = Field(default_factory=list)
+    supported_runtime_modes: list[str] = Field(default_factory=list)
     executor_factory_path: str
 
 
@@ -157,7 +158,7 @@ def compile_business_runtime(
     except ZoneInfoNotFoundError:
         errors.append(f"business {business.business_id} timezone is invalid: {business.timezone}")
 
-    compiled_connectors = _compile_connectors(business, errors)
+    compiled_connectors = _compile_connectors(business, errors, run_mode=run_mode)
     compiled_schedules = _compile_schedules(business, schedules or [], errors)
 
     if errors:
@@ -206,6 +207,8 @@ def compile_business_runtime(
 def _compile_connectors(
     business: BusinessConfig,
     errors: list[str],
+    *,
+    run_mode: RuntimeMode,
 ) -> list[CompiledConnectorRuntime]:
     enabled_connectors = [connector for connector in business.connectors if connector.enabled]
     if not enabled_connectors:
@@ -220,6 +223,15 @@ def _compile_connectors(
         except ValueError:
             errors.append(
                 f"connector {connector.connector_id} has unsupported connector_type: {connector.connector_type}"
+            )
+            continue
+
+        assert spec.executor is not None  # populated by ConnectorSpec.__post_init__
+        supported_runtime_modes = list(spec.executor.supported_runtime_modes)
+        if run_mode not in spec.executor.supported_runtime_modes:
+            errors.append(
+                f"connector {connector.connector_id} ({connector.connector_type}) does not support "
+                f"runtime mode {run_mode}; supported modes: {', '.join(supported_runtime_modes)}"
             )
             continue
 
@@ -249,6 +261,7 @@ def _compile_connectors(
                 legacy_secret_param_names=legacy_secret_names,
                 capabilities=list(spec.capabilities),
                 emitted_metric_families=list(spec.emitted_metric_families),
+                supported_runtime_modes=supported_runtime_modes,
                 executor_factory_path=spec.factory_path,
             )
         )
