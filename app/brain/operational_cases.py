@@ -793,7 +793,11 @@ def _case_type_for_insight(insight: Insight) -> OperationalCaseType | None:
     if "conversaciones" in title:
         return "unanswered_conversations"
     if "tiendanube" in title or "canal" in title:
-        return "channel_mix_shift"
+        # `channel_mix_shift` remains a catalog/deferred family until it has
+        # channel-scoped CASE_FAMILY_METRICS, stale-source suppression, and
+        # entity-specific dedupe. Do not turn aggregate channel-mix warnings
+        # into owner-actionable cases yet.
+        return None
     if "ventas" in title:
         return "sales_drop"
     return None

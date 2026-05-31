@@ -556,8 +556,10 @@ def test_detect_cases_from_report_maps_actionable_insights_to_deterministic_dedu
 # Contract regression: every production insight title produced by
 # `app.brain.insights` must continue to map to a stable case_type so that
 # rewording an insight cannot silently drop a case family or its dedupe key.
+# Deferred/internal families are explicitly locked to no emitted OperationalCase
+# until their promotion gates have canonical evidence metrics and scoping.
 # Includes title-precedence rules (stock-first, then spend-without-orders
-# tokens, conversations, channel, generic ventas). Info-severity always wins.
+# tokens, conversations, deferred channel, generic ventas). Info-severity always wins.
 _PRODUCTION_INSIGHT_CASE_MAPPING = [
     # (id, severity, title, expected_case_type, expected_dedupe_suffix)
     (
@@ -582,11 +584,11 @@ _PRODUCTION_INSIGHT_CASE_MAPPING = [
         "unanswered_conversations/channel/whatsapp/support.conversations/daily",
     ),
     (
-        "canal-tiendanube",
+        "canal-tiendanube-deferred",
         "warning",
         "Canal Tiendanube posiblemente sub-rendimiento",
-        "channel_mix_shift",
-        "channel_mix_shift/business/all_channels/commerce.revenue/daily",
+        None,
+        None,
     ),
     (
         "roas-bajo",
@@ -642,10 +644,43 @@ def test_detect_cases_locks_production_insight_titles_to_case_types(
         artifact_ref="ledger://runs/run-1/daily-report",
     )
 
-    assert len(detections) == 1, f"insight {title!r} unexpectedly dropped"
+    assert len(detections) == (0 if expected_case_type is None else 1), f"insight {title!r} emitted unexpected cases"
+    if expected_case_type is None:
+        return
     assert detections[0].case_type == expected_case_type
     assert detections[0].dedupe_key == f"artemea/{expected_dedupe_suffix}"
     assert detections[0].metadata["insight_title"] == title
+
+
+def test_detect_cases_keeps_channel_mix_shift_internal_until_promotion_gate_is_ready():
+    tn_source = Evidence(source="tiendanube", label="Tiendanube")
+    ml_source = Evidence(source="mercadolibre", label="MercadoLibre")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="revenue_today_tn", label="Revenue TN", value=100_000, unit="ARS", evidence=[tn_source]),
+            Metric(key="revenue_today_ml", label="Revenue ML", value=180_000, unit="ARS", evidence=[ml_source]),
+        ],
+        insights=[
+            Insight(
+                severity="warning",
+                title="Canal Tiendanube posiblemente sub-rendimiento",
+                explanation="MercadoLibre generó más revenue que Tiendanube hoy.",
+                recommended_action="Revisar canales.",
+                evidence=[tn_source, ml_source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    assert detections == []
 
 
 def test_detect_cases_skips_info_severity_even_when_title_matches_case_family():
