@@ -20,6 +20,7 @@ from app.brain.operational_cases import (
 )
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
+from app.brain.service_management import list_service_management_cases as project_service_management_cases
 
 CaseActionKey = Literal[
     "acknowledge_case",
@@ -290,6 +291,17 @@ def list_case_queue(
     parsed_limit = parse_limit(limit)
     cases = store.list_cases(business_id=business_id, status=parsed_status, limit=parsed_limit)
     return {"cases": [case_queue_item(case) for case in cases], "limit": parsed_limit}
+
+
+def list_service_management_case_projection(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    parsed_limit = parse_limit(limit)
+    return project_service_management_cases(store, business_id=business_id, limit=parsed_limit, now=now)
 
 
 def get_scoped_case(store: OperationalCaseStore, *, business_id: str, case_id: str) -> OperationalCase:
