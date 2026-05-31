@@ -12,8 +12,12 @@ def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
         parse_case_jql("business_id = other")
     assert business_scope.value.code == "unsupported_jql_field"
 
+    assert parse_case_jql("status = in_progress").normalized == (
+        "status = in_progress ORDER BY priority_score DESC, opened_at ASC"
+    )
+
     with pytest.raises(OperatorAPIError) as unsupported_status:
-        parse_case_jql("status = in_progress")
+        parse_case_jql("status = blocked")
     assert unsupported_status.value.code == "unsupported_jql_value"
 
     with pytest.raises(OperatorAPIError) as sql_shape:
@@ -83,7 +87,7 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert response.status_code == 200
     body = response.get_json()
     views = {view["view_id"]: view for view in body["data"]["views"]}
-    assert {"open_cases", "critical_open", "data_stale", "stockout_risk"}.issubset(views)
+    assert {"open_cases", "in_progress_cases", "critical_open", "data_stale", "stockout_risk"}.issubset(views)
     assert all(view["readonly"] is True for view in views.values())
     assert "business_id" not in " ".join(view["jql"] for view in views.values())
     assert body["redaction_applied"] is True

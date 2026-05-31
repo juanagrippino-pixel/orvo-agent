@@ -50,15 +50,14 @@ Allowed transitions:
 ```text
 open -> acknowledged
 open -> in_progress
-open -> resolved
 open -> dismissed
 acknowledged -> in_progress
 acknowledged -> resolved
 acknowledged -> dismissed
 in_progress -> resolved
 in_progress -> dismissed
-resolved -> open       # reopen with evidence
-dismissed -> open      # reopen only with stronger/new evidence
+resolved -> open       # reopen with recurring deterministic evidence
+dismissed -> open      # reopen only with recurring deterministic evidence
 ```
 
 Rules:

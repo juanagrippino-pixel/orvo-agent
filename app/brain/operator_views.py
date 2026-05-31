@@ -100,6 +100,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "readonly": True,
     },
     {
+        "view_id": "in_progress_cases",
+        "label": "In-progress cases",
+        "description": "Cases actively being worked by an operator, most recently updated first.",
+        "jql": "status = in_progress ORDER BY updated_at DESC",
+        "readonly": True,
+    },
+    {
         "view_id": "resolved_cases",
         "label": "Resolved cases",
         "description": "Resolved cases, most recently updated first.",
@@ -116,15 +123,15 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
     {
         "view_id": "data_stale",
         "label": "Data stale",
-        "description": "Open or acknowledged stale-data cases.",
-        "jql": "case_type = data_stale AND status IN (open, acknowledged) ORDER BY updated_at DESC",
+        "description": "Open, acknowledged, or in-progress stale-data cases.",
+        "jql": "case_type = data_stale AND status IN (open, acknowledged, in_progress) ORDER BY updated_at DESC",
         "readonly": True,
     },
     {
         "view_id": "stockout_risk",
         "label": "Stock risks",
-        "description": "Open or acknowledged stockout risk cases.",
-        "jql": "case_type = stockout_risk AND status IN (open, acknowledged) ORDER BY priority_score DESC",
+        "description": "Open, acknowledged, or in-progress stockout risk cases.",
+        "jql": "case_type = stockout_risk AND status IN (open, acknowledged, in_progress) ORDER BY priority_score DESC",
         "readonly": True,
     },
 )

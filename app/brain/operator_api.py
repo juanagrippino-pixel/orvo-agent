@@ -20,7 +20,7 @@ from app.brain.operational_cases import (
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 
-CaseActionKey = Literal["acknowledge_case", "resolve_case", "add_comment"]
+CaseActionKey = Literal["acknowledge_case", "mark_in_progress", "resolve_case", "dismiss_case", "add_comment"]
 _ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
@@ -314,7 +314,7 @@ def list_case_timeline(
     )
 
 
-_ACTIONABLE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"open", "acknowledged"})
+_ACTIONABLE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"open", "acknowledged", "in_progress"})
 
 
 def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> dict[str, Any]:
@@ -322,7 +322,7 @@ def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> di
 
     Scoped projection: never returns cases from other tenants and never reads
     raw payloads beyond what the case store already exposes. Counts cover the
-    full lifecycle (open/acknowledged/resolved); actionable totals isolate the
+    full lifecycle (open/acknowledged/in_progress/resolved/dismissed); actionable totals isolate the
     in-flight slice that operator surfaces typically lead with.
     """
 
@@ -392,7 +392,7 @@ def summarize_case_queue_aging(
 ) -> dict[str, Any]:
     """Deterministic age histogram for actionable cases in a business.
 
-    Buckets actionable (open + acknowledged) cases by ``now - opened_at`` so
+    Buckets actionable (open + acknowledged + in_progress) cases by ``now - opened_at`` so
     operator surfaces can see how stale the in-flight workload is. Strictly
     scoped per tenant; ``now`` is injectable for deterministic tests and
     defaults to current UTC.
@@ -454,7 +454,7 @@ def summarize_case_queue_stagnation(
     """Deterministic idleness histogram for actionable cases in a business.
 
     Aggregate counterpart to :func:`list_top_stalled_actionable_cases`: buckets
-    actionable (open + acknowledged) cases by ``now - updated_at`` so operator
+    actionable (open + acknowledged + in_progress) cases by ``now - updated_at`` so operator
     surfaces can see how many cases have not been touched in each time window
     without paging through a long top-N list. Severity is split per bucket so
     operators can tell whether old idle work is critical or informational.
@@ -950,7 +950,7 @@ def summarize_case_queue_aging_by_priority_bracket(
     connector. Operator surfaces use it to spot when the in-flight backlog
     is skewed toward high-priority work even when the overall age
     distribution and case_type / entity_kind / source-connector splits look
-    healthy. Open and acknowledged cases are both counted as actionable.
+    healthy. Open, acknowledged, and in-progress cases are counted as actionable.
     Strictly scoped per tenant; ``now`` is injectable for deterministic
     tests and defaults to current UTC.
     """
@@ -1071,8 +1071,8 @@ def list_top_actionable_cases_by_priority(
     """Top-N highest-priority actionable cases for a business.
 
     Counterpart to :func:`list_top_actionable_cases_by_age`: operators triage
-    by priority as often as by age, so this projection ranks open and
-    acknowledged cases by ``priority_score`` DESC. Ties on priority are broken
+    by priority as often as by age, so this projection ranks open, acknowledged,
+    and in-progress cases by ``priority_score`` DESC. Ties on priority are broken
     by ``case_id`` ASC for deterministic ordering. ``age_seconds`` is included
     on each row for context but does not influence ordering. ``now`` is
     injectable for tests and defaults to current UTC. Strictly scoped per
@@ -1694,8 +1694,8 @@ def summarize_case_resolution_latency_histogram(
     can see the *shape* of resolution time — e.g. catching a long tail of
     over-7d resolutions that a healthy median would otherwise mask. Severity
     is split per bucket so SLA pressure on critical work is visible even when
-    informational backlog dominates the histogram. Open and acknowledged-only
-    cases are excluded; ``resolved_total`` only counts cases that reached
+    informational backlog dominates the histogram. Open, acknowledged, and
+    in-progress cases are excluded; ``resolved_total`` only counts cases that reached
     ``resolved`` state. Strictly scoped per tenant.
     """
 
@@ -1757,7 +1757,7 @@ def summarize_case_resolution_latency_histogram_by_case_type(
     bucket by case type (sales_drop/stockout_risk/etc.) instead of severity, so
     operator surfaces can see which case families dominate long-tail resolution
     time — for example, a healthy median that masks a stockout_risk over-7d
-    tail. Open and acknowledged-only cases are excluded; ``resolved_total`` only
+    tail. Open, acknowledged, and in-progress cases are excluded; ``resolved_total`` only
     counts cases that reached ``resolved`` state. Strictly scoped per tenant.
     """
 
@@ -1822,7 +1822,7 @@ def summarize_case_resolution_latency_histogram_by_entity_kind(
     example, a healthy median that masks a per-product over-7d tail of stockout
     risks even when channel-level resolution looks healthy. Cases missing a
     ``kind`` are bucketed under ``"unknown"`` so totals never silently drop.
-    Open and acknowledged-only cases are excluded; ``resolved_total`` only
+    Open, acknowledged, and in-progress cases are excluded; ``resolved_total`` only
     counts cases that reached ``resolved`` state. Strictly scoped per tenant.
     """
 
@@ -1893,7 +1893,7 @@ def summarize_case_resolution_latency_histogram_by_source_connector(
     :func:`summarize_case_workflow_throughput_by_source_connector` — so the
     per-bucket totals always sum exactly to ``resolved_total``. Cases without
     any evidence source are bucketed under ``"unknown"`` so totals never
-    silently drop. Open and acknowledged-only cases are excluded;
+    silently drop. Open, acknowledged, and in-progress cases are excluded;
     ``resolved_total`` only counts cases that reached ``resolved`` state.
     Strictly scoped per tenant.
     """
@@ -1961,7 +1961,7 @@ def summarize_case_resolution_latency_histogram_by_priority_bracket(
     connector. Operator surfaces use it to spot when long-tail resolution time
     is concentrated in high-priority cases even though the overall median,
     case_type, entity_kind and source-connector distributions look healthy.
-    Open and acknowledged-only cases are excluded; ``resolved_total`` only
+    Open, acknowledged, and in-progress cases are excluded; ``resolved_total`` only
     counts cases that reached ``resolved`` state. Strictly scoped per tenant.
     """
 
@@ -2371,8 +2371,8 @@ def summarize_case_handling_latency_histogram(
     open->resolve tail that's actually a queue-wait problem looks very
     different from one driven by slow hands-on resolution. Buckets reuse the
     same age horizons as :func:`summarize_case_queue_aging`; severity is
-    split per bucket so SLA pressure on critical work stays visible. Open
-    and acknowledged-only cases are excluded; ``handled_total`` only counts
+    split per bucket so SLA pressure on critical work stays visible. Open,
+    acknowledged, and in-progress cases are excluded; ``handled_total`` only counts
     cases that reached ``resolved`` state (which by lifecycle invariant also
     have ``acknowledged_at`` set). Strictly scoped per tenant.
     """
@@ -2438,7 +2438,7 @@ def summarize_case_handling_latency_histogram_by_case_type(
     dominate slow hands-on resolution tails — e.g. a healthy median that
     masks an unanswered_conversations over-7d tail of long handle times even
     when stockout_risk handling looks fine. Buckets reuse the queue-aging
-    horizons. Open and acknowledged-only cases are excluded; ``handled_total``
+    horizons. Open, acknowledged, and in-progress cases are excluded; ``handled_total``
     only counts cases that reached ``resolved`` state. Strictly scoped per
     tenant.
     """
@@ -2505,7 +2505,7 @@ def summarize_case_handling_latency_histogram_by_entity_kind(
     hands-on resolution tails — e.g. a healthy median that masks a per-product
     over-7d tail of long handle times even when channel-level handling looks
     fine. Cases missing a ``kind`` are bucketed under ``"unknown"`` so totals
-    never silently drop. Open and acknowledged-only cases are excluded;
+    never silently drop. Open, acknowledged, and in-progress cases are excluded;
     ``handled_total`` only counts cases that reached ``resolved`` state.
     Strictly scoped per tenant.
     """
@@ -2578,7 +2578,7 @@ def summarize_case_handling_latency_histogram_by_source_connector(
     and :func:`summarize_case_resolution_latency_histogram_by_source_connector` —
     so the per-bucket totals always sum exactly to ``handled_total``. Cases
     without any evidence source are bucketed under ``"unknown"`` so totals
-    never silently drop. Open and acknowledged-only cases are excluded;
+    never silently drop. Open, acknowledged, and in-progress cases are excluded;
     ``handled_total`` only counts cases that reached ``resolved`` state.
     Strictly scoped per tenant.
     """
@@ -2648,7 +2648,7 @@ def summarize_case_handling_latency_histogram_by_priority_bracket(
     connector. Operator surfaces use it to spot when long-tail hands-on
     resolution time is concentrated in high-priority cases even though the
     overall median, case_type, entity_kind and source-connector
-    distributions look healthy. Open and acknowledged-only cases are
+    distributions look healthy. Open, acknowledged, and in-progress cases are
     excluded; ``handled_total`` only counts cases that reached ``resolved``
     state. Strictly scoped per tenant.
     """
@@ -2752,15 +2752,22 @@ def apply_case_action(
         )
         return {"case": case_detail(updated)}
 
-    target_status: OperationalCaseStatus = "acknowledged" if action_key == "acknowledge_case" else "resolved"
-    default_reason = "Acknowledged by operator." if action_key == "acknowledge_case" else "Resolved by operator."
+    action_targets: dict[str, tuple[OperationalCaseStatus, str]] = {
+        "acknowledge_case": ("acknowledged", "Acknowledged by operator."),
+        "mark_in_progress": ("in_progress", "Marked in progress by operator."),
+        "resolve_case": ("resolved", "Resolved by operator."),
+        "dismiss_case": ("dismissed", "Dismissed by operator."),
+    }
+    target_status, default_reason = action_targets[action_key]
+    if action_key == "dismiss_case" and (not isinstance(reason, str) or not reason.strip()):
+        raise OperatorAPIError("missing_case_action_reason", "dismiss_case requires a non-empty reason", status_code=400)
     try:
         updated = store.transition_case(
             case.case_id,
             status=target_status,
             actor_type="operator",
             actor_ref=effective_actor_ref,
-            reason=reason or default_reason,
+            reason=reason.strip() if isinstance(reason, str) and reason.strip() else default_reason,
         )
     except OperationalCaseStatusError as exc:
         raise OperatorAPIError("invalid_case_transition", str(exc), status_code=409) from exc

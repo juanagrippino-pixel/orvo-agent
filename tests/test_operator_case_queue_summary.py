@@ -79,8 +79,8 @@ def _seed_mixed_queue() -> InMemoryOperationalCaseStore:
         ),
         detected_at=_utc(9),
     )
-    # Open warning sales drop in a different entity scope (different dedupe).
-    store.upsert_detection(
+    # In-progress warning sales drop in a different entity scope (different dedupe).
+    in_progress_sales = store.upsert_detection(
         _detection(
             case_type="sales_drop",
             dedupe_suffix="sales_drop/channel/meta_ads/commerce.revenue/daily",
@@ -89,6 +89,13 @@ def _seed_mixed_queue() -> InMemoryOperationalCaseStore:
             run_id="run-3",
         ),
         detected_at=_utc(10),
+    )
+    store.transition_case(
+        in_progress_sales.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=_utc(11),
     )
     # Acknowledge one of the cases.
     store.transition_case(
@@ -144,10 +151,10 @@ def test_summarize_case_queue_counts_by_status_severity_and_case_type():
 
     assert result["business_id"] == "artemea"
     assert result["total"] == 4
-    assert result["by_status"] == {"open": 2, "acknowledged": 1, "resolved": 1}
+    assert result["by_status"] == {"open": 1, "in_progress": 1, "acknowledged": 1, "resolved": 1}
     assert result["by_severity"] == {"critical": 1, "warning": 3}
     assert result["by_case_type"] == {"stockout_risk": 1, "sales_drop": 2, "data_stale": 1}
-    # Actionable = open + acknowledged. The acknowledged stockout case is critical.
+    # Actionable = open + acknowledged + in_progress. The acknowledged stockout case is critical.
     assert result["actionable_total"] == 3
     assert result["actionable_by_severity"] == {"critical": 1, "warning": 2}
     # Degraded count only reflects actionable cases with non-fresh evidence snapshots.
