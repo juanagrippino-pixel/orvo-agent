@@ -39,6 +39,8 @@ TimelineEventType = Literal[
     "operator_comment",
 ]
 ActorType = Literal["system", "operator"]
+ACTIONABLE_CASE_STATUSES: tuple[OperationalCaseStatus, ...] = ("open", "acknowledged", "in_progress")
+TERMINAL_CASE_STATUSES: tuple[OperationalCaseStatus, ...] = ("resolved", "dismissed")
 
 _CASE_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "open": {"acknowledged", "in_progress", "dismissed"},
@@ -292,6 +294,12 @@ class OperationalCase(BaseModel):
         if self.status == "resolved" and self.resolved_at is None:
             raise ValueError("resolved case requires resolved_at")
         return self
+
+
+def is_actionable_case(case: OperationalCase) -> bool:
+    """Return whether a case should appear in actionable owner/operator projections."""
+
+    return case.status in ACTIONABLE_CASE_STATUSES
 
 
 def _unique_snapshots(snapshots: list[OperationalCaseEvidenceSnapshot]) -> list[OperationalCaseEvidenceSnapshot]:

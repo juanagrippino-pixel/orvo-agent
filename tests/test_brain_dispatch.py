@@ -94,6 +94,34 @@ def test_dispatch_owner_case_brief_sends_case_backed_text_with_separate_idempote
     assert "raw_dispatch_secret" not in text
 
 
+def test_dispatch_owner_case_brief_treats_in_progress_as_actionable_and_terminal_as_hidden():
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.in-progress", error=None)
+
+    result = dispatch_owner_case_brief(
+        cases=[
+            make_owner_case("in-progress", status="in_progress"),
+            make_owner_case("resolved", status="resolved"),
+            make_owner_case("dismissed", status="dismissed"),
+        ],
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+
+    assert result is not None
+    assert result.status == "sent"
+    _phone, text = delivery_client.send_text.call_args.args
+    assert "in-progress" in text
+    assert "resolved" not in text
+    assert "dismissed" not in text
+    assert "sin temas operativos abiertos" not in text.lower()
+
+
 def test_dispatch_owner_case_brief_skips_without_actionable_cases():
     from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
 

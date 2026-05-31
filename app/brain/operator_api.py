@@ -16,6 +16,7 @@ from app.brain.operational_cases import (
     OperationalCaseStatusError,
     OperationalCaseStore,
     TimelineEventType,
+    is_actionable_case,
 )
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
@@ -314,8 +315,6 @@ def list_case_timeline(
     )
 
 
-_ACTIONABLE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"open", "acknowledged", "in_progress"})
-
 
 def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> dict[str, Any]:
     """Deterministic counts over the case queue for a single business.
@@ -337,7 +336,7 @@ def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> di
         by_status[case.status] = by_status.get(case.status, 0) + 1
         by_severity[case.severity] = by_severity.get(case.severity, 0) + 1
         by_case_type[case.case_type] = by_case_type.get(case.case_type, 0) + 1
-        if case.status in _ACTIONABLE_STATUSES:
+        if is_actionable_case(case):
             actionable_total += 1
             actionable_by_severity[case.severity] = actionable_by_severity.get(case.severity, 0) + 1
             if _is_degraded(case):
@@ -411,7 +410,7 @@ def summarize_case_queue_aging(
     oldest_age = -1
     oldest_case: OperationalCase | None = None
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -477,7 +476,7 @@ def summarize_case_queue_stagnation(
     most_stalled_case: OperationalCase | None = None
     most_stalled_age = 0
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -546,7 +545,7 @@ def summarize_case_queue_stagnation_by_case_type(
     most_stalled_case: OperationalCase | None = None
     most_stalled_age = 0
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -617,7 +616,7 @@ def summarize_case_queue_stagnation_by_entity_kind(
     most_stalled_case: OperationalCase | None = None
     most_stalled_age = 0
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -697,7 +696,7 @@ def summarize_case_queue_stagnation_by_source_connector(
     most_stalled_case: OperationalCase | None = None
     most_stalled_age = 0
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -775,7 +774,7 @@ def summarize_case_queue_stagnation_by_priority_bracket(
     most_stalled_case: OperationalCase | None = None
     most_stalled_age = 0
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -843,7 +842,7 @@ def summarize_case_queue_aging_by_case_type(
     oldest_age = -1
     oldest_case: OperationalCase | None = None
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -912,7 +911,7 @@ def summarize_case_queue_aging_by_source_connector(
     oldest_age = -1
     oldest_case: OperationalCase | None = None
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -977,7 +976,7 @@ def summarize_case_queue_aging_by_entity_kind(
     oldest_age = -1
     oldest_case: OperationalCase | None = None
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -1045,7 +1044,7 @@ def summarize_case_queue_aging_by_priority_bracket(
     oldest_age = -1
     oldest_case: OperationalCase | None = None
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         actionable_total += 1
         opened_at = case.opened_at.astimezone(timezone.utc)
@@ -1106,7 +1105,7 @@ def list_top_actionable_cases_by_age(
     parsed_limit = parse_limit(limit)
     actionable: list[tuple[int, str, OperationalCase]] = []
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         opened_at = case.opened_at.astimezone(timezone.utc)
         age_seconds = max(int((reference - opened_at).total_seconds()), 0)
@@ -1166,7 +1165,7 @@ def list_top_actionable_cases_by_priority(
     parsed_limit = parse_limit(limit)
     actionable: list[tuple[int, str, int, OperationalCase]] = []
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         opened_at = case.opened_at.astimezone(timezone.utc)
         age_seconds = max(int((reference - opened_at).total_seconds()), 0)
@@ -1228,7 +1227,7 @@ def list_top_stalled_actionable_cases(
     parsed_limit = parse_limit(limit)
     actionable: list[tuple[int, str, int, OperationalCase]] = []
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         opened_at = case.opened_at.astimezone(timezone.utc)
         updated_at = case.updated_at.astimezone(timezone.utc)
@@ -1315,7 +1314,7 @@ def list_top_actionable_degraded_cases(
     parsed_limit = parse_limit(limit)
     degraded: list[tuple[int, str, int, OperationalCase]] = []
     for case in store.list_cases(business_id=business_id, limit=None):
-        if case.status not in _ACTIONABLE_STATUSES:
+        if not is_actionable_case(case):
             continue
         if not _is_degraded(case):
             continue

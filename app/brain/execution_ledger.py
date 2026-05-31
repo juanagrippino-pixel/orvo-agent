@@ -12,6 +12,7 @@ from typing import Any, Callable, Sequence
 
 from app.brain.config import BusinessConfig
 from app.brain.operational_cases import (
+    ACTIONABLE_CASE_STATUSES,
     OperationalCase,
     OperationalCaseStore,
     upsert_cases_from_report,
@@ -89,7 +90,7 @@ def _metric_count_for_connector(pipeline: PipelineResult, connector_type: str, c
 
 def _owner_brief_cases(case_store: OperationalCaseStore, business_id: str) -> list[OperationalCase]:
     cases: list[OperationalCase] = []
-    for status in ("open", "acknowledged"):
+    for status in ACTIONABLE_CASE_STATUSES:
         cases.extend(case_store.list_cases(business_id=business_id, status=status, limit=None))
     return cases
 
