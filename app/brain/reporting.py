@@ -281,7 +281,7 @@ def compose_daily_report_text(report: DailyReport) -> str:
     # Compact footer
     lines.extend(["", _compact_sources(report)])
 
-    return "\n".join(lines)
+    return redact_text("\n".join(lines)) or "[REDACTED]"
 
 
 def truncate_for_whatsapp(text: str, max_chars: int = 1000) -> str:
