@@ -833,6 +833,86 @@ def find_pii_class_violations(
     return issues
 
 
+def _metric_unit(metric: Any) -> Any:
+    """Return the runtime currency/unit string a metric exposes.
+
+    The runtime ``Metric`` model carries an optional ``unit`` (currency code or
+    label) that is distinct from ``MetricDefinition.unit`` (the canonical unit
+    kind). Money diagnostics inspect this field, so missing access must raise
+    explicitly instead of silently treating absence as ``None``.
+    """
+
+    if isinstance(metric, Mapping):
+        if "unit" not in metric:
+            raise ValueError(
+                "Metrics passed to money-currency validation must expose a unit field"
+            )
+        return metric.get("unit")
+    if not hasattr(metric, "unit"):
+        raise ValueError(
+            "Metrics passed to money-currency validation must expose a unit field"
+        )
+    return getattr(metric, "unit")
+
+
+def find_money_currency_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for money metrics emitted without a
+    non-empty currency/unit string on the runtime metric object.
+
+    The metric registry contract requires money metrics to carry currency
+    context so reports can render values unambiguously. A
+    ``money_currency_missing`` violation means a metric key resolved to a
+    canonical definition whose ``unit`` is ``"money"`` but whose runtime
+    object's ``unit`` field is missing, ``None``, or whitespace-only. Unknown
+    (unresolved) keys are intentionally skipped so this diagnostic composes
+    cleanly with :func:`validate_metrics` and the other envelope helpers. A
+    non-string ``unit`` raises ``ValueError`` so caller bugs surface loudly
+    instead of being silently coerced. Result order matches input order and is
+    deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        unit = _metric_unit(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.unit != "money":
+            continue
+        if unit is None:
+            missing = True
+        elif isinstance(unit, str):
+            missing = not unit.strip()
+        else:
+            raise ValueError(
+                f"Metric key '{key}' must expose a string unit field for "
+                f"money-currency validation; received {type(unit).__name__}"
+            )
+        if not missing:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="money_currency_missing",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"canonical unit 'money' but runtime metric carries no "
+                    f"currency context (unit field is missing or blank)"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_freshness_companion_violations(
     metric_keys: Iterable[str],
     *,
@@ -1015,19 +1095,25 @@ def validate_report_metric_objects(
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
     """Compose unknown_metric + report_not_allowed + evidence_missing +
-    evidence_source_mismatch + value_kind_mismatch diagnostics for
-    metric-shaped objects bound for a user-facing report stage.
+    evidence_source_mismatch + value_kind_mismatch + money_currency_missing
+    diagnostics for metric-shaped objects bound for a user-facing report stage.
 
     Parallel to :meth:`ConnectorSpec.validate_emitted_metric_objects` but on the
     report-rendering side: the report renderer must reject report_not_allowed
-    canonical metrics and surface evidence/value-kind mismatches that the
-    key-only :func:`validate_report_metric_keys` cannot see. The fixed
+    canonical metrics and surface evidence/value-kind/currency mismatches that
+    the key-only :func:`validate_report_metric_keys` cannot see. The fixed
     concatenation order ``unknown_metric`` -> ``report_not_allowed`` ->
     ``evidence_missing`` -> ``evidence_source_mismatch`` ->
-    ``value_kind_mismatch`` keeps the result deterministic and free of overlap
-    because each downstream helper skips unknown keys and the two evidence
-    diagnostics are mutually exclusive (evidence_missing fires only on zero
-    entries, evidence_source_mismatch only on non-empty collections).
+    ``value_kind_mismatch`` -> ``money_currency_missing`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys, the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch only
+    on non-empty collections), and money_currency_missing is scoped to a
+    disjoint canonical population (only ``unit="money"`` metrics) from
+    value_kind_mismatch (any unit kind). Money-currency lands last so
+    structural and value-type diagnostics surface before the rendering-metadata
+    diagnostic that money metrics must carry a currency string for reports to
+    render unambiguously.
     """
 
     materialized = list(metrics)
@@ -1043,12 +1129,16 @@ def validate_report_metric_objects(
     value_kind_issues = find_value_kind_violations(
         materialized, registry=registry
     )
+    money_currency_issues = find_money_currency_violations(
+        materialized, registry=registry
+    )
     return [
         *unknown_issues,
         *report_issues,
         *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
+        *money_currency_issues,
     ]
 
 
@@ -1331,6 +1421,7 @@ __all__ = [
     "find_evidence_source_violations",
     "find_family_envelope_violations",
     "find_freshness_companion_violations",
+    "find_money_currency_violations",
     "find_pii_class_violations",
     "find_report_allowed_violations",
     "find_source_envelope_violations",
