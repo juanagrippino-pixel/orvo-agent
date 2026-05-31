@@ -165,9 +165,41 @@ def test_internal_case_queue_accepts_safe_jql_and_keeps_business_scope(monkeypat
     assert body["data"]["jql"] == "status = open AND severity = critical"
     assert body["data"]["normalized_jql"] == "status = open AND severity = critical ORDER BY priority_score DESC, opened_at ASC"
     assert body["data"]["count"] == 1
+    assert body["data"]["total"] == 1
+    assert body["data"]["truncated"] is False
     assert [case["case_id"] for case in body["data"]["cases"]] == [critical.case_id]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
     assert body["redaction_applied"] is True
+
+
+def test_internal_case_queue_jql_reports_scoped_total_and_truncation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    top_case = _seed_case(db_path, _case_detection(run_id="run-top", priority=95))
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-lower",
+            dedupe_suffix="stockout_risk/sku/LOW/inventory.on_hand/daily",
+            priority=80,
+            title="Riesgo de stock menor",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other", priority=99))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=status%20%3D%20open&limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["count"] == 1
+    assert body["data"]["total"] == 2
+    assert body["data"]["truncated"] is True
+    assert body["data"]["limit"] == 1
+    assert [case["case_id"] for case in body["data"]["cases"]] == [top_case.case_id]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
 def test_internal_case_queue_rejects_conflicting_filters_and_invalid_jql(monkeypatch, tmp_path):

@@ -194,6 +194,7 @@ def query_case_queue(
     parsed_limit = parse_limit(limit)
     candidates = store.list_cases(business_id=business_id, limit=None)
     filtered = [case for case in candidates if _matches(case, parsed.clauses)]
+    total = len(filtered)
     filtered = _sort_cases(filtered, parsed.order_by)
     limited = filtered[:parsed_limit]
     data: dict[str, Any] = {
@@ -202,6 +203,8 @@ def query_case_queue(
         "cases": [case_queue_item(case) for case in limited],
         "limit": parsed_limit,
         "count": len(limited),
+        "total": total,
+        "truncated": total > len(limited),
     }
     if view is not None:
         data["view"] = {key: view[key] for key in ("view_id", "label", "readonly")}
