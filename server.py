@@ -52,6 +52,7 @@ from app.brain.operator_api import (
     list_recently_acknowledged_cases,
     list_recently_opened_cases,
     list_recently_resolved_cases,
+    list_service_management_case_projection,
     list_top_actionable_cases_by_age,
     list_top_actionable_cases_by_priority,
     list_top_actionable_degraded_cases,
@@ -240,6 +241,22 @@ def internal_brain_case_actions(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             list_case_action_catalog(business_id=business_id),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/service-management/cases")
+def internal_brain_service_management_cases(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_service_management_case_projection(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+                now=datetime.now(timezone.utc),
+            ),
         ),
     )
 

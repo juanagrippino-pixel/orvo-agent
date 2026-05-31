@@ -93,6 +93,45 @@ Queue filters:
 - source connector;
 - entity scope.
 
+### Service-management projection
+
+The internal endpoint `GET /internal/brain/businesses/{business_id}/service-management/cases` returns a read-only service-management projection over canonical `OperationalCase` rows. It must remain a projection only: `OperationalCase.status`, timeline events, run ledger records, and evidence snapshots remain the source of truth.
+
+Minimum additional fields per case:
+
+```json
+{
+  "service_record_type": {"code": "incident", "label": "Incident", "label_es": "Incidente"},
+  "owner_status": {
+    "code": "waiting_external",
+    "label_es": "Esperando a un tercero",
+    "status_category": "waiting",
+    "source_status": "acknowledged"
+  },
+  "sla": {
+    "first_response": {
+      "policy_key": "first_response_warning_240m",
+      "target_seconds": 14400,
+      "elapsed_seconds": 3600,
+      "remaining_seconds": 10800,
+      "breached": false,
+      "completed": true,
+      "started_at": "2026-05-24T08:00:00Z",
+      "stopped_at": "2026-05-24T09:00:00Z",
+      "due_at": "2026-05-24T12:00:00Z"
+    }
+  }
+}
+```
+
+Projection rules:
+
+- map case families to Atlassian-like record labels (`incident`, `service_request`, `problem`, `change`) deterministically;
+- derive `waiting_owner` and `waiting_external` from case metadata only for active `acknowledged`/`in_progress` cases;
+- include first-response and resolution SLA clocks as deterministic UTC timers;
+- redact secret-shaped values at the projection boundary;
+- preserve explicit tenant scope and stable internal response envelopes.
+
 ## Surface 3: Case timeline
 
 Minimum events:
