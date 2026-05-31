@@ -203,3 +203,49 @@ def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapsho
     ]
     assert result["actions"][0]["action_key"] == "request_follow_up"
     assert result["actions"][0]["execution_status"] == "dry_run"
+
+
+def test_simulate_case_workflow_suppresses_duplicate_idempotency_key_plans_with_audit():
+    _, case = seed_case()
+    duplicate_params = {"reason": "token=raw_duplicate_secret"}
+    expected_key = make_workflow_idempotency_key(
+        business_id="artemea",
+        rule_id="duplicate-ack-plan",
+        case_id=case.case_id,
+        action_key="acknowledge_case",
+        params=duplicate_params,
+    )
+    rule = WorkflowRule(
+        rule_id="duplicate-ack-plan",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(action_key="acknowledge_case", params=duplicate_params),
+            WorkflowAction(action_key="acknowledge_case", params=duplicate_params),
+        ],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(14))
+
+    assert result["side_effects_executed"] == 0
+    assert [action["idempotency_key"] for action in result["actions"]] == [expected_key]
+    assert result["skipped_actions"] == [
+        {
+            "action_key": "acknowledge_case",
+            "idempotency_key": expected_key,
+            "execution_status": "skipped_duplicate",
+            "reason": "duplicate_idempotency_key",
+            "audit_event": {
+                "event_type": "workflow_action_skipped_duplicate",
+                "rule_id": "duplicate-ack-plan",
+                "case_id": case.case_id,
+                "action_key": "acknowledge_case",
+                "idempotency_key": expected_key,
+                "execution_status": "skipped_duplicate",
+                "reason": "duplicate_idempotency_key",
+                "created_at": "2026-05-31T14:00:00Z",
+            },
+        }
+    ]
+    assert "raw_duplicate_secret" not in str(result)

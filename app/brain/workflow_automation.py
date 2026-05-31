@@ -241,6 +241,65 @@ def _planned_action_projection(
     )
 
 
+def _skipped_duplicate_action_projection(
+    *,
+    rule: WorkflowRule,
+    case: OperationalCase,
+    action_key: str,
+    idempotency_key: str,
+    now: datetime,
+) -> dict[str, Any]:
+    status = "skipped_duplicate"
+    reason = "duplicate_idempotency_key"
+    audit_event = {
+        "event_type": "workflow_action_skipped_duplicate",
+        "rule_id": rule.rule_id,
+        "case_id": case.case_id,
+        "action_key": action_key,
+        "idempotency_key": idempotency_key,
+        "execution_status": status,
+        "reason": reason,
+        "created_at": _iso(now),
+    }
+    return redact_secrets(
+        {
+            "action_key": action_key,
+            "idempotency_key": idempotency_key,
+            "execution_status": status,
+            "reason": reason,
+            "audit_event": audit_event,
+        }
+    )
+
+
+def _dedupe_planned_actions(
+    *,
+    rule: WorkflowRule,
+    case: OperationalCase,
+    now: datetime,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    actions: list[dict[str, Any]] = []
+    skipped_actions: list[dict[str, Any]] = []
+    seen_idempotency_keys: set[str] = set()
+    for action in rule.actions:
+        planned_action = _planned_action_projection(rule=rule, case=case, action=action, now=now)
+        idempotency_key = str(planned_action["idempotency_key"])
+        if idempotency_key in seen_idempotency_keys:
+            skipped_actions.append(
+                _skipped_duplicate_action_projection(
+                    rule=rule,
+                    case=case,
+                    action_key=action.action_key,
+                    idempotency_key=idempotency_key,
+                    now=now,
+                )
+            )
+            continue
+        seen_idempotency_keys.add(idempotency_key)
+        actions.append(planned_action)
+    return actions, skipped_actions
+
+
 def simulate_case_workflow(rule: WorkflowRule, case: OperationalCase, *, now: datetime | None = None) -> dict[str, Any]:
     """Dry-run a workflow rule against one canonical Operational Case.
 
@@ -254,10 +313,10 @@ def simulate_case_workflow(rule: WorkflowRule, case: OperationalCase, *, now: da
     generated_at = _now_utc() if now is None else now.astimezone(timezone.utc)
     condition_results = [_condition_projection(case, condition) for condition in rule.conditions]
     matched = all(result["matched"] for result in condition_results)
-    actions = [
-        _planned_action_projection(rule=rule, case=case, action=action, now=generated_at)
-        for action in rule.actions
-    ] if matched else []
+    actions: list[dict[str, Any]] = []
+    skipped_actions: list[dict[str, Any]] = []
+    if matched:
+        actions, skipped_actions = _dedupe_planned_actions(rule=rule, case=case, now=generated_at)
     return redact_secrets(
         {
             "rule_id": rule.rule_id,
@@ -274,6 +333,7 @@ def simulate_case_workflow(rule: WorkflowRule, case: OperationalCase, *, now: da
             "matched": matched,
             "conditions": condition_results,
             "actions": actions,
+            "skipped_actions": skipped_actions,
             "side_effects_executed": 0,
             "generated_at": _iso(generated_at),
         }
