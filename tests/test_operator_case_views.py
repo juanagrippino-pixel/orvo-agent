@@ -58,6 +58,7 @@ def test_parse_case_jql_supports_source_connector_allowlist_filter():
     assert sql_shape.value.code == "invalid_jql"
 
 
+
 def test_parse_case_jql_supports_degraded_boolean_filter():
     assert parse_case_jql("degraded = true").normalized == "degraded = true ORDER BY priority_score DESC, opened_at ASC"
     assert parse_case_jql("degraded != false").normalized == "degraded != false ORDER BY priority_score DESC, opened_at ASC"
@@ -121,6 +122,7 @@ def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scop
     assert [case["case_id"] for case in body["data"]["cases"]] == [meta_case.case_id]
     assert body["data"]["cases"][0]["source_connectors"] == ["meta_ads"]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
 
 
 def test_internal_case_queue_filters_degraded_cases_and_keeps_business_scope(monkeypatch, tmp_path):
