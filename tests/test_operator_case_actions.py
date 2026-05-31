@@ -268,6 +268,31 @@ def test_apply_case_action_status_actions_reject_blank_or_non_string_actor_ref(
     assert len(reloaded.timeline) == len(opened.timeline)
 
 
+def test_apply_case_action_rejects_unknown_action_key_before_actor_and_case_lookup():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    other = store.upsert_detection(case_detection(business_id="other", run_id="run-other"), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=other.case_id,
+            action_key="delete_everything",
+            actor_ref="",
+            comment="Cannot cross scope",
+        )
+
+    assert exc.value.code == "unknown_action_key"
+    assert exc.value.status_code == 400
+    reloaded_opened = store.get_case(opened.case_id)
+    reloaded_other = store.get_case(other.case_id)
+    assert reloaded_opened is not None
+    assert reloaded_other is not None
+    assert len(reloaded_opened.timeline) == len(opened.timeline)
+    assert len(reloaded_other.timeline) == len(other.timeline)
+
+
 def test_apply_case_action_add_comment_rejects_missing_actor_and_preserves_cross_business_scope():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))
