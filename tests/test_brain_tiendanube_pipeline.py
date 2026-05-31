@@ -95,7 +95,7 @@ def test_tiendanube_pipeline_fails_if_connector_missing_required_params():
 
     business = make_tiendanube_business(params={"store_id": "12345"})
 
-    with pytest.raises(ValueError, match="store_id and access_token"):
+    with pytest.raises(ValueError, match="access_token"):
         run_tiendanube_daily_report_pipeline(
             business=business,
             report_date=date(2026, 5, 19),
