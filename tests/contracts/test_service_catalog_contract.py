@@ -13,12 +13,17 @@ def test_default_service_catalog_covers_core_control_plane_components():
         "run_ledger",
         "operational_cases",
         "operator_api",
+        "gateway_policy",
         "delivery_dispatch",
         "edge_developer_platform",
     ]
     assert catalog.get("compiled_runtime").owner_department == "Edge / Developer Platform"
     assert catalog.get("connector_registry").owner_department == "Connector / Ecosystem Platform"
     assert catalog.get("metric_registry").source_of_truth == "app.brain.semantics.metric_registry"
+    assert catalog.get("gateway_policy").source_of_truth == "app.brain.gateway_policy"
+    assert catalog.get("gateway_policy").runtime_surfaces == ("operator_api", "developer_platform")
+    assert "actor_id_redacted" in catalog.get("gateway_policy").observability_signals
+    assert "rate_limit_key_redacted" in catalog.get("gateway_policy").observability_signals
     assert "docs/specs/compiled-runtime-contract.md" in catalog.get("compiled_runtime").docs
 
 
@@ -75,6 +80,7 @@ def test_service_catalog_queries_by_owner_and_runtime_surface():
 
     assert [component.component_id for component in edge_components] == [
         "compiled_runtime",
+        "gateway_policy",
         "edge_developer_platform",
     ]
-    assert [component.component_id for component in api_components] == ["operator_api"]
+    assert [component.component_id for component in api_components] == ["operator_api", "gateway_policy"]

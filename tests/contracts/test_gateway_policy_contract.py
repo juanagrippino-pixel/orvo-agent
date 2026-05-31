@@ -1,0 +1,181 @@
+import pytest
+
+
+def test_default_gateway_policy_registry_covers_current_internal_boundaries():
+    from app.brain.gateway_policy import default_gateway_policy_registry
+
+    registry = default_gateway_policy_registry()
+
+    assert registry.route_keys() == [
+        "operator_api.case_queue.read",
+        "operator_api.case_action.mutate",
+        "runtime.force_run.mutate",
+    ]
+    case_queue = registry.get("operator_api.case_queue.read")
+    case_action = registry.get("operator_api.case_action.mutate")
+
+    assert case_queue.method == "GET"
+    assert case_queue.required_permissions == ("cases:read",)
+    assert case_queue.idempotency_required is False
+    assert case_queue.rate_limit.bucket == "operator_api_read"
+
+    assert case_action.method == "POST"
+    assert case_action.required_permissions == ("cases:write",)
+    assert case_action.idempotency_required is True
+    assert case_action.audit_event_type == "operator_case_action_requested"
+
+
+def test_gateway_policy_manifest_is_stable_and_secret_safe():
+    from app.brain.gateway_policy import gateway_policy_manifest
+
+    manifest = gateway_policy_manifest()
+
+    assert manifest["schema_version"] == "2026-05-31.gateway-policy.v1"
+    assert [route["route_key"] for route in manifest["routes"]] == [
+        "operator_api.case_queue.read",
+        "operator_api.case_action.mutate",
+        "runtime.force_run.mutate",
+    ]
+    serialized = repr(manifest).lower()
+    assert "bearer" not in serialized
+    assert "token" not in serialized
+    assert "secret" not in serialized
+    assert "authorization" not in serialized
+
+
+def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_idempotency():
+    from app.brain.gateway_policy import (
+        GatewayPrincipal,
+        GatewayRequestContext,
+        default_gateway_policy_registry,
+    )
+
+    registry = default_gateway_policy_registry()
+    base = GatewayRequestContext(
+        route_key="operator_api.case_action.mutate",
+        method="POST",
+        business_id="artemea",
+        idempotency_key="case-action:artemea:case-1:acknowledge:v1",
+    )
+
+    unauthenticated = registry.evaluate(base)
+    assert unauthenticated.allowed is False
+    assert unauthenticated.code == "unauthenticated"
+    assert unauthenticated.status_code == 401
+    assert unauthenticated.audit_event["decision_code"] == "unauthenticated"
+
+    cross_business = registry.evaluate(
+        base.model_copy(
+            update={
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("other",),
+                    permissions=("cases:write",),
+                )
+            }
+        )
+    )
+    assert cross_business.allowed is False
+    assert cross_business.code == "business_scope_forbidden"
+    assert cross_business.status_code == 403
+
+    missing_permission = registry.evaluate(
+        base.model_copy(
+            update={
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=("cases:read",),
+                )
+            }
+        )
+    )
+    assert missing_permission.allowed is False
+    assert missing_permission.code == "permission_denied"
+    assert missing_permission.status_code == 403
+
+    missing_idempotency = registry.evaluate(
+        base.model_copy(
+            update={
+                "idempotency_key": None,
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=("cases:write",),
+                ),
+            }
+        )
+    )
+    assert missing_idempotency.allowed is False
+    assert missing_idempotency.code == "missing_idempotency_key"
+    assert missing_idempotency.status_code == 428
+
+    allowed = registry.evaluate(
+        base.model_copy(
+            update={
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=("cases:write",),
+                )
+            }
+        )
+    )
+    assert allowed.allowed is True
+    assert allowed.code == "allowed"
+    assert allowed.status_code == 200
+    assert allowed.rate_limit_key == "operator_api_mutation:artemea:operator:ana"
+    assert allowed.audit_event == {
+        "event_type": "operator_case_action_requested",
+        "route_key": "operator_api.case_action.mutate",
+        "business_id": "artemea",
+        "actor_id": "operator:ana",
+        "decision_code": "allowed",
+        "idempotency_key_present": True,
+        "rate_limit_key": "operator_api_mutation:artemea:operator:ana",
+    }
+
+
+def test_gateway_policy_redacts_actor_id_in_decision_audit_event():
+    from app.brain.gateway_policy import (
+        GatewayPrincipal,
+        GatewayRequestContext,
+        default_gateway_policy_registry,
+    )
+
+    decision = default_gateway_policy_registry().evaluate(
+        GatewayRequestContext(
+            route_key="operator_api.case_queue.read",
+            method="GET",
+            business_id="artemea",
+            principal=GatewayPrincipal(
+                actor_id="operator access_token=raw_gateway_secret",
+                business_ids=("artemea",),
+                permissions=("cases:read",),
+            ),
+        )
+    )
+
+    assert decision.allowed is True
+    assert decision.audit_event["actor_id"] == "operator access_token=[REDACTED]"
+    assert "raw_gateway_secret" not in repr(decision.model_dump())
+
+
+def test_gateway_policy_rejects_duplicate_routes_and_unknown_routes():
+    from app.brain.gateway_policy import GatewayPolicyRegistry, GatewayRoutePolicy
+
+    policy = GatewayRoutePolicy(
+        route_key="operator_api.case_queue.read",
+        method="GET",
+        path_template="/internal/brain/businesses/{business_id}/cases",
+        surface="operator_api",
+        required_permissions=("cases:read",),
+        audit_event_type="operator_case_queue_requested",
+    )
+
+    with pytest.raises(ValueError, match="duplicate gateway route policy"):
+        GatewayPolicyRegistry((policy, policy))
+
+    registry = GatewayPolicyRegistry((policy,))
+    with pytest.raises(KeyError, match="unknown gateway route policy"):
+        registry.get("unknown.route")

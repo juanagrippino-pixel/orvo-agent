@@ -42,7 +42,7 @@ It is intentionally not a new infrastructure service. The first slice is an in-r
 | `test_paths` | Tests that protect the component. |
 | `dependencies` | Other catalog component IDs required by this component. |
 | `runtime_surfaces` | Runtime/API surfaces touched by the component. |
-| `observability_signals` | Stable log/ledger/API field names useful for provenance. |
+| `observability_signals` | Stable log/ledger/API field names useful for provenance. Signal names that reference actors, keys, or external identifiers must describe redacted/projected values, never raw credential-bearing values. |
 
 ## Current components
 
@@ -54,14 +54,16 @@ The initial catalog covers the current Orvo Brain control-plane spine:
 4. `run_ledger` — runtime execution provenance and status.
 5. `operational_cases` — WorkItem/OperationalCase lifecycle source of truth.
 6. `operator_api` — internal operator API projection layer.
-7. `delivery_dispatch` — dispatch/idempotency boundary for report and owner brief delivery.
-8. `edge_developer_platform` — in-repo platform conventions and catalog contract.
+7. `gateway_policy` — shared auth, permission, rate-limit, idempotency, and audit-decision conventions for internal edges.
+8. `delivery_dispatch` — dispatch/idempotency boundary for report and owner brief delivery.
+9. `edge_developer_platform` — in-repo platform conventions and catalog contract.
 
 ## Acceptance tests
 
 Required tests live in `tests/contracts/test_service_catalog_contract.py` and prove:
 
 - default catalog coverage for core control-plane components;
+- gateway policy ownership and source-of-truth metadata;
 - stable public manifest schema and component ordering;
 - duplicate component IDs are rejected;
 - dependencies must point at known components;
