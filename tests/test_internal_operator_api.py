@@ -33,7 +33,9 @@ def _case_detection(
     run_id: str = "run-artemea-1",
     source: str = "tiendanube",
     source_label: str = "Tiendanube access_token=raw_snapshot_secret",
+    entity_scope: dict[str, str] | None = None,
 ) -> OperationalCaseDetection:
+    scope = entity_scope or {"kind": "business", "id": "monitored", "label": "Monitoreado"}
     return OperationalCaseDetection(
         business_id=business_id,
         case_type=case_type,
@@ -41,13 +43,13 @@ def _case_detection(
         title=title,
         severity=severity,
         priority_score=priority,
-        entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado"},
+        entity_scope=scope,
         evidence_refs=[f"evidence://{business_id}/{run_id}/{case_type}"],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/daily-report"],
         evidence_snapshots=[
             OperationalCaseEvidenceSnapshot(
-                snapshot_key=f"{run_id}/evidence://{business_id}/{run_id}/{case_type}/{case_type}/business/monitored",
+                snapshot_key=f"{run_id}/evidence://{business_id}/{run_id}/{case_type}/{case_type}/{scope.get('kind', 'unknown')}/{scope.get('id', 'unknown')}",
                 captured_at=_utc(8),
                 run_id=run_id,
                 artifact_ref=f"ledger://runs/{run_id}/daily-report?access_token=raw_snapshot_secret",
@@ -55,7 +57,7 @@ def _case_detection(
                 source=source,
                 source_label=source_label,
                 case_type=case_type,
-                entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado"},
+                entity_scope=scope,
                 summary="Snapshot Bearer raw_snapshot_secret",
                 freshness_state="fresh",
                 metrics=[
@@ -422,6 +424,41 @@ def test_internal_case_queue_summary_by_priority_bracket_returns_scoped_envelope
     assert summary["actionable_degraded_by_priority_bracket"] == {}
 
 
+def test_internal_case_queue_summary_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-stockout"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-sales-drop",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-stockout"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert summary["actionable_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert summary["actionable_degraded_by_case_type"] == {}
+
+
 def test_internal_case_queue_summary_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-artemea-tn", source="tiendanube"))
@@ -459,6 +496,57 @@ def test_internal_case_queue_summary_by_source_connector_returns_scoped_envelope
     assert summary["actionable_degraded_by_source_connector"] == {}
 
 
+def test_internal_case_queue_summary_by_entity_kind_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-artemea-product",
+            dedupe_suffix="stockout_risk/product/sku-1/commerce.inventory/daily",
+            entity_scope={"kind": "product", "id": "sku-1", "label": "SKU 1"},
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-channel",
+            entity_scope={"kind": "channel", "id": "all", "label": "All channels"},
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-other-product",
+            dedupe_suffix="stockout_risk/product/sku-other/commerce.inventory/daily",
+            entity_scope={"kind": "product", "id": "sku-other", "label": "Other SKU"},
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-entity-kind",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_entity_kind"] == {"product": 1, "channel": 1}
+    assert summary["actionable_by_entity_kind"] == {"product": 1, "channel": 1}
+    assert summary["actionable_degraded_by_entity_kind"] == {}
+
+
 def test_internal_case_queue_aging_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
@@ -494,6 +582,57 @@ def test_internal_case_queue_aging_by_priority_bracket_returns_scoped_envelope(m
     assert data["by_age_bucket"]["under_6h"] == 1
     assert data["by_age_bucket_priority_bracket"]["under_6h"] == {"high": 1}
     assert data["oldest_actionable"]["case_type"] == "stockout_risk"
+
+
+def test_internal_case_queue_aging_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-critical",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-critical/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-warning",
+            severity="warning",
+            dedupe_suffix="stockout_risk/product/sku-warning/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-other/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/aging/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_age_bucket"]["under_6h"] == 2
+    assert data["by_age_bucket_severity"]["under_6h"] == {"critical": 1, "warning": 1}
+    assert data["oldest_actionable"]["case_type"] == "stockout_risk"
+    assert data["oldest_actionable"]["severity"] in {"critical", "warning"}
 
 
 def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
