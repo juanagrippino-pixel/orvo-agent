@@ -499,6 +499,57 @@ def summarize_case_queue_by_case_type(
     )
 
 
+def summarize_case_queue_by_entity_kind(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Entity-kind-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but groups lifecycle, actionable, and
+    actionable-degraded counts by ``entity_scope.kind`` (product / channel /
+    business / connector / etc.), matching the attribution used by
+    :func:`summarize_case_queue_aging_by_entity_kind`,
+    :func:`summarize_case_queue_stagnation_by_entity_kind`, and
+    :func:`summarize_case_workflow_throughput_by_entity_kind`. Lets operator
+    surfaces lead with which scope dominates the in-flight backlog even when
+    severity / case_type / source distributions look balanced — for example, a
+    wave of product-scoped stockouts often hides inside healthy aggregate
+    counts. Cases whose ``entity_scope`` lacks a ``kind`` are bucketed under
+    ``"unknown"`` so totals never silently drop. ``total`` counts the full
+    lifecycle (open + acknowledged + resolved); ``actionable_*`` counts isolate
+    the in-flight slice. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_entity_kind: dict[str, int] = {}
+    actionable_by_entity_kind: dict[str, int] = {}
+    actionable_degraded_by_entity_kind: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        entity_kind = case.entity_scope.get("kind") or "unknown"
+        totals_by_entity_kind[entity_kind] = (
+            totals_by_entity_kind.get(entity_kind, 0) + 1
+        )
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_entity_kind[entity_kind] = (
+                actionable_by_entity_kind.get(entity_kind, 0) + 1
+            )
+            if _is_degraded(case):
+                actionable_degraded_by_entity_kind[entity_kind] = (
+                    actionable_degraded_by_entity_kind.get(entity_kind, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_entity_kind": totals_by_entity_kind,
+            "actionable_by_entity_kind": actionable_by_entity_kind,
+            "actionable_degraded_by_entity_kind": actionable_degraded_by_entity_kind,
+        }
+    )
+
+
 def summarize_case_queue_by_source_connector(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
