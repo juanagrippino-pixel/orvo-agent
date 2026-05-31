@@ -19,6 +19,7 @@ from app.brain.operational_cases import OperationalCase
 from app.brain.security.redaction import redact_secrets, redact_text
 
 WorkflowTrigger = Literal["case_opened", "case_updated", "manual"]
+WORKFLOW_TRIGGER_VALUES = {"case_opened", "case_updated", "manual"}
 WorkflowConditionField = Literal["status", "case_type", "severity", "min_priority_score", "degraded"]
 WorkflowActionMode = Literal["manual", "suggestion", "approval_required"]
 WorkflowSideEffect = Literal["none", "case_transition", "case_comment", "operator_request", "external"]
@@ -186,6 +187,11 @@ def _validate_rule(rule: WorkflowRule, case: OperationalCase) -> None:
         raise WorkflowAutomationError("business_scope_mismatch", "workflow rule business_id does not match case business_id")
     if not rule.rule_id.strip():
         raise WorkflowAutomationError("invalid_workflow_rule", "workflow rule_id is required")
+    if rule.trigger not in WORKFLOW_TRIGGER_VALUES:
+        raise WorkflowAutomationError(
+            "unsupported_workflow_trigger",
+            f"unsupported workflow trigger: {rule.trigger}",
+        )
     for action in rule.actions:
         if action.action_key not in WORKFLOW_ACTION_REGISTRY:
             raise WorkflowAutomationError(

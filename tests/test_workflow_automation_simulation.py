@@ -165,6 +165,22 @@ def test_simulate_case_workflow_rejects_unknown_action_key_before_projecting_act
     assert exc.value.code == "unknown_workflow_action_key"
 
 
+def test_simulate_case_workflow_rejects_unknown_trigger_before_projecting_actions():
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="unknown-trigger",
+        business_id="artemea",
+        trigger="case_deleted",  # type: ignore[arg-type]
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[WorkflowAction(action_key="acknowledge_case", params={})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(11))
+
+    assert exc.value.code == "unsupported_workflow_trigger"
+
+
 def test_simulate_case_workflow_returns_no_actions_when_conditions_do_not_match():
     _, case = seed_case(priority_score=40)
     rule = WorkflowRule(
