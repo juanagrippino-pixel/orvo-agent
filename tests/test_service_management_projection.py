@@ -195,3 +195,65 @@ def test_list_service_management_cases_is_business_scoped_limited_and_rejects_na
             business_id="artemea",
             now=datetime(2026, 5, 24, 12),
         )
+
+
+def test_service_management_projection_exposes_deterministic_escalation_reasons():
+    store = InMemoryOperationalCaseStore()
+    breached = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="critical-stockout/business/monitored/inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-breached",
+        ),
+        detected_at=NOW - timedelta(hours=5),
+    )
+    waiting_external = store.upsert_detection(
+        _detection(
+            case_type="data_stale",
+            dedupe_suffix="stale/connector/tiendanube/freshness/daily",
+            severity="warning",
+            priority=80,
+            run_id="run-waiting-external",
+            metadata={"waiting_on": "external"},
+        ),
+        detected_at=NOW - timedelta(hours=2),
+    )
+    store.transition_case(
+        waiting_external.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=1, minutes=30),
+    )
+
+    breached_item = service_management_case_item(breached, now=NOW)
+    waiting_item = service_management_case_item(store.get_case(waiting_external.case_id), now=NOW)  # type: ignore[arg-type]
+
+    assert breached_item["needs_escalation"] is True
+    assert breached_item["escalation_reasons"] == [
+        {
+            "code": "critical_case_unacknowledged",
+            "label_es": "Caso crítico sin acuse",
+            "source": "case_status",
+        },
+        {
+            "code": "first_response_sla_breached",
+            "label_es": "SLA de primera respuesta vencido",
+            "source": "sla.first_response",
+        },
+        {
+            "code": "resolution_sla_breached",
+            "label_es": "SLA de resolución vencido",
+            "source": "sla.resolution",
+        },
+    ]
+    assert waiting_item["needs_escalation"] is True
+    assert waiting_item["escalation_reasons"] == [
+        {
+            "code": "waiting_external",
+            "label_es": "Bloqueado por un tercero",
+            "source": "owner_status",
+        }
+    ]
