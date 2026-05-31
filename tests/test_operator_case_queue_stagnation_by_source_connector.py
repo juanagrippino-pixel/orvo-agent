@@ -246,6 +246,7 @@ def test_summarize_case_queue_stagnation_by_source_connector_excludes_resolved_c
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=NOW - timedelta(days=18),
     )
 

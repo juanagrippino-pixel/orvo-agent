@@ -81,6 +81,7 @@ def test_summarize_case_workflow_throughput_by_source_connector_splits_latencies
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(12),
     )
     # google_sheets B: opened 08:00, acknowledged 13:00, resolved 18:00.
@@ -107,6 +108,7 @@ def test_summarize_case_workflow_throughput_by_source_connector_splits_latencies
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(18),
     )
     # tiendanube C: opened 08:00, acknowledged 09:00 only.

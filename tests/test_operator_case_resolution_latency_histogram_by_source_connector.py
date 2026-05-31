@@ -67,6 +67,7 @@ def _resolve(
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=resolved_at,
     )
     return case.case_id
@@ -379,6 +380,7 @@ def test_resolution_latency_histogram_by_source_connector_buckets_missing_source
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=opened_at + timedelta(hours=3),
     )
 
@@ -426,6 +428,7 @@ def test_resolution_latency_histogram_by_source_connector_uses_first_sorted_sour
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=opened_at + timedelta(hours=3),
     )
 
