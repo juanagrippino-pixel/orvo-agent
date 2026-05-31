@@ -56,6 +56,7 @@ def _seed_case_with_lifecycle(
     opened_hours_ago: int = 24,
     ack_minutes_after_open: int | None = 30,
     resolve_hours_after_open: int | None = None,
+    priority: int = 100,
     run_id: str = "run-1",
     dedupe_suffix: str = "stockout_risk/business/monitored/commerce.inventory/daily",
 ) -> str:
@@ -64,7 +65,12 @@ def _seed_case_with_lifecycle(
     conn = sqlite3.connect(str(db_path))
     store = SQLiteOperationalCaseStore(conn)
     case = store.upsert_detection(
-        _detection(business_id=business_id, run_id=run_id, dedupe_suffix=dedupe_suffix),
+        _detection(
+            business_id=business_id,
+            priority=priority,
+            run_id=run_id,
+            dedupe_suffix=dedupe_suffix,
+        ),
         detected_at=opened_at,
     )
     if ack_minutes_after_open is not None:
@@ -161,6 +167,48 @@ def test_workflow_throughput_scopes_to_business_id(_isolate_db):
     data = response.get_json()["data"]
     assert data["business_id"] == "other-biz"
     assert data["total"] == 0
+
+
+def test_workflow_throughput_by_priority_bracket_exposes_split_projection(_isolate_db):
+    from server import app
+
+    _seed_case_with_lifecycle(
+        _isolate_db,
+        priority=95,
+        ack_minutes_after_open=30,
+        resolve_hours_after_open=4,
+        dedupe_suffix="case-high",
+    )
+    _seed_case_with_lifecycle(
+        _isolate_db,
+        priority=65,
+        ack_minutes_after_open=None,
+        resolve_hours_after_open=None,
+        dedupe_suffix="case-medium",
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/workflow/throughput/by-priority-bracket",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["total"] == 2
+    assert data["totals_by_priority_bracket"] == {"high": 1, "medium": 1}
+    assert data["acknowledged_by_priority_bracket"] == {"high": 1}
+    assert data["resolved_by_priority_bracket"] == {"high": 1}
+    assert data["time_to_acknowledge_seconds_by_priority_bracket"]["high"] == {
+        "min": 1800,
+        "max": 1800,
+        "avg": 1800,
+        "median": 1800,
+    }
 
 
 def test_workflow_throughput_rejects_unauthorized_request(_isolate_db):

@@ -71,8 +71,10 @@ POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 Actions must use registered action keys and append timeline events. The action
 catalog endpoint is an authenticated, business-scoped projection of registered
 case action keys; it must mark which catalog actions are actually enabled by the
-current internal API so clients do not infer executable capabilities from docs or
-owner-facing copy.
+current internal API (including `assign_owner` once the scoped assignment path is
+wired) so clients do not infer executable capabilities from docs or owner-facing
+copy. Enabled assignment entries must advertise required input fields without
+exposing unredacted assignee values.
 
 ## Response envelope
 

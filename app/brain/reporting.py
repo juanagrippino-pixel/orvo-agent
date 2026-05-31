@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Iterable
 
 from app.brain.models import DailyReport, Evidence, Metric
-from app.brain.operational_cases import OperationalCase
+from app.brain.operational_cases import ACTIONABLE_OPERATIONAL_CASE_STATUSES, OperationalCase
 from app.brain.security.redaction import redact_text
 
 
@@ -198,7 +198,7 @@ def compose_owner_case_brief(
     store. The text is intentionally short and fully redacted before returning.
     """
 
-    actionable = [case for case in cases if case.status in {"open", "acknowledged"}]
+    actionable = [case for case in cases if case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES]
     actionable = sorted(actionable, key=_case_order)
     visible_cases = actionable[:max_cases]
     date_suffix = f" · {report_date.isoformat()}" if report_date else ""

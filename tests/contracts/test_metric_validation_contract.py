@@ -962,10 +962,10 @@ def test_validate_report_metric_objects_composes_unknown_then_report_then_eviden
     from app.brain.semantics.metric_registry import validate_report_metric_objects
 
     metrics = [
-        _metric("revenue_today", "tiendanube"),
+        _metric("revenue_today", "tiendanube", unit="ARS"),
         _metric("custom.unknown_report_metric", "tiendanube"),
         _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
-        _metric("ad_spend_today", "whatsapp"),
+        _metric("ad_spend_today", "whatsapp", unit="ARS"),
         _metric("orders_today", "tiendanube", value="not a number"),
     ]
 
@@ -995,27 +995,32 @@ def test_validate_report_metric_objects_slots_evidence_missing_between_report_an
         {
             "key": "revenue_today",
             "value": 120000,
+            "unit": "ARS",
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "custom.unknown_report_metric",
             "value": 1,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "runtime.freshness.age_seconds",
             "value": 42,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
-        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
         {
             "key": "ad_spend_today",
             "value": 1500,
+            "unit": "ARS",
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
             "key": "orders_today",
             "value": "not a number",
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
     ]
@@ -1031,14 +1036,44 @@ def test_validate_report_metric_objects_slots_evidence_missing_between_report_an
     ]
 
 
+def test_validate_report_metric_objects_appends_money_currency_missing_after_value_kind():
+    """The six-diagnostic composition inside
+    :func:`validate_report_metric_objects` must place money_currency_missing
+    after value_kind_mismatch: structural and value-type diagnostics surface
+    before the rendering-metadata diagnostic that money metrics must carry a
+    currency string for reports to render unambiguously. Each diagnostic
+    preserves its own input-order index, and a single metric that is both
+    value-kind invalid and missing currency must surface in both slots."""
+
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+        _metric("commerce.revenue.baseline", "google_sheets", value=80000),
+        _metric("ad_spend_today", "meta_ads", value="invalid"),
+    ]
+
+    issues = validate_report_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
+        ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("value_kind_mismatch", "ad_spend_today", 4, "warning"),
+        ("money_currency_missing", "commerce.revenue.baseline", 3, "warning"),
+        ("money_currency_missing", "ad_spend_today", 4, "warning"),
+    ]
+
+
 def test_validate_report_metric_objects_returns_empty_for_clean_report_metrics():
     from app.brain.semantics.metric_registry import validate_report_metric_objects
 
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
-        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("revenue_today", "mercadolibre", value=120000, unit="ARS"),
         _metric("stock_units", "tiendanube", value=42),
-        _metric("ad_spend_today", "meta_ads", value=1500),
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
     ]
 
     assert validate_report_metric_objects(metrics) == []
@@ -1056,7 +1091,7 @@ def test_validate_report_metric_objects_matches_key_path_when_no_object_violatio
     )
 
     metrics = [
-        _metric("revenue_today", "tiendanube", value=120000),
+        _metric("revenue_today", "tiendanube", value=120000, unit="ARS"),
         _metric("custom.unknown_report_metric", "tiendanube"),
         _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
     ]
@@ -1136,8 +1171,8 @@ def test_validate_case_metric_objects_composes_unknown_then_case_then_evidence_t
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
         _metric("custom.unknown_case_metric", "tiendanube"),
-        _metric("avg_order_value", "tiendanube", value=7500),
-        _metric("ad_spend_today", "whatsapp", value=1500),
+        _metric("avg_order_value", "tiendanube", value=7500, unit="ARS"),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
         _metric("commerce.orders.count", "tiendanube", value="not a number"),
     ]
 
@@ -1167,27 +1202,32 @@ def test_validate_case_metric_objects_slots_evidence_missing_between_case_and_ev
         {
             "key": "orders_today",
             "value": 12,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "custom.unknown_case_metric",
             "value": 1,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "avg_order_value",
             "value": 7500,
+            "unit": "ARS",
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
-        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
         {
             "key": "ad_spend_today",
             "value": 1500,
+            "unit": "ARS",
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
             "key": "commerce.orders.count",
             "value": "not a number",
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
     ]
@@ -1203,14 +1243,45 @@ def test_validate_case_metric_objects_slots_evidence_missing_between_case_and_ev
     ]
 
 
+def test_validate_case_metric_objects_appends_money_currency_missing_after_value_kind():
+    """The six-diagnostic composition inside
+    :func:`validate_case_metric_objects` must place money_currency_missing
+    after value_kind_mismatch: structural and value-type diagnostics surface
+    before the rendering-metadata diagnostic that money metrics must carry a
+    currency string for case detections to compare values unambiguously. Each
+    diagnostic preserves its own input-order index, and a single metric that is
+    both value-kind invalid and missing currency must surface in both slots."""
+
+    from app.brain.semantics.metric_registry import validate_case_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_case_metric", "tiendanube"),
+        _metric("avg_order_value", "tiendanube", value=7500),
+        _metric("revenue_today", "tiendanube", value=120000),
+        _metric("ad_spend_today", "meta_ads", value="invalid"),
+    ]
+
+    issues = validate_case_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_case_metric", 1, "warning"),
+        ("case_not_allowed", "avg_order_value", 2, "warning"),
+        ("value_kind_mismatch", "ad_spend_today", 4, "warning"),
+        ("money_currency_missing", "avg_order_value", 2, "warning"),
+        ("money_currency_missing", "revenue_today", 3, "warning"),
+        ("money_currency_missing", "ad_spend_today", 4, "warning"),
+    ]
+
+
 def test_validate_case_metric_objects_returns_empty_for_clean_case_metrics():
     from app.brain.semantics.metric_registry import validate_case_metric_objects
 
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
-        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("revenue_today", "mercadolibre", value=120000, unit="ARS"),
         _metric("stock_units", "tiendanube", value=42),
-        _metric("ad_spend_today", "meta_ads", value=1500),
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
     ]
 
     assert validate_case_metric_objects(metrics) == []
@@ -1230,7 +1301,7 @@ def test_validate_case_metric_objects_matches_key_path_when_no_object_violations
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
         _metric("custom.unknown_case_metric", "tiendanube"),
-        _metric("avg_order_value", "tiendanube", value=7500),
+        _metric("avg_order_value", "tiendanube", value=7500, unit="ARS"),
     ]
     keys = [metric.key for metric in metrics]
 
@@ -1713,7 +1784,7 @@ def test_validate_surface_metric_objects_composes_unknown_then_pii_then_evidence
         _metric("orders_today", "tiendanube", value=12),
         _metric("custom.unknown_surface_metric", "tiendanube"),
         _metric("unanswered_conversations", "whatsapp", value=5),
-        _metric("ad_spend_today", "whatsapp"),
+        _metric("ad_spend_today", "whatsapp", unit="ARS"),
         _metric("commerce.orders.count", "tiendanube", value="not a number"),
     ]
 
@@ -1745,27 +1816,32 @@ def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_
         {
             "key": "orders_today",
             "value": 12,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "custom.unknown_surface_metric",
             "value": 1,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "unanswered_conversations",
             "value": 5,
+            "unit": None,
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
-        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
         {
             "key": "ad_spend_today",
             "value": 1500,
+            "unit": "ARS",
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
             "key": "commerce.orders.count",
             "value": "not a number",
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
     ]
@@ -1783,14 +1859,47 @@ def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_
     ]
 
 
+def test_validate_surface_metric_objects_appends_money_currency_missing_after_value_kind():
+    """The six-diagnostic composition inside
+    :func:`validate_surface_metric_objects` must place money_currency_missing
+    after value_kind_mismatch: structural and value-type diagnostics surface
+    before the rendering-metadata diagnostic that money metrics must carry a
+    currency string for surfaces (WhatsApp dispatch, owner brief) to render
+    unambiguously. Each diagnostic preserves its own input-order index, and a
+    single metric that is both value-kind invalid and missing currency must
+    surface in both slots."""
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+        _metric("commerce.revenue.baseline", "google_sheets", value=80000),
+        _metric("ad_spend_today", "meta_ads", value="invalid"),
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+        ("value_kind_mismatch", "ad_spend_today", 4, "warning"),
+        ("money_currency_missing", "commerce.revenue.baseline", 3, "warning"),
+        ("money_currency_missing", "ad_spend_today", 4, "warning"),
+    ]
+
+
 def test_validate_surface_metric_objects_returns_empty_for_clean_surface_metrics():
     from app.brain.semantics.metric_registry import validate_surface_metric_objects
 
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
-        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("revenue_today", "mercadolibre", value=120000, unit="ARS"),
         _metric("stock_units", "tiendanube", value=42),
-        _metric("ad_spend_today", "meta_ads", value=1500),
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
     ]
 
     assert (
@@ -2383,3 +2492,235 @@ def test_validate_freshness_envelope_metric_objects_is_reexported_from_semantics
 
     assert hasattr(semantics, "validate_freshness_envelope_metric_objects")
     assert "validate_freshness_envelope_metric_objects" in semantics.__all__
+
+
+def test_money_currency_helper_flags_money_metric_missing_currency_context():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # commerce.revenue.total has canonical unit="money"; runtime metric objects
+    # must carry a non-empty unit (currency code) so reports can render the
+    # value with currency context. A missing unit must be reported.
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=120000,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+    ]
+
+    violations = find_money_currency_violations(metrics)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("money_currency_missing", "commerce.revenue.total", 1, "warning"),
+    ]
+    assert "commerce.revenue.total" in violations[0].message
+    assert "money" in violations[0].message
+
+
+def test_money_currency_helper_resolves_aliases_before_checking_unit_kind():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # revenue_today is an alias for commerce.revenue.total (unit="money"); the
+    # diagnostic must resolve the alias and surface the canonical key in the
+    # message.
+    metrics = [
+        Metric(
+            key="revenue_today",
+            label="Ventas",
+            value=90000,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+    ]
+    violations = find_money_currency_violations(metrics)
+    assert len(violations) == 1
+    assert violations[0].key == "revenue_today"
+    assert "commerce.revenue.total" in violations[0].message
+
+
+def test_money_currency_helper_returns_empty_when_money_metrics_carry_currency():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    metrics = [
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=120000,
+            unit="ARS",
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="ad_spend_today",
+            label="Spend",
+            value=1500,
+            unit="USD",
+            evidence=[_evidence("meta_ads")],
+        ),
+    ]
+    assert find_money_currency_violations(metrics) == []
+
+
+def test_money_currency_helper_skips_non_money_metrics():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # commerce.orders.count (unit="count") and runtime.freshness.age_seconds
+    # (unit="duration") have non-money unit kinds; their unit field is
+    # irrelevant to the money-currency check and must never be flagged.
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=12,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="runtime.freshness.age_seconds",
+            label="Freshness",
+            value=300,
+            unit=None,
+            evidence=[_evidence()],
+        ),
+    ]
+    assert find_money_currency_violations(metrics) == []
+
+
+def test_money_currency_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    metrics = [
+        {
+            "key": "never_registered_metric",
+            "value": 1000,
+            "unit": None,
+            "evidence": [{"source": "sample", "label": "s"}],
+        },
+    ]
+    assert find_money_currency_violations(metrics) == []
+
+
+def test_money_currency_helper_treats_empty_string_unit_as_missing():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # An empty-string unit is semantically the same as no currency context for
+    # a money metric; both must produce a diagnostic.
+    metrics = [
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": "",
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": "   ",
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+    ]
+    violations = find_money_currency_violations(metrics)
+    assert [(issue.code, issue.index) for issue in violations] == [
+        ("money_currency_missing", 0),
+        ("money_currency_missing", 1),
+    ]
+
+
+def test_money_currency_helper_rejects_non_string_unit():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    # A non-string unit on a money metric is a contract violation the helper
+    # must surface explicitly rather than silently coercing.
+    metrics = [
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": 123,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+    ]
+    with pytest.raises(ValueError, match="unit"):
+        find_money_currency_violations(metrics)
+
+
+def test_money_currency_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    metrics = [
+        {
+            "key": "commerce.revenue.total",
+            "value": 120000,
+            "unit": None,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "unit": None,
+            "evidence": [{"source": "meta_ads", "label": "ma"}],
+        },
+    ]
+    first = find_money_currency_violations(metrics)
+    second = find_money_currency_violations(metrics)
+    assert first == second
+    assert [issue.key for issue in first] == [
+        "commerce.revenue.total",
+        "ad_spend_today",
+    ]
+
+
+def test_money_currency_helper_rejects_metrics_missing_key_field():
+    from app.brain.semantics.metric_registry import find_money_currency_violations
+
+    with pytest.raises(ValueError, match="key"):
+        find_money_currency_violations(
+            [{"label": "no key", "value": 1, "unit": "ARS", "evidence": []}]
+        )
+
+
+def test_money_currency_helper_threads_custom_registry_into_alias_resolution():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_money_currency_violations,
+    )
+
+    # A custom registry can declare new money metrics; the helper must use the
+    # passed registry rather than the process-wide default for resolution.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="custom.margin.total",
+                family="custom.margin",
+                label="Margin",
+                unit="money",
+                allowed_sources=("sample",),
+                aliases=("margin_today",),
+                aggregation="sum",
+                case_allowed=False,
+                report_allowed=True,
+            ),
+        )
+    )
+
+    metrics = [
+        {"key": "custom.margin.total", "value": 5000, "unit": None, "evidence": []},
+        {"key": "margin_today", "value": 4000, "unit": "ARS", "evidence": []},
+    ]
+    violations = find_money_currency_violations(metrics, registry=registry)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("money_currency_missing", "custom.margin.total", 0),
+    ]
+
+
+def test_money_currency_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_money_currency_violations")
+    assert "find_money_currency_violations" in semantics.__all__

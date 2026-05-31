@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.brain.config import BusinessConfig
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient, make_idempotency_key
 from app.brain.models import DailyReport
-from app.brain.operational_cases import OperationalCase
+from app.brain.operational_cases import ACTIONABLE_OPERATIONAL_CASE_STATUSES, OperationalCase
 from app.brain.reporting import compose_daily_report_text, compose_owner_case_brief, truncate_for_whatsapp
 
 _log = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def _send_text_once(
 
 
 def _actionable_cases(cases: Sequence[OperationalCase]) -> list[OperationalCase]:
-    return [case for case in cases if case.status in {"open", "acknowledged"}]
+    return [case for case in cases if case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES]
 
 
 def dispatch_owner_case_brief(

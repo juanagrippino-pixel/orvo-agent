@@ -20,6 +20,9 @@ from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
 
 OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved", "dismissed"]
+ACTIONABLE_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset(
+    {"open", "acknowledged", "in_progress"}
+)
 OperationalCaseType = Literal[
     "sales_drop",
     "stockout_risk",
@@ -35,6 +38,7 @@ TimelineEventType = Literal[
     "case_updated",
     "case_reopened",
     "status_changed",
+    "case_assigned",
     "evidence_attached",
     "operator_comment",
 ]
@@ -252,6 +256,8 @@ class OperationalCase(BaseModel):
     opened_at: datetime = Field(default_factory=_now_utc)
     updated_at: datetime = Field(default_factory=_now_utc)
     acknowledged_at: datetime | None = None
+    assigned_at: datetime | None = None
+    assignee_ref: str | None = None
     resolved_at: datetime | None = None
     latest_run_id: str | None = None
     source_run_ids: list[str] = Field(default_factory=list)
@@ -266,10 +272,17 @@ class OperationalCase(BaseModel):
     def redact_title(cls, value: str) -> str:
         return redact_text(value) or "[REDACTED]"
 
-    @field_validator("opened_at", "updated_at", "acknowledged_at", "resolved_at")
+    @field_validator("opened_at", "updated_at", "acknowledged_at", "assigned_at", "resolved_at")
     @classmethod
     def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
         return _as_utc(value) if value is not None else None
+
+    @field_validator("assignee_ref", mode="before")
+    @classmethod
+    def redact_assignee_ref(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        return redact_text(str(value)) or "[REDACTED]"
 
     @field_validator("metadata", "entity_scope", mode="before")
     @classmethod
@@ -287,6 +300,12 @@ class OperationalCase(BaseModel):
             raise ValueError("updated_at must be after opened_at")
         if self.acknowledged_at is not None and self.acknowledged_at < self.opened_at:
             raise ValueError("acknowledged_at must be after opened_at")
+        if self.assigned_at is not None and self.assigned_at < self.opened_at:
+            raise ValueError("assigned_at must be after opened_at")
+        if self.assigned_at is not None and self.assignee_ref is None:
+            raise ValueError("assigned case requires assignee_ref")
+        if self.assignee_ref is not None and self.assigned_at is None:
+            raise ValueError("assigned case requires assigned_at")
         if self.resolved_at is not None and self.resolved_at < self.opened_at:
             raise ValueError("resolved_at must be after opened_at")
         if self.status == "resolved" and self.resolved_at is None:
@@ -416,6 +435,16 @@ class OperationalCaseStore(Protocol):
         comment: str,
         metadata: dict[str, Any] | None = None,
         commented_at: datetime | None = None,
+    ) -> OperationalCase: ...
+
+    def assign_case(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        assignee_ref: str,
+        assigned_at: datetime | None = None,
     ) -> OperationalCase: ...
 
     def get_case(self, case_id: str) -> OperationalCase | None: ...
@@ -596,6 +625,46 @@ class _OperationalCaseMutations:
                         created_at=commented_at,
                         summary=comment,
                         metadata=metadata or {},
+                    ),
+                ],
+            },
+            deep=True,
+        )
+        updated = OperationalCase.model_validate(updated.model_dump())
+        self._persist(updated)
+        return updated.model_copy(deep=True)
+
+    def assign_case(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        assignee_ref: str,
+        assigned_at: datetime | None = None,
+    ) -> OperationalCase:
+        record = self._load_for_update(case_id)
+        if record.status in {"resolved", "dismissed"}:
+            raise OperationalCaseStatusError(f"case {case_id} cannot assign owner while {record.status}")
+        normalized_assignee_ref = assignee_ref.strip()
+        if not normalized_assignee_ref:
+            raise ValueError("assignee_ref must be non-empty")
+        assigned_at = _as_utc(assigned_at) if assigned_at is not None else _now_utc()
+        updated = record.model_copy(
+            update={
+                "assignee_ref": normalized_assignee_ref,
+                "assigned_at": assigned_at,
+                "updated_at": assigned_at,
+                "timeline": [
+                    *record.timeline,
+                    OperationalCaseTimelineEvent(
+                        event_type="case_assigned",
+                        actor_type=actor_type,
+                        actor_ref=actor_ref,
+                        case_id=record.case_id,
+                        created_at=assigned_at,
+                        summary=f"Assigned case to {normalized_assignee_ref}.",
+                        metadata={"assignee_ref": normalized_assignee_ref},
                     ),
                 ],
             },
