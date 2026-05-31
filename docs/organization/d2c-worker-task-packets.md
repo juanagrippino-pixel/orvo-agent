@@ -334,6 +334,115 @@ Acceptance:
 - dedupe/entity-scope tests prove one all-channel key cannot hide distinct channel-specific issues;
 - full suite remains green.
 
+## Packet O — Trust/Admin/Security audit closure
+
+Goal: close the 2026-05-31 architecture-review blockers before presenting Trust/Admin/Security as live-use ready.
+
+Dependency: dispatch after the current internal operator API action path is green. Do not combine with unrelated workflow or connector rewrites.
+
+Read:
+
+- `docs/architecture-reviews/2026-05-31-review.md`
+- `docs/specs/internal-operator-api-contract.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
+- `docs/specs/testing-invariant-matrix.md`
+
+Likely files:
+
+- `server.py`
+- `app/brain/operator_api.py`
+- `app/brain/storage.py`
+- `tests/test_internal_operator_api.py`
+
+Acceptance:
+
+- failed/denied case actions are audited where an authenticated actor/business/case context can be derived;
+- auth failures are either audited through a safe pre-auth event shape or explicitly documented as impossible without a trusted actor/business context;
+- audit payloads and actor/business/target fields are redacted before persistence;
+- minimal action-scope/RBAC behavior is implemented, or the branch is explicitly labeled audit-foundation-only;
+- full suite remains green.
+
+## Packet P — Work-management contract cleanup
+
+Goal: reconcile merged workflow behavior with the Operational Case contract and avoid silent Jira-parity drift.
+
+Dependency: dispatch after `codex/work-management` merges are present in the target branch.
+
+Read:
+
+- `docs/architecture-reviews/2026-05-31-review.md`
+- `docs/specs/operational-case-engine-contract.md`
+- `docs/specs/d2c-action-key-catalog.md`
+
+Likely files:
+
+- `app/brain/operational_cases.py`
+- `app/brain/operator_api.py`
+- `tests/test_brain_operational_cases.py`
+- `tests/test_operator_case_actions.py`
+
+Acceptance:
+
+- manual `resolve_case` requires a non-empty reason just like `dismiss_case`;
+- lifecycle transition tests assert the contract table, including the intentional absence of direct `open -> resolved`;
+- project abstraction, issue-type registry/versioning, and status-category work are documented as separate follow-up packets rather than hidden in this cleanup;
+- no owner-facing projection changes unless required by the contract.
+
+## Packet Q — Connector registry secret-ref runtime hardening
+
+Goal: move registry-driven daily report execution away from transitional inline secret params before calling the connector platform compiled-runtime complete.
+
+Dependency: dispatch after `codex/connector-platform` is present and current connector compatibility tests are green.
+
+Read:
+
+- `docs/architecture-reviews/2026-05-31-review.md`
+- `docs/specs/connector-registry-contract.md`
+- `docs/specs/compiled-runtime-contract.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
+
+Likely files:
+
+- `app/brain/connector_registry.py`
+- `app/brain/runtime.py`
+- `app/brain/pipeline.py`
+- `tests/test_brain_connector_registry.py`
+- `tests/test_brain_pipeline.py`
+
+Acceptance:
+
+- required secret refs resolve at execution time without entering runtime hashes;
+- Tiendanube/MercadoLibre/Meta Ads legacy inline token paths are either removed or explicitly isolated as compatibility shims with redaction tests;
+- connector factory imports remain static/allowlisted and not tenant-controlled;
+- missing/invalid secrets produce redacted typed failures and, where runtime/case integration exists, open/update `data_stale` instead of unsupported advice.
+
+## Packet R — Connector/semantic family alignment gate
+
+Goal: prevent drift between connector-declared `emitted_metric_families` and the semantic metric registry.
+
+Dependency: dispatch after current metric registry diagnostics and connector registry tests are green.
+
+Read:
+
+- `docs/specs/connector-registry-contract.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/testing-invariant-matrix.md`
+- `docs/specs/d2c-case-family-catalog.md`
+
+Likely files:
+
+- `app/brain/connector_registry.py`
+- `app/brain/semantics/metric_registry.py`
+- `tests/contracts/test_adapter_metric_emission_contract.py`
+- `tests/test_brain_connector_registry.py`
+
+Acceptance:
+
+- tests fail when a connector declares an emitted family absent from the semantic registry;
+- connector emission/report/case metric validation uses one canonical family vocabulary or shared constants;
+- `channel_mix_shift` remains deferred/internal unless Packet N acceptance gates are also satisfied;
+- no new dependency and no owner-facing wording changes.
+
 ## Packet output format
 
 Workers must report:
