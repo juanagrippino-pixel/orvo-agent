@@ -422,6 +422,41 @@ def test_internal_case_queue_summary_by_priority_bracket_returns_scoped_envelope
     assert summary["actionable_degraded_by_priority_bracket"] == {}
 
 
+def test_internal_case_queue_summary_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-stockout"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-sales-drop",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-stockout"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert summary["actionable_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert summary["actionable_degraded_by_case_type"] == {}
+
+
 def test_internal_case_queue_summary_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-artemea-tn", source="tiendanube"))
