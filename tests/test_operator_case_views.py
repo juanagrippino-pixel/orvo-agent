@@ -7,6 +7,24 @@ from app.brain.operator_views import parse_case_jql
 from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
 
 
+def _case_detection_with_source(*, source: str, run_id: str, **kwargs):
+    detection = _case_detection(run_id=run_id, **kwargs)
+    snapshot = detection.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_key": f"{run_id}/evidence://{source}/{run_id}/{detection.case_type}/{detection.case_type}/business/monitored",
+            "source": source,
+            "source_label": source,
+            "evidence_ref": f"evidence://{source}/{run_id}/{detection.case_type}",
+        }
+    )
+    return detection.model_copy(
+        update={
+            "evidence_refs": [f"evidence://{source}/{run_id}/{detection.case_type}"],
+            "evidence_snapshots": [snapshot],
+        }
+    )
+
+
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
     with pytest.raises(OperatorAPIError) as business_scope:
         parse_case_jql("business_id = other")
@@ -23,6 +41,51 @@ def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
     with pytest.raises(OperatorAPIError) as sql_shape:
         parse_case_jql("status = open; DROP TABLE operational_cases")
     assert sql_shape.value.code == "invalid_jql"
+
+
+def test_parse_case_jql_supports_source_connector_allowlist_filter():
+    assert parse_case_jql("source_connector IN (tiendanube, meta_ads)").normalized == (
+        "source_connector IN (tiendanube, meta_ads) ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_operator:
+        parse_case_jql("source_connector > tiendanube")
+    assert unsupported_operator.value.code == "unsupported_jql_operator"
+
+    with pytest.raises(OperatorAPIError) as sql_shape:
+        parse_case_jql("source_connector = meta_ads; DROP TABLE operational_cases")
+    assert sql_shape.value.code == "invalid_jql"
+
+
+def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
+    meta_case = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-meta",
+            case_type="spend_without_orders",
+            dedupe_suffix="spend_without_orders/channel/meta_ads/marketing.spend/daily",
+            severity="warning",
+            priority=75,
+            title="Meta Ads sin ventas",
+        ),
+    )
+    _seed_case(db_path, _case_detection_with_source(source="meta_ads", run_id="run-other", business_id="other"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=source_connector%20%3D%20meta_ads",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "source_connector = meta_ads ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [meta_case.case_id]
+    assert body["data"]["cases"][0]["source_connectors"] == ["meta_ads"]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
 def test_internal_case_queue_accepts_safe_jql_and_keeps_business_scope(monkeypatch, tmp_path):
