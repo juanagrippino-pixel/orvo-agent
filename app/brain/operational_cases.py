@@ -20,6 +20,9 @@ from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
 
 OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved", "dismissed"]
+ACTIONABLE_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset(
+    {"open", "acknowledged", "in_progress"}
+)
 OperationalCaseType = Literal[
     "sales_drop",
     "stockout_risk",

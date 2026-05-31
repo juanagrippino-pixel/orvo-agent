@@ -10,6 +10,7 @@ from typing import Any, Literal, get_args
 from datetime import datetime, timezone
 
 from app.brain.operational_cases import (
+    ACTIONABLE_OPERATIONAL_CASE_STATUSES,
     ActorType,
     OperationalCase,
     OperationalCaseStatus,
@@ -338,7 +339,7 @@ def list_case_timeline(
     )
 
 
-_ACTIONABLE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"open", "acknowledged", "in_progress"})
+_ACTIONABLE_STATUSES = ACTIONABLE_OPERATIONAL_CASE_STATUSES
 
 
 def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> dict[str, Any]:
@@ -780,7 +781,7 @@ def summarize_case_queue_stagnation_by_priority_bracket(
     healthy. Idleness is driven by ``updated_at``, so a recently-acknowledged
     old case is reported as freshly handled; ``opened_at`` is reported on the
     most-stalled row for triage context but does not influence bucket
-    assignment. Open and acknowledged cases are both counted as actionable.
+    assignment. Open, acknowledged, and in-progress cases are counted as actionable.
     Strictly scoped per tenant; ``now`` is injectable for deterministic tests
     and defaults to current UTC.
     """
