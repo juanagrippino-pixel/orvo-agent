@@ -176,8 +176,8 @@ def test_connector_spec_validate_emitted_metric_objects_composes_all_four_diagno
     metrics = [
         _metric("orders_today", "tiendanube"),
         _metric("mystery_metric", "tiendanube"),
-        _metric("ad_spend_today", "tiendanube"),
-        _metric("revenue_today", "mercadolibre"),
+        _metric("ad_spend_today", "tiendanube", unit="ARS"),
+        _metric("revenue_today", "mercadolibre", unit="ARS"),
     ]
 
     issues = tiendanube.validate_emitted_metric_objects(metrics)
@@ -200,7 +200,7 @@ def test_connector_spec_validate_emitted_metric_objects_returns_empty_for_in_env
     assert tiendanube.validate_emitted_metric_objects(
         [
             _metric("orders_today", "tiendanube"),
-            _metric("revenue_today", "tiendanube"),
+            _metric("revenue_today", "tiendanube", unit="ARS"),
             _metric("stock_units", "tiendanube"),
         ]
     ) == []
@@ -264,7 +264,7 @@ def test_connector_spec_validate_emitted_metric_objects_matches_key_path_when_no
     metrics = [
         _metric("orders_today", "tiendanube"),
         _metric("mystery_metric", "tiendanube"),
-        _metric("ad_spend_today", "google_sheets"),
+        _metric("ad_spend_today", "google_sheets", unit="ARS"),
         _metric("ad_roas_today", "meta_ads"),
     ]
     keys = [metric.key for metric in metrics]
@@ -287,7 +287,7 @@ def test_connector_spec_validate_emitted_metric_objects_appends_value_kind_after
     meta_ads = get_connector_spec("meta_ads")
 
     metrics = [
-        _metric("ad_spend_today", "meta_ads"),
+        _metric("ad_spend_today", "meta_ads", unit="ARS"),
         _metric("mystery_metric", "meta_ads"),
         _metric("orders_today", "meta_ads"),
         _metric("ad_roas_today", "meta_ads", value="0.5"),
@@ -302,6 +302,44 @@ def test_connector_spec_validate_emitted_metric_objects_appends_value_kind_after
         ("undeclared_family", "orders_today", 2),
         ("evidence_source_mismatch", "orders_today", 2),
         ("value_kind_mismatch", "ad_roas_today", 3),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
+def test_connector_spec_validate_emitted_metric_objects_appends_money_currency_after_value_kind():
+    """ConnectorSpec.validate_emitted_metric_objects must append
+    money_currency_missing as the sixth diagnostic in the fixed composition
+    order so the runtime can detect money metrics emitted without a currency
+    string alongside the five upstream diagnostics in a single call. This
+    mirrors the slot reserved by
+    :func:`validate_report_metric_objects`,
+    :func:`validate_case_metric_objects`, and
+    :func:`validate_surface_metric_objects` so connector-, report-, case-, and
+    surface-side compositions stay symmetric.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+
+    metrics = [
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
+        _metric("mystery_metric", "meta_ads"),
+        _metric("orders_today", "meta_ads"),
+        _metric("ad_roas_today", "meta_ads", value="0.5"),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+    ]
+
+    issues = meta_ads.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "orders_today", 2),
+        ("undeclared_family", "orders_today", 2),
+        ("evidence_source_mismatch", "orders_today", 2),
+        ("value_kind_mismatch", "ad_roas_today", 3),
+        ("money_currency_missing", "ad_spend_today", 4),
     ]
     assert all(issue.severity == "warning" for issue in issues)
 
@@ -327,27 +365,32 @@ def test_connector_spec_validate_emitted_metric_objects_slots_evidence_missing_b
         {
             "key": "orders_today",
             "value": 12,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "mystery_metric",
             "value": 1,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "ad_spend_today",
             "value": 1500,
+            "unit": "ARS",
             "evidence": [{"source": "meta_ads", "label": "ads run"}],
         },
-        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
         {
             "key": "revenue_today",
             "value": 90000,
+            "unit": "ARS",
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
             "key": "orders_today",
             "value": "not a number",
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
     ]
