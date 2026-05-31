@@ -7,6 +7,7 @@ surfaces are projections of this state, not owners of lifecycle.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -76,6 +77,29 @@ def _unique(values: list[str]) -> list[str]:
             seen.add(value)
             result.append(value)
     return result
+
+
+def _backfill_legacy_dismissed_at(payload: dict[str, Any]) -> dict[str, Any]:
+    """Backfill dismissed_at for dismissed cases stored before the field existed."""
+    if payload.get("status") != "dismissed" or payload.get("dismissed_at") is not None:
+        return payload
+    for event in reversed(payload.get("timeline") or []):
+        if not isinstance(event, dict):
+            continue
+        raw_metadata = event.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        if event.get("event_type") == "status_changed" and metadata.get("to_status") == "dismissed":
+            created_at = event.get("created_at")
+            if created_at is not None:
+                return {**payload, "dismissed_at": created_at}
+    updated_at = payload.get("updated_at")
+    if updated_at is not None:
+        return {**payload, "dismissed_at": updated_at}
+    return payload
+
+
+def _load_operational_case_json(value: str) -> "OperationalCase":
+    return OperationalCase.model_validate(_backfill_legacy_dismissed_at(json.loads(value)))
 
 
 def _safe_metadata(value: Any) -> dict[str, Any]:
@@ -260,6 +284,7 @@ class OperationalCase(BaseModel):
     assigned_at: datetime | None = None
     assignee_ref: str | None = None
     resolved_at: datetime | None = None
+    dismissed_at: datetime | None = None
     latest_run_id: str | None = None
     source_run_ids: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
@@ -273,7 +298,7 @@ class OperationalCase(BaseModel):
     def redact_title(cls, value: str) -> str:
         return redact_text(value) or "[REDACTED]"
 
-    @field_validator("opened_at", "updated_at", "acknowledged_at", "assigned_at", "resolved_at")
+    @field_validator("opened_at", "updated_at", "acknowledged_at", "assigned_at", "resolved_at", "dismissed_at")
     @classmethod
     def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
         return _as_utc(value) if value is not None else None
@@ -309,8 +334,14 @@ class OperationalCase(BaseModel):
             raise ValueError("assigned case requires assigned_at")
         if self.resolved_at is not None and self.resolved_at < self.opened_at:
             raise ValueError("resolved_at must be after opened_at")
+        if self.dismissed_at is not None and self.dismissed_at < self.opened_at:
+            raise ValueError("dismissed_at must be after opened_at")
         if self.status == "resolved" and self.resolved_at is None:
             raise ValueError("resolved case requires resolved_at")
+        if self.status == "dismissed" and self.dismissed_at is None:
+            raise ValueError("dismissed case requires dismissed_at")
+        if self.status != "dismissed" and self.dismissed_at is not None:
+            raise ValueError("only dismissed cases may have dismissed_at")
         return self
 
 
@@ -554,6 +585,7 @@ class _OperationalCaseMutations:
             }
             if is_recurrence:
                 update["resolved_at"] = None
+                update["dismissed_at"] = None
                 update["acknowledged_at"] = None
             case = existing.model_copy(update=update, deep=True)
             case = OperationalCase.model_validate(case.model_dump())
@@ -599,6 +631,8 @@ class _OperationalCaseMutations:
             update["acknowledged_at"] = transitioned_at
         if status == "resolved":
             update["resolved_at"] = transitioned_at
+        if status == "dismissed":
+            update["dismissed_at"] = transitioned_at
         updated = record.model_copy(update=update, deep=True)
         updated = OperationalCase.model_validate(updated.model_dump())
         self._persist(updated)
@@ -744,7 +778,7 @@ class SQLiteOperationalCaseStore(_OperationalCaseMutations):
         row = cursor.fetchone()
         if row is None:
             return None
-        return OperationalCase.model_validate_json(row[0])
+        return _load_operational_case_json(row[0])
 
     def find_by_dedupe_key(self, business_id: str, dedupe_key: str) -> OperationalCase | None:
         cursor = self._conn.execute(
@@ -754,7 +788,7 @@ class SQLiteOperationalCaseStore(_OperationalCaseMutations):
         row = cursor.fetchone()
         if row is None:
             return None
-        return OperationalCase.model_validate_json(row[0])
+        return _load_operational_case_json(row[0])
 
     def list_cases(
         self,
@@ -779,7 +813,7 @@ class SQLiteOperationalCaseStore(_OperationalCaseMutations):
             query += " LIMIT ?"
             params.append(limit)
         cursor = self._conn.execute(query, tuple(params))
-        return [OperationalCase.model_validate_json(row[0]) for row in cursor.fetchall()]
+        return [_load_operational_case_json(row[0]) for row in cursor.fetchall()]
 
 
 def _priority_for_severity(severity: OperationalCaseSeverity) -> int:

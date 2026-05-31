@@ -419,6 +419,7 @@ def test_apply_case_action_mark_in_progress_and_dismiss_case_update_lifecycle_wi
     )
     assert dismissed["case"]["status"] == "dismissed"
     assert dismissed["case"]["resolved_at"] is None
+    assert dismissed["case"]["dismissed_at"] is not None
     assert dismissed["case"]["timeline"][-1]["summary"] == "False positive after physical stock count"
 
 

@@ -237,6 +237,7 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "assigned_at": _iso(case.assigned_at),
             "assignee_ref": case.assignee_ref,
             "resolved_at": _iso(case.resolved_at),
+            "dismissed_at": _iso(case.dismissed_at),
             "latest_run_id": case.latest_run_id,
             "source_run_ids": case.source_run_ids,
             "evidence_refs": case.evidence_refs,

@@ -5,6 +5,7 @@ TDD: define case lifecycle and persistence before wiring report execution.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime, timezone
 
@@ -13,6 +14,7 @@ import pytest
 from app.brain.models import DailyReport, Evidence, Insight, Metric
 from app.brain.operational_cases import (
     InMemoryOperationalCaseStore,
+    OperationalCase,
     OperationalCaseDetection,
     OperationalCaseEvidenceMetric,
     OperationalCaseEvidenceSnapshot,
@@ -266,6 +268,56 @@ def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():
         store.transition_case(opened.case_id, status="open", actor_type="operator", actor_ref="juan")
 
 
+def test_operational_case_model_enforces_dismissed_at_lifecycle_invariants():
+    opened = InMemoryOperationalCaseStore().upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    payload = opened.model_dump(mode="python")
+
+    with pytest.raises(ValueError, match="dismissed case requires dismissed_at"):
+        OperationalCase.model_validate({**payload, "status": "dismissed", "dismissed_at": None})
+
+    with pytest.raises(ValueError, match="only dismissed cases may have dismissed_at"):
+        OperationalCase.model_validate({**payload, "status": "open", "dismissed_at": utc_dt(9)})
+
+    with pytest.raises(ValueError, match="dismissed_at must be after opened_at"):
+        OperationalCase.model_validate({**payload, "status": "dismissed", "dismissed_at": utc_dt(7)})
+
+
+def test_sqlite_store_loads_legacy_dismissed_case_without_dismissed_at(conn):
+    store = SQLiteOperationalCaseStore(conn)
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    store.transition_case(
+        opened.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="juan",
+        transitioned_at=utc_dt(9),
+    )
+    dismissed = store.transition_case(
+        opened.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Legacy dismissal fixture",
+        transitioned_at=utc_dt(10),
+    )
+    legacy_payload = dismissed.model_dump(mode="json")
+    legacy_payload.pop("dismissed_at")
+    conn.execute(
+        """
+        UPDATE operational_cases
+        SET data = ?
+        WHERE case_id = ?
+        """,
+        (json.dumps(legacy_payload), dismissed.case_id),
+    )
+
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(dismissed.case_id)
+
+    assert reloaded is not None
+    assert reloaded.status == "dismissed"
+    assert reloaded.dismissed_at == utc_dt(10)
+
+
 def test_operational_case_requires_acknowledged_before_resolved():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
@@ -338,6 +390,7 @@ def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reop
     )
     assert dismissed.status == "dismissed"
     assert dismissed.resolved_at is None
+    assert dismissed.dismissed_at == utc_dt(10)
     assert dismissed.timeline[-1].metadata == {"from_status": "in_progress", "to_status": "dismissed"}
 
     with pytest.raises(OperationalCaseStatusError):
@@ -354,6 +407,7 @@ def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reop
     assert reopened.case_id == opened.case_id
     assert reopened.status == "open"
     assert reopened.acknowledged_at is None
+    assert reopened.dismissed_at is None
     assert reopened.timeline[-1].event_type == "case_reopened"
 
 
