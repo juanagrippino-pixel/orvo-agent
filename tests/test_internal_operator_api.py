@@ -31,6 +31,8 @@ def _case_detection(
     severity: OperationalCaseSeverity = "critical",
     title: str = "Stock crítico",
     run_id: str = "run-artemea-1",
+    source: str = "tiendanube",
+    source_label: str = "Tiendanube access_token=raw_snapshot_secret",
 ) -> OperationalCaseDetection:
     return OperationalCaseDetection(
         business_id=business_id,
@@ -50,8 +52,8 @@ def _case_detection(
                 run_id=run_id,
                 artifact_ref=f"ledger://runs/{run_id}/daily-report?access_token=raw_snapshot_secret",
                 evidence_ref=f"evidence://{business_id}/{run_id}/{case_type}?api_key=raw_snapshot_secret",
-                source="tiendanube",
-                source_label="Tiendanube access_token=raw_snapshot_secret",
+                source=source,
+                source_label=source_label,
                 case_type=case_type,
                 entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado"},
                 summary="Snapshot Bearer raw_snapshot_secret",
@@ -356,6 +358,78 @@ def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch
     assert summary["actionable_degraded"] == 0
     assert summary["by_status"] == {}
     assert summary["by_severity"] == {}
+
+
+def test_internal_case_queue_summary_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-high", priority=95))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-medium",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-high", priority=95))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-priority-bracket",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_priority_bracket"] == {"high": 1, "medium": 1}
+    assert summary["actionable_by_priority_bracket"] == {"high": 1, "medium": 1}
+    assert summary["actionable_degraded_by_priority_bracket"] == {}
+
+
+def test_internal_case_queue_summary_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-tn", source="tiendanube"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-sheets",
+            source="google_sheets",
+            source_label="Google Sheets",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-tn", source="tiendanube"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-source-connector",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_source_connector"] == {"tiendanube": 1, "google_sheets": 1}
+    assert summary["actionable_by_source_connector"] == {"tiendanube": 1, "google_sheets": 1}
+    assert summary["actionable_degraded_by_source_connector"] == {}
 
 
 def test_internal_case_queue_aging_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):

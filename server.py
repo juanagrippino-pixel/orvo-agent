@@ -50,6 +50,8 @@ from app.brain.operator_api import (
     list_run_history,
     list_top_actionable_cases_by_priority,
     summarize_case_queue,
+    summarize_case_queue_by_priority_bracket,
+    summarize_case_queue_by_source_connector,
     summarize_case_queue_aging,
     summarize_case_queue_aging_by_priority_bracket,
     summarize_case_queue_stagnation,
@@ -188,6 +190,28 @@ def internal_brain_cases_summary(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_queue(case_store, business_id=business_id),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/summary/by-priority-bracket")
+def internal_brain_cases_summary_by_priority_bracket(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_by_priority_bracket(case_store, business_id=business_id),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/summary/by-source-connector")
+def internal_brain_cases_summary_by_source_connector(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_by_source_connector(case_store, business_id=business_id),
         ),
     )
 
