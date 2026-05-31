@@ -21,6 +21,13 @@ from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 
 CaseActionKey = Literal["acknowledge_case", "mark_in_progress", "resolve_case", "dismiss_case", "add_comment"]
+_API_ENABLED_CASE_ACTION_KEYS: tuple[CaseActionKey, ...] = (
+    "acknowledge_case",
+    "add_comment",
+    "dismiss_case",
+    "mark_in_progress",
+    "resolve_case",
+)
 _ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
@@ -2777,6 +2784,106 @@ def summarize_case_handling_latency_histogram_by_priority_bracket(
             "by_handling_bucket_priority_bracket": bracket_by_bucket,
             "fastest_handled": _payload(fastest_case, fastest_seconds),
             "slowest_handled": _payload(slowest_case, slowest_seconds),
+        }
+    )
+
+
+def list_case_action_catalog(*, business_id: str) -> dict[str, Any]:
+    """Return the internal operator case action contract for one business.
+
+    This is a projection over the registered operator action keys. It explicitly
+    marks catalog actions that are not enabled in this API slice so clients do
+    not infer executable capabilities from docs or owner-facing copy.
+    """
+
+    enabled = set(_API_ENABLED_CASE_ACTION_KEYS)
+    actions = [
+        {
+            "action_key": "acknowledge_case",
+            "label": "Acknowledge case",
+            "mode": "manual_operator_mutation",
+            "api_enabled": "acknowledge_case" in enabled,
+            "status_effect": "acknowledged",
+            "requires_reason": False,
+            "requires_comment": False,
+            "approval_required": False,
+        },
+        {
+            "action_key": "assign_owner",
+            "label": "Assign owner",
+            "mode": "manual_operator_mutation",
+            "api_enabled": False,
+            "status_effect": None,
+            "requires_reason": False,
+            "requires_comment": False,
+            "approval_required": False,
+        },
+        {
+            "action_key": "add_comment",
+            "label": "Add comment",
+            "mode": "manual_operator_mutation",
+            "api_enabled": "add_comment" in enabled,
+            "status_effect": None,
+            "requires_reason": False,
+            "requires_comment": True,
+            "approval_required": False,
+        },
+        {
+            "action_key": "request_follow_up",
+            "label": "Request follow-up",
+            "mode": "manual_operator_action",
+            "api_enabled": False,
+            "status_effect": None,
+            "requires_reason": False,
+            "requires_comment": False,
+            "approval_required": False,
+        },
+        {
+            "action_key": "mark_in_progress",
+            "label": "Mark in progress",
+            "mode": "manual_operator_mutation",
+            "api_enabled": "mark_in_progress" in enabled,
+            "status_effect": "in_progress",
+            "requires_reason": False,
+            "requires_comment": False,
+            "approval_required": False,
+        },
+        {
+            "action_key": "resolve_case",
+            "label": "Resolve case",
+            "mode": "manual_operator_mutation",
+            "api_enabled": "resolve_case" in enabled,
+            "status_effect": "resolved",
+            "requires_reason": False,
+            "requires_comment": False,
+            "approval_required": False,
+        },
+        {
+            "action_key": "dismiss_case",
+            "label": "Dismiss case",
+            "mode": "manual_operator_mutation",
+            "api_enabled": "dismiss_case" in enabled,
+            "status_effect": "dismissed",
+            "requires_reason": True,
+            "requires_comment": False,
+            "approval_required": False,
+        },
+        {
+            "action_key": "request_external_action",
+            "label": "Request external action",
+            "mode": "approval_required_disabled",
+            "api_enabled": False,
+            "status_effect": None,
+            "requires_reason": True,
+            "requires_comment": False,
+            "approval_required": True,
+        },
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "api_enabled_action_keys": list(_API_ENABLED_CASE_ACTION_KEYS),
+            "actions": actions,
         }
     )
 

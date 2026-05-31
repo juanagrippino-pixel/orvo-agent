@@ -45,6 +45,7 @@ from app.brain.operator_api import (
     get_operator_dashboard,
     get_run_projection,
     list_builtin_case_views,
+    list_case_action_catalog,
     list_case_queue,
     list_case_timeline,
     list_run_history,
@@ -295,6 +296,17 @@ def internal_brain_dashboard(business_id: str):
                 now=datetime.now(timezone.utc),
                 limit=int(limit) if limit else 10,
             ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/case-actions")
+def internal_brain_case_actions_catalog(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_case_action_catalog(business_id=business_id),
         ),
     )
 

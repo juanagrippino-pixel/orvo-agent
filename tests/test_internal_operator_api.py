@@ -401,6 +401,50 @@ def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envel
     assert data["most_stalled_actionable"]["case_type"] == "stockout_risk"
 
 
+def test_internal_case_action_catalog_returns_auth_scoped_redacted_action_contract(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-actions", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["request_id"] == "req-test"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["api_enabled_action_keys"] == [
+        "acknowledge_case",
+        "add_comment",
+        "dismiss_case",
+        "mark_in_progress",
+        "resolve_case",
+    ]
+    actions = {item["action_key"]: item for item in data["actions"]}
+    assert actions["acknowledge_case"]["api_enabled"] is True
+    assert actions["acknowledge_case"]["status_effect"] == "acknowledged"
+    assert actions["add_comment"]["requires_comment"] is True
+    assert actions["dismiss_case"]["requires_reason"] is True
+    assert actions["assign_owner"]["api_enabled"] is False
+    assert actions["request_external_action"]["approval_required"] is True
+    assert actions["request_external_action"]["api_enabled"] is False
+    assert "raw_" not in response.get_data(as_text=True)
+
+
+def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-actions")
+
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "unauthorized"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())

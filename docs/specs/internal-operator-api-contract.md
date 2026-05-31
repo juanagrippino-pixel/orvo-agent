@@ -64,10 +64,15 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 ```http
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
+GET /internal/brain/businesses/{business_id}/case-actions
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
 
-Actions must use registered action keys and append timeline events.
+Actions must use registered action keys and append timeline events. The action
+catalog endpoint is an authenticated, business-scoped projection of registered
+case action keys; it must mark which catalog actions are actually enabled by the
+current internal API so clients do not infer executable capabilities from docs or
+owner-facing copy.
 
 ## Response envelope
 
@@ -116,4 +121,5 @@ Before exposing beyond local/dev:
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - case action rejects unknown action keys;
+- case action catalog is authenticated, tenant-scoped, redacted, and marks disabled catalog actions as not executable;
 - responses include `redaction_applied=true`.
