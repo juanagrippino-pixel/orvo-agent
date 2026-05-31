@@ -368,6 +368,7 @@ def test_apply_case_action_assign_owner_rejects_terminal_cases_without_mutation(
             case_id=opened.case_id,
             action_key="resolve_case",
             actor_ref="operator@example.com",
+            reason="Resolved after follow-up",
         )["case"]
 
     with pytest.raises(OperatorAPIError) as exc:
@@ -439,6 +440,36 @@ def test_apply_case_action_dismiss_case_requires_reason(bad_reason: str | None):
     assert exc.value.code == "missing_case_action_reason"
     assert exc.value.status_code == 400
     assert store.get_case(opened.case_id).status == "open"
+
+
+@pytest.mark.parametrize("bad_reason", [None, "", "   "])
+def test_apply_case_action_resolve_case_requires_reason_without_mutation(bad_reason: str | None):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    acknowledged = apply_case_action(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="acknowledge_case",
+        actor_ref="operator@example.com",
+    )["case"]
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="resolve_case",
+            actor_ref="operator@example.com",
+            reason=bad_reason,
+        )
+
+    assert exc.value.code == "missing_case_action_reason"
+    assert exc.value.status_code == 400
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.status == "acknowledged"
+    assert len(reloaded.timeline) == len(acknowledged["timeline"])
 
 
 @pytest.mark.parametrize("action_key", ["acknowledge_case", "mark_in_progress", "resolve_case", "dismiss_case"])
