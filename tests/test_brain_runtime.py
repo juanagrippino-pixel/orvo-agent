@@ -59,6 +59,22 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
     assert [connector.connector_id for connector in runtime.connectors] == ["sheet", "tn"]
     assert runtime.connectors[0].required_params == ["spreadsheet_id", "range_name"]
     assert runtime.connectors[1].secret_param_names == ["access_token"]
+    assert runtime.connectors[1].health_policy == {
+        "readiness_check": "metadata_only",
+        "supports_health_check": False,
+        "degraded_state": "degraded",
+    }
+    assert runtime.connectors[1].required_scopes == ["orders.read", "products.read"]
+    assert runtime.connectors[1].rate_limit_policy == {
+        "default_timeout_seconds": 30,
+        "requests_per_minute": 120,
+        "retry_policy": "adapter_default",
+    }
+    assert runtime.connectors[1].lifecycle == {
+        "status": "active",
+        "owner": "orvo-brain",
+        "version": "phase-a",
+    }
     assert runtime.execution_plan.daily_connector_types == ["google_sheets", "tiendanube"]
     assert runtime.execution_plan.report_types == ["daily"]
 
