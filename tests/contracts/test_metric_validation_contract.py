@@ -2197,3 +2197,189 @@ def test_validate_freshness_envelope_metric_keys_is_reexported_from_semantics_pu
 
     assert hasattr(semantics, "validate_freshness_envelope_metric_keys")
     assert "validate_freshness_envelope_metric_keys" in semantics.__all__
+
+
+def test_validate_freshness_envelope_metric_objects_composes_unknown_then_freshness_then_evidence_source_then_value_kind():
+    """Parallel to :func:`validate_freshness_envelope_metric_keys` but on the
+    object side: the five-diagnostic composition must report unknown_metric
+    first, then freshness_companion_missing, then evidence_source_mismatch,
+    and finally value_kind_mismatch. Each diagnostic preserves its own
+    input-order index. This case carries non-empty evidence on every metric so
+    the evidence_missing slot is exercised by a separate dedicated test.
+    """
+
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_freshness_metric", "tiendanube"),
+        _metric("ad_spend_today", "whatsapp", value=1500),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_freshness_envelope_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
+        ("freshness_companion_missing", "orders_today", 0, "warning"),
+        ("freshness_companion_missing", "ad_spend_today", 2, "warning"),
+        ("freshness_companion_missing", "commerce.orders.count", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 2, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 3, "warning"),
+    ]
+
+
+def test_validate_freshness_envelope_metric_objects_slots_evidence_missing_between_freshness_and_evidence_source():
+    """Mixed bag exercising the evidence_missing slot. The composition order
+    inside :func:`validate_freshness_envelope_metric_objects` must put
+    evidence_missing immediately after freshness_companion_missing and before
+    evidence_source_mismatch so structural ``no evidence at all`` diagnostics
+    surface before content diagnostics about wrong-source evidence. Each
+    diagnostic preserves its own input-order index. Mapping form is required
+    because Pydantic ``Metric`` enforces ``min_length=1`` on evidence and
+    cannot represent the missing case directly."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_objects,
+    )
+
+    metrics = [
+        {
+            "key": "orders_today",
+            "value": 12,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "custom.unknown_freshness_metric",
+            "value": 1,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {
+            "key": "commerce.orders.count",
+            "value": "not a number",
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+    ]
+
+    issues = validate_freshness_envelope_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
+        ("freshness_companion_missing", "orders_today", 0, "warning"),
+        ("freshness_companion_missing", "commerce.revenue.total", 2, "warning"),
+        ("freshness_companion_missing", "ad_spend_today", 3, "warning"),
+        ("freshness_companion_missing", "commerce.orders.count", 4, "warning"),
+        ("evidence_missing", "commerce.revenue.total", 2, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 4, "warning"),
+    ]
+
+
+def test_validate_freshness_envelope_metric_objects_returns_empty_when_companion_present_and_all_clean():
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric(
+            "runtime.freshness.last_success_at",
+            "tiendanube",
+            value="2026-05-30T00:00:00+00:00",
+        ),
+    ]
+
+    assert validate_freshness_envelope_metric_objects(metrics) == []
+
+
+def test_validate_freshness_envelope_metric_objects_matches_key_path_when_no_object_violations():
+    """When every metric object has in-envelope evidence sources and the value
+    type matches the canonical unit kind, the object-level result must equal
+    ``validate_freshness_envelope_metric_keys`` over the same keys so callers
+    can freely upgrade from keys to objects without a behavior change."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_keys,
+        validate_freshness_envelope_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_freshness_metric", "tiendanube"),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+    ]
+    keys = [metric.key for metric in metrics]
+
+    assert validate_freshness_envelope_metric_objects(
+        metrics
+    ) == validate_freshness_envelope_metric_keys(keys)
+
+
+def test_validate_freshness_envelope_metric_objects_threads_custom_registry_into_all_diagnostics():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        validate_freshness_envelope_metric_objects,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="commerce.subscriptions.count",
+                family="commerce.subscriptions",
+                label="Active subscriptions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("subscriptions_today",),
+                aggregation="latest",
+                case_allowed=True,
+            ),
+        )
+    )
+
+    metrics = [
+        _metric("subscriptions_today", "sample", value=42),
+        _metric("orders_today", "tiendanube", value=12),
+    ]
+
+    issues = validate_freshness_envelope_metric_objects(metrics, registry=registry)
+    # orders_today is unknown under the custom registry; the alias on the
+    # custom registry resolves to a freshness_required canonical metric whose
+    # companion runtime.freshness family is absent from the input.
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("unknown_metric", "orders_today", 1),
+        ("freshness_companion_missing", "subscriptions_today", 0),
+    ]
+
+
+def test_validate_freshness_envelope_metric_objects_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_objects,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_freshness_metric", "tiendanube"),
+        _metric("ad_spend_today", "whatsapp", value=1500),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    first = validate_freshness_envelope_metric_objects(metrics)
+    second = validate_freshness_envelope_metric_objects(metrics)
+    assert first == second
+
+
+def test_validate_freshness_envelope_metric_objects_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "validate_freshness_envelope_metric_objects")
+    assert "validate_freshness_envelope_metric_objects" in semantics.__all__
