@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 
@@ -249,6 +250,47 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
     assert reloaded.status == "resolved"
     assert reloaded.timeline[-1].actor_ref == "operator:juan"
     assert "raw_action_secret" not in reloaded.model_dump_json()
+
+
+def test_internal_case_action_writes_scoped_redacted_audit_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=AUTH,
+        json={
+            "action_key": "add_comment",
+            "comment": "Follow-up Authorization: Bearer raw_audit_secret",
+            "metadata": {"api_key": "raw_audit_secret", "note": "safe"},
+        },
+    )
+
+    assert response.status_code == 200
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    business_id, actor_ref, event_type, target_type, target_id, request_id, raw_data = rows[0]
+    assert business_id == "artemea"
+    assert actor_ref == "operator:juan"
+    assert event_type == "case_action_applied"
+    assert target_type == "operational_case"
+    assert target_id == case.case_id
+    assert request_id == "req-test"
+    assert "raw_audit_secret" not in raw_data
+    data = json.loads(raw_data)
+    assert data["action_key"] == "add_comment"
+    assert data["case_id"] == case.case_id
+    assert data["status"] == "succeeded"
+    assert data["metadata"]["api_key"].startswith("[REDACTED")
+    assert data["result"]["case_status"] == "open"
 
 
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):

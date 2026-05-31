@@ -104,6 +104,24 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_whatsapp_delivery_status_recent
             ON whatsapp_delivery_status_events (created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS operator_audit_events (
+            event_id    TEXT PRIMARY KEY,
+            business_id TEXT NOT NULL,
+            actor_ref   TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_id   TEXT,
+            request_id  TEXT,
+            created_at  TEXT NOT NULL,
+            data        TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_operator_audit_business_created
+            ON operator_audit_events (business_id, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_operator_audit_target_created
+            ON operator_audit_events (target_type, target_id, created_at DESC);
         """
     )
     conn.commit()

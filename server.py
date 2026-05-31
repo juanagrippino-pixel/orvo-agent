@@ -55,6 +55,7 @@ from app.brain.operator_api import (
     summarize_case_workflow_throughput,
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
+from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.delivery_status import (
     SQLiteWhatsAppDeliveryStatusStore,
     parse_meta_status_payload,
@@ -149,14 +150,18 @@ def _internal_brain_db_path() -> str:
     return os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3")
 
 
-def _with_internal_stores(business_id: str, handler):
+def _with_internal_stores(business_id: str, handler, *, include_audit: bool = False):
     auth_error = _authorize_internal_operator(business_id)
     if auth_error is not None:
         return auth_error
     try:
         with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
             init_schema(conn)
-            return handler(SQLiteOperationalCaseStore(conn), SQLiteRunLedger(conn))
+            case_store = SQLiteOperationalCaseStore(conn)
+            run_ledger = SQLiteRunLedger(conn)
+            if include_audit:
+                return handler(case_store, run_ledger, SQLiteOperatorAuditStore(conn))
+            return handler(case_store, run_ledger)
     except OperatorAPIError as exc:
         return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
 
@@ -324,22 +329,42 @@ def internal_brain_case_timeline(business_id: str, case_id: str):
 def internal_brain_case_action(business_id: str, case_id: str):
     payload = request.get_json(silent=True) or {}
     actor_ref = request.headers.get("X-Orvo-Operator", "")
-    return _with_internal_stores(
-        business_id,
-        lambda case_store, run_ledger: _internal_success(
-            business_id,
-            apply_case_action(
-                case_store,
-                business_id=business_id,
-                case_id=case_id,
-                action_key=str(payload.get("action_key", "")),
-                actor_ref=actor_ref,
-                reason=payload.get("reason"),
-                comment=payload.get("comment"),
-                metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
-            ),
-        ),
-    )
+    action_key = str(payload.get("action_key", ""))
+
+    def _handle(case_store, run_ledger, audit_store):
+        result = apply_case_action(
+            case_store,
+            business_id=business_id,
+            case_id=case_id,
+            action_key=action_key,
+            actor_ref=actor_ref,
+            reason=payload.get("reason"),
+            comment=payload.get("comment"),
+            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+        )
+        audit_store.append_event(
+            business_id=business_id,
+            actor_ref=actor_ref,
+            event_type="case_action_applied",
+            target_type="operational_case",
+            target_id=case_id,
+            request_id=_internal_request_id(),
+            data={
+                "status": "succeeded",
+                "action_key": action_key,
+                "case_id": case_id,
+                "reason": payload.get("reason"),
+                "comment": payload.get("comment"),
+                "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+                "result": {
+                    "case_id": result["case"]["case_id"],
+                    "case_status": result["case"]["status"],
+                },
+            },
+        )
+        return _internal_success(business_id, result)
+
+    return _with_internal_stores(business_id, _handle, include_audit=True)
 
 
 @app.get("/internal/brain/businesses/<business_id>/runs")
