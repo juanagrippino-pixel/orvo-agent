@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.brain.operational_cases import (
     OperationalCaseDetection,
@@ -325,6 +325,43 @@ def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch
     assert summary["actionable_degraded"] == 0
     assert summary["by_status"] == {}
     assert summary["by_severity"] == {}
+
+
+def test_internal_case_queue_aging_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(run_id="run-artemea-high", priority=95),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-high",
+            priority=95,
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/aging/by-priority-bracket",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 1
+    assert data["by_age_bucket"]["under_6h"] == 1
+    assert data["by_age_bucket_priority_bracket"]["under_6h"] == {"high": 1}
+    assert data["oldest_actionable"]["case_type"] == "stockout_risk"
 
 
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
