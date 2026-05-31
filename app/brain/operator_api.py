@@ -427,6 +427,53 @@ def summarize_case_queue_by_priority_bracket(
     )
 
 
+def summarize_case_queue_by_case_type(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Case-type-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but groups lifecycle, actionable, and
+    actionable-degraded counts by ``case.case_type``
+    (stockout_risk/sales_drop/data_stale/etc.), matching the attribution used
+    by :func:`summarize_case_queue_aging_by_case_type` and
+    :func:`summarize_case_workflow_throughput_by_case_type`. Lets operator
+    surfaces lead with which case family dominates the in-flight backlog even
+    when severity / priority distributions look balanced — a stockout_risk
+    wave or a data_stale spike often hides inside healthy aggregate counts.
+    ``total`` counts the full lifecycle (open + acknowledged + resolved);
+    ``actionable_*`` counts isolate the in-flight slice. Strictly scoped per
+    tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_case_type: dict[str, int] = {}
+    actionable_by_case_type: dict[str, int] = {}
+    actionable_degraded_by_case_type: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        case_type = case.case_type
+        totals_by_case_type[case_type] = totals_by_case_type.get(case_type, 0) + 1
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_case_type[case_type] = (
+                actionable_by_case_type.get(case_type, 0) + 1
+            )
+            if _is_degraded(case):
+                actionable_degraded_by_case_type[case_type] = (
+                    actionable_degraded_by_case_type.get(case_type, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_case_type": totals_by_case_type,
+            "actionable_by_case_type": actionable_by_case_type,
+            "actionable_degraded_by_case_type": actionable_degraded_by_case_type,
+        }
+    )
+
+
 def summarize_case_queue_by_source_connector(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
