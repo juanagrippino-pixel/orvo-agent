@@ -1748,7 +1748,7 @@ def test_validate_surface_metric_objects_composes_unknown_then_pii_then_evidence
         _metric("orders_today", "tiendanube", value=12),
         _metric("custom.unknown_surface_metric", "tiendanube"),
         _metric("unanswered_conversations", "whatsapp", value=5),
-        _metric("ad_spend_today", "whatsapp"),
+        _metric("ad_spend_today", "whatsapp", unit="ARS"),
         _metric("commerce.orders.count", "tiendanube", value="not a number"),
     ]
 
@@ -1780,27 +1780,32 @@ def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_
         {
             "key": "orders_today",
             "value": 12,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "custom.unknown_surface_metric",
             "value": 1,
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
         {
             "key": "unanswered_conversations",
             "value": 5,
+            "unit": None,
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
-        {"key": "commerce.revenue.total", "value": 90000, "evidence": []},
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
         {
             "key": "ad_spend_today",
             "value": 1500,
+            "unit": "ARS",
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
             "key": "commerce.orders.count",
             "value": "not a number",
+            "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
         },
     ]
@@ -1818,14 +1823,47 @@ def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_
     ]
 
 
+def test_validate_surface_metric_objects_appends_money_currency_missing_after_value_kind():
+    """The six-diagnostic composition inside
+    :func:`validate_surface_metric_objects` must place money_currency_missing
+    after value_kind_mismatch: structural and value-type diagnostics surface
+    before the rendering-metadata diagnostic that money metrics must carry a
+    currency string for surfaces (WhatsApp dispatch, owner brief) to render
+    unambiguously. Each diagnostic preserves its own input-order index, and a
+    single metric that is both value-kind invalid and missing currency must
+    surface in both slots."""
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+        _metric("commerce.revenue.baseline", "google_sheets", value=80000),
+        _metric("ad_spend_today", "meta_ads", value="invalid"),
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+        ("value_kind_mismatch", "ad_spend_today", 4, "warning"),
+        ("money_currency_missing", "commerce.revenue.baseline", 3, "warning"),
+        ("money_currency_missing", "ad_spend_today", 4, "warning"),
+    ]
+
+
 def test_validate_surface_metric_objects_returns_empty_for_clean_surface_metrics():
     from app.brain.semantics.metric_registry import validate_surface_metric_objects
 
     metrics = [
         _metric("orders_today", "tiendanube", value=12),
-        _metric("revenue_today", "mercadolibre", value=120000),
+        _metric("revenue_today", "mercadolibre", value=120000, unit="ARS"),
         _metric("stock_units", "tiendanube", value=42),
-        _metric("ad_spend_today", "meta_ads", value=1500),
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
     ]
 
     assert (
