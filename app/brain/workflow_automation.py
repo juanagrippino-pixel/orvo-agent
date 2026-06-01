@@ -213,6 +213,18 @@ def _execution_status(definition: WorkflowActionDefinition) -> str:
     return "dry_run"
 
 
+def _approval_gate_projection(definition: WorkflowActionDefinition) -> dict[str, Any]:
+    """Return the deterministic approval boundary for a planned workflow action."""
+
+    if definition.requires_approval:
+        return {
+            "required": True,
+            "state": "pending_approval",
+            "reason": "approval_required_before_execution",
+        }
+    return {"required": False, "state": "not_required"}
+
+
 def _planned_action_projection(
     *,
     rule: WorkflowRule,
@@ -244,6 +256,7 @@ def _planned_action_projection(
             "mode": definition.mode,
             "side_effect": definition.side_effect,
             "requires_approval": definition.requires_approval,
+            "approval_gate": _approval_gate_projection(definition),
             "execution_status": status,
             "idempotency_key": idempotency_key,
             "params": _redacted_params(action.params),

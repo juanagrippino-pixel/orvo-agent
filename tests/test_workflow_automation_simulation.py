@@ -175,6 +175,11 @@ def test_simulate_case_workflow_blocks_external_action_behind_approval_gate_and_
     assert planned_action["action_key"] == "request_external_action"
     assert planned_action["mode"] == "approval_required"
     assert planned_action["requires_approval"] is True
+    assert planned_action["approval_gate"] == {
+        "required": True,
+        "state": "pending_approval",
+        "reason": "approval_required_before_execution",
+    }
     assert planned_action["execution_status"] == "blocked_approval_required"
     assert planned_action["side_effect"] == "external"
     assert "raw_external_secret" not in str(result)
