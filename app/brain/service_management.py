@@ -100,32 +100,57 @@ def _sla_clock(
     target_seconds: int,
     policy_key: str,
     stopped_at: datetime | None,
+    paused_at: datetime | None = None,
+    pause_reason: str | None = None,
     reference: datetime,
 ) -> dict[str, Any]:
     started_at = case.opened_at.astimezone(timezone.utc)
-    effective_stop = stopped_at.astimezone(timezone.utc) if stopped_at is not None else reference
+    normalized_stopped_at = stopped_at.astimezone(timezone.utc) if stopped_at is not None else None
+    normalized_paused_at = paused_at.astimezone(timezone.utc) if paused_at is not None else None
+    if normalized_stopped_at is not None:
+        effective_stop = normalized_stopped_at
+    elif normalized_paused_at is not None:
+        effective_stop = normalized_paused_at
+    else:
+        effective_stop = reference
     elapsed_seconds = max(int((effective_stop - started_at).total_seconds()), 0)
     due_at = started_at + timedelta(seconds=target_seconds)
-    return {
+    payload = {
         "policy_key": policy_key,
         "target_seconds": target_seconds,
         "elapsed_seconds": elapsed_seconds,
         "remaining_seconds": max(target_seconds - elapsed_seconds, 0),
         "breached": elapsed_seconds > target_seconds,
-        "completed": stopped_at is not None,
+        "completed": normalized_stopped_at is not None,
         "started_at": _iso(started_at),
-        "stopped_at": _iso(stopped_at),
+        "stopped_at": _iso(normalized_stopped_at),
         "due_at": _iso(due_at),
     }
+    if normalized_paused_at is not None and normalized_stopped_at is None:
+        payload.update(
+            {
+                "paused": True,
+                "paused_at": _iso(normalized_paused_at),
+                "pause_reason": pause_reason,
+            }
+        )
+    return payload
 
 
-def _sla_projection(case: OperationalCase, *, reference: datetime) -> dict[str, Any]:
+def _resolution_pause(case: OperationalCase, *, owner_status: dict[str, str]) -> tuple[datetime | None, str | None]:
+    if owner_status["code"] not in {"waiting_owner", "waiting_external"}:
+        return None, None
+    return case.acknowledged_at or case.updated_at, owner_status["code"]
+
+
+def _sla_projection(case: OperationalCase, *, owner_status: dict[str, str], reference: datetime) -> dict[str, Any]:
     severity = str(case.severity)
     first_response_target = _FIRST_RESPONSE_TARGET_SECONDS[severity]
     resolution_target = _RESOLUTION_TARGET_SECONDS[severity]
     terminal_stopped_at = case.resolved_at or case.dismissed_at
     first_response_stopped_at = case.acknowledged_at or terminal_stopped_at
     resolution_stopped_at = terminal_stopped_at
+    resolution_paused_at, resolution_pause_reason = _resolution_pause(case, owner_status=owner_status)
     return {
         "first_response": _sla_clock(
             case=case,
@@ -139,6 +164,8 @@ def _sla_projection(case: OperationalCase, *, reference: datetime) -> dict[str, 
             target_seconds=resolution_target,
             policy_key=f"resolution_{severity}_{resolution_target // 60}m",
             stopped_at=resolution_stopped_at,
+            paused_at=resolution_paused_at,
+            pause_reason=resolution_pause_reason,
             reference=reference,
         ),
     }
@@ -211,7 +238,7 @@ def service_management_case_item(case: OperationalCase, *, now: datetime | None 
 
     reference = _normalize_reference_time(now)
     owner_status = _owner_status(case)
-    sla = _sla_projection(case, reference=reference)
+    sla = _sla_projection(case, owner_status=owner_status, reference=reference)
     escalation_reasons = _escalation_reasons(case, owner_status=owner_status, sla=sla)
     return redact_secrets(
         {
