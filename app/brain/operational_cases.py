@@ -668,6 +668,9 @@ class _OperationalCaseMutations:
         commented_at: datetime | None = None,
     ) -> OperationalCase:
         record = self._load_for_update(case_id)
+        normalized_comment = comment.strip() if isinstance(comment, str) else ""
+        if not normalized_comment:
+            raise ValueError("comment must be non-empty")
         commented_at = _as_utc(commented_at) if commented_at is not None else _now_utc()
         updated = record.model_copy(
             update={
@@ -680,7 +683,7 @@ class _OperationalCaseMutations:
                         actor_ref=actor_ref,
                         case_id=record.case_id,
                         created_at=commented_at,
-                        summary=comment,
+                        summary=normalized_comment,
                         metadata=metadata or {},
                     ),
                 ],
