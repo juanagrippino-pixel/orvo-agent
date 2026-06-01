@@ -1033,6 +1033,24 @@ def test_internal_top_degraded_actionable_cases_endpoint_is_scoped_and_ordered(m
     assert all(case["source_connectors"] == ["tiendanube"] for case in data["cases"])
 
 
+def test_internal_dashboard_endpoint_rejects_non_integer_limit_with_safe_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/dashboard?limit=not-an-int",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_limit"
+    assert body["error"]["message"] == "limit must be an integer"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())
