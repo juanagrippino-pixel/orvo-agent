@@ -657,6 +657,9 @@ def internal_brain_whatsapp_delivery_statuses():
     auth_error = _authorize_internal_operator(business_id)
     if auth_error is not None:
         return auth_error
+    permission_error = _require_internal_header_permission(business_id, INTERNAL_READ_PERMISSION)
+    if permission_error is not None:
+        return permission_error
     raw_limit = request.args.get("limit")
     try:
         limit = int(raw_limit) if raw_limit not in (None, "") else 50
