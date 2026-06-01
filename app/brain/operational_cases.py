@@ -341,6 +341,8 @@ class OperationalCase(BaseModel):
             raise ValueError("dismissed_at must be after opened_at")
         if self.status == "resolved" and self.resolved_at is None:
             raise ValueError("resolved case requires resolved_at")
+        if self.status != "resolved" and self.resolved_at is not None:
+            raise ValueError("only resolved cases may have resolved_at")
         if self.status == "dismissed" and self.dismissed_at is None:
             raise ValueError("dismissed case requires dismissed_at")
         if self.status != "dismissed" and self.dismissed_at is not None:
