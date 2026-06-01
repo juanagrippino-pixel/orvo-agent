@@ -41,6 +41,44 @@ def test_redact_secrets_handles_bearer_headers_url_tokens_private_keys_and_neste
     assert "state=safe-state" in rendered
 
 
+def test_redact_secrets_preserves_safe_connector_reference_metadata_without_raw_secret_values():
+    from app.brain.security.redaction import redact_secrets
+
+    raw = {
+        "connector_refs": [
+            {
+                "connector_id": "tn",
+                "secret_refs": {
+                    "access_token": "secret://businesses/artemea/connectors/tn/access_token",
+                    "refresh_token": "raw_inline_secret_ref",
+                    "api_key": "secret://businesses/artemea/connectors/tn/api_key?token=raw_ref_query",
+                },
+                "secret_param_names": ["access_token"],
+                "legacy_secret_param_names": ["access_token"],
+                "raw_token": "tn_live_raw_secret",
+            }
+        ],
+        "access_token": "top_level_raw_secret",
+    }
+
+    redacted = redact_secrets(raw)
+    rendered = str(redacted)
+
+    assert redacted["connector_refs"][0]["secret_refs"] == {
+        "access_token": "secret://businesses/artemea/connectors/tn/access_token",
+        "refresh_token": "[REDACTED]",
+        "api_key": "secret://businesses/artemea/connectors/tn/api_key?token=%5BREDACTED%5D",
+    }
+    assert redacted["connector_refs"][0]["secret_param_names"] == ["access_token"]
+    assert redacted["connector_refs"][0]["legacy_secret_param_names"] == ["access_token"]
+    assert redacted["connector_refs"][0]["raw_token"] == "[REDACTED]"
+    assert redacted["access_token"] == "[REDACTED]"
+    assert "tn_live_raw_secret" not in rendered
+    assert "top_level_raw_secret" not in rendered
+    assert "raw_inline_secret_ref" not in rendered
+    assert "raw_ref_query" not in rendered
+
+
 def test_redact_text_removes_multi_token_basic_authorization_headers():
     from app.brain.security.redaction import redact_text
 
