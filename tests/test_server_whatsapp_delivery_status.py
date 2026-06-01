@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -153,6 +154,67 @@ def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path)
     assert len(events) == 3
     assert all(e["provider"] == "meta_cloud" for e in events)
     assert {e["message_id"] for e in events} == {"wamid.A", "wamid.B"}
+
+
+def test_internal_delivery_statuses_allows_viewer_read_role(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    assert client.post("/webhook", json=_status_payload(message_id="wamid.VIEW", status="delivered")).status_code == 200
+
+    response = client.get(
+        "/internal/brain/whatsapp/delivery-statuses",
+        headers={**AUTH, "X-Orvo-Role": "viewer"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["business_id"] == "whatsapp"
+    assert body["data"]["events"][0]["message_id"] == "wamid.VIEW"
+
+
+def test_internal_delivery_statuses_denies_unknown_role_and_audits_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    raw_role_secret = "raw_delivery_role_secret"
+
+    response = client.get(
+        "/internal/brain/whatsapp/delivery-statuses?limit=not-an-int",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": f"access_token={raw_role_secret}",
+            "X-Request-ID": "req-delivery-status-rbac-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "forbidden"
+    assert raw_role_secret not in response.get_data(as_text=True)
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+
+    assert len(rows) == 1
+    business_id, actor_ref, event_type, target_type, target_id, request_id, raw_data = rows[0]
+    assert business_id == "whatsapp"
+    assert actor_ref == "operator:juan"
+    assert event_type == "internal_operator_authorization_denied"
+    assert target_type == "internal_operator_api"
+    assert target_id == "/internal/brain/whatsapp/delivery-statuses"
+    assert request_id == "req-delivery-status-rbac-denied"
+    assert raw_role_secret not in raw_data
+    assert json.loads(raw_data) == {
+        "method": "GET",
+        "permission": "role:known",
+        "reason": "unknown_operator_role",
+        "role": "access_token=[REDACTED]",
+        "status": "denied",
+        "status_code": 403,
+    }
 
 
 def test_internal_delivery_statuses_redacts_failed_error_metadata(monkeypatch, tmp_path):

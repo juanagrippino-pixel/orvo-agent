@@ -209,6 +209,57 @@ def _authorize_internal_operator(business_id: str):
     return None
 
 
+def _record_internal_authorization_denial(
+    audit_store: SQLiteOperatorAuditStore,
+    *,
+    business_id: str,
+    exc: InternalOperatorAuthorizationError,
+    target_type: str,
+    target_id: str,
+) -> None:
+    audit_store.append_event(
+        business_id=business_id,
+        actor_ref=request.headers.get("X-Orvo-Operator") or "anonymous",
+        event_type="internal_operator_authorization_denied",
+        target_type=target_type,
+        target_id=target_id,
+        request_id=_internal_request_id(),
+        data={
+            "status": "denied",
+            "reason": exc.code,
+            "status_code": exc.status_code,
+            "method": request.method,
+            "role": exc.role,
+            "permission": exc.permission,
+        },
+    )
+
+
+def _authorize_internal_read_permission(
+    business_id: str,
+    audit_store: SQLiteOperatorAuditStore,
+    *,
+    target_type: str = "internal_operator_api",
+    target_id: str | None = None,
+):
+    try:
+        principal = build_internal_operator_principal(
+            actor_ref=request.headers.get("X-Orvo-Operator", ""),
+            role=request.headers.get("X-Orvo-Role"),
+        )
+        require_internal_permission(principal, INTERNAL_READ_PERMISSION)
+    except InternalOperatorAuthorizationError as exc:
+        _record_internal_authorization_denial(
+            audit_store,
+            business_id=business_id,
+            exc=exc,
+            target_type=target_type,
+            target_id=target_id or request.path,
+        )
+        return _internal_error(business_id, "forbidden", "Forbidden", status_code=403)
+    return None
+
+
 def _internal_brain_db_path() -> str:
     return os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3")
 
@@ -230,31 +281,15 @@ def _with_internal_stores(
             run_ledger = SQLiteRunLedger(conn)
             audit_store = SQLiteOperatorAuditStore(conn) if include_audit or enforce_read_permission else None
             if enforce_read_permission:
-                try:
-                    principal = build_internal_operator_principal(
-                        actor_ref=request.headers.get("X-Orvo-Operator", ""),
-                        role=request.headers.get("X-Orvo-Role"),
-                    )
-                    require_internal_permission(principal, INTERNAL_READ_PERMISSION)
-                except InternalOperatorAuthorizationError as exc:
-                    assert audit_store is not None
-                    audit_store.append_event(
-                        business_id=business_id,
-                        actor_ref=request.headers.get("X-Orvo-Operator") or "anonymous",
-                        event_type="internal_operator_authorization_denied",
-                        target_type="internal_operator_api",
-                        target_id=request.path,
-                        request_id=_internal_request_id(),
-                        data={
-                            "status": "denied",
-                            "reason": exc.code,
-                            "status_code": exc.status_code,
-                            "method": request.method,
-                            "role": exc.role,
-                            "permission": exc.permission,
-                        },
-                    )
-                    return _internal_error(business_id, "forbidden", "Forbidden", status_code=403)
+                assert audit_store is not None
+                permission_error = _authorize_internal_read_permission(
+                    business_id,
+                    audit_store,
+                    target_type="internal_operator_api",
+                    target_id=request.path,
+                )
+                if permission_error is not None:
+                    return permission_error
             if include_audit:
                 assert audit_store is not None
                 return handler(case_store, run_ledger, audit_store)
@@ -733,16 +768,25 @@ def internal_brain_whatsapp_delivery_statuses():
     auth_error = _authorize_internal_operator(business_id)
     if auth_error is not None:
         return auth_error
-    raw_limit = request.args.get("limit")
-    try:
-        limit = int(raw_limit) if raw_limit not in (None, "") else 50
-    except ValueError:
-        return _internal_error(business_id, "invalid_limit", "limit must be an integer", status_code=400)
-    if limit < 1:
-        return _internal_error(business_id, "invalid_limit", "limit must be positive", status_code=400)
-    limit = min(limit, 200)
     with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
         init_schema(conn)
+        audit_store = SQLiteOperatorAuditStore(conn)
+        permission_error = _authorize_internal_read_permission(
+            business_id,
+            audit_store,
+            target_type="internal_operator_api",
+            target_id=request.path,
+        )
+        if permission_error is not None:
+            return permission_error
+        raw_limit = request.args.get("limit")
+        try:
+            limit = int(raw_limit) if raw_limit not in (None, "") else 50
+        except ValueError:
+            return _internal_error(business_id, "invalid_limit", "limit must be an integer", status_code=400)
+        if limit < 1:
+            return _internal_error(business_id, "invalid_limit", "limit must be positive", status_code=400)
+        limit = min(limit, 200)
         events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(limit=limit)
     return _internal_success(business_id, {"events": redact_secrets(events)})
 
