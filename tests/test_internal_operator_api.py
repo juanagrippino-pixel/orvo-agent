@@ -35,6 +35,7 @@ def _case_detection(
     run_id: str = "run-artemea-1",
     source: str = "tiendanube",
     source_label: str = "Tiendanube access_token=raw_snapshot_secret",
+    freshness_state: str = "fresh",
     entity_scope: dict[str, str] | None = None,
 ) -> OperationalCaseDetection:
     scope = entity_scope or {"kind": "business", "id": "monitored", "label": "Monitoreado"}
@@ -61,7 +62,7 @@ def _case_detection(
                 case_type=case_type,
                 entity_scope=scope,
                 summary="Snapshot Bearer raw_snapshot_secret",
-                freshness_state="fresh",
+                freshness_state=freshness_state,  # type: ignore[arg-type]
                 metrics=[
                     OperationalCaseEvidenceMetric(
                         metric_key="commerce.inventory.available_units",
@@ -903,6 +904,71 @@ def test_internal_top_stalled_actionable_cases_endpoint_orders_by_idle_time(monk
     assert [case["case_id"] for case in data["cases"]] == [untouched.case_id, moved.case_id]
     assert data["cases"][0]["idle_seconds"] > data["cases"][1]["idle_seconds"]
     assert data["cases"][1]["age_seconds"] > data["cases"][1]["idle_seconds"]
+
+
+def test_internal_top_degraded_actionable_cases_endpoint_is_scoped_and_ordered(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    high = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-high-degraded",
+            priority=95,
+            freshness_state="degraded",
+            dedupe_suffix="stockout_risk/product/sku-high/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    low = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            run_id="run-artemea-low-stale",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            freshness_state="stale",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+    store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-fresh",
+            priority=100,
+            freshness_state="fresh",
+            dedupe_suffix="stockout_risk/product/sku-fresh/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=2),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-degraded",
+            freshness_state="missing",
+            dedupe_suffix="stockout_risk/product/sku-other/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/top-degraded?limit=2",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_degraded_total"] == 2
+    assert data["limit"] == 2
+    assert data["count"] == 2
+    assert [case["case_id"] for case in data["cases"]] == [high.case_id, low.case_id]
+    assert [case["freshness_state"] for case in data["cases"]] == ["degraded", "stale"]
+    assert all(case["source_connectors"] == ["tiendanube"] for case in data["cases"])
 
 
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
