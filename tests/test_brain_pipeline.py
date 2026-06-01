@@ -238,3 +238,121 @@ def test_registry_driven_builder_rejects_non_daily_report_connector():
             business=business,
             report_date=date(2026, 5, 19),
         )
+
+
+def test_run_connector_daily_report_pipeline_dispatches_registry_built_report(monkeypatch):
+    from app.brain.models import DailyReport, Evidence, Metric
+    from app.brain.pipeline import run_connector_daily_report_pipeline
+
+    captured = {}
+
+    def fake_csv_report_factory(**kwargs):
+        captured.update(kwargs)
+        return DailyReport(
+            business_name=kwargs["business_name"],
+            report_date=kwargs["report_date"],
+            metrics=[
+                Metric(
+                    key="orders_today",
+                    label="Pedidos",
+                    value=2,
+                    unit="orders",
+                    evidence=[Evidence(source="csv", label="Daily CSV")],
+                )
+            ],
+            insights=[],
+        )
+
+    monkeypatch.setattr(
+        "app.brain.adapters.csv_file.build_daily_report_from_csv_file",
+        fake_csv_report_factory,
+    )
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="csv-main",
+                connector_type="csv",
+                label="CSV Artemea",
+                params={"csv_path": "/tmp/orders.csv", "source_label": "Daily CSV"},
+            )
+        ],
+    )
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.1", error=None)
+
+    result = run_connector_daily_report_pipeline(
+        connector_type="csv",
+        business=business,
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+
+    assert result.dispatch.status == "sent"
+    assert result.report.metrics[0].key == "orders_today"
+    assert captured["csv_path"] == "/tmp/orders.csv"
+    delivery_client.send_text.assert_called_once()
+
+
+def test_connector_specific_pipeline_wrappers_reload_registry_factory_metadata(monkeypatch):
+    import app.brain.pipeline as pipeline
+    from app.brain.models import DailyReport, Evidence, Metric
+
+    captured = {}
+
+    def fake_tiendanube_report_factory(**kwargs):
+        captured.update(kwargs)
+        return DailyReport(
+            business_name=kwargs["business_name"],
+            report_date=kwargs["report_date"],
+            metrics=[
+                Metric(
+                    key="orders_today",
+                    label="Pedidos",
+                    value=1,
+                    unit="orders",
+                    evidence=[Evidence(source="tiendanube", label="TN Artemea")],
+                )
+            ],
+            insights=[],
+        )
+
+    monkeypatch.setattr(
+        "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube",
+        fake_tiendanube_report_factory,
+    )
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="TN Artemea",
+                params={"store_id": "123", "access_token": "tn_test_token", "include_stock": True},
+            )
+        ],
+    )
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.2", error=None)
+
+    result = pipeline.run_tiendanube_daily_report_pipeline(
+        business=business,
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+        http_client=object(),
+    )
+
+    assert result.dispatch.status == "sent"
+    assert captured["store_id"] == "123"
+    assert captured["access_token"] == "tn_test_token"
+    assert captured["include_stock"] is True

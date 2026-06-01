@@ -368,6 +368,7 @@ def test_apply_case_action_assign_owner_rejects_terminal_cases_without_mutation(
             case_id=opened.case_id,
             action_key="resolve_case",
             actor_ref="operator@example.com",
+            reason="Resolved after owner follow-up",
         )["case"]
 
     with pytest.raises(OperatorAPIError) as exc:
@@ -418,11 +419,11 @@ def test_apply_case_action_mark_in_progress_and_dismiss_case_update_lifecycle_wi
     )
     assert dismissed["case"]["status"] == "dismissed"
     assert dismissed["case"]["resolved_at"] is None
+    assert dismissed["case"]["dismissed_at"] is not None
     assert dismissed["case"]["timeline"][-1]["summary"] == "False positive after physical stock count"
 
 
-@pytest.mark.parametrize("bad_reason", [None, "", "   "])
-def test_apply_case_action_dismiss_case_requires_reason(bad_reason: str | None):
+def test_apply_case_action_resolve_case_still_requires_acknowledged_state_with_reason():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))
 
@@ -431,14 +432,46 @@ def test_apply_case_action_dismiss_case_requires_reason(bad_reason: str | None):
             store,
             business_id="artemea",
             case_id=opened.case_id,
-            action_key="dismiss_case",
+            action_key="resolve_case",
+            actor_ref="operator@example.com",
+            reason="Resolved after owner follow-up",
+        )
+
+    assert exc.value.code == "invalid_case_transition"
+    assert exc.value.status_code == 409
+    assert store.get_case(opened.case_id) == opened
+
+
+@pytest.mark.parametrize("action_key", ["resolve_case", "dismiss_case"])
+@pytest.mark.parametrize("bad_reason", [None, "", "   "])
+def test_apply_case_action_terminal_actions_require_reason(action_key: str, bad_reason: str | None):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    if action_key == "resolve_case":
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="acknowledge_case",
+            actor_ref="operator@example.com",
+        )
+
+    before = store.get_case(opened.case_id)
+    assert before is not None
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key=action_key,
             actor_ref="operator@example.com",
             reason=bad_reason,
         )
 
     assert exc.value.code == "missing_case_action_reason"
     assert exc.value.status_code == 400
-    assert store.get_case(opened.case_id).status == "open"
+    assert store.get_case(opened.case_id) == before
 
 
 @pytest.mark.parametrize("action_key", ["acknowledge_case", "mark_in_progress", "resolve_case", "dismiss_case"])
@@ -466,6 +499,31 @@ def test_apply_case_action_status_actions_reject_blank_or_non_string_actor_ref(
     reloaded = store.get_case(opened.case_id)
     assert reloaded is not None
     assert len(reloaded.timeline) == len(opened.timeline)
+
+
+def test_apply_case_action_rejects_unknown_action_key_before_actor_and_case_lookup():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    other = store.upsert_detection(case_detection(business_id="other", run_id="run-other"), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=other.case_id,
+            action_key="delete_everything",
+            actor_ref="",
+            comment="Cannot cross scope",
+        )
+
+    assert exc.value.code == "unknown_action_key"
+    assert exc.value.status_code == 400
+    reloaded_opened = store.get_case(opened.case_id)
+    reloaded_other = store.get_case(other.case_id)
+    assert reloaded_opened is not None
+    assert reloaded_other is not None
+    assert len(reloaded_opened.timeline) == len(opened.timeline)
+    assert len(reloaded_other.timeline) == len(other.timeline)
 
 
 def test_apply_case_action_add_comment_rejects_missing_actor_and_preserves_cross_business_scope():

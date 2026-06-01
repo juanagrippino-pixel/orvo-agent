@@ -45,16 +45,21 @@ from app.brain.operator_api import (
     get_operator_dashboard,
     get_run_projection,
     list_builtin_case_views,
+    list_case_action_catalog,
     list_case_queue,
     list_case_timeline,
     list_run_history,
+    list_top_actionable_cases_by_age,
     list_top_actionable_cases_by_priority,
+    list_top_stalled_actionable_cases,
     summarize_case_queue,
     summarize_case_queue_by_case_type,
+    summarize_case_queue_by_entity_kind,
     summarize_case_queue_by_priority_bracket,
     summarize_case_queue_by_source_connector,
     summarize_case_queue_aging,
     summarize_case_queue_aging_by_priority_bracket,
+    summarize_case_queue_aging_by_severity,
     summarize_case_queue_stagnation,
     summarize_case_queue_stagnation_by_priority_bracket,
     summarize_case_workflow_throughput,
@@ -184,6 +189,17 @@ def internal_brain_cases(business_id: str):
     )
 
 
+@app.get("/internal/brain/businesses/<business_id>/case-actions")
+def internal_brain_case_actions(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_case_action_catalog(business_id=business_id),
+        ),
+    )
+
+
 @app.get("/internal/brain/businesses/<business_id>/cases/summary")
 def internal_brain_cases_summary(business_id: str):
     return _with_internal_stores(
@@ -213,6 +229,17 @@ def internal_brain_cases_summary_by_case_type(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_queue_by_case_type(case_store, business_id=business_id),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/summary/by-entity-kind")
+def internal_brain_cases_summary_by_entity_kind(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_by_entity_kind(case_store, business_id=business_id),
         ),
     )
 
@@ -250,6 +277,21 @@ def internal_brain_cases_aging_by_priority_bracket(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_queue_aging_by_priority_bracket(
+                case_store,
+                business_id=business_id,
+                now=datetime.now(timezone.utc),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/aging/by-severity")
+def internal_brain_cases_aging_by_severity(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_aging_by_severity(
                 case_store,
                 business_id=business_id,
                 now=datetime.now(timezone.utc),
@@ -316,6 +358,22 @@ def internal_brain_workflow_throughput_by_priority_bracket(business_id: str):
     )
 
 
+@app.get("/internal/brain/businesses/<business_id>/cases/top-by-age")
+def internal_brain_cases_top_by_age(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_top_actionable_cases_by_age(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+                now=datetime.now(timezone.utc),
+            ),
+        ),
+    )
+
+
 @app.get("/internal/brain/businesses/<business_id>/cases/top-by-priority")
 def internal_brain_cases_top_by_priority(business_id: str):
     return _with_internal_stores(
@@ -323,6 +381,22 @@ def internal_brain_cases_top_by_priority(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             list_top_actionable_cases_by_priority(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+                now=datetime.now(timezone.utc),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/top-stalled")
+def internal_brain_cases_top_stalled(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_top_stalled_actionable_cases(
                 case_store,
                 business_id=business_id,
                 limit=request.args.get("limit"),

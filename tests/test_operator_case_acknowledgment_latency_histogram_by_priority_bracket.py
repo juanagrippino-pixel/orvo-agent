@@ -281,6 +281,7 @@ def test_acknowledgment_latency_histogram_by_priority_bracket_counts_resolved_ca
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=opened_at + timedelta(hours=5),
     )
 

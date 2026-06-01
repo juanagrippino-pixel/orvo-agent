@@ -21,6 +21,7 @@ from app.brain.semantics.metric_registry import (
     find_evidence_required_violations,
     find_evidence_source_violations,
     find_family_envelope_violations,
+    find_money_currency_violations,
     find_source_envelope_violations,
     find_value_kind_violations,
     validate_metrics,
@@ -440,23 +441,31 @@ class ConnectorSpec:
         *,
         registry: MetricRegistry | None = None,
     ) -> list[MetricValidationIssue]:
-        """Compose all six envelope diagnostics for emitted metric objects.
+        """Compose all seven envelope diagnostics for emitted metric objects.
 
         Symmetric extension of :meth:`validate_emitted_metrics` that operates
-        on metric-shaped objects (each exposing ``key``, ``value``, and
-        ``evidence``). The fixed concatenation order ``unknown_metric`` ->
+        on metric-shaped objects (each exposing ``key``, ``value``, ``unit``,
+        and ``evidence``). The fixed concatenation order ``unknown_metric`` ->
         ``disallowed_source`` -> ``undeclared_family`` -> ``evidence_missing``
-        -> ``evidence_source_mismatch`` -> ``value_kind_mismatch`` lets the
-        runtime treat object-level validation as a superset of key-level
-        validation: when every required metric carries non-empty evidence with
-        in-envelope sources and every value type matches the canonical unit
-        kind, the result equals ``validate_emitted_metrics`` over the same
-        keys. ``evidence_missing`` slots between ``undeclared_family`` and
-        ``evidence_source_mismatch`` so structural ``no evidence at all``
-        diagnostics surface before content diagnostics about wrong-source
-        evidence; this mirrors the slot reserved by
-        :func:`validate_report_metric_objects` and
-        :func:`validate_case_metric_objects`.
+        -> ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
+        ``money_currency_missing`` lets the runtime treat object-level
+        validation as a superset of key-level validation: when every required
+        metric carries non-empty evidence with in-envelope sources, every
+        value type matches the canonical unit kind, and every money metric
+        carries a currency string, the result equals
+        ``validate_emitted_metrics`` over the same keys. ``evidence_missing``
+        slots between ``undeclared_family`` and ``evidence_source_mismatch``
+        so structural ``no evidence at all`` diagnostics surface before
+        content diagnostics about wrong-source evidence; this mirrors the
+        slot reserved by :func:`validate_report_metric_objects` and
+        :func:`validate_case_metric_objects`. ``money_currency_missing``
+        lands last so structural and value-type diagnostics surface before
+        the rendering-metadata diagnostic that money metrics must carry a
+        currency string for the runtime/control-plane to interpret values
+        unambiguously, mirroring the slot reserved by
+        :func:`validate_report_metric_objects`,
+        :func:`validate_case_metric_objects`, and
+        :func:`validate_surface_metric_objects`.
         """
 
         materialized = list(metrics)
@@ -482,6 +491,9 @@ class ConnectorSpec:
         value_kind_issues = find_value_kind_violations(
             materialized, registry=registry
         )
+        money_currency_issues = find_money_currency_violations(
+            materialized, registry=registry
+        )
         return [
             *unknown_issues,
             *source_issues,
@@ -489,6 +501,7 @@ class ConnectorSpec:
             *evidence_missing_issues,
             *evidence_issues,
             *value_kind_issues,
+            *money_currency_issues,
         ]
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:

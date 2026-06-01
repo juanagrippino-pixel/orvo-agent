@@ -79,6 +79,7 @@ def test_summarize_case_workflow_throughput_by_severity_splits_latencies_per_sev
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(12),
     )
     # Critical B: opened 08:00, acknowledged 09:00 only.
@@ -121,6 +122,7 @@ def test_summarize_case_workflow_throughput_by_severity_splits_latencies_per_sev
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(18),
     )
     # Warning D: opened 08:00 and still open — counts toward totals only.
