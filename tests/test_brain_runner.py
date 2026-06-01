@@ -9,7 +9,7 @@ from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStor
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
 from app.brain.run_ledger import InMemoryRunLedger
-from app.brain.operational_cases import InMemoryOperationalCaseStore
+from app.brain.operational_cases import InMemoryOperationalCaseStore, OperationalCaseDetection
 
 
 def make_store():
@@ -321,6 +321,55 @@ def test_run_due_daily_reports_sends_owner_case_brief_after_cases_are_persisted(
     assert [out.metadata.get("message_type") for out in run.dispatch_outcomes] == ["daily_report", "owner_case_brief"]
     assert [out.message_id for out in run.dispatch_outcomes] == ["wamid.daily", "wamid.case-brief"]
     assert run.summary_metadata["case_brief_dispatch_status"] == "sent"
+
+
+def test_run_due_daily_reports_owner_brief_includes_in_progress_actionable_cases():
+    from app.brain.runner import run_due_daily_reports
+
+    delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="wamid.daily", error=None),
+        DeliveryResult(success=True, message_id="wamid.case-brief", error=None),
+    ]
+    case_store = InMemoryOperationalCaseStore()
+    preexisting = case_store.upsert_detection(
+        OperationalCaseDetection(
+            business_id="artemea",
+            case_type="stockout_risk",
+            dedupe_key="artemea/stockout_risk/business/monitored/commerce.inventory/daily",
+            title="Stock crítico",
+            severity="critical",
+            priority_score=100,
+            entity_scope={"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
+            evidence_refs=["evidence://tiendanube/stock/preexisting"],
+            run_id="run-preexisting",
+            artifact_refs=["ledger://runs/run-preexisting/daily-report"],
+        ),
+        detected_at=datetime(2026, 5, 18, 12, tzinfo=timezone.utc),
+    )
+    case_store.transition_case(
+        preexisting.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        reason="Owner is restocking now",
+        transitioned_at=datetime(2026, 5, 18, 13, tzinfo=timezone.utc),
+    )
+
+    run_due_daily_reports(
+        config_store=make_store(),
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        run_ledger=InMemoryRunLedger(),
+        case_store=case_store,
+    )
+
+    assert delivery.send_text.call_count == 2
+    _brief_phone, brief_text = delivery.send_text.call_args_list[1].args
+    assert "Stock crítico" in brief_text
+    assert preexisting.case_id in brief_text
 
 
 def test_run_due_daily_reports_records_partial_when_owner_case_brief_raises():

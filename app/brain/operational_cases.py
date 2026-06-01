@@ -11,7 +11,7 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal, Protocol
+from typing import Any, Iterable, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -30,9 +30,12 @@ OperationalCaseType = Literal[
     "stockout_risk",
     "spend_without_orders",
     "data_stale",
+    "fulfillment_backlog",
     "unanswered_conversations",
     "channel_mix_shift",
 ]
+DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
+OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
@@ -343,6 +346,22 @@ class OperationalCase(BaseModel):
         if self.status != "dismissed" and self.dismissed_at is not None:
             raise ValueError("only dismissed cases may have dismissed_at")
         return self
+
+
+def is_owner_facing_operational_case(case: OperationalCase) -> bool:
+    """Return whether a case family is promoted for owner-facing projections."""
+
+    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES
+
+
+def owner_facing_actionable_cases(cases: Iterable[OperationalCase]) -> list[OperationalCase]:
+    """Filter canonical cases to the subset eligible for owner-facing action surfaces."""
+
+    return [
+        case
+        for case in cases
+        if case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES and is_owner_facing_operational_case(case)
+    ]
 
 
 def _unique_snapshots(snapshots: list[OperationalCaseEvidenceSnapshot]) -> list[OperationalCaseEvidenceSnapshot]:
@@ -824,17 +843,20 @@ def _case_type_for_insight(insight: Insight) -> OperationalCaseType | None:
     title = insight.title.lower()
     if insight.severity == "info":
         return None
+    candidate: OperationalCaseType | None = None
     if "stock" in title:
-        return "stockout_risk"
-    if "sin ventas" in title or "roas bajo" in title:
-        return "spend_without_orders"
-    if "conversaciones" in title:
-        return "unanswered_conversations"
-    if "tiendanube" in title or "canal" in title:
-        return "channel_mix_shift"
-    if "ventas" in title:
-        return "sales_drop"
-    return None
+        candidate = "stockout_risk"
+    elif "sin ventas" in title or "roas bajo" in title:
+        candidate = "spend_without_orders"
+    elif "conversaciones" in title:
+        candidate = "unanswered_conversations"
+    elif "tiendanube" in title or "canal" in title:
+        candidate = "channel_mix_shift"
+    elif "ventas" in title:
+        candidate = "sales_drop"
+    if candidate not in DETECTABLE_OPERATIONAL_CASE_TYPES:
+        return None
+    return candidate
 
 
 def _dedupe_key(business_id: str, case_type: OperationalCaseType) -> str:
@@ -843,6 +865,7 @@ def _dedupe_key(business_id: str, case_type: OperationalCaseType) -> str:
         "stockout_risk": "stockout_risk/business/monitored/commerce.inventory/daily",
         "spend_without_orders": "spend_without_orders/channel/meta_ads/ads.spend/daily",
         "data_stale": "data_stale/connector/unknown/runtime.freshness/daily",
+        "fulfillment_backlog": "fulfillment_backlog/channel/tiendanube/commerce.fulfillment/daily",
         "unanswered_conversations": "unanswered_conversations/channel/whatsapp/support.conversations/daily",
         "channel_mix_shift": "channel_mix_shift/business/all_channels/commerce.revenue/daily",
     }
@@ -855,6 +878,7 @@ def _entity_scope(case_type: OperationalCaseType) -> dict[str, str]:
         "stockout_risk": {"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
         "spend_without_orders": {"kind": "channel", "id": "meta_ads", "label": "Meta Ads"},
         "data_stale": {"kind": "connector", "id": "unknown", "label": "Unknown connector"},
+        "fulfillment_backlog": {"kind": "channel", "id": "tiendanube", "label": "Tiendanube"},
         "unanswered_conversations": {"kind": "channel", "id": "whatsapp", "label": "WhatsApp"},
         "channel_mix_shift": {"kind": "business", "id": "all_channels", "label": "Todos los canales"},
     }[case_type]

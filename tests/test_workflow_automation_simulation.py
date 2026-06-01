@@ -176,6 +176,40 @@ def test_simulate_case_workflow_blocks_external_action_behind_approval_gate_and_
     assert planned_action["params"]["Authorization"] == "[REDACTED]"
 
 
+def test_workflow_idempotency_keys_are_stable_across_secret_rotation_but_sensitive_to_action_intent():
+    _, case = seed_case()
+    base_params = {"target": "supplier-a", "Authorization": "Basic " + "rotated_external_secret_a"}
+    rotated_secret_params = {"target": "supplier-a", "Authorization": "Basic " + "rotated_external_secret_b"}
+    changed_intent_params = {"target": "supplier-b", "Authorization": "Basic " + "rotated_external_secret_a"}
+
+    base_key = make_workflow_idempotency_key(
+        business_id="artemea",
+        rule_id="external-restock-request",
+        case_id=case.case_id,
+        action_key="request_external_action",
+        params=base_params,
+    )
+    rotated_secret_key = make_workflow_idempotency_key(
+        business_id="artemea",
+        rule_id="external-restock-request",
+        case_id=case.case_id,
+        action_key="request_external_action",
+        params=rotated_secret_params,
+    )
+    changed_intent_key = make_workflow_idempotency_key(
+        business_id="artemea",
+        rule_id="external-restock-request",
+        case_id=case.case_id,
+        action_key="request_external_action",
+        params=changed_intent_params,
+    )
+
+    assert rotated_secret_key == base_key
+    assert changed_intent_key != base_key
+    assert "rotated_external_secret" not in base_key
+    assert base_key.startswith(f"workflow/artemea/external-restock-request/{case.case_id}/request_external_action/")
+
+
 def test_simulate_case_workflow_rejects_unknown_action_key_before_projecting_actions():
     _, case = seed_case(priority_score=10)
     rule = WorkflowRule(
@@ -190,6 +224,22 @@ def test_simulate_case_workflow_rejects_unknown_action_key_before_projecting_act
         simulate_case_workflow(rule, case, now=utc(11))
 
     assert exc.value.code == "unknown_workflow_action_key"
+
+
+def test_simulate_case_workflow_rejects_action_key_for_unregistered_case_family():
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="wrong-family-suggestion",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[WorkflowAction(action_key="check_storefront", params={})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(11))
+
+    assert exc.value.code == "action_not_allowed_for_case_type"
 
 
 def test_simulate_case_workflow_rejects_unknown_trigger_before_projecting_actions():
