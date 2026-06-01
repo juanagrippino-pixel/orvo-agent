@@ -279,6 +279,34 @@ def test_store_assign_case_sets_assignee_timeline_event_preserves_status_redacts
         assert "raw_assignee_secret" not in assigned.model_dump_json()
 
 
+def test_assign_case_same_assignee_is_idempotent_without_timeline_noise(conn):
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(case_detection(run_id=f"{label}-run"), detected_at=utc(8))
+        first = store.assign_case(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="operator@example.com",
+            assignee_ref="owner access_token=raw_assignee_secret",
+            assigned_at=utc(9),
+        )
+        second = store.assign_case(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="other-operator@example.com",
+            assignee_ref="  owner access_token=raw_assignee_secret  ",
+            assigned_at=utc(10),
+        )
+
+        assert second == first, f"{label}: assigning the same owner again must be a no-op"
+        assert second.assigned_at == utc(9)
+        assert second.updated_at == utc(9)
+        assert [event.event_type for event in second.timeline] == ["case_opened", "case_assigned"]
+        assert "raw_assignee_secret" not in second.model_dump_json()
+
+
 def test_apply_case_action_assign_owner_updates_projection_and_keeps_lifecycle_status():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))

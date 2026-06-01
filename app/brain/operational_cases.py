@@ -711,10 +711,13 @@ class _OperationalCaseMutations:
         normalized_assignee_ref = assignee_ref.strip()
         if not normalized_assignee_ref:
             raise ValueError("assignee_ref must be non-empty")
+        redacted_assignee_ref = redact_text(normalized_assignee_ref) or "[REDACTED]"
+        if record.assignee_ref == redacted_assignee_ref:
+            return record.model_copy(deep=True)
         assigned_at = _as_utc(assigned_at) if assigned_at is not None else _now_utc()
         updated = record.model_copy(
             update={
-                "assignee_ref": normalized_assignee_ref,
+                "assignee_ref": redacted_assignee_ref,
                 "assigned_at": assigned_at,
                 "updated_at": assigned_at,
                 "timeline": [
@@ -725,8 +728,8 @@ class _OperationalCaseMutations:
                         actor_ref=actor_ref,
                         case_id=record.case_id,
                         created_at=assigned_at,
-                        summary=f"Assigned case to {normalized_assignee_ref}.",
-                        metadata={"assignee_ref": normalized_assignee_ref},
+                        summary=f"Assigned case to {redacted_assignee_ref}.",
+                        metadata={"assignee_ref": redacted_assignee_ref},
                     ),
                 ],
             },
