@@ -1,73 +1,66 @@
 # Reporte ejecutivo autónomo — Orvo Codex Board
 
-Fecha de corte: 2026-06-01 03:32 UTC  
-Repo: `/root/orvo-agent`  
-Rama canónica: `feat/orvo-brain-control-plane` @ `166545e`  
-Estado verificado: parent repo limpio; worktrees sin cambios locales no commiteados; `python -m pytest -q` → 1120 passed.
+Fecha de corte: 2026-06-01 11:44 UTC<br>
+Repo: `/root/orvo-agent`<br>
+Rama canónica: `feat/orvo-brain-control-plane` @ `e4bd410`<br>
+Estado verificado en este refresh: parent repo limpio antes de editar; inspección de `git log`, branch ancestry y código fuente; focused docs-referenced suite `26 passed`; full suite `1133 passed`.
 
 ## Qué shipped en la rama canónica
 
-Desde el último tren documentado, la rama canónica avanzó de forma importante y está verde:
+Desde el último reporte board, la rama canónica avanzó de `166545e` a `e4bd410` y corrigió drift importante del tren:
 
-- `b59bcc3` — integró Work Management con razones obligatorias para cierres/resoluciones terminales.
-- `ba0ff58` — integró Connector Platform runtime: pipelines pasan por registry, modos runtime y metadata de health.
-- `8493451` — integró Workflow Automation en modo simulación/dry-run, con dedupe de action plans.
-- `194e4d3` — integró Search/Analytics: filtros JQL-lite por source connector/degraded y totales scopeados.
-- `61543de` — expuso endpoint interno de top actionable cases por antigüedad.
-- `9fa1dce` + `ff24e81` — fijó actor identity de acciones y el guard de whitelist antes de lookup.
-- `28119f5` — centralizó el catálogo de acciones (`app/brain/action_catalog.py`) y lo conectó a API/workflow automation.
-- `166545e` — expuso endpoint interno de stalled actionable cases.
+- `8d4641f` — integró el paid-pilot close kit docs-only; ya no es candidato pendiente.
+- `20b385f` — alineó familias detectables con el semantic registry: `fulfillment_backlog` es representable como `OperationalCaseType`, `channel_mix_shift` queda interno/deferido al no estar en `CASE_FAMILY_METRICS`, y hay contract tests para registry/action/catalog alignment.
+- `29558ba` — agregó el Architecture Review Board report del 2026-06-01; su hallazgo de case-family drift ya fue resuelto por `20b385f` en el head actual.
+- `d9c7fa5` — agregó guard de regresión de colección pytest; no permitir suites verdes por borrar tests.
+- `df1ced3` — expuso endpoint interno de degraded actionable cases.
+- `099c00a` — integró workflow action case-family gating; el dry-run rechaza acciones declaradas para otra familia.
+- `178c0a8` — integró guard de idempotency frente a secret rotation en workflow planning.
+- `e4bd410` — expuso endpoint interno de recently opened cases.
 
-Lectura producto: Orvo sigue moviéndose desde “reporte” hacia control-plane: casos persistentes, acciones whitelisteadas, workflow dry-run, query/search y endpoints operables.
+Lectura producto: Orvo sigue moviéndose desde “reporte” hacia control-plane: casos persistentes, acciones whitelisteadas, workflow dry-run, query/search, endpoints operables y ahora un contrato más fuerte entre semantic registry, case types y actions.
 
-## Qué está corriendo
+## Qué está corriendo / higiene operativa
 
-Según el roster activo y las salidas cron recientes, la organización autónoma está distribuida en 29 jobs relevantes:
-
-- 19 jobs LLM Codex (`openai-codex` / `gpt-5.5`) con áreas: COO, Market/ICP, ARB, QA/Red Team, Release/Integration, SRE/Ops, Knowledge/Roadmap, Engineering Factory, Work Management, Workflow Automation, Connector Platform, Search, Service Management, Edge/Developer, GTM, Operator Surfaces, Trust/Admin/Security y Board Reporter.
-- 10 watchdogs/scripts: higiene de repo, inventario de worktrees, review queue, gateway liveness, daily WhatsApp report, Claude direct workers y backup.
 - Regla operativa vigente: parent repo canónico limpio; implementación en `/root/orvo-agent-worktrees/*`; integración secuencial con tests.
+- El integration train fue refrescado para dejar de recomendar como pendientes el paid-pilot docs branch, el case-family gate core, el coverage guard, el workflow idempotency guard y los primeros endpoints de operator case-list que ya están integrados.
+- `channel_mix_shift` sigue siendo diseño post-pilot/deferido hasta tener métricas channel-scoped, freshness policy cross-source y tests de dedupe/entity scope; WhatsApp/reportes siguen siendo superficies, no source of truth.
 
 ## Bloqueos / ramas que necesitan decisión o integración
 
 ### Promoción próxima recomendada
 
-1. `docs/gtm-paid-pilot-roi-20260601` @ `93c582e` — commit docs-only con close kit de paid pilot. Bajo riesgo; buen candidato para integrar rápido.
-2. `codex/work-management` @ `2a68aca` — agrega policy de owner-facing case brief. Requiere rebase sobre `166545e` y suite completa porque toca proyecciones/casos.
-3. `codex/operator-surfaces` @ `118aff8` — contiene catálogo/razones terminales que se solapan con lo ya integrado en `action_catalog`; requiere reconciliación, no merge directo.
-4. `codex/trust-admin-security` @ `a90e276` — RBAC/audit útil, pero debe revisarse por auth, scoping, least privilege y auditoría append-only antes de promover.
-5. `codex/service-management` @ `b7793fc` y `codex/edge-developer-platform` @ `ba37d0b` — valiosos, pero deben esperar a que Work Management/Operator API queden estabilizados.
+1. `codex/work-management` @ `6923796` — agrega policy de owner-facing case brief. Requiere rebase sobre `e4bd410` y suite completa porque toca proyecciones/casos y debe convivir con endpoints top/stalled/degraded/recently-opened.
+2. QA uniqueness review — revisar `codex/channel-mix-case-gate` @ `4f366cb`, `qa/case-family-registry-drift` @ `b78e65e` y `codex/coverage-regression-guard-20260531-0330` @ `d2d171d` solo para rescatar tests únicos. No mergear código stale sobre los fixes ya integrados (`20b385f`, `d9c7fa5`).
+3. `codex/qa-owner-brief-actionable` @ `c3f0954` — integrar después de rebasear la policy owner-facing para asegurar que WhatsApp/operator briefs excluyan casos resueltos/no accionables.
+4. `codex/operator-surfaces` @ `6c6bf70` y `codex/trust-admin-security` @ `0ec59c2` — reconciliar contra `action_catalog.py`, actor identity, whitelist ordering y endpoints actuales antes de promover.
+5. `codex/service-management` @ `55737d3` y `codex/edge-developer-platform` @ `dca4b4d` — valiosos, pero detrás de estabilización Work Management/Operator API.
 
 ### Ramas ya absorbidas o candidatas a limpieza segura
 
-- `codex/connector-platform`, `codex/workflow-automation`, `codex/search-analytics`, `codex/action-catalog-service-20260601` aparecen como ancestros o ya integradas en `feat/orvo-brain-control-plane`.
-- Recomendación: limpiar solo con `git branch -d`/verificación de `merge-base --is-ancestor`; no usar force-delete.
+- `docs/gtm-paid-pilot-roi-20260601` @ `93c582e`
+- `codex/eng-factory-coverage-regression-guard-20260601` @ `d9c7fa5`
+- `codex/qa-workflow-secret-idempotency` @ `efdc221`
+- `codex/top-degraded-endpoint-20260601` @ `df1ced3`
+- `codex-operator-recently-opened-endpoint-20260601` @ `e4bd410`
 
-### Ramas QA / hardening aún pendientes
-
-- `codex/channel-mix-case-gate` @ `4f366cb`
-- `codex/coverage-regression-guard-20260531-0330` @ `d2d171d`
-- `codex/qa-owner-brief-actionable` @ `c3f0954`
-- `codex/qa-redteam-run-ledger-redaction-20260531` @ `b2aa861`
-- `qa/case-family-registry-drift` @ `b78e65e`
-
-Estas son importantes para reducir regresión, pero deben entrar una por una y con tests enfocados + `pytest -q`.
+Limpieza solo con `git branch -d`/`merge-base --is-ancestor`; no usar force-delete sobre ramas no verificadas.
 
 ## Riesgos que importan
 
-- **Docs de integración desactualizadas:** `docs/ops/2026-05-31-integration-train.md` todavía describe un bloqueo que la rama canónica ya superó. Este reporte lo supersede operacionalmente, pero conviene actualizar/archivar esa train doc.
-- **Overlaps en Operator API:** varias ramas tocan acciones, catálogo, case projections y endpoints internos; merge directo puede reintroducir duplicación o romper contratos.
-- **Deuda de limpieza de ramas:** hay muchas ramas remotas históricas/demo/hito0. No bloquean build, pero aumentan ruido para Release/Integration.
-- **Scope creep:** GTM y producto avanzan, pero el foco debe seguir siendo control-plane D2C; WhatsApp/reportes son superficie, no source of truth.
+- **Owner-facing projections:** varios endpoints nuevos aumentan el valor operador, pero el próximo riesgo es que owner-facing briefs muestren casos resueltos/no accionables si la policy no se integra con tests.
+- **Trust/Admin/Security:** aún no hay boundary sellable completo: faltan scoped principals, least privilege, failure audit y append-only guarantees.
+- **QA stale branches:** ya hay fixes mainline para registry drift y coverage collection; fusionar ramas viejas puede reintroducir comportamiento anterior.
+- **Scope creep:** mantener foco D2C control-plane; WhatsApp y reportes son delivery/projections, no estado canónico.
 
 ## Próximas acciones autónomas
 
-- Release/Integration: integrar primero `docs/gtm-paid-pilot-roi-20260601`; luego preparar rebase controlado de `codex/work-management` y ejecutar suite completa.
-- QA/Red Team: priorizar `coverage-regression-guard` y owner-brief actionable invariant después del rebase Work Management.
-- Operator Surfaces + Trust/Admin: reconciliar contra `action_catalog.py` y endpoints ya en `166545e`; evitar duplicar lógica en controllers.
-- Knowledge/Roadmap: actualizar el integration train para reflejar que Work Management, Connector Platform, Workflow Automation, Search Analytics y Action Catalog ya entraron.
-- SRE/Ops: mantener vigilancia sobre higiene de worktrees y no tocar cron desde jobs no autorizados.
+- Release/Integration: rebase controlado de `codex/work-management`; tests enfocados + `pytest -q`; luego QA uniqueness review para ramas stale.
+- QA/Red Team: rescatar solo regresiones no cubiertas de case-family/coverage stale branches y preparar owner-brief actionable invariant post-policy.
+- Operator Surfaces + Trust/Admin: freshen contra `e4bd410`; no duplicar action metadata en controllers.
+- Knowledge/Roadmap: mantener el integration train como navegación actual y marcar reportes ARB históricos como evidencia, no como estado vivo cuando el código ya corrigió un hallazgo.
+- SRE/Ops: mantener vigilancia de higiene de worktrees y no tocar cron desde jobs no autorizados.
 
 ## Decisión pedida a Juan
 
-¿Autorizamos que el próximo ciclo priorice **GTM paid-pilot close kit** como merge docs-only inmediato y luego congele merges de feature hasta rebasear `codex/work-management` + reconciliar `operator-surfaces` contra el nuevo `action_catalog`?
+¿Autorizamos congelar merges de nuevas features hasta rebasear **Work Management owner-facing brief policy** y completar el QA uniqueness review de ramas stale que ahora solapan con fixes ya shipped?

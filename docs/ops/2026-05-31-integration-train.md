@@ -1,18 +1,17 @@
 # Integration Train — 2026-05-31
 
-## Supersession update — 2026-06-01 03:39 UTC
+## Supersession update — 2026-06-01 11:44 UTC
 
 Status: **superseded by shipped canonical integration state**.
 
 Canonical branch: `feat/orvo-brain-control-plane`<br>
-Current head reviewed: `394344a` (`docs: refresh autonomous board report`)<br>
-Last pushed product head in the local log: `166545e` (`codex: expose stalled actionable cases endpoint`)
+Current head reviewed: `e4bd410` (`codex: expose recently opened cases endpoint`)
 
-This file originally recorded failed 2026-05-31 merge attempts and a blocker around terminal transition reasons. That blocker is no longer the active integration state. The canonical branch now contains the Work Management terminal-reason invariant and the follow-on platform slices listed below.
+This file originally recorded failed 2026-05-31 merge attempts and a blocker around terminal transition reasons. That blocker is no longer the active integration state. The canonical branch now contains the Work Management terminal-reason invariant plus the follow-on control-plane slices listed below.
 
 ### Shipped since the blocked 2026-05-31 train
 
-Grounded in `git log --oneline` from the canonical branch:
+Grounded in `git log --oneline` and code inspection from the canonical branch:
 
 | Commit | Status | What changed | Notes for future workers |
 |---:|---|---|---|
@@ -24,9 +23,17 @@ Grounded in `git log --oneline` from the canonical branch:
 | `9fa1dce` / `ff24e81` | shipped | Pinned action actor identity and action whitelist-before-lookup behavior. | Keep actor identity from authenticated/internal context, not client payload. |
 | `28119f5` | shipped | Centralized case action catalog in `app/brain/action_catalog.py`. | API and workflow projections should reuse this service-layer catalog instead of duplicating action metadata. |
 | `166545e` | shipped | Exposed stalled actionable cases endpoint. | Operator surface projection over actionable cases. |
-| `394344a` | docs-only | Refreshed autonomous board report with the current train state. | This integration-train update reconciles the stale train doc with that report and local branch inspection. |
+| `8d4641f` | shipped | Merged the paid-pilot close-kit docs branch. | The docs-only GTM branch is no longer a pending integration item. |
+| `20b385f` | shipped | Aligned detectable case families with the semantic registry. | Resolves the 2026-06-01 ARB drift: `fulfillment_backlog` is representable, `channel_mix_shift` stays internal/deferred because it is absent from `CASE_FAMILY_METRICS`, and contract tests cover registry/action/catalog alignment. |
+| `d9c7fa5` | shipped | Added pytest collection regression guard. | Keep this guard when adding/removing tests; do not make the suite green by silently dropping coverage. |
+| `df1ced3` | shipped | Exposed degraded actionable cases endpoint. | Operator projection over canonical actionable cases. |
+| `099c00a` | shipped | Integrated workflow action case-family gating. | Workflow dry-run now refuses actions whose catalog-declared families do not match the case. |
+| `178c0a8` | shipped | Merged workflow idempotency secret-rotation guard. | Runtime hashes/secret rotations must not perturb workflow idempotency keys. |
+| `e4bd410` | shipped | Exposed recently opened cases endpoint. | Operator projection only; case lifecycle remains canonical in the case service/store. |
 
 Code inspection confirms the action catalog is now service-layer source of truth: `app/brain/action_catalog.py` defines registered action metadata, marks `resolve_case`/`dismiss_case` as `requires_reason=True`, exposes `API_ENABLED_CASE_ACTION_KEYS`, and provides `workflow_action_registry()` for workflow dry-run validation. `app/brain/workflow_automation.py` imports that catalog instead of maintaining an independent workflow action registry.
+
+Code inspection also confirms the ARB case-family drift has been closed in the current base: `app/brain/operational_cases.py` defines `DETECTABLE_OPERATIONAL_CASE_TYPES = frozenset(CASE_FAMILY_METRICS)`, includes `fulfillment_backlog` in `OperationalCaseType`, and keeps `channel_mix_shift` out of detected owner-facing cases until it has registered case metrics. `tests/contracts/test_metric_registry_contract.py` now checks that registry families are representable Operational Cases and that action catalog families resolve to the same registry.
 
 ### Branch inventory as of this update
 
@@ -34,28 +41,28 @@ Checked with `git merge-base --is-ancestor <branch> HEAD` from `/root/orvo-agent
 
 | Branch | Head | Canonical status | Recommended handling |
 |---|---:|---|---|
-| `codex/connector-platform` | `6c544fb` | merged | Candidate for safe cleanup only after normal branch-retention review. |
-| `codex/workflow-automation` | `8c6260d` | merged | Candidate for safe cleanup; keep dry-run-only labeling in docs/release notes. |
-| `codex/search-analytics` | `087a081` | merged | Candidate for safe cleanup. |
-| `codex/action-catalog-service-20260601` | `28119f5` | merged | Candidate for safe cleanup; this is now the canonical action-catalog service slice. |
-| `docs/gtm-paid-pilot-roi-20260601` | `93c582e` | unmerged | Low-risk docs-only candidate; integrate before more feature branches if the diff is still clean. |
-| `codex/work-management` | `2a68aca` | unmerged follow-up | Contains owner-facing case brief policy beyond already-shipped terminal reasons; rebase and run full suite before merge. |
-| `codex/operator-surfaces` | `118aff8` | unmerged/rework | Must reconcile with shipped `action_catalog.py`; do not reintroduce duplicated action metadata. |
-| `codex/trust-admin-security` | `a90e276` | unmerged/review | Still needs security review for scoped principals, least privilege, failed-attempt audit, and append-only audit guarantees. |
-| `codex/service-management` | `b7793fc` | unmerged/dependent | Wait until Work Management/Operator API follow-ups stabilize. |
-| `codex/edge-developer-platform` | `ba37d0b` | unmerged/dependent | Wait for current operator/runtime contracts to settle. |
-| `codex/coverage-regression-guard-20260531-0330` | `d2d171d` | unmerged QA | Good hardening candidate; merge one at a time with full tests. |
+| `docs/gtm-paid-pilot-roi-20260601` | `93c582e` | merged | Candidate for safe cleanup only after normal branch-retention review. |
+| `codex/eng-factory-coverage-regression-guard-20260601` | `d9c7fa5` | merged | Candidate for safe cleanup; coverage guard is now canonical. |
+| `codex/qa-workflow-secret-idempotency` | `efdc221` | merged | Candidate for safe cleanup; keep the regression test in mainline. |
+| `codex/top-degraded-endpoint-20260601` | `df1ced3` | merged | Candidate for safe cleanup; endpoint is now canonical. |
+| `codex-operator-recently-opened-endpoint-20260601` | `e4bd410` | merged | Current head; cleanup only after retention review. |
+| `codex/work-management` | `6923796` | unmerged follow-up | Contains owner-facing case brief policy; rebase and run full suite before merge. |
+| `codex/operator-surfaces` | `6c6bf70` | unmerged/rework | Must reconcile with shipped operator endpoint surfaces and `action_catalog.py`; do not reintroduce duplicated action metadata. |
+| `codex/trust-admin-security` | `0ec59c2` | unmerged/review | Still needs scoped principals, least-privilege defaults, failed-attempt audit, and append-only audit guarantees. |
+| `codex/service-management` | `55737d3` | unmerged/dependent | Wait until Work Management/Operator API follow-ups stabilize; keep projections non-canonical. |
+| `codex/edge-developer-platform` | `dca4b4d` | unmerged/dependent | Wait for current operator/runtime contracts to settle; avoid generic platform detour. |
+| `codex/coverage-regression-guard-20260531-0330` | `d2d171d` | unmerged/stale QA | Likely superseded by `d9c7fa5`; inspect before preserving or deleting. |
 | `codex/qa-owner-brief-actionable` | `c3f0954` | unmerged QA | Re-evaluate after the owner-facing case brief policy branch is rebased. |
-| `codex/channel-mix-case-gate` | `4f366cb` | unmerged QA/product gate | Keep aligned with Packet N; channel mix remains deferred/internal until gates pass. |
-| `codex/qa-redteam-run-ledger-redaction-20260531` | `b2aa861` | unmerged QA | Review carefully because the branch subject overlaps channel-mix gating despite the name. |
-| `qa/case-family-registry-drift` | `b78e65e` | unmerged QA | Useful registry drift test candidate; sequence after current semantic/connector tests are green. |
+| `codex/channel-mix-case-gate` | `4f366cb` | unmerged/stale QA | Core gate is now shipped via `20b385f`; do not merge stale branch as-is. Cherry-pick only unique tests if any remain. |
+| `codex/qa-redteam-run-ledger-redaction-20260531` | `b2aa861` | unmerged QA | Review carefully because it overlaps channel-mix/redaction behavior. |
+| `qa/case-family-registry-drift` | `b78e65e` | unmerged/stale QA | Likely superseded by `tests/contracts/test_metric_registry_contract.py`; inspect for unique regressions before cleanup. |
 
 ### Current next integration order
 
-1. **Docs-only first:** `docs/gtm-paid-pilot-roi-20260601` if its diff still contains only GTM/ROI docs and passes conflict-marker/secret checks.
-2. **Work Management follow-up:** rebase `codex/work-management` @ `2a68aca` onto `feat/orvo-brain-control-plane`; verify owner-facing brief policy does not conflict with current actionable-case projections.
-3. **QA hardening:** integrate `coverage-regression-guard`, `qa-owner-brief-actionable`, and `qa/case-family-registry-drift` one at a time, with focused tests plus `pytest -q` after each merge.
-4. **Operator/Trust branches:** only after action-catalog and Work Management follow-ups are stable, reconcile `codex/operator-surfaces` and `codex/trust-admin-security` against the shipped catalog, actor identity, whitelist ordering, and operator endpoint surfaces.
+1. **Work Management follow-up:** rebase `codex/work-management` @ `6923796` onto `feat/orvo-brain-control-plane`; verify owner-facing brief policy does not conflict with the recently shipped top/stalled/degraded/recently-opened operator projections.
+2. **QA uniqueness review:** inspect stale QA branches (`codex/channel-mix-case-gate`, `qa/case-family-registry-drift`, old coverage guard) for unique tests only; do not merge stale code paths over the shipped `20b385f`/`d9c7fa5` fixes.
+3. **Owner-facing brief invariant:** integrate `codex/qa-owner-brief-actionable` only after the Work Management brief policy is current and green.
+4. **Operator/Trust branches:** reconcile `codex/operator-surfaces` and `codex/trust-admin-security` against the shipped catalog, actor identity, whitelist ordering, and current operator endpoints.
 5. **Platform expansion:** service-management and edge/developer branches should remain behind the above stabilization work.
 
 ### Superseded blocker notes
@@ -63,7 +70,7 @@ Checked with `git merge-base --is-ancestor <branch> HEAD` from `/root/orvo-agent
 The earlier sections below are kept as historical integration evidence. Do not use their branch order as current guidance. In particular:
 
 - `codex/work-management-fixture-reasons-20260531` / severity fixture repair are no longer the top-level integration blocker on the canonical branch; Work Management terminal reasons are already present.
-- Connector Platform, Workflow Automation simulation, Search/Analytics, and Action Catalog are no longer pending train items; they are merged into `feat/orvo-brain-control-plane`.
+- Connector Platform, Workflow Automation simulation, Search/Analytics, Action Catalog, paid-pilot docs, case-family registry drift, coverage regression guard, workflow idempotency guard, and the first operator case-list projection endpoints are no longer pending train items; they are merged into `feat/orvo-brain-control-plane`.
 - Any future cleanup must use safe deletion (`git branch -d`) and/or explicit `merge-base --is-ancestor` checks; do not force-delete unmerged branches.
 
 ---
