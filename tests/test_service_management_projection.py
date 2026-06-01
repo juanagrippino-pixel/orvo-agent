@@ -197,6 +197,38 @@ def test_list_service_management_cases_is_business_scoped_limited_and_rejects_na
         )
 
 
+def test_service_management_projection_stops_sla_clocks_for_dismissed_terminal_cases():
+    store = InMemoryOperationalCaseStore()
+    dismissed = store.upsert_detection(
+        _detection(
+            case_type="data_stale",
+            dedupe_suffix="dismissed-stale/connector/tiendanube/freshness/daily",
+            severity="warning",
+            priority=80,
+            run_id="run-dismissed",
+        ),
+        detected_at=NOW - timedelta(days=5),
+    )
+    store.transition_case(
+        dismissed.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        reason="False positive after manual connector check.",
+        transitioned_at=NOW - timedelta(days=1),
+    )
+
+    item = service_management_case_item(store.get_case(dismissed.case_id), now=NOW)  # type: ignore[arg-type]
+
+    assert item["owner_status"]["code"] == "dismissed"
+    assert item["dismissed_at"] == "2026-05-23T12:00:00Z"
+    assert item["needs_escalation"] is False
+    assert item["sla"]["first_response"]["completed"] is True
+    assert item["sla"]["first_response"]["stopped_at"] == "2026-05-23T12:00:00Z"
+    assert item["sla"]["resolution"]["completed"] is True
+    assert item["sla"]["resolution"]["stopped_at"] == "2026-05-23T12:00:00Z"
+
+
 def test_service_management_projection_exposes_deterministic_escalation_reasons():
     store = InMemoryOperationalCaseStore()
     breached = store.upsert_detection(

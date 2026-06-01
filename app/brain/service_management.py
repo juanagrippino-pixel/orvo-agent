@@ -123,8 +123,9 @@ def _sla_projection(case: OperationalCase, *, reference: datetime) -> dict[str, 
     severity = str(case.severity)
     first_response_target = _FIRST_RESPONSE_TARGET_SECONDS[severity]
     resolution_target = _RESOLUTION_TARGET_SECONDS[severity]
-    first_response_stopped_at = case.acknowledged_at or case.resolved_at
-    resolution_stopped_at = case.resolved_at
+    terminal_stopped_at = case.resolved_at or case.dismissed_at
+    first_response_stopped_at = case.acknowledged_at or terminal_stopped_at
+    resolution_stopped_at = terminal_stopped_at
     return {
         "first_response": _sla_clock(
             case=case,
@@ -227,6 +228,7 @@ def service_management_case_item(case: OperationalCase, *, now: datetime | None 
             "updated_at": _iso(case.updated_at),
             "acknowledged_at": _iso(case.acknowledged_at),
             "resolved_at": _iso(case.resolved_at),
+            "dismissed_at": _iso(case.dismissed_at),
             "latest_run_id": case.latest_run_id,
             "sla": sla,
             "needs_escalation": bool(escalation_reasons),
