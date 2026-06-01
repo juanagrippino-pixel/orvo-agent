@@ -96,6 +96,23 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert unsupported_category.value.code == "unsupported_jql_value"
 
 
+def test_parse_case_jql_supports_assigned_boolean_filter():
+    assert parse_case_jql("assigned = false").normalized == "assigned = false ORDER BY priority_score DESC, opened_at ASC"
+    assert parse_case_jql("assigned != true").normalized == "assigned != true ORDER BY priority_score DESC, opened_at ASC"
+
+    with pytest.raises(OperatorAPIError) as unsupported_operator:
+        parse_case_jql("assigned > false")
+    assert unsupported_operator.value.code == "unsupported_jql_operator"
+
+    with pytest.raises(OperatorAPIError) as unsupported_value:
+        parse_case_jql("assigned = maybe")
+    assert unsupported_value.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as sql_shape:
+        parse_case_jql("assigned = false OR assignee_ref = admin")
+    assert sql_shape.value.code == "invalid_jql"
+
+
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
@@ -254,6 +271,59 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
+def test_internal_case_queue_filters_unassigned_actionable_cases_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    unassigned = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-unassigned",
+            dedupe_suffix="stockout_risk/sku/UNASSIGNED/commerce.inventory/daily",
+            priority=90,
+        ),
+    )
+    assigned = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-assigned-unassigned-filter",
+            dedupe_suffix="stockout_risk/sku/ASSIGNED_FILTER/commerce.inventory/daily",
+            priority=100,
+            title="Riesgo de stock asignado",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-other", business_id="other", priority=99))
+
+    assign_response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{assigned.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "assign_owner", "assignee_ref": "operator:ana"},
+    )
+    assert assign_response.status_code == 200
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=status%20IN%20(open%2C%20acknowledged%2C%20in_progress)%20AND%20assigned%20%3D%20false",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        "status IN (open, acknowledged, in_progress) AND assigned = false ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [unassigned.case_id]
+    assert body["data"]["cases"][0]["assignee_ref"] is None
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+    view_response = client.get(
+        "/internal/brain/businesses/artemea/case-views/unassigned_actionable/cases",
+        headers=AUTH,
+    )
+    assert view_response.status_code == 200
+    view_body = view_response.get_json()
+    assert view_body["data"]["view"]["view_id"] == "unassigned_actionable"
+    assert view_body["data"]["cases"] == body["data"]["cases"]
+
+
 def test_internal_case_queue_accepts_safe_jql_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _seed_case(db_path, _case_detection(run_id="run-critical"))
@@ -348,11 +418,14 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert response.status_code == 200
     body = response.get_json()
     views = {view["view_id"]: view for view in body["data"]["views"]}
-    assert {"open_cases", "in_progress_cases", "critical_open", "data_stale", "stockout_risk", "connector_degraded"}.issubset(
+    assert {"open_cases", "in_progress_cases", "critical_open", "data_stale", "stockout_risk", "connector_degraded", "unassigned_actionable"}.issubset(
         views
     )
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"
+    )
+    assert views["unassigned_actionable"]["jql"] == (
+        "status IN (open, acknowledged, in_progress) AND assigned = false ORDER BY priority_score DESC"
     )
     assert all(view["readonly"] is True for view in views.values())
     assert "business_id" not in " ".join(view["jql"] for view in views.values())
