@@ -9,8 +9,14 @@ from app.brain.operational_cases import (
     OperationalCaseDetection,
     OperationalCaseEvidenceSnapshot,
 )
+from app.brain.action_catalog import (
+    API_ENABLED_CASE_ACTION_KEYS,
+    ACTION_CATALOG,
+    list_case_action_catalog,
+)
 from app.brain.workflow_automation import (
     CaseWorkflowCondition,
+    WORKFLOW_ACTION_REGISTRY,
     WorkflowAction,
     WorkflowAutomationError,
     WorkflowRule,
@@ -61,6 +67,27 @@ def seed_case(priority_score: int = 95, degraded: bool = False):
     store = InMemoryOperationalCaseStore()
     case = store.upsert_detection(case_detection(priority_score=priority_score, degraded=degraded), detected_at=utc(8))
     return store, case
+
+
+def test_action_catalog_is_canonical_for_workflow_and_operator_projections():
+    projection = list_case_action_catalog(business_id="artemea")
+    actions = {action["action_key"]: action for action in projection["actions"]}
+
+    assert set(WORKFLOW_ACTION_REGISTRY) == set(ACTION_CATALOG)
+    assert projection["business_id"] == "artemea"
+    assert projection["api_enabled_action_keys"] == list(API_ENABLED_CASE_ACTION_KEYS)
+    assert set(projection["api_enabled_action_keys"]) == {
+        "acknowledge_case",
+        "add_comment",
+        "assign_owner",
+        "dismiss_case",
+        "mark_in_progress",
+        "resolve_case",
+    }
+    assert actions["resolve_case"]["requires_reason"] is True
+    assert actions["dismiss_case"]["requires_reason"] is True
+    assert actions["request_external_action"]["api_enabled"] is False
+    assert actions["request_external_action"]["approval_required"] is True
 
 
 def test_simulate_case_workflow_dry_run_plans_whitelisted_action_without_mutating_case():

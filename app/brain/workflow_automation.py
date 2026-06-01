@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from app.brain.action_catalog import ActionDefinition as WorkflowActionDefinition
+from app.brain.action_catalog import workflow_action_registry
 from app.brain.operational_cases import OperationalCase
 from app.brain.security.redaction import redact_secrets, redact_text
 
@@ -25,40 +27,9 @@ WorkflowActionMode = Literal["manual", "suggestion", "approval_required"]
 WorkflowSideEffect = Literal["none", "case_transition", "case_comment", "operator_request", "external"]
 
 
-@dataclass(frozen=True)
-class WorkflowActionDefinition:
-    """Registered workflow action metadata.
-
-    ``side_effect`` describes what a future executor would touch after passing
-    approval/idempotency/audit gates. The simulation path never performs that
-    side effect.
-    """
-
-    mode: WorkflowActionMode
-    side_effect: WorkflowSideEffect
-    requires_approval: bool = False
-
-
 # Code whitelist aligned with docs/specs/d2c-action-key-catalog.md. Suggested
 # D2C actions remain projection-only until a governed executor exists.
-WORKFLOW_ACTION_REGISTRY: dict[str, WorkflowActionDefinition] = {
-    "acknowledge_case": WorkflowActionDefinition("manual", "case_transition"),
-    "assign_owner": WorkflowActionDefinition("manual", "operator_request"),
-    "add_comment": WorkflowActionDefinition("manual", "case_comment"),
-    "request_follow_up": WorkflowActionDefinition("manual", "operator_request"),
-    "mark_in_progress": WorkflowActionDefinition("manual", "case_transition"),
-    "resolve_case": WorkflowActionDefinition("manual", "case_transition"),
-    "dismiss_case": WorkflowActionDefinition("manual", "case_transition"),
-    "request_external_action": WorkflowActionDefinition("approval_required", "external", requires_approval=True),
-    "check_storefront": WorkflowActionDefinition("suggestion", "none"),
-    "review_campaigns": WorkflowActionDefinition("suggestion", "none"),
-    "confirm_stock": WorkflowActionDefinition("suggestion", "none"),
-    "pause_promotion": WorkflowActionDefinition("approval_required", "external", requires_approval=True),
-    "refresh_credentials": WorkflowActionDefinition("manual", "operator_request"),
-    "retry_connector": WorkflowActionDefinition("manual", "operator_request"),
-    "inspect_pending_orders": WorkflowActionDefinition("suggestion", "none"),
-    "reply_pending_chats": WorkflowActionDefinition("suggestion", "none"),
-}
+WORKFLOW_ACTION_REGISTRY: dict[str, WorkflowActionDefinition] = workflow_action_registry()
 
 
 class WorkflowAutomationError(Exception):

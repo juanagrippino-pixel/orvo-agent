@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Literal, get_args
 from datetime import datetime, timezone
 
+from app.brain.action_catalog import API_ENABLED_CASE_ACTION_KEYS, list_case_action_catalog
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
     TERMINAL_OPERATIONAL_CASE_STATUSES,
@@ -35,7 +36,7 @@ CaseActionKey = Literal[
     "dismiss_case",
     "add_comment",
 ]
-_ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
+_ALLOWED_CASE_ACTIONS: set[str] = set(API_ENABLED_CASE_ACTION_KEYS)
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
 _ALLOWED_TIMELINE_EVENT_TYPES: set[str] = set(get_args(TimelineEventType))

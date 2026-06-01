@@ -345,6 +345,51 @@ def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monk
     assert "raw_owner_secret" not in reloaded.model_dump_json()
 
 
+def test_internal_case_action_catalog_returns_canonical_action_contract(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-actions", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["request_id"] == "req-test"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["api_enabled_action_keys"] == [
+        "acknowledge_case",
+        "add_comment",
+        "assign_owner",
+        "dismiss_case",
+        "mark_in_progress",
+        "resolve_case",
+    ]
+    actions = {item["action_key"]: item for item in data["actions"]}
+    assert actions["acknowledge_case"]["status_effect"] == "acknowledged"
+    assert actions["add_comment"]["requires_comment"] is True
+    assert actions["assign_owner"]["input_fields"] == ["assignee_ref"]
+    assert actions["resolve_case"]["requires_reason"] is True
+    assert actions["dismiss_case"]["requires_reason"] is True
+    assert actions["request_external_action"]["api_enabled"] is False
+    assert actions["request_external_action"]["approval_required"] is True
+    assert "raw_" not in response.get_data(as_text=True)
+
+
+def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-actions")
+
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "unauthorized"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_run(db_path, business_id="artemea", run_id="run-artemea")
