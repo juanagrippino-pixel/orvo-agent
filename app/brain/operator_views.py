@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
+    ACTIONABLE_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
     OperationalCaseSeverity,
     OperationalCaseStatus,
@@ -81,6 +82,7 @@ _FIELD_SPECS: dict[str, FieldSpec] = {
     "source_connector": FieldSpec("string"),
     "degraded": FieldSpec("bool", None, frozenset({"=", "!="})),
     "assigned": FieldSpec("bool", None, frozenset({"=", "!="})),
+    "actionable": FieldSpec("bool", None, frozenset({"=", "!="})),
     "dedupe_key": FieldSpec("string", None, frozenset({"=", "!="})),
     "opened_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
     "updated_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
@@ -122,6 +124,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "label": "Critical open cases",
         "description": "Open critical cases first.",
         "jql": "status = open AND severity = critical ORDER BY priority_score DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "actionable_cases",
+        "label": "Actionable cases",
+        "description": "Open, acknowledged, or in-progress cases that still need operator attention.",
+        "jql": "actionable = true ORDER BY priority_score DESC",
         "readonly": True,
     },
     {
@@ -400,6 +409,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return is_case_degraded(case)
     if field == "assigned":
         return case.assignee_ref is not None
+    if field == "actionable":
+        return case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES
     return getattr(case, field)
 
 

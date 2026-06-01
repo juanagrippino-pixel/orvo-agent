@@ -93,6 +93,23 @@ def test_parse_case_jql_supports_assigned_boolean_filter():
     assert sql_shape.value.code == "invalid_jql"
 
 
+def test_parse_case_jql_supports_actionable_boolean_filter():
+    assert parse_case_jql("actionable = true").normalized == "actionable = true ORDER BY priority_score DESC, opened_at ASC"
+    assert parse_case_jql("actionable != false").normalized == "actionable != false ORDER BY priority_score DESC, opened_at ASC"
+
+    with pytest.raises(OperatorAPIError) as unsupported_operator:
+        parse_case_jql("actionable > true")
+    assert unsupported_operator.value.code == "unsupported_jql_operator"
+
+    with pytest.raises(OperatorAPIError) as unsupported_value:
+        parse_case_jql("actionable = probably")
+    assert unsupported_value.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as sql_shape:
+        parse_case_jql("actionable = true OR status = resolved")
+    assert sql_shape.value.code == "invalid_jql"
+
+
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
@@ -202,6 +219,100 @@ def test_internal_case_queue_filters_unassigned_actionable_cases_and_keeps_busin
     assert view_body["data"]["cases"] == body["data"]["cases"]
 
 
+def test_internal_case_queue_filters_actionable_cases_and_builtin_view_matches_direct_jql(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    open_case = _seed_case(db_path, _case_detection(run_id="run-open", priority=90))
+    acknowledged = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-ack",
+            dedupe_suffix="stockout_risk/sku/ACK/inventory.on_hand/daily",
+            priority=80,
+            title="Riesgo de stock reconocido",
+        ),
+    )
+    in_progress = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-progress",
+            dedupe_suffix="stockout_risk/sku/PROGRESS/inventory.on_hand/daily",
+            priority=95,
+            title="Riesgo de stock en progreso",
+        ),
+    )
+    resolved = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-resolved",
+            dedupe_suffix="stockout_risk/sku/RESOLVED/inventory.on_hand/daily",
+            priority=100,
+            title="Riesgo de stock resuelto",
+        ),
+    )
+    dismissed = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-dismissed",
+            dedupe_suffix="stockout_risk/sku/DISMISSED/inventory.on_hand/daily",
+            priority=99,
+            title="Riesgo de stock descartado",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-other", business_id="other", priority=98))
+
+    ack_response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{acknowledged.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "acknowledge_case", "reason": "En revisión"},
+    )
+    assert ack_response.status_code == 200
+    progress_response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{in_progress.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "mark_in_progress", "reason": "Tomado"},
+    )
+    assert progress_response.status_code == 200
+    resolved_ack = client.post(
+        f"/internal/brain/businesses/artemea/cases/{resolved.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "acknowledge_case", "reason": "En revisión"},
+    )
+    assert resolved_ack.status_code == 200
+    resolved_response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{resolved.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "resolve_case", "reason": "Resuelto"},
+    )
+    assert resolved_response.status_code == 200
+    dismissed_response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{dismissed.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "dismiss_case", "reason": "No aplica"},
+    )
+    assert dismissed_response.status_code == 200
+
+    direct_response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=actionable%20%3D%20true",
+        headers=AUTH,
+    )
+    view_response = client.get(
+        "/internal/brain/businesses/artemea/case-views/actionable_cases/cases",
+        headers=AUTH,
+    )
+
+    assert direct_response.status_code == 200
+    assert view_response.status_code == 200
+    direct_body = direct_response.get_json()
+    view_body = view_response.get_json()
+    expected_case_ids = [in_progress.case_id, open_case.case_id, acknowledged.case_id]
+    assert direct_body["data"]["normalized_jql"] == "actionable = true ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in direct_body["data"]["cases"]] == expected_case_ids
+    assert all(case["status"] in {"open", "acknowledged", "in_progress"} for case in direct_body["data"]["cases"])
+    assert all(case["business_id"] == "artemea" for case in direct_body["data"]["cases"])
+    assert view_body["data"]["view"]["view_id"] == "actionable_cases"
+    assert view_body["data"]["cases"] == direct_body["data"]["cases"]
+
+
 def test_internal_case_queue_accepts_safe_jql_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _seed_case(db_path, _case_detection(run_id="run-critical"))
@@ -296,9 +407,17 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert response.status_code == 200
     body = response.get_json()
     views = {view["view_id"]: view for view in body["data"]["views"]}
-    assert {"open_cases", "in_progress_cases", "critical_open", "data_stale", "stockout_risk", "connector_degraded", "unassigned_actionable"}.issubset(
-        views
-    )
+    assert {
+        "open_cases",
+        "in_progress_cases",
+        "critical_open",
+        "data_stale",
+        "stockout_risk",
+        "connector_degraded",
+        "unassigned_actionable",
+        "actionable_cases",
+    }.issubset(views)
+    assert views["actionable_cases"]["jql"] == "actionable = true ORDER BY priority_score DESC"
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"
     )
