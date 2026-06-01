@@ -98,6 +98,15 @@ def get_operator_dashboard(
         "run_history": list_run_history(
             ledger, business_id=business_id, status=None, limit=str(limit)
         ),
+        "builtin_case_view_totals": _summarize_builtin_case_view_totals(
+            store, business_id=business_id
+        ),
     }
+
+
+def _summarize_builtin_case_view_totals(store: OperationalCaseStore, *, business_id: str) -> dict[str, Any]:
+    from app.brain.operator_views import summarize_builtin_case_view_totals
+
+    return summarize_builtin_case_view_totals(store, business_id=business_id)
 
 __all__ = [name for name in globals() if not name.startswith("__")]
