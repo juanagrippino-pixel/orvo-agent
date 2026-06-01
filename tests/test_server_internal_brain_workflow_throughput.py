@@ -53,6 +53,7 @@ def _seed_case_with_lifecycle(
     db_path,
     *,
     business_id: str = "artemea",
+    case_type: str = "stockout_risk",
     opened_hours_ago: int = 24,
     ack_minutes_after_open: int | None = 30,
     resolve_hours_after_open: int | None = None,
@@ -67,6 +68,7 @@ def _seed_case_with_lifecycle(
     case = store.upsert_detection(
         _detection(
             business_id=business_id,
+            case_type=case_type,
             priority=priority,
             run_id=run_id,
             dedupe_suffix=dedupe_suffix,
@@ -209,6 +211,48 @@ def test_workflow_throughput_by_priority_bracket_exposes_split_projection(_isola
         "max": 1800,
         "avg": 1800,
         "median": 1800,
+    }
+
+
+def test_workflow_throughput_by_case_type_exposes_split_projection(_isolate_db):
+    from server import app
+
+    _seed_case_with_lifecycle(
+        _isolate_db,
+        case_type="stockout_risk",
+        ack_minutes_after_open=30,
+        resolve_hours_after_open=4,
+        dedupe_suffix="case-stockout",
+    )
+    _seed_case_with_lifecycle(
+        _isolate_db,
+        case_type="sales_drop",
+        ack_minutes_after_open=60,
+        resolve_hours_after_open=None,
+        dedupe_suffix="case-sales-drop",
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/workflow/throughput/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["total"] == 2
+    assert data["totals_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert data["acknowledged_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert data["resolved_by_case_type"] == {"stockout_risk": 1}
+    assert data["time_to_acknowledge_seconds_by_case_type"]["sales_drop"] == {
+        "min": 3600,
+        "max": 3600,
+        "avg": 3600,
+        "median": 3600,
     }
 
 
