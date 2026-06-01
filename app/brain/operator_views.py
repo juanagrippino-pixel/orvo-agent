@@ -219,6 +219,34 @@ def query_case_queue(
     return redact_secrets(data)
 
 
+def summarize_builtin_case_view_totals(store: OperationalCaseStore, *, business_id: str) -> dict[str, Any]:
+    """Return scoped counts for each built-in read-only case view.
+
+    This dashboard primitive compiles every built-in view through the same
+    JQL-lite parser used by executable case views, then counts matches against
+    the business-scoped case set. It intentionally returns totals only, not raw
+    cases, so dashboards can show saved-view coverage without making the
+    dashboard a source of truth for queue state.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    views: list[dict[str, Any]] = []
+    for view in _BUILTIN_CASE_VIEWS:
+        parsed = parse_case_jql(view["jql"])
+        total = sum(1 for case in cases if _matches(case, parsed.clauses))
+        views.append(
+            {
+                "view_id": view["view_id"],
+                "label": view["label"],
+                "readonly": view["readonly"],
+                "jql": view["jql"],
+                "normalized_jql": parsed.normalized,
+                "total": total,
+            }
+        )
+    return redact_secrets({"business_id": business_id, "views": views})
+
+
 def _split_order_by(raw: str) -> tuple[str, tuple[tuple[str, str], ...]]:
     match = re.search(r"\s+ORDER\s+BY\s+(.+)$", raw, flags=re.IGNORECASE)
     if not match:
