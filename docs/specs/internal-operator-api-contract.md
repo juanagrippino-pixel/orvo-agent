@@ -65,6 +65,8 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/recently-opened
 GET /internal/brain/businesses/{business_id}/cases/recently-acknowledged
+GET /internal/brain/businesses/{business_id}/cases/recently-resolved
+GET /internal/brain/businesses/{business_id}/cases/recently-dismissed
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/case-actions
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions

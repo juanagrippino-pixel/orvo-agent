@@ -50,6 +50,7 @@ from app.brain.operator_api import (
     list_case_timeline,
     list_run_history,
     list_recently_acknowledged_cases,
+    list_recently_dismissed_cases,
     list_recently_opened_cases,
     list_recently_resolved_cases,
     list_top_actionable_cases_by_age,
@@ -527,6 +528,21 @@ def internal_brain_cases_recently_resolved(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             list_recently_resolved_cases(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/recently-dismissed")
+def internal_brain_cases_recently_dismissed(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_recently_dismissed_cases(
                 case_store,
                 business_id=business_id,
                 limit=request.args.get("limit"),

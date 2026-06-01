@@ -1865,6 +1865,56 @@ def list_recently_acknowledged_cases(
     )
 
 
+def list_recently_dismissed_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-dismissed cases for a business.
+
+    Complements the open/acknowledged/resolved workflow projections with the
+    non-actionable terminal path used for false positives and no-op cases.
+    Ordered by ``dismissed_at`` DESC with ``case_id`` ASC as a deterministic
+    tie-breaker. Each row includes ``dismissal_seconds`` (opened_at ->
+    dismissed_at) so operator surfaces can render time-to-dismiss without extra
+    lookups. Strictly scoped per tenant and redacted at the projection boundary.
+    """
+
+    parsed_limit = parse_limit(limit)
+    dismissed: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="dismissed", limit=None):
+        if case.dismissed_at is None:
+            continue
+        dismissed.append((case.dismissed_at.astimezone(timezone.utc), case.case_id, case))
+
+    # Most recently dismissed first; tie-break by case_id ASC for deterministic order.
+    dismissed.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = dismissed[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "dismissed_at": dismissed_at.isoformat(),
+            "dismissal_seconds": int((dismissed_at - case.opened_at).total_seconds()),
+        }
+        for dismissed_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "dismissed_total": len(dismissed),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}
