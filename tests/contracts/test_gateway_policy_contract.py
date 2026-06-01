@@ -110,6 +110,69 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
     assert missing_idempotency.code == "missing_idempotency_key"
     assert missing_idempotency.status_code == 428
 
+    invalid_idempotency = registry.evaluate(
+        base.model_copy(
+            update={
+                "idempotency_key": "case-action:other:case-1:acknowledge:v1",
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=("cases:write",),
+                ),
+            }
+        )
+    )
+    assert invalid_idempotency.allowed is False
+    assert invalid_idempotency.code == "invalid_idempotency_key"
+    assert invalid_idempotency.status_code == 400
+    assert invalid_idempotency.audit_event["idempotency_key_present"] is True
+
+    whitespace_idempotency = registry.evaluate(
+        base.model_copy(
+            update={
+                "idempotency_key": "case-action:artemea:case 1:acknowledge:v1",
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=("cases:write",),
+                ),
+            }
+        )
+    )
+    assert whitespace_idempotency.allowed is False
+    assert whitespace_idempotency.code == "invalid_idempotency_key"
+
+    overlong_idempotency = registry.evaluate(
+        base.model_copy(
+            update={
+                "idempotency_key": "case-action:artemea:" + "x" * 201,
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=("cases:write",),
+                ),
+            }
+        )
+    )
+    assert overlong_idempotency.allowed is False
+    assert overlong_idempotency.code == "invalid_idempotency_key"
+
+    secret_shaped_idempotency = registry.evaluate(
+        base.model_copy(
+            update={
+                "idempotency_key": "case-action:artemea:access_token=raw_gateway_secret",
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=("cases:write",),
+                ),
+            }
+        )
+    )
+    assert secret_shaped_idempotency.allowed is False
+    assert secret_shaped_idempotency.code == "invalid_idempotency_key"
+    assert "raw_gateway_secret" not in repr(secret_shaped_idempotency.model_dump())
+
     allowed = registry.evaluate(
         base.model_copy(
             update={

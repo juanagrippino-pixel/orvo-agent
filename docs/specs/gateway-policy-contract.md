@@ -27,6 +27,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 5. Permission checks are allowlisted by route policy; wildcard grants are for tests/admin bootstrap only.
 6. Rate-limit keys are deterministic and safe to log after boundary redaction: `<bucket>:<business_id>:<redacted_actor_id>`.
 7. Audit events record decision codes and whether an idempotency key was present, but not the idempotency key value itself. Actor identifiers are passed through the shared redaction helper before projection.
+8. Idempotency keys for mutating routes must be scoped to the target business, must not contain whitespace, must fit within the documented key-size budget, and must not contain secret-shaped material.
 
 ## Current schema
 
@@ -43,7 +44,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 | `idempotency_required` | Whether requests must carry an idempotency key before execution. |
 | `audit_event_type` | Stable audit/provenance event name emitted by policy decisions. |
 
-`GatewayRequestContext` carries only request facts needed for evaluation: route key, method, business ID, optional authenticated principal, and optional idempotency key. `GatewayPolicyDecision` returns a safe decision envelope with status code, decision code, rate-limit key, idempotency requirement, and audit event metadata.
+`GatewayRequestContext` carries only request facts needed for evaluation: route key, method, business ID, optional authenticated principal, and optional idempotency key. Mutating-route idempotency keys are accepted only when they are 1-200 characters, whitespace-free, secret-safe after shared redaction inspection, and contain the target `business_id` as a colon-delimited segment. `GatewayPolicyDecision` returns a safe decision envelope with status code, decision code, rate-limit key, idempotency requirement, and audit event metadata.
 
 ## Initial route policies
 
@@ -65,6 +66,7 @@ These are conventions and contract tests first. Existing Flask handlers can be w
 | `business_scope_forbidden` | 403 | Principal is not allowed for the requested business. |
 | `permission_denied` | 403 | Principal lacks one or more required route permissions. |
 | `missing_idempotency_key` | 428 | Mutating route requires an idempotency key before execution. |
+| `invalid_idempotency_key` | 400 | Supplied idempotency key is not business-scoped, is too large, contains whitespace, or includes secret-shaped material. |
 
 ## Acceptance tests
 
@@ -72,7 +74,7 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 
 - the default registry covers the current internal boundaries in stable order;
 - public manifests are deterministic and secret-safe;
-- policy evaluation rejects missing auth, cross-business access, missing permissions, and missing idempotency keys;
+- policy evaluation rejects missing auth, cross-business access, missing permissions, missing idempotency keys, and invalid/cross-business/secret-shaped idempotency keys;
 - allowed decisions emit stable audit metadata and redacted rate-limit keys;
 - actor identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;
 - duplicate route keys and unknown route lookups are rejected.

@@ -192,6 +192,22 @@ class GatewayPolicyRegistry:
                 reason="Mutating gateway route requires an idempotency key.",
                 rate_limit_key=rate_limit_key,
             )
+        if policy.idempotency_required and not _idempotency_key_is_valid(
+            context.idempotency_key,
+            context.business_id,
+        ):
+            return _decision(
+                policy,
+                context,
+                allowed=False,
+                code="invalid_idempotency_key",
+                status_code=400,
+                reason=(
+                    "Idempotency key must be scoped to the business, contain no whitespace, "
+                    "and contain no secret-shaped material."
+                ),
+                rate_limit_key=rate_limit_key,
+            )
         return _decision(
             policy,
             context,
@@ -246,6 +262,18 @@ def gateway_policy_manifest() -> dict[str, Any]:
     """Return the default public gateway-policy manifest."""
 
     return default_gateway_policy_registry().public_manifest()
+
+
+def _idempotency_key_is_valid(idempotency_key: str | None, business_id: str) -> bool:
+    if not idempotency_key:
+        return False
+    if len(idempotency_key) > 200:
+        return False
+    if any(character.isspace() for character in idempotency_key):
+        return False
+    if redact_text(idempotency_key) != idempotency_key:
+        return False
+    return business_id in idempotency_key.split(":")
 
 
 def _rate_limit_key(policy: GatewayRoutePolicy, context: GatewayRequestContext) -> str:
