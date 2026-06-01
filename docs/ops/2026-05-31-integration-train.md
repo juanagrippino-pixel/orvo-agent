@@ -1,6 +1,74 @@
 # Integration Train — 2026-05-31
 
-## Update — 2026-05-31 20:35 UTC
+## Supersession update — 2026-06-01 03:39 UTC
+
+Status: **superseded by shipped canonical integration state**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head reviewed: `394344a` (`docs: refresh autonomous board report`)<br>
+Last pushed product head in the local log: `166545e` (`codex: expose stalled actionable cases endpoint`)
+
+This file originally recorded failed 2026-05-31 merge attempts and a blocker around terminal transition reasons. That blocker is no longer the active integration state. The canonical branch now contains the Work Management terminal-reason invariant and the follow-on platform slices listed below.
+
+### Shipped since the blocked 2026-05-31 train
+
+Grounded in `git log --oneline` from the canonical branch:
+
+| Commit | Status | What changed | Notes for future workers |
+|---:|---|---|---|
+| `b59bcc3` | shipped | Integrated Work Management terminal reasons. | Manual terminal case actions must keep non-empty reasons; do not weaken this invariant for fixtures. |
+| `ba0ff58` | shipped | Integrated Connector Platform runtime metadata/execution routing. | Still treat secret-ref execution hardening as follow-up; compiled metadata is not the whole connector platform. |
+| `8493451` | shipped | Integrated Workflow Automation simulation. | Dry-run only: no external side effects, no durable executor, no approval workflow yet. |
+| `194e4d3` | shipped | Integrated Search/Analytics case query/view slices. | JQL-lite/read-only views remain scoped projections over canonical cases. |
+| `61543de` | shipped | Exposed top actionable cases by age endpoint. | Operator surface only; does not own case state. |
+| `9fa1dce` / `ff24e81` | shipped | Pinned action actor identity and action whitelist-before-lookup behavior. | Keep actor identity from authenticated/internal context, not client payload. |
+| `28119f5` | shipped | Centralized case action catalog in `app/brain/action_catalog.py`. | API and workflow projections should reuse this service-layer catalog instead of duplicating action metadata. |
+| `166545e` | shipped | Exposed stalled actionable cases endpoint. | Operator surface projection over actionable cases. |
+| `394344a` | docs-only | Refreshed autonomous board report with the current train state. | This integration-train update reconciles the stale train doc with that report and local branch inspection. |
+
+Code inspection confirms the action catalog is now service-layer source of truth: `app/brain/action_catalog.py` defines registered action metadata, marks `resolve_case`/`dismiss_case` as `requires_reason=True`, exposes `API_ENABLED_CASE_ACTION_KEYS`, and provides `workflow_action_registry()` for workflow dry-run validation. `app/brain/workflow_automation.py` imports that catalog instead of maintaining an independent workflow action registry.
+
+### Branch inventory as of this update
+
+Checked with `git merge-base --is-ancestor <branch> HEAD` from `/root/orvo-agent`:
+
+| Branch | Head | Canonical status | Recommended handling |
+|---|---:|---|---|
+| `codex/connector-platform` | `6c544fb` | merged | Candidate for safe cleanup only after normal branch-retention review. |
+| `codex/workflow-automation` | `8c6260d` | merged | Candidate for safe cleanup; keep dry-run-only labeling in docs/release notes. |
+| `codex/search-analytics` | `087a081` | merged | Candidate for safe cleanup. |
+| `codex/action-catalog-service-20260601` | `28119f5` | merged | Candidate for safe cleanup; this is now the canonical action-catalog service slice. |
+| `docs/gtm-paid-pilot-roi-20260601` | `93c582e` | unmerged | Low-risk docs-only candidate; integrate before more feature branches if the diff is still clean. |
+| `codex/work-management` | `2a68aca` | unmerged follow-up | Contains owner-facing case brief policy beyond already-shipped terminal reasons; rebase and run full suite before merge. |
+| `codex/operator-surfaces` | `118aff8` | unmerged/rework | Must reconcile with shipped `action_catalog.py`; do not reintroduce duplicated action metadata. |
+| `codex/trust-admin-security` | `a90e276` | unmerged/review | Still needs security review for scoped principals, least privilege, failed-attempt audit, and append-only audit guarantees. |
+| `codex/service-management` | `b7793fc` | unmerged/dependent | Wait until Work Management/Operator API follow-ups stabilize. |
+| `codex/edge-developer-platform` | `ba37d0b` | unmerged/dependent | Wait for current operator/runtime contracts to settle. |
+| `codex/coverage-regression-guard-20260531-0330` | `d2d171d` | unmerged QA | Good hardening candidate; merge one at a time with full tests. |
+| `codex/qa-owner-brief-actionable` | `c3f0954` | unmerged QA | Re-evaluate after the owner-facing case brief policy branch is rebased. |
+| `codex/channel-mix-case-gate` | `4f366cb` | unmerged QA/product gate | Keep aligned with Packet N; channel mix remains deferred/internal until gates pass. |
+| `codex/qa-redteam-run-ledger-redaction-20260531` | `b2aa861` | unmerged QA | Review carefully because the branch subject overlaps channel-mix gating despite the name. |
+| `qa/case-family-registry-drift` | `b78e65e` | unmerged QA | Useful registry drift test candidate; sequence after current semantic/connector tests are green. |
+
+### Current next integration order
+
+1. **Docs-only first:** `docs/gtm-paid-pilot-roi-20260601` if its diff still contains only GTM/ROI docs and passes conflict-marker/secret checks.
+2. **Work Management follow-up:** rebase `codex/work-management` @ `2a68aca` onto `feat/orvo-brain-control-plane`; verify owner-facing brief policy does not conflict with current actionable-case projections.
+3. **QA hardening:** integrate `coverage-regression-guard`, `qa-owner-brief-actionable`, and `qa/case-family-registry-drift` one at a time, with focused tests plus `pytest -q` after each merge.
+4. **Operator/Trust branches:** only after action-catalog and Work Management follow-ups are stable, reconcile `codex/operator-surfaces` and `codex/trust-admin-security` against the shipped catalog, actor identity, whitelist ordering, and operator endpoint surfaces.
+5. **Platform expansion:** service-management and edge/developer branches should remain behind the above stabilization work.
+
+### Superseded blocker notes
+
+The earlier sections below are kept as historical integration evidence. Do not use their branch order as current guidance. In particular:
+
+- `codex/work-management-fixture-reasons-20260531` / severity fixture repair are no longer the top-level integration blocker on the canonical branch; Work Management terminal reasons are already present.
+- Connector Platform, Workflow Automation simulation, Search/Analytics, and Action Catalog are no longer pending train items; they are merged into `feat/orvo-brain-control-plane`.
+- Any future cleanup must use safe deletion (`git branch -d`) and/or explicit `merge-base --is-ancestor` checks; do not force-delete unmerged branches.
+
+---
+
+## Historical update — 2026-05-31 20:35 UTC
 
 Integration branch: `feat/orvo-brain-control-plane`
 Base before attempted merge: `01da568` (`merge: consolidate runtime semantics diagnostics`)
@@ -40,7 +108,7 @@ Required fix before retry:
 - Keep the production invariant that operator terminal transitions require non-empty reasons; do not weaken the invariant to satisfy fixtures.
 - Re-run the severity-split aging/stagnation tests, the existing focused Work Management suite, and `pytest -q` after the fixture repair.
 
-### Updated next integration order
+### Historical next integration order from that run
 
 1. `codex/work-management-fixture-reasons-20260531` @ `641db72` — first priority, but blocked by the two severity fixture failures above.
 2. `codex/connector-platform` @ `6c544fb` — ARB merge-ready incremental; retry only after Work Management terminal-reason semantics land or are intentionally deferred.
@@ -110,7 +178,7 @@ Required fix before retry:
 - Keep the new production invariant; do not weaken it to make fixtures pass.
 - Re-run the focused queue-summary slices plus `pytest -q` after the fixture fix.
 
-## Current branch inventory
+## Historical branch inventory from that run
 
 ### Merge-ready after blocker fix / dependency order
 
@@ -146,7 +214,7 @@ Already merged into the integration branch:
 - `claude/qa-review`
 - `claude/case-workflow`
 
-## Parent/worktree hygiene
+## Parent/worktree hygiene recorded in earlier run
 
 - Parent repo dirty state from the Architecture Review Board report was converted into commit `72dd737` (`docs: refresh architecture review board report`).
 - The failed implementation merge was rolled back; `feat/orvo-brain-control-plane` does not contain the failing `codex/work-management` merge.
