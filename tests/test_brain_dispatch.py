@@ -94,6 +94,36 @@ def test_dispatch_owner_case_brief_sends_case_backed_text_with_separate_idempote
     assert "raw_dispatch_secret" not in text
 
 
+def test_dispatch_owner_case_brief_delivers_in_progress_cases_as_actionable():
+    """Owner briefs must use the same actionable status set as operator queues.
+
+    In-progress cases still require owner attention/projection until they are
+    terminal, so they must not be hidden by the delivery prefilter or by the
+    composed WhatsApp brief.
+    """
+    from app.brain.delivery import DeliveryResult
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+    delivery_client.send_text.return_value = DeliveryResult(success=True, message_id="wamid.case", error=None)
+
+    result = dispatch_owner_case_brief(
+        cases=[make_owner_case("work-1", status="in_progress")],
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+
+    assert result is not None
+    assert result.status == "sent"
+    phone, text = delivery_client.send_text.call_args.args
+    assert phone == "+5491112345678"
+    assert "Stock crítico" in text
+    assert "work-1" in text
+    assert "raw_dispatch_secret" not in text
+
+
 def test_dispatch_owner_case_brief_skips_without_actionable_cases():
     from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
 

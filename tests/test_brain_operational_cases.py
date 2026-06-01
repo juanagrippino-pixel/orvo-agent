@@ -5,6 +5,7 @@ TDD: define case lifecycle and persistence before wiring report execution.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime, timezone
 
@@ -13,6 +14,7 @@ import pytest
 from app.brain.models import DailyReport, Evidence, Insight, Metric
 from app.brain.operational_cases import (
     InMemoryOperationalCaseStore,
+    OperationalCase,
     OperationalCaseDetection,
     OperationalCaseEvidenceMetric,
     OperationalCaseEvidenceSnapshot,
@@ -266,6 +268,56 @@ def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():
         store.transition_case(opened.case_id, status="open", actor_type="operator", actor_ref="juan")
 
 
+def test_operational_case_model_enforces_dismissed_at_lifecycle_invariants():
+    opened = InMemoryOperationalCaseStore().upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    payload = opened.model_dump(mode="python")
+
+    with pytest.raises(ValueError, match="dismissed case requires dismissed_at"):
+        OperationalCase.model_validate({**payload, "status": "dismissed", "dismissed_at": None})
+
+    with pytest.raises(ValueError, match="only dismissed cases may have dismissed_at"):
+        OperationalCase.model_validate({**payload, "status": "open", "dismissed_at": utc_dt(9)})
+
+    with pytest.raises(ValueError, match="dismissed_at must be after opened_at"):
+        OperationalCase.model_validate({**payload, "status": "dismissed", "dismissed_at": utc_dt(7)})
+
+
+def test_sqlite_store_loads_legacy_dismissed_case_without_dismissed_at(conn):
+    store = SQLiteOperationalCaseStore(conn)
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    store.transition_case(
+        opened.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="juan",
+        transitioned_at=utc_dt(9),
+    )
+    dismissed = store.transition_case(
+        opened.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Legacy dismissal fixture",
+        transitioned_at=utc_dt(10),
+    )
+    legacy_payload = dismissed.model_dump(mode="json")
+    legacy_payload.pop("dismissed_at")
+    conn.execute(
+        """
+        UPDATE operational_cases
+        SET data = ?
+        WHERE case_id = ?
+        """,
+        (json.dumps(legacy_payload), dismissed.case_id),
+    )
+
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(dismissed.case_id)
+
+    assert reloaded is not None
+    assert reloaded.status == "dismissed"
+    assert reloaded.dismissed_at == utc_dt(10)
+
+
 def test_operational_case_requires_acknowledged_before_resolved():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
@@ -278,6 +330,85 @@ def test_operational_case_requires_acknowledged_before_resolved():
             actor_ref="juan",
             reason="Trying to skip acknowledgement",
         )
+
+
+@pytest.mark.parametrize("terminal_status", ["resolved", "dismissed"])
+@pytest.mark.parametrize("bad_reason", [None, "", "   "])
+def test_operator_terminal_transition_requires_non_empty_reason_without_mutation(terminal_status, bad_reason):
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    if terminal_status == "resolved":
+        store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+
+    before = store.get_case(opened.case_id)
+    assert before is not None
+
+    with pytest.raises(OperationalCaseStatusError, match="requires a non-empty reason"):
+        store.transition_case(
+            opened.case_id,
+            status=terminal_status,
+            actor_type="operator",
+            actor_ref="juan",
+            reason=bad_reason,
+            transitioned_at=utc_dt(10),
+        )
+
+    after = store.get_case(opened.case_id)
+    assert after == before
+
+
+def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reopen():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+
+    in_progress = store.transition_case(
+        opened.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Investigating supplier ETA",
+        transitioned_at=utc_dt(9),
+    )
+    assert in_progress.status == "in_progress"
+    assert in_progress.acknowledged_at == utc_dt(9)
+    assert in_progress.timeline[-1].metadata == {"from_status": "open", "to_status": "in_progress"}
+
+    dismissed = store.transition_case(
+        opened.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="False positive after physical stock count",
+        transitioned_at=utc_dt(10),
+    )
+    assert dismissed.status == "dismissed"
+    assert dismissed.resolved_at is None
+    assert dismissed.dismissed_at == utc_dt(10)
+    assert dismissed.timeline[-1].metadata == {"from_status": "in_progress", "to_status": "dismissed"}
+
+    with pytest.raises(OperationalCaseStatusError):
+        store.transition_case(
+            opened.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Cannot resolve a dismissed case manually",
+            transitioned_at=utc_dt(11),
+        )
+
+    reopened = store.upsert_detection(make_stockout_detection(run_id="run-2"), detected_at=utc_dt(12))
+    assert reopened.case_id == opened.case_id
+    assert reopened.status == "open"
+    assert reopened.acknowledged_at is None
+    assert reopened.dismissed_at is None
+    assert reopened.timeline[-1].event_type == "case_reopened"
 
 
 def test_sqlite_operational_case_store_persists_and_filters_by_status(conn):
@@ -537,13 +668,6 @@ _PRODUCTION_INSIGHT_CASE_MAPPING = [
         "unanswered_conversations/channel/whatsapp/support.conversations/daily",
     ),
     (
-        "canal-tiendanube",
-        "warning",
-        "Canal Tiendanube posiblemente sub-rendimiento",
-        "channel_mix_shift",
-        "channel_mix_shift/business/all_channels/commerce.revenue/daily",
-    ),
-    (
         "roas-bajo",
         "warning",
         "ROAS bajo: 1.4x (mínimo recomendado 3.0x)",
@@ -601,6 +725,32 @@ def test_detect_cases_locks_production_insight_titles_to_case_types(
     assert detections[0].case_type == expected_case_type
     assert detections[0].dedupe_key == f"artemea/{expected_dedupe_suffix}"
     assert detections[0].metadata["insight_title"] == title
+
+
+def test_detect_cases_skips_deferred_channel_mix_shift_until_case_family_metrics_exist():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        insights=[
+            Insight(
+                severity="warning",
+                title="Canal Tiendanube posiblemente sub-rendimiento",
+                explanation="El canal requiere métricas channel-scoped antes de promover casos.",
+                recommended_action="Monitorear.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    assert detections == []
 
 
 def test_detect_cases_skips_info_severity_even_when_title_matches_case_family():

@@ -1,21 +1,19 @@
 """Connector registry for Orvo Brain runtime/control-plane validation.
 
-This module is intentionally additive: it describes the connector adapters that
-already exist in ``app.brain.adapters`` without changing the current pipeline
-execution paths. Future runtime compilation can depend on these specs to check
-connector availability, capabilities, secret-reference requirements, and config
-shape before a run.
-
-TODO(phase-a-runtime): pipeline execution still contains connector-specific
-branching. This branch only hardens the registry/control-plane contract; a later
-slice should consume ``ConnectorSpec.executor`` from compiled runtime execution.
+This module describes the connector adapters that already exist in
+``app.brain.adapters`` and exposes allowlisted executor metadata so runtime
+orchestration can invoke daily-report factories through the registry rather than
+hardcoding every connector branch. Runtime compilation can depend on these specs
+to check connector availability, capabilities, secret-reference requirements,
+config shape, and adapter kwargs before a run.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from types import MappingProxyType
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from app.brain.semantics.metric_registry import (
     MetricRegistry,
@@ -23,6 +21,7 @@ from app.brain.semantics.metric_registry import (
     find_evidence_required_violations,
     find_evidence_source_violations,
     find_family_envelope_violations,
+    find_money_currency_violations,
     find_source_envelope_violations,
     find_value_kind_violations,
     validate_metrics,
@@ -100,8 +99,24 @@ class ConnectorValidationIssue:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectorFactoryParam:
+    """Declarative binding from connector/runtime context to adapter kwargs.
+
+    ``source`` is intentionally allowlisted so registry-driven execution cannot
+    smuggle arbitrary connector params into adapter calls. ``fallback`` is used
+    only for absent/empty optional values and must be non-secret static data.
+    """
+
+    argument: str
+    source: str
+    key: str | None = None
+    required: bool = True
+    fallback: Any = None
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectorExecutorMetadata:
-    """Minimal callable metadata for a future registry-driven runtime."""
+    """Callable metadata for registry-driven runtime execution."""
 
     adapter_module: str
     report_factory: str
@@ -111,11 +126,20 @@ class ConnectorExecutorMetadata:
         RUNTIME_MODE_SCHEDULED,
         RUNTIME_MODE_OPERATOR_TRIGGERED,
     )
+    factory_params: tuple[ConnectorFactoryParam, ...] = ()
 
     @property
     def factory_path(self) -> str:
         return f"{self.adapter_module}.{self.report_factory}"
 
+    def load_factory(self):
+        """Import and return the configured report factory callable."""
+
+        module = import_module(self.adapter_module)
+        factory = getattr(module, self.report_factory)
+        if not callable(factory):
+            raise TypeError(f"Connector executor factory is not callable: {self.factory_path}")
+        return factory
 
 @dataclass(frozen=True, slots=True)
 class ConnectorHealthMetadata:
@@ -193,6 +217,96 @@ class ConnectorSpec:
         """Fully qualified path to the adapter report-builder callable."""
 
         return f"{self.adapter_module}.{self.report_factory}"
+
+    def load_report_factory(self):
+        """Import the configured report-builder callable from executor metadata."""
+
+        assert self.executor is not None  # set in __post_init__
+        return self.executor.load_factory()
+
+    def _resolve_factory_param(
+        self,
+        binding: ConnectorFactoryParam,
+        *,
+        connector: object,
+        business: object,
+        report_date: object,
+        service_bindings: Mapping[str, object],
+    ) -> tuple[bool, object]:
+        params = getattr(connector, "params", {}) or {}
+        if not isinstance(params, Mapping):
+            raise TypeError(f"{self.connector_type} connector params must be a mapping")
+
+        if binding.source == "business_attr":
+            return True, getattr(business, binding.key or binding.argument)
+        if binding.source == "report_date":
+            return True, report_date
+        if binding.source == "connector_param":
+            value = params.get(binding.key or binding.argument)
+            if value in (None, "") and binding.fallback is not None:
+                value = binding.fallback
+            return value not in (None, ""), value
+        if binding.source == "connector_param_bool":
+            return True, bool(params.get(binding.key or binding.argument, binding.fallback))
+        if binding.source == "connector_label":
+            return True, getattr(connector, "label")
+        if binding.source == "connector_param_or_label":
+            value = params.get(binding.key or binding.argument)
+            if value in (None, ""):
+                value = getattr(connector, "label")
+            return True, value
+        if binding.source == "service_binding":
+            key = binding.key or binding.argument
+            if key in service_bindings:
+                return True, service_bindings[key]
+            return False, None
+        if binding.source == "insight_thresholds":
+            return True, getattr(business, "insight_thresholds")
+        if binding.source == "literal":
+            return True, binding.fallback
+        raise ValueError(f"Unsupported connector factory param source: {binding.source}")
+
+    def build_report_factory_kwargs(
+        self,
+        *,
+        connector: object,
+        business: object,
+        report_date: object,
+        service_bindings: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Build adapter kwargs from allowlisted executor metadata.
+
+        Required connector params are reported by key name only; values are never
+        included in errors so inline legacy secrets cannot leak through pipeline
+        failures.
+        """
+
+        assert self.executor is not None  # set in __post_init__
+        kwargs: dict[str, object] = {}
+        missing_required: list[str] = []
+        bindings = service_bindings or {}
+        for binding in self.executor.factory_params:
+            present, value = self._resolve_factory_param(
+                binding,
+                connector=connector,
+                business=business,
+                report_date=report_date,
+                service_bindings=bindings,
+            )
+            if not present:
+                if binding.required:
+                    missing_required.append(binding.key or binding.argument)
+                continue
+            kwargs[binding.argument] = value
+
+        if missing_required:
+            missing = (
+                missing_required[0]
+                if len(missing_required) == 1
+                else f"{', '.join(missing_required[:-1])} and {missing_required[-1]}"
+            )
+            raise ValueError(f"{self.connector_type} connector params must include {missing}")
+        return kwargs
 
     def _validate_key_presence(
         self,
@@ -327,23 +441,31 @@ class ConnectorSpec:
         *,
         registry: MetricRegistry | None = None,
     ) -> list[MetricValidationIssue]:
-        """Compose all six envelope diagnostics for emitted metric objects.
+        """Compose all seven envelope diagnostics for emitted metric objects.
 
         Symmetric extension of :meth:`validate_emitted_metrics` that operates
-        on metric-shaped objects (each exposing ``key``, ``value``, and
-        ``evidence``). The fixed concatenation order ``unknown_metric`` ->
+        on metric-shaped objects (each exposing ``key``, ``value``, ``unit``,
+        and ``evidence``). The fixed concatenation order ``unknown_metric`` ->
         ``disallowed_source`` -> ``undeclared_family`` -> ``evidence_missing``
-        -> ``evidence_source_mismatch`` -> ``value_kind_mismatch`` lets the
-        runtime treat object-level validation as a superset of key-level
-        validation: when every required metric carries non-empty evidence with
-        in-envelope sources and every value type matches the canonical unit
-        kind, the result equals ``validate_emitted_metrics`` over the same
-        keys. ``evidence_missing`` slots between ``undeclared_family`` and
-        ``evidence_source_mismatch`` so structural ``no evidence at all``
-        diagnostics surface before content diagnostics about wrong-source
-        evidence; this mirrors the slot reserved by
-        :func:`validate_report_metric_objects` and
-        :func:`validate_case_metric_objects`.
+        -> ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
+        ``money_currency_missing`` lets the runtime treat object-level
+        validation as a superset of key-level validation: when every required
+        metric carries non-empty evidence with in-envelope sources, every
+        value type matches the canonical unit kind, and every money metric
+        carries a currency string, the result equals
+        ``validate_emitted_metrics`` over the same keys. ``evidence_missing``
+        slots between ``undeclared_family`` and ``evidence_source_mismatch``
+        so structural ``no evidence at all`` diagnostics surface before
+        content diagnostics about wrong-source evidence; this mirrors the
+        slot reserved by :func:`validate_report_metric_objects` and
+        :func:`validate_case_metric_objects`. ``money_currency_missing``
+        lands last so structural and value-type diagnostics surface before
+        the rendering-metadata diagnostic that money metrics must carry a
+        currency string for the runtime/control-plane to interpret values
+        unambiguously, mirroring the slot reserved by
+        :func:`validate_report_metric_objects`,
+        :func:`validate_case_metric_objects`, and
+        :func:`validate_surface_metric_objects`.
         """
 
         materialized = list(metrics)
@@ -369,6 +491,9 @@ class ConnectorSpec:
         value_kind_issues = find_value_kind_violations(
             materialized, registry=registry
         )
+        money_currency_issues = find_money_currency_violations(
+            materialized, registry=registry
+        )
         return [
             *unknown_issues,
             *source_issues,
@@ -376,6 +501,7 @@ class ConnectorSpec:
             *evidence_missing_issues,
             *evidence_issues,
             *value_kind_issues,
+            *money_currency_issues,
         ]
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:
@@ -472,6 +598,26 @@ def _access_token_requirement(
     )
 
 
+def _daily_executor(
+    *,
+    adapter_module: str,
+    report_factory: str,
+    factory_params: tuple[ConnectorFactoryParam, ...],
+) -> ConnectorExecutorMetadata:
+    return ConnectorExecutorMetadata(
+        adapter_module=adapter_module,
+        report_factory=report_factory,
+        factory_params=factory_params,
+    )
+
+
+def _common_daily_params() -> tuple[ConnectorFactoryParam, ConnectorFactoryParam]:
+    return (
+        ConnectorFactoryParam("business_name", "business_attr", key="business_name"),
+        ConnectorFactoryParam("report_date", "report_date"),
+    )
+
+
 DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
     ConnectorSpec(
         connector_type=CONNECTOR_TYPE_CSV,
@@ -488,6 +634,20 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         ),
         required_config_fields=("csv_path",),
         optional_config_fields=("source_label",),
+        executor=_daily_executor(
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="build_daily_report_from_csv_file",
+            factory_params=(
+                *_common_daily_params(),
+                ConnectorFactoryParam("csv_path", "connector_param", key="csv_path"),
+                ConnectorFactoryParam(
+                    "source_label",
+                    "connector_param_or_label",
+                    key="source_label",
+                ),
+                ConnectorFactoryParam("insight_thresholds", "insight_thresholds"),
+            ),
+        ),
         rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=10),
     ),
     ConnectorSpec(
@@ -504,6 +664,23 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             "runtime.data_quality",
         ),
         required_config_fields=("spreadsheet_id", "range_name"),
+        executor=_daily_executor(
+            adapter_module="app.brain.adapters.google_sheets",
+            report_factory="build_daily_report_from_sheet",
+            factory_params=(
+                *_common_daily_params(),
+                ConnectorFactoryParam("spreadsheet_id", "connector_param", key="spreadsheet_id"),
+                ConnectorFactoryParam("range_name", "connector_param", key="range_name"),
+                ConnectorFactoryParam("source_label", "connector_label"),
+                ConnectorFactoryParam(
+                    "service",
+                    "service_binding",
+                    key="sheets_service",
+                    required=False,
+                ),
+                ConnectorFactoryParam("insight_thresholds", "insight_thresholds"),
+            ),
+        ),
         scopes=ConnectorScopeMetadata(required=("spreadsheets.readonly",)),
     ),
     ConnectorSpec(
@@ -529,6 +706,33 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             ),
         ),
         legacy_secret_config_fields=("access_token",),
+        executor=_daily_executor(
+            adapter_module="app.brain.adapters.mercadolibre",
+            report_factory="build_daily_report_from_mercadolibre",
+            factory_params=(
+                *_common_daily_params(),
+                ConnectorFactoryParam("seller_id", "connector_param", key="seller_id"),
+                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+                ConnectorFactoryParam(
+                    "site_id",
+                    "connector_param",
+                    key="site_id",
+                    required=False,
+                    fallback="MLA",
+                ),
+                ConnectorFactoryParam(
+                    "source_label",
+                    "connector_param_or_label",
+                    key="source_label",
+                ),
+                ConnectorFactoryParam(
+                    "http_client",
+                    "service_binding",
+                    key="mercadolibre_http_client",
+                    required=False,
+                ),
+            ),
+        ),
         scopes=ConnectorScopeMetadata(required=("orders.read", "items.read")),
         rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=30, requests_per_minute=60),
     ),
@@ -555,6 +759,26 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             ),
         ),
         legacy_secret_config_fields=("access_token",),
+        executor=_daily_executor(
+            adapter_module="app.brain.adapters.meta_ads",
+            report_factory="build_daily_report_from_meta_ads",
+            factory_params=(
+                *_common_daily_params(),
+                ConnectorFactoryParam("ad_account_id", "connector_param", key="ad_account_id"),
+                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+                ConnectorFactoryParam(
+                    "source_label",
+                    "connector_param_or_label",
+                    key="source_label",
+                ),
+                ConnectorFactoryParam(
+                    "http_client",
+                    "service_binding",
+                    key="meta_ads_http_client",
+                    required=False,
+                ),
+            ),
+        ),
         scopes=ConnectorScopeMetadata(required=("ads_read", "read_insights")),
         rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=30, requests_per_minute=200),
     ),
@@ -598,6 +822,30 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             ),
         ),
         legacy_secret_config_fields=("access_token",),
+        executor=_daily_executor(
+            adapter_module="app.brain.adapters.tiendanube",
+            report_factory="build_daily_report_from_tiendanube",
+            factory_params=(
+                ConnectorFactoryParam("business_name", "business_attr", key="business_name"),
+                ConnectorFactoryParam("store_id", "connector_param", key="store_id"),
+                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+                ConnectorFactoryParam("report_date", "report_date"),
+                ConnectorFactoryParam(
+                    "http_client",
+                    "service_binding",
+                    key="tiendanube_http_client",
+                    required=False,
+                ),
+                ConnectorFactoryParam(
+                    "include_stock",
+                    "connector_param_bool",
+                    key="include_stock",
+                    required=False,
+                    fallback=False,
+                ),
+                ConnectorFactoryParam("source_label", "connector_label"),
+            ),
+        ),
         scopes=ConnectorScopeMetadata(required=("orders.read", "products.read")),
         rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=30, requests_per_minute=120),
     ),

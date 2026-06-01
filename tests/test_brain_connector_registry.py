@@ -1,3 +1,4 @@
+from datetime import date
 import importlib
 from typing import Any
 
@@ -43,6 +44,7 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
         assert callable(factory)
         assert spec.factory_path == f"{spec.adapter_module}.{spec.report_factory}"
         assert spec.executor.factory_path == spec.factory_path
+        assert spec.load_report_factory() is factory
         expected_modes = (
             ("preview", "operator_triggered")
             if spec.connector_type == "sample"
@@ -53,6 +55,88 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
         assert spec.rate_limit.default_timeout_seconds > 0
         assert spec.lifecycle.status == "active"
         assert isinstance(spec.scopes.required, tuple)
+
+
+def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
+    from app.brain.config import BusinessConfig, ConnectorConfig
+    from app.brain.connector_registry import get_connector_spec
+
+    http_client = object()
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[],
+    )
+    connector = ConnectorConfig(
+        connector_id="tn-main",
+        connector_type="tiendanube",
+        label="TN Artemea",
+        params={"store_id": "123", "access_token": "tn_test_token", "include_stock": True},
+    )
+
+    kwargs = get_connector_spec("tiendanube").build_report_factory_kwargs(
+        connector=connector,
+        business=business,
+        report_date=date(2026, 5, 30),
+        service_bindings={"tiendanube_http_client": http_client},
+    )
+
+    assert kwargs == {
+        "business_name": "Artemea",
+        "store_id": "123",
+        "access_token": "tn_test_token",
+        "report_date": date(2026, 5, 30),
+        "http_client": http_client,
+        "include_stock": True,
+        "source_label": "TN Artemea",
+    }
+
+
+def test_executor_metadata_reports_missing_execution_params_without_secret_values():
+    from app.brain.config import BusinessConfig, ConnectorConfig
+    from app.brain.connector_registry import get_connector_spec
+
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[],
+    )
+    connector = ConnectorConfig(
+        connector_id="tn-main",
+        connector_type="tiendanube",
+        label="TN Artemea",
+        params={"store_id": "123"},
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        get_connector_spec("tiendanube").build_report_factory_kwargs(
+            connector=connector,
+            business=business,
+            report_date=date(2026, 5, 30),
+        )
+
+    message = str(exc_info.value)
+    assert message == "tiendanube connector params must include access_token"
+    assert "123" not in message
+    assert "tn_test_token" not in message
+
+
+def test_executor_metadata_rejects_non_callable_factory_path():
+    from app.brain.connector_registry import ConnectorExecutorMetadata
+
+    executor = ConnectorExecutorMetadata(
+        adapter_module="app.brain.connector_registry",
+        report_factory="CONNECTOR_TYPE_CSV",
+    )
+
+    with pytest.raises(TypeError, match="factory is not callable"):
+        executor.load_factory()
 
 
 def test_registry_reports_helpful_error_for_unknown_connector_type():

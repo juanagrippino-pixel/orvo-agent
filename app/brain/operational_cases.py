@@ -7,6 +7,7 @@ surfaces are projections of this state, not owners of lifecycle.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -19,15 +20,21 @@ from app.brain.models import DailyReport, Insight, Metric
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
 
-OperationalCaseStatus = Literal["open", "acknowledged", "resolved"]
+OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved", "dismissed"]
+ACTIONABLE_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset(
+    {"open", "acknowledged", "in_progress"}
+)
+TERMINAL_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"resolved", "dismissed"})
 OperationalCaseType = Literal[
     "sales_drop",
     "stockout_risk",
     "spend_without_orders",
     "data_stale",
+    "fulfillment_backlog",
     "unanswered_conversations",
     "channel_mix_shift",
 ]
+DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
@@ -35,15 +42,18 @@ TimelineEventType = Literal[
     "case_updated",
     "case_reopened",
     "status_changed",
+    "case_assigned",
     "evidence_attached",
     "operator_comment",
 ]
 ActorType = Literal["system", "operator"]
 
 _CASE_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "open": {"acknowledged"},
-    "acknowledged": {"resolved"},
+    "open": {"acknowledged", "in_progress", "dismissed"},
+    "acknowledged": {"in_progress", "resolved", "dismissed"},
+    "in_progress": {"resolved", "dismissed"},
     "resolved": set(),
+    "dismissed": set(),
 }
 
 
@@ -69,6 +79,29 @@ def _unique(values: list[str]) -> list[str]:
             seen.add(value)
             result.append(value)
     return result
+
+
+def _backfill_legacy_dismissed_at(payload: dict[str, Any]) -> dict[str, Any]:
+    """Backfill dismissed_at for dismissed cases stored before the field existed."""
+    if payload.get("status") != "dismissed" or payload.get("dismissed_at") is not None:
+        return payload
+    for event in reversed(payload.get("timeline") or []):
+        if not isinstance(event, dict):
+            continue
+        raw_metadata = event.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        if event.get("event_type") == "status_changed" and metadata.get("to_status") == "dismissed":
+            created_at = event.get("created_at")
+            if created_at is not None:
+                return {**payload, "dismissed_at": created_at}
+    updated_at = payload.get("updated_at")
+    if updated_at is not None:
+        return {**payload, "dismissed_at": updated_at}
+    return payload
+
+
+def _load_operational_case_json(value: str) -> "OperationalCase":
+    return OperationalCase.model_validate(_backfill_legacy_dismissed_at(json.loads(value)))
 
 
 def _safe_metadata(value: Any) -> dict[str, Any]:
@@ -250,7 +283,10 @@ class OperationalCase(BaseModel):
     opened_at: datetime = Field(default_factory=_now_utc)
     updated_at: datetime = Field(default_factory=_now_utc)
     acknowledged_at: datetime | None = None
+    assigned_at: datetime | None = None
+    assignee_ref: str | None = None
     resolved_at: datetime | None = None
+    dismissed_at: datetime | None = None
     latest_run_id: str | None = None
     source_run_ids: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
@@ -264,10 +300,17 @@ class OperationalCase(BaseModel):
     def redact_title(cls, value: str) -> str:
         return redact_text(value) or "[REDACTED]"
 
-    @field_validator("opened_at", "updated_at", "acknowledged_at", "resolved_at")
+    @field_validator("opened_at", "updated_at", "acknowledged_at", "assigned_at", "resolved_at", "dismissed_at")
     @classmethod
     def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
         return _as_utc(value) if value is not None else None
+
+    @field_validator("assignee_ref", mode="before")
+    @classmethod
+    def redact_assignee_ref(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        return redact_text(str(value)) or "[REDACTED]"
 
     @field_validator("metadata", "entity_scope", mode="before")
     @classmethod
@@ -285,10 +328,22 @@ class OperationalCase(BaseModel):
             raise ValueError("updated_at must be after opened_at")
         if self.acknowledged_at is not None and self.acknowledged_at < self.opened_at:
             raise ValueError("acknowledged_at must be after opened_at")
+        if self.assigned_at is not None and self.assigned_at < self.opened_at:
+            raise ValueError("assigned_at must be after opened_at")
+        if self.assigned_at is not None and self.assignee_ref is None:
+            raise ValueError("assigned case requires assignee_ref")
+        if self.assignee_ref is not None and self.assigned_at is None:
+            raise ValueError("assigned case requires assigned_at")
         if self.resolved_at is not None and self.resolved_at < self.opened_at:
             raise ValueError("resolved_at must be after opened_at")
+        if self.dismissed_at is not None and self.dismissed_at < self.opened_at:
+            raise ValueError("dismissed_at must be after opened_at")
         if self.status == "resolved" and self.resolved_at is None:
             raise ValueError("resolved case requires resolved_at")
+        if self.status == "dismissed" and self.dismissed_at is None:
+            raise ValueError("dismissed case requires dismissed_at")
+        if self.status != "dismissed" and self.dismissed_at is not None:
+            raise ValueError("only dismissed cases may have dismissed_at")
         return self
 
 
@@ -416,6 +471,16 @@ class OperationalCaseStore(Protocol):
         commented_at: datetime | None = None,
     ) -> OperationalCase: ...
 
+    def assign_case(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        assignee_ref: str,
+        assigned_at: datetime | None = None,
+    ) -> OperationalCase: ...
+
     def get_case(self, case_id: str) -> OperationalCase | None: ...
     def find_by_dedupe_key(self, business_id: str, dedupe_key: str) -> OperationalCase | None: ...
     def list_cases(
@@ -484,7 +549,7 @@ class _OperationalCaseMutations:
                 ],
             )
         else:
-            is_recurrence = existing.status == "resolved"
+            is_recurrence = existing.status in {"resolved", "dismissed"}
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
             merged_snapshots = _unique_snapshots([*existing.evidence_snapshots, *detection_snapshots])
@@ -522,6 +587,7 @@ class _OperationalCaseMutations:
             }
             if is_recurrence:
                 update["resolved_at"] = None
+                update["dismissed_at"] = None
                 update["acknowledged_at"] = None
             case = existing.model_copy(update=update, deep=True)
             case = OperationalCase.model_validate(case.model_dump())
@@ -543,6 +609,9 @@ class _OperationalCaseMutations:
             raise OperationalCaseStatusError(f"case {case_id} already has status {status}")
         if status not in _CASE_STATUS_TRANSITIONS[record.status]:
             raise OperationalCaseStatusError(f"case {case_id} cannot transition from {record.status} to {status}")
+        normalized_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
+        if actor_type == "operator" and status in TERMINAL_OPERATIONAL_CASE_STATUSES and normalized_reason is None:
+            raise OperationalCaseStatusError(f"operator transition to {status} requires a non-empty reason")
         transitioned_at = _as_utc(transitioned_at) if transitioned_at is not None else _now_utc()
         update: dict[str, Any] = {
             "status": status,
@@ -555,15 +624,17 @@ class _OperationalCaseMutations:
                     actor_ref=actor_ref,
                     case_id=record.case_id,
                     created_at=transitioned_at,
-                    summary=reason or f"Status changed from {record.status} to {status}.",
+                    summary=normalized_reason or f"Status changed from {record.status} to {status}.",
                     metadata={"from_status": record.status, "to_status": status},
                 ),
             ],
         }
-        if status == "acknowledged":
+        if status in {"acknowledged", "in_progress"}:
             update["acknowledged_at"] = transitioned_at
         if status == "resolved":
             update["resolved_at"] = transitioned_at
+        if status == "dismissed":
+            update["dismissed_at"] = transitioned_at
         updated = record.model_copy(update=update, deep=True)
         updated = OperationalCase.model_validate(updated.model_dump())
         self._persist(updated)
@@ -594,6 +665,46 @@ class _OperationalCaseMutations:
                         created_at=commented_at,
                         summary=comment,
                         metadata=metadata or {},
+                    ),
+                ],
+            },
+            deep=True,
+        )
+        updated = OperationalCase.model_validate(updated.model_dump())
+        self._persist(updated)
+        return updated.model_copy(deep=True)
+
+    def assign_case(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        assignee_ref: str,
+        assigned_at: datetime | None = None,
+    ) -> OperationalCase:
+        record = self._load_for_update(case_id)
+        if record.status in {"resolved", "dismissed"}:
+            raise OperationalCaseStatusError(f"case {case_id} cannot assign owner while {record.status}")
+        normalized_assignee_ref = assignee_ref.strip()
+        if not normalized_assignee_ref:
+            raise ValueError("assignee_ref must be non-empty")
+        assigned_at = _as_utc(assigned_at) if assigned_at is not None else _now_utc()
+        updated = record.model_copy(
+            update={
+                "assignee_ref": normalized_assignee_ref,
+                "assigned_at": assigned_at,
+                "updated_at": assigned_at,
+                "timeline": [
+                    *record.timeline,
+                    OperationalCaseTimelineEvent(
+                        event_type="case_assigned",
+                        actor_type=actor_type,
+                        actor_ref=actor_ref,
+                        case_id=record.case_id,
+                        created_at=assigned_at,
+                        summary=f"Assigned case to {normalized_assignee_ref}.",
+                        metadata={"assignee_ref": normalized_assignee_ref},
                     ),
                 ],
             },
@@ -669,7 +780,7 @@ class SQLiteOperationalCaseStore(_OperationalCaseMutations):
         row = cursor.fetchone()
         if row is None:
             return None
-        return OperationalCase.model_validate_json(row[0])
+        return _load_operational_case_json(row[0])
 
     def find_by_dedupe_key(self, business_id: str, dedupe_key: str) -> OperationalCase | None:
         cursor = self._conn.execute(
@@ -679,7 +790,7 @@ class SQLiteOperationalCaseStore(_OperationalCaseMutations):
         row = cursor.fetchone()
         if row is None:
             return None
-        return OperationalCase.model_validate_json(row[0])
+        return _load_operational_case_json(row[0])
 
     def list_cases(
         self,
@@ -704,7 +815,7 @@ class SQLiteOperationalCaseStore(_OperationalCaseMutations):
             query += " LIMIT ?"
             params.append(limit)
         cursor = self._conn.execute(query, tuple(params))
-        return [OperationalCase.model_validate_json(row[0]) for row in cursor.fetchall()]
+        return [_load_operational_case_json(row[0]) for row in cursor.fetchall()]
 
 
 def _priority_for_severity(severity: OperationalCaseSeverity) -> int:
@@ -715,17 +826,20 @@ def _case_type_for_insight(insight: Insight) -> OperationalCaseType | None:
     title = insight.title.lower()
     if insight.severity == "info":
         return None
+    candidate: OperationalCaseType | None = None
     if "stock" in title:
-        return "stockout_risk"
-    if "sin ventas" in title or "roas bajo" in title:
-        return "spend_without_orders"
-    if "conversaciones" in title:
-        return "unanswered_conversations"
-    if "tiendanube" in title or "canal" in title:
-        return "channel_mix_shift"
-    if "ventas" in title:
-        return "sales_drop"
-    return None
+        candidate = "stockout_risk"
+    elif "sin ventas" in title or "roas bajo" in title:
+        candidate = "spend_without_orders"
+    elif "conversaciones" in title:
+        candidate = "unanswered_conversations"
+    elif "tiendanube" in title or "canal" in title:
+        candidate = "channel_mix_shift"
+    elif "ventas" in title:
+        candidate = "sales_drop"
+    if candidate not in DETECTABLE_OPERATIONAL_CASE_TYPES:
+        return None
+    return candidate
 
 
 def _dedupe_key(business_id: str, case_type: OperationalCaseType) -> str:
@@ -734,6 +848,7 @@ def _dedupe_key(business_id: str, case_type: OperationalCaseType) -> str:
         "stockout_risk": "stockout_risk/business/monitored/commerce.inventory/daily",
         "spend_without_orders": "spend_without_orders/channel/meta_ads/ads.spend/daily",
         "data_stale": "data_stale/connector/unknown/runtime.freshness/daily",
+        "fulfillment_backlog": "fulfillment_backlog/channel/tiendanube/commerce.fulfillment/daily",
         "unanswered_conversations": "unanswered_conversations/channel/whatsapp/support.conversations/daily",
         "channel_mix_shift": "channel_mix_shift/business/all_channels/commerce.revenue/daily",
     }
@@ -746,6 +861,7 @@ def _entity_scope(case_type: OperationalCaseType) -> dict[str, str]:
         "stockout_risk": {"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
         "spend_without_orders": {"kind": "channel", "id": "meta_ads", "label": "Meta Ads"},
         "data_stale": {"kind": "connector", "id": "unknown", "label": "Unknown connector"},
+        "fulfillment_backlog": {"kind": "channel", "id": "tiendanube", "label": "Tiendanube"},
         "unanswered_conversations": {"kind": "channel", "id": "whatsapp", "label": "WhatsApp"},
         "channel_mix_shift": {"kind": "business", "id": "all_channels", "label": "Todos los canales"},
     }[case_type]

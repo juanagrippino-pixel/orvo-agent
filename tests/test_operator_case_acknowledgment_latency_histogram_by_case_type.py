@@ -196,6 +196,7 @@ def test_acknowledgment_latency_histogram_by_case_type_includes_resolved_cases()
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=opened_at + timedelta(hours=6),
     )
 

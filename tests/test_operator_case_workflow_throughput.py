@@ -77,6 +77,7 @@ def test_summarize_case_workflow_throughput_aggregates_latencies_from_lifecycle_
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(12),
     )
     # Case B: opened 08:00, acknowledged 09:00 only.
@@ -157,6 +158,7 @@ def test_summarize_case_workflow_throughput_is_scoped_per_business():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=_utc(22),
     )
 

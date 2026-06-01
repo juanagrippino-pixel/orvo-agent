@@ -147,6 +147,27 @@ def test_case_family_metric_mappings_only_reference_registered_case_allowed_metr
             assert definition.case_allowed, f"{case_family} references non-case metric {metric_key}"
 
 
+def test_case_family_catalogs_stay_aligned_with_operational_cases_and_actions():
+    from typing import get_args
+
+    from app.brain.action_catalog import workflow_action_registry
+    from app.brain.operational_cases import OperationalCaseType
+    from app.brain.semantics.metric_registry import CASE_FAMILY_METRICS
+
+    implemented_case_types = set(get_args(OperationalCaseType))
+    registered_case_families = set(CASE_FAMILY_METRICS)
+
+    assert registered_case_families <= implemented_case_types
+
+    dangling_action_families = {
+        case_family
+        for action in workflow_action_registry().values()
+        for case_family in action.case_families
+        if case_family not in registered_case_families
+    }
+    assert dangling_action_families == set()
+
+
 def test_connector_emitted_metric_families_are_registered_or_explicitly_compatible():
     from app.brain.connector_registry import list_connector_specs
     from app.brain.semantics.metric_registry import CONNECTOR_FAMILY_COMPATIBILITY, default_metric_registry
