@@ -220,6 +220,31 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.connector_outcomes[0].connector_id == "sheet"
     assert record.connector_outcomes[0].connector_type == "google_sheets"
     assert record.connector_outcomes[0].status == "succeeded"
+    assert record.connector_outcomes[0].metadata == {
+        "label": "Sheet Artemea",
+        "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "capabilities": ["daily_report", "sheet_import"],
+        "emitted_metric_families": [
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ],
+        "required_scopes": ["spreadsheets.readonly"],
+        "metric_certification": {
+            "status": "warning",
+            "issue_count": 1,
+            "issues": [
+                {
+                    "code": "undeclared_family",
+                    "key": "unanswered_conversations",
+                    "index": 4,
+                }
+            ],
+        },
+    }
+    assert "abc123" not in json.dumps(record.connector_outcomes[0].metadata)
     assert record.dispatch_outcomes[0].status == "sent"
     assert record.dispatch_outcomes[0].message_id == "wamid.ledger"
     assert record.artifacts[0].artifact_type == "daily_report"
@@ -270,6 +295,20 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
     assert failed_connector.finished_at is not None
     assert failed_connector.error_summary is not None
     assert "raw_failure_secret" not in failed_connector.error_summary
+    assert failed_connector.metadata == {
+        "failure_stage": "pre_dispatch",
+        "label": "Sheet Artemea",
+        "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "capabilities": ["daily_report", "sheet_import"],
+        "emitted_metric_families": [
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ],
+        "required_scopes": ["spreadsheets.readonly"],
+    }
     assert run.artifacts == []
     assert run.dispatch_outcomes == []
     assert run.summary_metadata["schedule_id"] == "artemea-daily-report"

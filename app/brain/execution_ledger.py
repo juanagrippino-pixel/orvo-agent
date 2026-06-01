@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Sequence
 
 from app.brain.config import BusinessConfig
+from app.brain.connector_registry import (
+    UnknownConnectorError,
+    default_connector_registry,
+    validate_emitted_metric_objects_for_connector,
+)
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
@@ -80,14 +85,57 @@ def _connector_by_type(business: BusinessConfig, connector_types: Sequence[str])
             yield connector
 
 
-def _metric_count_for_connector(pipeline: PipelineResult, connector_type: str, connector_count: int) -> int:
+def _metrics_for_connector(
+    pipeline_result: PipelineResult,
+    connector_type: str,
+    connector_count: int,
+) -> list[Any]:
     if connector_count == 1:
-        return len(pipeline.report.metrics)
-    return sum(
-        1
-        for metric in pipeline.report.metrics
+        return list(pipeline_result.report.metrics)
+    return [
+        metric
+        for metric in pipeline_result.report.metrics
         if any(evidence.source == connector_type for evidence in metric.evidence)
+    ]
+
+
+def _connector_contract_metadata(
+    connector_type: str,
+    *,
+    connector_label: str | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    if connector_label:
+        metadata["label"] = connector_label
+    try:
+        spec = default_connector_registry().get(connector_type)
+    except UnknownConnectorError:
+        return metadata
+    metadata.update(
+        {
+            "executor_factory_path": spec.factory_path,
+            "capabilities": list(spec.capabilities),
+            "emitted_metric_families": list(spec.emitted_metric_families),
+            "required_scopes": list(spec.scopes.required),
+        }
     )
+    return metadata
+
+
+def _metric_certification_metadata(connector_type: str, metrics: Sequence[Any]) -> dict[str, Any]:
+    issues = validate_emitted_metric_objects_for_connector(connector_type, metrics)
+    return {
+        "status": "passed" if not issues else "warning",
+        "issue_count": len(issues),
+        "issues": [
+            {
+                "code": issue.code,
+                "key": issue.key,
+                "index": issue.index,
+            }
+            for issue in issues
+        ],
+    }
 
 
 def _owner_brief_cases(case_store: OperationalCaseStore, business_id: str) -> list[OperationalCase]:
@@ -122,9 +170,10 @@ def _failed_connector_outcome(
     error_summary: str,
     failed_at: datetime,
 ) -> ConnectorRunOutcome:
-    metadata = {"failure_stage": "pre_dispatch"}
-    if connector_label is not None:
-        metadata["label"] = connector_label
+    metadata = {
+        "failure_stage": "pre_dispatch",
+        **_connector_contract_metadata(connector_type, connector_label=connector_label),
+    }
     return ConnectorRunOutcome(
         connector_id=connector_id,
         connector_type=connector_type,
@@ -223,6 +272,15 @@ def record_pipeline_success(
     connectors = list(_connector_by_type(business, connector_types))
     connector_count = max(len(connectors), 1)
     for connector in connectors:
+        connector_metrics = _metrics_for_connector(pipeline, connector.connector_type, connector_count)
+        connector_metadata = _connector_contract_metadata(
+            connector.connector_type,
+            connector_label=connector.label,
+        )
+        connector_metadata["metric_certification"] = _metric_certification_metadata(
+            connector.connector_type,
+            connector_metrics,
+        )
         run_ledger.append_connector_outcome(
             run_id,
             ConnectorRunOutcome(
@@ -231,9 +289,9 @@ def record_pipeline_success(
                 status="succeeded",
                 started_at=finished_at,
                 finished_at=finished_at,
-                metrics_count=_metric_count_for_connector(pipeline, connector.connector_type, connector_count),
+                metrics_count=len(connector_metrics),
                 evidence_refs=[f"evidence://{connector.connector_id}/{pipeline.report.report_date.isoformat()}"],
-                metadata={"label": connector.label},
+                metadata=connector_metadata,
             ),
         )
 
