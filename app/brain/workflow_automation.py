@@ -142,6 +142,27 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
     return actual == condition.value
 
 
+def _is_non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _missing_required_action_params(
+    definition: WorkflowActionDefinition,
+    params: dict[str, Any],
+) -> list[str]:
+    """Return catalog-required workflow action fields missing from params."""
+
+    missing: list[str] = []
+    if definition.requires_reason and not _is_non_empty_string(params.get("reason")):
+        missing.append("reason")
+    if definition.requires_comment and not _is_non_empty_string(params.get("comment")):
+        missing.append("comment")
+    for field_name in definition.input_fields:
+        if not _is_non_empty_string(params.get(field_name)):
+            missing.append(field_name)
+    return missing
+
+
 def _condition_projection(case: OperationalCase, condition: CaseWorkflowCondition) -> dict[str, Any]:
     actual = _condition_actual(case, condition.field)
     return redact_secrets(
@@ -175,6 +196,12 @@ def _validate_rule(rule: WorkflowRule, case: OperationalCase) -> None:
             raise WorkflowAutomationError(
                 "action_not_allowed_for_case_type",
                 f"workflow action_key {action.action_key} is not registered for case_type {case.case_type}",
+            )
+        missing_params = _missing_required_action_params(definition, action.params)
+        if missing_params:
+            raise WorkflowAutomationError(
+                "missing_workflow_action_params",
+                f"workflow action_key {action.action_key} missing required params: {', '.join(missing_params)}",
             )
 
 

@@ -160,7 +160,11 @@ def test_simulate_case_workflow_blocks_external_action_behind_approval_gate_and_
         actions=[
             WorkflowAction(
                 action_key="request_external_action",
-                params={"target": "supplier", "Authorization": "Basic raw_external_secret"},
+                params={
+                    "target": "supplier",
+                    "reason": "Ask supplier for emergency restock",
+                    "Authorization": "Basic raw_external_secret",
+                },
             )
         ],
     )
@@ -175,6 +179,35 @@ def test_simulate_case_workflow_blocks_external_action_behind_approval_gate_and_
     assert planned_action["side_effect"] == "external"
     assert "raw_external_secret" not in str(result)
     assert planned_action["params"]["Authorization"] == "[REDACTED]"
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_missing"),
+    [
+        (WorkflowAction(action_key="resolve_case", params={}), "reason"),
+        (WorkflowAction(action_key="dismiss_case", params={"reason": "   "}), "reason"),
+        (WorkflowAction(action_key="request_external_action", params={"Authorization": "Basic raw_missing_reason_secret"}), "reason"),
+        (WorkflowAction(action_key="add_comment", params={}), "comment"),
+        (WorkflowAction(action_key="assign_owner", params={"assignee_ref": ""}), "assignee_ref"),
+    ],
+)
+def test_simulate_case_workflow_rejects_actions_missing_catalog_required_params(action, expected_missing):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id=f"missing-{action.action_key}-param",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[action],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(10, 30))
+
+    assert exc.value.code == "missing_workflow_action_params"
+    assert action.action_key in exc.value.message
+    assert expected_missing in exc.value.message
+    assert "raw_missing_reason_secret" not in exc.value.message
 
 
 def test_workflow_idempotency_keys_are_stable_across_secret_rotation_but_sensitive_to_action_intent():
