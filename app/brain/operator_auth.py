@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Final
 
 
+AUDIT_READ_PERMISSION: Final[str] = "audit:read"
 CASE_ACTION_PERMISSION: Final[str] = "case:action"
 INTERNAL_READ_PERMISSION: Final[str] = "internal:read"
 
@@ -19,7 +20,7 @@ INTERNAL_READ_PERMISSION: Final[str] = "internal:read"
 _ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
     "viewer": frozenset({INTERNAL_READ_PERMISSION}),
     "operator": frozenset({INTERNAL_READ_PERMISSION, CASE_ACTION_PERMISSION}),
-    "admin": frozenset({INTERNAL_READ_PERMISSION, CASE_ACTION_PERMISSION}),
+    "admin": frozenset({INTERNAL_READ_PERMISSION, CASE_ACTION_PERMISSION, AUDIT_READ_PERMISSION}),
 }
 _DEFAULT_OPERATOR_ROLE: Final[str] = "operator"
 

@@ -69,6 +69,7 @@ from app.brain.operator_api import (
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.operator_auth import (
+    AUDIT_READ_PERMISSION,
     CASE_ACTION_PERMISSION,
     InternalOperatorAuthorizationError,
     build_internal_operator_principal,
@@ -604,18 +605,42 @@ def internal_brain_case_action(business_id: str, case_id: str):
 
 @app.get("/internal/brain/businesses/<business_id>/audit-events")
 def internal_brain_audit_events(business_id: str):
-    return _with_internal_stores(
-        business_id,
-        lambda case_store, run_ledger, audit_store: _internal_success(
+    def _handle(case_store, run_ledger, audit_store):
+        try:
+            principal = build_internal_operator_principal(
+                actor_ref=request.headers.get("X-Orvo-Operator", ""),
+                role=request.headers.get("X-Orvo-Role"),
+            )
+            require_internal_permission(principal, AUDIT_READ_PERMISSION)
+        except InternalOperatorAuthorizationError as exc:
+            audit_store.append_event(
+                business_id=business_id,
+                actor_ref=request.headers.get("X-Orvo-Operator") or "anonymous",
+                event_type="internal_operator_authorization_denied",
+                target_type="operator_audit_events",
+                target_id=business_id,
+                request_id=_internal_request_id(),
+                data={
+                    "status": "denied",
+                    "reason": exc.code,
+                    "status_code": exc.status_code,
+                    "method": request.method,
+                    "role": exc.role,
+                    "permission": exc.permission,
+                },
+            )
+            raise OperatorAPIError("forbidden", "Forbidden", status_code=403) from exc
+
+        return _internal_success(
             business_id,
             list_operator_audit_events(
                 audit_store,
                 business_id=business_id,
                 limit=request.args.get("limit"),
             ),
-        ),
-        include_audit=True,
-    )
+        )
+
+    return _with_internal_stores(business_id, _handle, include_audit=True)
 
 
 @app.get("/internal/brain/businesses/<business_id>/runs")

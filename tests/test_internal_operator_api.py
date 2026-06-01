@@ -1170,7 +1170,7 @@ def test_internal_audit_events_endpoint_is_business_scoped_limited_and_redacted(
 
     response = client.get(
         "/internal/brain/businesses/artemea/audit-events?limit=1",
-        headers={**AUTH, "X-Orvo-Role": "viewer", "X-Request-ID": "req-audit-list"},
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Request-ID": "req-audit-list"},
     )
 
     assert response.status_code == 200
@@ -1199,12 +1199,69 @@ def test_internal_audit_events_endpoint_is_business_scoped_limited_and_redacted(
     assert older_event not in raw_body
 
 
+def test_internal_audit_events_endpoint_rejects_viewer_role_and_audits_denial(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    audit_store = SQLiteOperatorAuditStore(conn)
+    audit_store.append_event(
+        business_id="artemea",
+        actor_ref="operator:ana",
+        event_type="case_action_applied",
+        target_type="operational_case",
+        target_id="case-safe",
+        request_id="req-existing",
+        created_at=_utc(7),
+        data={"status": "succeeded"},
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "viewer", "X-Request-ID": "req-audit-denied"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        WHERE event_type = 'internal_operator_authorization_denied'
+        """
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    business_id, actor_ref, event_type, target_type, target_id, request_id, raw_data = rows[0]
+    assert business_id == "artemea"
+    assert actor_ref == "operator:juan"
+    assert event_type == "internal_operator_authorization_denied"
+    assert target_type == "operator_audit_events"
+    assert target_id == "artemea"
+    assert request_id == "req-audit-denied"
+    data = json.loads(raw_data)
+    assert data == {
+        "method": "GET",
+        "permission": "audit:read",
+        "reason": "missing_permission",
+        "role": "viewer",
+        "status": "denied",
+        "status_code": 403,
+    }
+
+
 def test_internal_audit_events_endpoint_rejects_invalid_limit(monkeypatch, tmp_path):
     client, _ = _client(monkeypatch, tmp_path)
 
     response = client.get(
         "/internal/brain/businesses/artemea/audit-events?limit=0",
-        headers=AUTH,
+        headers={**AUTH, "X-Orvo-Role": "admin"},
     )
 
     assert response.status_code == 400
