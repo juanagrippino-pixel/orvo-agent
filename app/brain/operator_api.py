@@ -9,14 +9,21 @@ from __future__ import annotations
 from typing import Any, Literal, get_args
 from datetime import datetime, timezone
 
+from app.brain.action_catalog import API_ENABLED_CASE_ACTION_KEYS, list_case_action_catalog
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
+    TERMINAL_OPERATIONAL_CASE_STATUSES,
     ActorType,
     OperationalCase,
     OperationalCaseStatus,
     OperationalCaseStatusError,
     OperationalCaseStore,
     TimelineEventType,
+)
+from app.brain.operator_case_projections import (
+    is_case_degraded as _is_degraded,
+    latest_evidence_at as _latest_evidence_at,
+    source_connectors as _source_connectors,
 )
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
@@ -29,15 +36,7 @@ CaseActionKey = Literal[
     "dismiss_case",
     "add_comment",
 ]
-_API_ENABLED_CASE_ACTION_KEYS: tuple[CaseActionKey, ...] = (
-    "acknowledge_case",
-    "add_comment",
-    "assign_owner",
-    "dismiss_case",
-    "mark_in_progress",
-    "resolve_case",
-)
-_ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
+_ALLOWED_CASE_ACTIONS: set[str] = set(API_ENABLED_CASE_ACTION_KEYS)
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
 _ALLOWED_TIMELINE_EVENT_TYPES: set[str] = set(get_args(TimelineEventType))
@@ -60,20 +59,6 @@ def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _latest_evidence_at(case: OperationalCase) -> datetime | None:
-    if not case.evidence_snapshots:
-        return None
-    return max(snapshot.captured_at for snapshot in case.evidence_snapshots)
-
-
-def _source_connectors(case: OperationalCase) -> list[str]:
-    return sorted({snapshot.source for snapshot in case.evidence_snapshots if snapshot.source})
-
-
-def _is_degraded(case: OperationalCase) -> bool:
-    return any(snapshot.freshness_state in {"stale", "degraded", "missing"} for snapshot in case.evidence_snapshots)
 
 
 def parse_limit(value: str | None, *, default: int = _DEFAULT_LIMIT, max_limit: int = _MAX_LIMIT) -> int:
@@ -244,6 +229,7 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "assigned_at": _iso(case.assigned_at),
             "assignee_ref": case.assignee_ref,
             "resolved_at": _iso(case.resolved_at),
+            "dismissed_at": _iso(case.dismissed_at),
             "latest_run_id": case.latest_run_id,
             "source_run_ids": case.source_run_ids,
             "evidence_refs": case.evidence_refs,
@@ -1034,6 +1020,84 @@ def summarize_case_queue_stagnation_by_priority_bracket(
             "actionable_total": actionable_total,
             "by_idle_bucket": buckets,
             "by_idle_bucket_priority_bracket": bracket_by_bucket,
+            "most_stalled_actionable": most_stalled_payload,
+        }
+    )
+
+
+def summarize_case_queue_stagnation_by_severity(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Severity-split idleness histogram for actionable cases in a business.
+
+    Mirrors :func:`summarize_case_queue_stagnation_by_priority_bracket` but
+    groups each idleness bucket by case severity (info / warning / critical)
+    instead of priority bracket, matching the attribution used by
+    :func:`summarize_case_queue_aging_by_severity` and
+    :func:`summarize_case_workflow_throughput_by_severity`. Operator surfaces
+    use it to spot when criticals are sitting un-touched even when the overall
+    idleness distribution and case_type / entity_kind / source-connector /
+    priority-bracket splits look healthy — a single old idle ``critical``
+    hiding in ``over_7d`` is materially different from an old idle ``info``
+    there. Idleness is driven by ``updated_at``, so a recently-acknowledged
+    old case is reported as freshly handled; ``opened_at`` is reported on the
+    most-stalled row for triage context but does not influence bucket
+    assignment. Open and acknowledged cases are both counted as actionable.
+    Strictly scoped per tenant; ``now`` is injectable for deterministic tests
+    and defaults to current UTC.
+    """
+
+    if now is None:
+        reference = _now_utc()
+    else:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise OperatorAPIError("invalid_now", "now must be timezone-aware", status_code=400)
+        reference = now.astimezone(timezone.utc)
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    severity_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    actionable_total = 0
+    most_stalled_idle = -1
+    most_stalled_case: OperationalCase | None = None
+    most_stalled_age = 0
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        actionable_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        updated_at = case.updated_at.astimezone(timezone.utc)
+        age_seconds = max(int((reference - opened_at).total_seconds()), 0)
+        idle_seconds = max(int((reference - updated_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(idle_seconds)
+        buckets[bucket] += 1
+        severity_counts = severity_by_bucket[bucket]
+        severity_counts[case.severity] = severity_counts.get(case.severity, 0) + 1
+        if idle_seconds > most_stalled_idle:
+            most_stalled_idle = idle_seconds
+            most_stalled_case = case
+            most_stalled_age = age_seconds
+    most_stalled_payload: dict[str, Any] | None = None
+    if most_stalled_case is not None:
+        most_stalled_payload = {
+            "case_id": most_stalled_case.case_id,
+            "case_type": most_stalled_case.case_type,
+            "status": most_stalled_case.status,
+            "severity": most_stalled_case.severity,
+            "opened_at": most_stalled_case.opened_at.isoformat(),
+            "updated_at": most_stalled_case.updated_at.isoformat(),
+            "idle_seconds": most_stalled_idle,
+            "age_seconds": most_stalled_age,
+        }
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": reference.isoformat(),
+            "actionable_total": actionable_total,
+            "by_idle_bucket": buckets,
+            "by_idle_bucket_severity": severity_by_bucket,
             "most_stalled_actionable": most_stalled_payload,
         }
     )
@@ -3124,107 +3188,6 @@ def summarize_case_handling_latency_histogram_by_priority_bracket(
     )
 
 
-def list_case_action_catalog(*, business_id: str) -> dict[str, Any]:
-    """Return the internal operator case action contract for one business.
-
-    This is a projection over the registered operator action keys. It explicitly
-    marks catalog actions that are not enabled in this API slice so clients do
-    not infer executable capabilities from docs or owner-facing copy.
-    """
-
-    enabled = set(_API_ENABLED_CASE_ACTION_KEYS)
-    actions = [
-        {
-            "action_key": "acknowledge_case",
-            "label": "Acknowledge case",
-            "mode": "manual_operator_mutation",
-            "api_enabled": "acknowledge_case" in enabled,
-            "status_effect": "acknowledged",
-            "requires_reason": False,
-            "requires_comment": False,
-            "approval_required": False,
-        },
-        {
-            "action_key": "assign_owner",
-            "label": "Assign owner",
-            "mode": "manual_operator_mutation",
-            "api_enabled": "assign_owner" in enabled,
-            "status_effect": None,
-            "requires_reason": False,
-            "requires_comment": False,
-            "input_fields": ["assignee_ref"],
-            "approval_required": False,
-        },
-        {
-            "action_key": "add_comment",
-            "label": "Add comment",
-            "mode": "manual_operator_mutation",
-            "api_enabled": "add_comment" in enabled,
-            "status_effect": None,
-            "requires_reason": False,
-            "requires_comment": True,
-            "approval_required": False,
-        },
-        {
-            "action_key": "request_follow_up",
-            "label": "Request follow-up",
-            "mode": "manual_operator_action",
-            "api_enabled": False,
-            "status_effect": None,
-            "requires_reason": False,
-            "requires_comment": False,
-            "approval_required": False,
-        },
-        {
-            "action_key": "mark_in_progress",
-            "label": "Mark in progress",
-            "mode": "manual_operator_mutation",
-            "api_enabled": "mark_in_progress" in enabled,
-            "status_effect": "in_progress",
-            "requires_reason": False,
-            "requires_comment": False,
-            "approval_required": False,
-        },
-        {
-            "action_key": "resolve_case",
-            "label": "Resolve case",
-            "mode": "manual_operator_mutation",
-            "api_enabled": "resolve_case" in enabled,
-            "status_effect": "resolved",
-            "requires_reason": True,
-            "requires_comment": False,
-            "approval_required": False,
-        },
-        {
-            "action_key": "dismiss_case",
-            "label": "Dismiss case",
-            "mode": "manual_operator_mutation",
-            "api_enabled": "dismiss_case" in enabled,
-            "status_effect": "dismissed",
-            "requires_reason": True,
-            "requires_comment": False,
-            "approval_required": False,
-        },
-        {
-            "action_key": "request_external_action",
-            "label": "Request external action",
-            "mode": "approval_required_disabled",
-            "api_enabled": False,
-            "status_effect": None,
-            "requires_reason": True,
-            "requires_comment": False,
-            "approval_required": True,
-        },
-    ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "api_enabled_action_keys": list(_API_ENABLED_CASE_ACTION_KEYS),
-            "actions": actions,
-        }
-    )
-
-
 def list_builtin_case_views() -> dict[str, Any]:
     from app.brain.operator_views import builtin_case_views
 
@@ -3295,7 +3258,8 @@ def apply_case_action(
         "dismiss_case": ("dismissed", "Dismissed by operator."),
     }
     target_status, default_reason = action_targets[action_key]
-    if action_key in {"resolve_case", "dismiss_case"} and (not isinstance(reason, str) or not reason.strip()):
+    provided_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
+    if target_status in TERMINAL_OPERATIONAL_CASE_STATUSES and provided_reason is None:
         raise OperatorAPIError(
             "missing_case_action_reason",
             f"{action_key} requires a non-empty reason",
@@ -3307,7 +3271,7 @@ def apply_case_action(
             status=target_status,
             actor_type="operator",
             actor_ref=effective_actor_ref,
-            reason=reason.strip() if isinstance(reason, str) and reason.strip() else default_reason,
+            reason=provided_reason or default_reason,
         )
     except OperationalCaseStatusError as exc:
         raise OperatorAPIError("invalid_case_transition", str(exc), status_code=409) from exc

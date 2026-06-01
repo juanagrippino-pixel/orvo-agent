@@ -51,7 +51,12 @@ class CompiledConnectorRuntime(BaseModel):
     legacy_secret_param_names: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     emitted_metric_families: list[str] = Field(default_factory=list)
+    supported_runtime_modes: list[str] = Field(default_factory=list)
     executor_factory_path: str
+    health_policy: dict[str, Any] = Field(default_factory=dict)
+    required_scopes: list[str] = Field(default_factory=list)
+    rate_limit_policy: dict[str, Any] = Field(default_factory=dict)
+    lifecycle: dict[str, str] = Field(default_factory=dict)
 
 
 class CompiledReportSchedule(BaseModel):
@@ -157,7 +162,7 @@ def compile_business_runtime(
     except ZoneInfoNotFoundError:
         errors.append(f"business {business.business_id} timezone is invalid: {business.timezone}")
 
-    compiled_connectors = _compile_connectors(business, errors)
+    compiled_connectors = _compile_connectors(business, errors, run_mode=run_mode)
     compiled_schedules = _compile_schedules(business, schedules or [], errors)
 
     if errors:
@@ -206,6 +211,8 @@ def compile_business_runtime(
 def _compile_connectors(
     business: BusinessConfig,
     errors: list[str],
+    *,
+    run_mode: RuntimeMode,
 ) -> list[CompiledConnectorRuntime]:
     enabled_connectors = [connector for connector in business.connectors if connector.enabled]
     if not enabled_connectors:
@@ -220,6 +227,15 @@ def _compile_connectors(
         except ValueError:
             errors.append(
                 f"connector {connector.connector_id} has unsupported connector_type: {connector.connector_type}"
+            )
+            continue
+
+        assert spec.executor is not None  # populated by ConnectorSpec.__post_init__
+        supported_runtime_modes = list(spec.executor.supported_runtime_modes)
+        if run_mode not in spec.executor.supported_runtime_modes:
+            errors.append(
+                f"connector {connector.connector_id} ({connector.connector_type}) does not support "
+                f"runtime mode {run_mode}; supported modes: {', '.join(supported_runtime_modes)}"
             )
             continue
 
@@ -249,10 +265,39 @@ def _compile_connectors(
                 legacy_secret_param_names=legacy_secret_names,
                 capabilities=list(spec.capabilities),
                 emitted_metric_families=list(spec.emitted_metric_families),
+                supported_runtime_modes=supported_runtime_modes,
                 executor_factory_path=spec.factory_path,
+                health_policy=_health_policy_for(spec),
+                required_scopes=list(spec.scopes.required),
+                rate_limit_policy=_rate_limit_policy_for(spec),
+                lifecycle=_lifecycle_metadata_for(spec),
             )
         )
     return compiled
+
+
+def _health_policy_for(spec: ConnectorSpec) -> dict[str, Any]:
+    return {
+        "readiness_check": spec.health.readiness_check,
+        "supports_health_check": spec.health.supports_health_check,
+        "degraded_state": spec.health.degraded_state,
+    }
+
+
+def _rate_limit_policy_for(spec: ConnectorSpec) -> dict[str, Any]:
+    return {
+        "default_timeout_seconds": spec.rate_limit.default_timeout_seconds,
+        "requests_per_minute": spec.rate_limit.requests_per_minute,
+        "retry_policy": spec.rate_limit.retry_policy,
+    }
+
+
+def _lifecycle_metadata_for(spec: ConnectorSpec) -> dict[str, str]:
+    return {
+        "status": spec.lifecycle.status,
+        "owner": spec.lifecycle.owner,
+        "version": spec.lifecycle.version,
+    }
 
 
 def _compile_schedules(

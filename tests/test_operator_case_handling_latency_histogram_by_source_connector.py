@@ -76,6 +76,7 @@ def _handle(
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=resolved_at,
     )
     return case.case_id
@@ -401,6 +402,7 @@ def test_handling_latency_histogram_by_source_connector_buckets_missing_source_a
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=opened_at + timedelta(hours=4),  # handling = 3h -> under_6h
     )
 
@@ -450,6 +452,7 @@ def test_handling_latency_histogram_by_source_connector_uses_first_sorted_source
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=opened_at + timedelta(hours=4),  # handling = 3h -> under_6h
     )
 

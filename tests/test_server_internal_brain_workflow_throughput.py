@@ -87,6 +87,7 @@ def _seed_case_with_lifecycle(
             status="resolved",
             actor_type="operator",
             actor_ref="operator://test",
+            reason="Resolved in test fixture",
             transitioned_at=opened_at + timedelta(hours=resolve_hours_after_open),
         )
     conn.close()

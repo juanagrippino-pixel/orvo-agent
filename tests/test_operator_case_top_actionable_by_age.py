@@ -159,6 +159,7 @@ def test_list_top_actionable_cases_by_age_excludes_resolved_cases():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved in test fixture",
         transitioned_at=NOW - timedelta(days=18),
     )
 
