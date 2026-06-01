@@ -51,6 +51,7 @@ from app.brain.operator_api import (
     list_run_history,
     list_recently_acknowledged_cases,
     list_recently_opened_cases,
+    list_recently_resolved_cases,
     list_top_actionable_cases_by_age,
     list_top_actionable_cases_by_priority,
     list_top_actionable_degraded_cases,
@@ -66,9 +67,19 @@ from app.brain.operator_api import (
     summarize_case_queue_stagnation,
     summarize_case_queue_stagnation_by_priority_bracket,
     summarize_case_workflow_throughput,
+    summarize_case_workflow_throughput_by_case_type,
     summarize_case_workflow_throughput_by_priority_bracket,
 )
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
+from app.brain.operator_auth import (
+    CASE_ACTION_PERMISSION,
+    INTERNAL_READ_PERMISSION,
+    InternalOperatorAuthorizationError,
+    build_internal_operator_principal,
+    permissions_for_role,
+    project_internal_operator_session,
+    require_internal_permission,
+)
 from app.brain.delivery_status import (
     SQLiteWhatsAppDeliveryStatusStore,
     parse_meta_status_payload,
@@ -163,10 +174,42 @@ def _internal_brain_db_path() -> str:
     return os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3")
 
 
+def _internal_principal_or_error(business_id: str, permission: str):
+    try:
+        principal = build_internal_operator_principal(
+            actor_ref=request.headers.get("X-Orvo-Operator", ""),
+            role=request.headers.get("X-Orvo-Role"),
+        )
+        require_internal_permission(principal, permission)
+    except InternalOperatorAuthorizationError as exc:
+        return None, _internal_error(business_id, "forbidden", "Forbidden", status_code=exc.status_code)
+    return principal, None
+
+
+def _require_internal_header_permission(business_id: str, permission: str):
+    _principal, permission_error = _internal_principal_or_error(business_id, permission)
+    return permission_error
+
+
+@app.get("/internal/brain/businesses/<business_id>/operator-session")
+def internal_brain_operator_session(business_id: str):
+    auth_error = _authorize_internal_operator(business_id)
+    if auth_error is not None:
+        return auth_error
+    principal, permission_error = _internal_principal_or_error(business_id, INTERNAL_READ_PERMISSION)
+    if permission_error is not None:
+        return permission_error
+    assert principal is not None
+    return _internal_success(business_id, project_internal_operator_session(principal))
+
+
 def _with_internal_stores(business_id: str, handler):
     auth_error = _authorize_internal_operator(business_id)
     if auth_error is not None:
         return auth_error
+    permission_error = _require_internal_header_permission(business_id, INTERNAL_READ_PERMISSION)
+    if permission_error is not None:
+        return permission_error
     try:
         with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
             init_schema(conn)
@@ -194,11 +237,19 @@ def internal_brain_cases(business_id: str):
 
 @app.get("/internal/brain/businesses/<business_id>/case-actions")
 def internal_brain_case_actions(business_id: str):
-    return _with_internal_stores(
+    auth_error = _authorize_internal_operator(business_id)
+    if auth_error is not None:
+        return auth_error
+    principal, permission_error = _internal_principal_or_error(business_id, INTERNAL_READ_PERMISSION)
+    if permission_error is not None:
+        return permission_error
+    assert principal is not None
+    can_execute_case_actions = CASE_ACTION_PERMISSION in permissions_for_role(principal.role)
+    return _internal_success(
         business_id,
-        lambda case_store, run_ledger: _internal_success(
-            business_id,
-            list_case_action_catalog(business_id=business_id),
+        list_case_action_catalog(
+            business_id=business_id,
+            can_execute_case_actions=can_execute_case_actions,
         ),
     )
 
@@ -361,6 +412,20 @@ def internal_brain_workflow_throughput_by_priority_bracket(business_id: str):
     )
 
 
+@app.get("/internal/brain/businesses/<business_id>/workflow/throughput/by-case-type")
+def internal_brain_workflow_throughput_by_case_type(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_workflow_throughput_by_case_type(
+                case_store,
+                business_id=business_id,
+            ),
+        ),
+    )
+
+
 @app.get("/internal/brain/businesses/<business_id>/cases/top-by-age")
 def internal_brain_cases_top_by_age(business_id: str):
     return _with_internal_stores(
@@ -455,6 +520,21 @@ def internal_brain_cases_recently_acknowledged(business_id: str):
     )
 
 
+@app.get("/internal/brain/businesses/<business_id>/cases/recently-resolved")
+def internal_brain_cases_recently_resolved(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_recently_resolved_cases(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+            ),
+        ),
+    )
+
+
 @app.get("/internal/brain/businesses/<business_id>/dashboard")
 def internal_brain_dashboard(business_id: str):
     limit = request.args.get("limit")
@@ -530,9 +610,12 @@ def internal_brain_case_timeline(business_id: str, case_id: str):
 def internal_brain_case_action(business_id: str, case_id: str):
     payload = request.get_json(silent=True) or {}
     actor_ref = request.headers.get("X-Orvo-Operator", "")
-    return _with_internal_stores(
-        business_id,
-        lambda case_store, run_ledger: _internal_success(
+
+    def _handle(case_store, run_ledger):
+        permission_error = _require_internal_header_permission(business_id, CASE_ACTION_PERMISSION)
+        if permission_error is not None:
+            return permission_error
+        return _internal_success(
             business_id,
             apply_case_action(
                 case_store,
@@ -546,8 +629,9 @@ def internal_brain_case_action(business_id: str, case_id: str):
                 assignee_ref=payload.get("assignee_ref"),
                 owner_ref=payload.get("owner_ref"),
             ),
-        ),
-    )
+        )
+
+    return _with_internal_stores(business_id, _handle)
 
 
 @app.get("/internal/brain/businesses/<business_id>/runs")

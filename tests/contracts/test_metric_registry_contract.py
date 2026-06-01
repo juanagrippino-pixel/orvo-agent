@@ -168,6 +168,47 @@ def test_case_family_catalogs_stay_aligned_with_operational_cases_and_actions():
     assert dangling_action_families == set()
 
 
+def test_detectable_operational_case_types_are_semantic_registry_families_or_explicitly_deferred():
+    """The metric registry is the source of truth for deterministic case detection.
+
+    Case types may exist ahead of their detectors, but only as an explicit
+    deferred list. Once a case type becomes detectable, it must have a
+    CASE_FAMILY_METRICS contract so snapshots cannot be opened from copy/title
+    heuristics without canonical evidence metrics.
+    """
+
+    from typing import get_args
+
+    from app.brain.operational_cases import (
+        DETECTABLE_OPERATIONAL_CASE_TYPES,
+        OperationalCaseType,
+    )
+    from app.brain.semantics.metric_registry import CASE_FAMILY_METRICS
+
+    registered_case_families = set(CASE_FAMILY_METRICS)
+    implemented_case_types = set(get_args(OperationalCaseType))
+    explicitly_deferred_case_types = {"channel_mix_shift"}
+
+    assert DETECTABLE_OPERATIONAL_CASE_TYPES == registered_case_families
+    assert DETECTABLE_OPERATIONAL_CASE_TYPES <= implemented_case_types
+    assert implemented_case_types <= registered_case_families | explicitly_deferred_case_types
+
+
+def test_owner_facing_operational_case_types_are_semantic_registry_families():
+    """Owner surfaces must not expose internal/deferred case families.
+
+    OperationalCaseType can include future catalog targets such as
+    channel_mix_shift, but WhatsApp/operator owner projections are limited to
+    families with CASE_FAMILY_METRICS evidence contracts.
+    """
+
+    from app.brain.operational_cases import OWNER_FACING_OPERATIONAL_CASE_TYPES
+    from app.brain.semantics.metric_registry import CASE_FAMILY_METRICS
+
+    assert OWNER_FACING_OPERATIONAL_CASE_TYPES == set(CASE_FAMILY_METRICS)
+    assert "channel_mix_shift" not in OWNER_FACING_OPERATIONAL_CASE_TYPES
+
+
 def test_connector_emitted_metric_families_are_registered_or_explicitly_compatible():
     from app.brain.connector_registry import list_connector_specs
     from app.brain.semantics.metric_registry import CONNECTOR_FAMILY_COMPATIBILITY, default_metric_registry

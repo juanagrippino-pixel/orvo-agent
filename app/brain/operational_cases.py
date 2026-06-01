@@ -11,7 +11,7 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal, Protocol
+from typing import Any, Iterable, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -35,6 +35,7 @@ OperationalCaseType = Literal[
     "channel_mix_shift",
 ]
 DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
+OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
@@ -340,11 +341,29 @@ class OperationalCase(BaseModel):
             raise ValueError("dismissed_at must be after opened_at")
         if self.status == "resolved" and self.resolved_at is None:
             raise ValueError("resolved case requires resolved_at")
+        if self.status != "resolved" and self.resolved_at is not None:
+            raise ValueError("only resolved cases may have resolved_at")
         if self.status == "dismissed" and self.dismissed_at is None:
             raise ValueError("dismissed case requires dismissed_at")
         if self.status != "dismissed" and self.dismissed_at is not None:
             raise ValueError("only dismissed cases may have dismissed_at")
         return self
+
+
+def is_owner_facing_operational_case(case: OperationalCase) -> bool:
+    """Return whether a case family is promoted for owner-facing projections."""
+
+    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES
+
+
+def owner_facing_actionable_cases(cases: Iterable[OperationalCase]) -> list[OperationalCase]:
+    """Filter canonical cases to the subset eligible for owner-facing action surfaces."""
+
+    return [
+        case
+        for case in cases
+        if case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES and is_owner_facing_operational_case(case)
+    ]
 
 
 def _unique_snapshots(snapshots: list[OperationalCaseEvidenceSnapshot]) -> list[OperationalCaseEvidenceSnapshot]:
@@ -651,6 +670,9 @@ class _OperationalCaseMutations:
         commented_at: datetime | None = None,
     ) -> OperationalCase:
         record = self._load_for_update(case_id)
+        normalized_comment = comment.strip() if isinstance(comment, str) else ""
+        if not normalized_comment:
+            raise ValueError("comment must be non-empty")
         commented_at = _as_utc(commented_at) if commented_at is not None else _now_utc()
         updated = record.model_copy(
             update={
@@ -663,7 +685,7 @@ class _OperationalCaseMutations:
                         actor_ref=actor_ref,
                         case_id=record.case_id,
                         created_at=commented_at,
-                        summary=comment,
+                        summary=normalized_comment,
                         metadata=metadata or {},
                     ),
                 ],

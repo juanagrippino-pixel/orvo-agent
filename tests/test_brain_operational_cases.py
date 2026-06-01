@@ -282,6 +282,20 @@ def test_operational_case_model_enforces_dismissed_at_lifecycle_invariants():
         OperationalCase.model_validate({**payload, "status": "dismissed", "dismissed_at": utc_dt(7)})
 
 
+def test_operational_case_model_enforces_resolved_at_lifecycle_invariants():
+    opened = InMemoryOperationalCaseStore().upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    payload = opened.model_dump(mode="python")
+
+    with pytest.raises(ValueError, match="resolved case requires resolved_at"):
+        OperationalCase.model_validate({**payload, "status": "resolved", "resolved_at": None})
+
+    with pytest.raises(ValueError, match="only resolved cases may have resolved_at"):
+        OperationalCase.model_validate({**payload, "status": "open", "resolved_at": utc_dt(9)})
+
+    with pytest.raises(ValueError, match="resolved_at must be after opened_at"):
+        OperationalCase.model_validate({**payload, "status": "resolved", "resolved_at": utc_dt(7)})
+
+
 def test_sqlite_store_loads_legacy_dismissed_case_without_dismissed_at(conn):
     store = SQLiteOperationalCaseStore(conn)
     opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
@@ -330,6 +344,29 @@ def test_operational_case_requires_acknowledged_before_resolved():
             actor_ref="juan",
             reason="Trying to skip acknowledgement",
         )
+
+
+@pytest.mark.parametrize("bad_comment", [None, "", "   "])
+def test_add_comment_requires_non_empty_comment_without_mutation(conn, bad_comment):
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run"), detected_at=utc_dt(8))
+        before = store.get_case(opened.case_id)
+        assert before is not None
+
+        with pytest.raises(ValueError, match="comment must be non-empty"):
+            store.add_comment(
+                opened.case_id,
+                actor_type="operator",
+                actor_ref="juan",
+                comment=bad_comment,
+                commented_at=utc_dt(9),
+            )
+
+        after = store.get_case(opened.case_id)
+        assert after == before, f"{label}: rejected empty comment must not append timeline events"
 
 
 @pytest.mark.parametrize("terminal_status", ["resolved", "dismissed"])

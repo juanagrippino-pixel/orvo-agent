@@ -416,6 +416,7 @@ def _owner_case(
     *,
     case_id: str,
     title: str,
+    case_type: str = "stockout_risk",
     severity: str = "warning",
     priority_score: int = 70,
     status: str = "open",
@@ -435,7 +436,7 @@ def _owner_case(
         **kwargs,
         case_id=case_id,
         business_id="artemea",
-        case_type="stockout_risk",
+        case_type=case_type,  # type: ignore[arg-type]
         dedupe_key=f"artemea/stockout/{case_id}",
         title=f"{title} access_token={token}",
         status=status,
@@ -457,7 +458,7 @@ def _owner_case(
                 evidence_ref=f"evidence://tiendanube/stock/{case_id}?access_token={token}",
                 source=source,
                 source_label=source_label,
-                case_type="stockout_risk",
+                case_type=case_type,  # type: ignore[arg-type]
                 entity_scope={"kind": "product", "id": "sku-1", "label": "Remera Negra"},
                 summary=f"Quedan pocas unidades Bearer {token}",
                 freshness_state=freshness_state,  # type: ignore[arg-type]
@@ -494,6 +495,26 @@ def test_compose_owner_case_brief_prioritizes_open_cases_with_evidence_and_actio
     assert "Reponer stock o pausar campañas." in text
     assert "Resuelto" not in text
     assert "raw_case_brief_secret" not in text
+
+
+def test_compose_owner_case_brief_excludes_internal_case_families_from_owner_surface():
+    from app.brain.reporting import compose_owner_case_brief
+
+    visible = _owner_case(case_id="case-visible", title="Stock crítico", priority_score=90)
+    internal = _owner_case(
+        case_id="case-internal",
+        title="Mix de canales interno",
+        case_type="channel_mix_shift",
+        priority_score=100,
+    )
+
+    text = compose_owner_case_brief("Artemea", [internal, visible], report_date=date(2026, 5, 24))
+
+    assert "1 tema operativo" in text
+    assert "Stock crítico" in text
+    assert "case-visible" in text
+    assert "Mix de canales interno" not in text
+    assert "case-internal" not in text
 
 
 def test_compose_owner_case_brief_marks_degraded_evidence():

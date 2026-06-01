@@ -16,6 +16,7 @@ from app.brain.storage import init_schema
 
 
 AUTH = {"Authorization": "Bearer test-internal-token", "X-Orvo-Operator": "operator:juan", "X-Request-ID": "req-test"}
+VIEWER_AUTH = {**AUTH, "X-Orvo-Role": "viewer", "X-Orvo-Operator": "viewer:ana"}
 
 
 def _utc(hour: int) -> datetime:
@@ -367,7 +368,9 @@ def test_internal_case_action_catalog_returns_canonical_action_contract(monkeypa
         "mark_in_progress",
         "resolve_case",
     ]
+    assert data["operator_executable_action_keys"] == data["api_enabled_action_keys"]
     actions = {item["action_key"]: item for item in data["actions"]}
+    assert actions["acknowledge_case"]["operator_executable"] is True
     assert actions["acknowledge_case"]["status_effect"] == "acknowledged"
     assert actions["add_comment"]["requires_comment"] is True
     assert actions["assign_owner"]["input_fields"] == ["assignee_ref"]
@@ -376,6 +379,30 @@ def test_internal_case_action_catalog_returns_canonical_action_contract(monkeypa
     assert actions["request_external_action"]["api_enabled"] is False
     assert actions["request_external_action"]["approval_required"] is True
     assert "raw_" not in response.get_data(as_text=True)
+
+
+def test_internal_case_action_catalog_marks_viewer_actions_not_executable(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-actions", headers=VIEWER_AUTH)
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["api_enabled_action_keys"] == [
+        "acknowledge_case",
+        "add_comment",
+        "assign_owner",
+        "dismiss_case",
+        "mark_in_progress",
+        "resolve_case",
+    ]
+    assert data["operator_executable_action_keys"] == []
+    actions = {item["action_key"]: item for item in data["actions"]}
+    assert actions["acknowledge_case"]["api_enabled"] is True
+    assert actions["acknowledge_case"]["operator_executable"] is False
+    assert actions["acknowledge_case"]["disabled_reason"] == "missing_case_action_permission"
+    assert actions["request_external_action"]["operator_executable"] is False
+    assert actions["request_external_action"]["disabled_reason"] == "api_disabled"
 
 
 def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_path):
@@ -403,6 +430,84 @@ def test_internal_case_action_catalog_has_single_route_binding(monkeypatch, tmp_
     ]
 
     assert [route.endpoint for route in routes] == ["internal_brain_case_actions"]
+
+
+def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-session",
+        headers={**VIEWER_AUTH, "X-Orvo-Operator": "viewer:ana access_token=raw_operator_secret"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"] == {
+        "operator": {
+            "actor_ref": "[REDACTED]",
+            "role": "viewer",
+            "permissions": ["internal:read"],
+            "can_read_internal": True,
+            "can_mutate_cases": False,
+        }
+    }
+    assert "raw_operator_secret" not in response.get_data(as_text=True)
+
+
+def test_internal_operator_session_defaults_legacy_callers_to_operator_role(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/operator-session", headers=AUTH)
+
+    assert response.status_code == 200
+    operator = response.get_json()["data"]["operator"]
+    assert operator["role"] == "operator"
+    assert operator["permissions"] == ["case:action", "internal:read"]
+    assert operator["can_mutate_cases"] is True
+
+
+def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(f"/internal/brain/businesses/artemea/cases/{case.case_id}", headers=VIEWER_AUTH)
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["case"]["case_id"] == case.case_id
+
+
+def test_internal_case_action_rejects_viewer_role_without_mutation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=VIEWER_AUTH,
+        json={"action_key": "acknowledge_case"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["error"]["code"] == "forbidden"
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+
+
+def test_internal_read_rejects_unknown_role(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}",
+        headers={**AUTH, "X-Orvo-Role": "superuser"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["error"]["code"] == "forbidden"
 
 
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):
