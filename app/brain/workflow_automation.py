@@ -169,6 +169,12 @@ def _validate_rule(rule: WorkflowRule, case: OperationalCase) -> None:
                 "unknown_workflow_action_key",
                 f"unknown workflow action_key: {action.action_key}",
             )
+        definition = WORKFLOW_ACTION_REGISTRY[action.action_key]
+        if definition.case_families and case.case_type not in definition.case_families:
+            raise WorkflowAutomationError(
+                "action_not_allowed_for_case_type",
+                f"workflow action_key {action.action_key} is not registered for case_type {case.case_type}",
+            )
 
 
 def _execution_status(definition: WorkflowActionDefinition) -> str:
