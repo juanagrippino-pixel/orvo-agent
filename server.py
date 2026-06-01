@@ -75,6 +75,7 @@ from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
     build_internal_operator_principal,
+    permissions_for_role,
     project_internal_operator_session,
     require_internal_permission,
 )
@@ -235,11 +236,19 @@ def internal_brain_cases(business_id: str):
 
 @app.get("/internal/brain/businesses/<business_id>/case-actions")
 def internal_brain_case_actions(business_id: str):
-    return _with_internal_stores(
+    auth_error = _authorize_internal_operator(business_id)
+    if auth_error is not None:
+        return auth_error
+    principal, permission_error = _internal_principal_or_error(business_id, INTERNAL_READ_PERMISSION)
+    if permission_error is not None:
+        return permission_error
+    assert principal is not None
+    can_execute_case_actions = CASE_ACTION_PERMISSION in permissions_for_role(principal.role)
+    return _internal_success(
         business_id,
-        lambda case_store, run_ledger: _internal_success(
-            business_id,
-            list_case_action_catalog(business_id=business_id),
+        list_case_action_catalog(
+            business_id=business_id,
+            can_execute_case_actions=can_execute_case_actions,
         ),
     )
 

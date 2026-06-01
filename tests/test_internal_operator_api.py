@@ -368,7 +368,9 @@ def test_internal_case_action_catalog_returns_canonical_action_contract(monkeypa
         "mark_in_progress",
         "resolve_case",
     ]
+    assert data["operator_executable_action_keys"] == data["api_enabled_action_keys"]
     actions = {item["action_key"]: item for item in data["actions"]}
+    assert actions["acknowledge_case"]["operator_executable"] is True
     assert actions["acknowledge_case"]["status_effect"] == "acknowledged"
     assert actions["add_comment"]["requires_comment"] is True
     assert actions["assign_owner"]["input_fields"] == ["assignee_ref"]
@@ -377,6 +379,30 @@ def test_internal_case_action_catalog_returns_canonical_action_contract(monkeypa
     assert actions["request_external_action"]["api_enabled"] is False
     assert actions["request_external_action"]["approval_required"] is True
     assert "raw_" not in response.get_data(as_text=True)
+
+
+def test_internal_case_action_catalog_marks_viewer_actions_not_executable(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-actions", headers=VIEWER_AUTH)
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["api_enabled_action_keys"] == [
+        "acknowledge_case",
+        "add_comment",
+        "assign_owner",
+        "dismiss_case",
+        "mark_in_progress",
+        "resolve_case",
+    ]
+    assert data["operator_executable_action_keys"] == []
+    actions = {item["action_key"]: item for item in data["actions"]}
+    assert actions["acknowledge_case"]["api_enabled"] is True
+    assert actions["acknowledge_case"]["operator_executable"] is False
+    assert actions["acknowledge_case"]["disabled_reason"] == "missing_case_action_permission"
+    assert actions["request_external_action"]["operator_executable"] is False
+    assert actions["request_external_action"]["disabled_reason"] == "api_disabled"
 
 
 def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_path):
