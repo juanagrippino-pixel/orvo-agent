@@ -64,10 +64,12 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 ```http
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
+GET /internal/brain/businesses/{business_id}/cases/recently-acknowledged
+GET /internal/brain/businesses/{business_id}/cases/recently-opened
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
 
-Actions must use registered action keys and append timeline events.
+Case list/detail endpoints are read-only projections over canonical Operational Cases. Actions must use registered action keys and append timeline events.
 
 ## Response envelope
 
