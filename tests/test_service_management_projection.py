@@ -229,6 +229,48 @@ def test_service_management_projection_stops_sla_clocks_for_dismissed_terminal_c
     assert item["sla"]["resolution"]["stopped_at"] == "2026-05-23T12:00:00Z"
 
 
+def test_service_management_projection_pauses_resolution_sla_while_waiting_external():
+    store = InMemoryOperationalCaseStore()
+    waiting_external = store.upsert_detection(
+        _detection(
+            case_type="data_stale",
+            dedupe_suffix="paused-stale/connector/tiendanube/freshness/daily",
+            severity="warning",
+            priority=80,
+            run_id="run-paused-waiting-external",
+            metadata={"waiting_on": "external"},
+        ),
+        detected_at=NOW - timedelta(hours=10),
+    )
+    store.transition_case(
+        waiting_external.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=6),
+    )
+    store.add_comment(
+        waiting_external.case_id,
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        comment="Proveedor avisado; esperando respuesta.",
+        commented_at=NOW - timedelta(hours=1),
+    )
+
+    item = service_management_case_item(store.get_case(waiting_external.case_id), now=NOW)  # type: ignore[arg-type]
+    resolution = item["sla"]["resolution"]
+
+    assert item["owner_status"]["code"] == "waiting_external"
+    assert resolution["completed"] is False
+    assert resolution["paused"] is True
+    assert resolution["paused_at"] == "2026-05-24T06:00:00Z"
+    assert resolution["pause_reason"] == "waiting_external"
+    assert resolution["elapsed_seconds"] == 14400
+    assert resolution["remaining_seconds"] == 72000
+    assert resolution["breached"] is False
+    assert [reason["code"] for reason in item["escalation_reasons"]] == ["waiting_external"]
+
+
 def test_service_management_projection_exposes_deterministic_escalation_reasons():
     store = InMemoryOperationalCaseStore()
     breached = store.upsert_detection(
