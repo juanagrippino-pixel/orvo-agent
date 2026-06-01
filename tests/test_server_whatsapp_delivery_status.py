@@ -137,6 +137,20 @@ def test_internal_delivery_statuses_requires_auth(monkeypatch, tmp_path):
     assert response.get_json()["error"]["code"] == "unauthorized"
 
 
+def test_internal_delivery_statuses_rejects_unknown_operator_role(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    headers = {**AUTH, "X-Orvo-Role": "superuser"}
+
+    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=headers)
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "whatsapp"
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     assert client.post("/webhook", json=_status_payload(message_id="wamid.A", status="sent", timestamp="1748002000")).status_code == 200
