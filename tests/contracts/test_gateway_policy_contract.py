@@ -1,5 +1,10 @@
 import pytest
 
+from app.brain.operator_auth import (
+    CASE_ACTION_PERMISSION,
+    INTERNAL_READ_PERMISSION,
+    RUNTIME_EXECUTE_PERMISSION,
+)
 
 def test_default_gateway_policy_registry_covers_current_internal_boundaries():
     from app.brain.gateway_policy import default_gateway_policy_registry
@@ -15,14 +20,30 @@ def test_default_gateway_policy_registry_covers_current_internal_boundaries():
     case_action = registry.get("operator_api.case_action.mutate")
 
     assert case_queue.method == "GET"
-    assert case_queue.required_permissions == ("cases:read",)
+    assert case_queue.required_permissions == (INTERNAL_READ_PERMISSION,)
     assert case_queue.idempotency_required is False
     assert case_queue.rate_limit.bucket == "operator_api_read"
 
     assert case_action.method == "POST"
-    assert case_action.required_permissions == ("cases:write",)
+    assert case_action.required_permissions == (CASE_ACTION_PERMISSION,)
     assert case_action.idempotency_required is True
     assert case_action.audit_event_type == "operator_case_action_requested"
+
+
+def test_gateway_policy_permissions_reuse_internal_operator_auth_contract():
+    from app.brain.gateway_policy import default_gateway_policy_registry
+
+    registry = default_gateway_policy_registry()
+
+    assert registry.get("operator_api.case_queue.read").required_permissions == (
+        INTERNAL_READ_PERMISSION,
+    )
+    assert registry.get("operator_api.case_action.mutate").required_permissions == (
+        CASE_ACTION_PERMISSION,
+    )
+    assert registry.get("runtime.force_run.mutate").required_permissions == (
+        RUNTIME_EXECUTE_PERMISSION,
+    )
 
 
 def test_gateway_policy_manifest_is_stable_and_secret_safe():
@@ -70,7 +91,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("other",),
-                    permissions=("cases:write",),
+                    permissions=(CASE_ACTION_PERMISSION,),
                 )
             }
         )
@@ -85,7 +106,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("artemea",),
-                    permissions=("cases:read",),
+                    permissions=(INTERNAL_READ_PERMISSION,),
                 )
             }
         )
@@ -101,7 +122,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("artemea",),
-                    permissions=("cases:write",),
+                    permissions=(CASE_ACTION_PERMISSION,),
                 ),
             }
         )
@@ -117,7 +138,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("artemea",),
-                    permissions=("cases:write",),
+                    permissions=(CASE_ACTION_PERMISSION,),
                 ),
             }
         )
@@ -134,7 +155,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("artemea",),
-                    permissions=("cases:write",),
+                    permissions=(CASE_ACTION_PERMISSION,),
                 ),
             }
         )
@@ -149,7 +170,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("artemea",),
-                    permissions=("cases:write",),
+                    permissions=(CASE_ACTION_PERMISSION,),
                 ),
             }
         )
@@ -164,7 +185,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("artemea",),
-                    permissions=("cases:write",),
+                    permissions=(CASE_ACTION_PERMISSION,),
                 ),
             }
         )
@@ -179,7 +200,7 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
                 "principal": GatewayPrincipal(
                     actor_id="operator:ana",
                     business_ids=("artemea",),
-                    permissions=("cases:write",),
+                    permissions=(CASE_ACTION_PERMISSION,),
                 )
             }
         )
@@ -214,7 +235,7 @@ def test_gateway_policy_redacts_actor_id_in_decision_audit_event():
             principal=GatewayPrincipal(
                 actor_id="operator access_token=raw_gateway_secret",
                 business_ids=("artemea",),
-                permissions=("cases:read",),
+                permissions=(INTERNAL_READ_PERMISSION,),
             ),
         )
     )
@@ -232,7 +253,7 @@ def test_gateway_policy_rejects_duplicate_routes_and_unknown_routes():
         method="GET",
         path_template="/internal/brain/businesses/{business_id}/cases",
         surface="operator_api",
-        required_permissions=("cases:read",),
+        required_permissions=(INTERNAL_READ_PERMISSION,),
         audit_event_type="operator_case_queue_requested",
     )
 

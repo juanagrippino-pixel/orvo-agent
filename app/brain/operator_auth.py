@@ -15,6 +15,7 @@ from app.brain.security.redaction import redact_text
 
 CASE_ACTION_PERMISSION: Final[str] = "case:action"
 INTERNAL_READ_PERMISSION: Final[str] = "internal:read"
+RUNTIME_EXECUTE_PERMISSION: Final[str] = "runtime:execute"
 
 _ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
     "viewer": frozenset({INTERNAL_READ_PERMISSION}),

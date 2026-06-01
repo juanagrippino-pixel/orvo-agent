@@ -24,7 +24,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 2. Gateway policy manifests are metadata only and must never contain bearer values, raw tokens, OAuth material, connector credentials, or environment variables.
 3. Mutating routes that can create side effects must declare `idempotency_required=true` before being exposed as automated/operator actions.
 4. Business scope is evaluated from the authenticated principal, not from caller-supplied prose.
-5. Permission checks are allowlisted by route policy; wildcard grants are for tests/admin bootstrap only.
+5. Permission checks are allowlisted by route policy and reuse the canonical internal operator permission constants in `app.brain.operator_auth`; wildcard grants are for tests/admin bootstrap only.
 6. Rate-limit keys are deterministic and safe to log after boundary redaction: `<bucket>:<business_id>:<redacted_actor_id>`.
 7. Audit events record decision codes and whether an idempotency key was present, but not the idempotency key value itself. Actor identifiers are passed through the shared redaction helper before projection.
 8. Idempotency keys for mutating routes must be scoped to the target business, must not contain whitespace, must fit within the documented key-size budget, and must not contain secret-shaped material.
@@ -50,8 +50,8 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 
 The first registry covers high-value internal boundaries without broad routing rewrites:
 
-1. `operator_api.case_queue.read` — read-only case queue access; requires `cases:read`; no idempotency key.
-2. `operator_api.case_action.mutate` — case lifecycle/comment/assignment actions; requires `cases:write`; idempotency key required.
+1. `operator_api.case_queue.read` — read-only case queue access; requires `internal:read`; no idempotency key.
+2. `operator_api.case_action.mutate` — case lifecycle/comment/assignment actions; requires `case:action`; idempotency key required.
 3. `runtime.force_run.mutate` — operator-triggered runtime execution; requires `runtime:execute`; idempotency key required.
 
 These are conventions and contract tests first. Existing Flask handlers can be wired to them in a later slice without changing the public response envelope.

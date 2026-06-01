@@ -13,6 +13,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.brain.operator_auth import (
+    CASE_ACTION_PERMISSION,
+    INTERNAL_READ_PERMISSION,
+    RUNTIME_EXECUTE_PERMISSION,
+)
 from app.brain.security.redaction import redact_text
 
 GatewayMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
@@ -229,7 +234,7 @@ def default_gateway_policy_registry() -> GatewayPolicyRegistry:
                 method="GET",
                 path_template="/internal/brain/businesses/{business_id}/cases",
                 surface="operator_api",
-                required_permissions=("cases:read",),
+                required_permissions=(INTERNAL_READ_PERMISSION,),
                 rate_limit=GatewayRateLimitPolicy(bucket="operator_api_read", requests_per_minute=120, burst=30),
                 idempotency_required=False,
                 audit_event_type="operator_case_queue_requested",
@@ -239,7 +244,7 @@ def default_gateway_policy_registry() -> GatewayPolicyRegistry:
                 method="POST",
                 path_template="/internal/brain/businesses/{business_id}/cases/{case_id}/actions",
                 surface="operator_api",
-                required_permissions=("cases:write",),
+                required_permissions=(CASE_ACTION_PERMISSION,),
                 rate_limit=GatewayRateLimitPolicy(bucket="operator_api_mutation", requests_per_minute=60, burst=10),
                 idempotency_required=True,
                 audit_event_type="operator_case_action_requested",
@@ -249,7 +254,7 @@ def default_gateway_policy_registry() -> GatewayPolicyRegistry:
                 method="POST",
                 path_template="/internal/brain/businesses/{business_id}/runs/force",
                 surface="runtime",
-                required_permissions=("runtime:execute",),
+                required_permissions=(RUNTIME_EXECUTE_PERMISSION,),
                 rate_limit=GatewayRateLimitPolicy(bucket="runtime_force_run", requests_per_minute=12, burst=3),
                 idempotency_required=True,
                 audit_event_type="runtime_force_run_requested",
