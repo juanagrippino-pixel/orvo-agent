@@ -184,6 +184,39 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.config_digest == results[0].runtime_metadata["config_digest"]
     assert record.summary_metadata["schedule_id"] == "artemea-daily-report"
     assert record.summary_metadata["report_type"] == "daily"
+    assert record.summary_metadata["connector_refs"] == [
+        {
+            "connector_id": "sheet",
+            "connector_type": "google_sheets",
+            "label": "Sheet Artemea",
+            "secret_refs": {},
+            "required_params": ["spreadsheet_id", "range_name"],
+            "secret_param_names": [],
+            "legacy_secret_param_names": [],
+            "capabilities": ["daily_report", "sheet_import"],
+            "emitted_metric_families": [
+                "commerce.orders",
+                "commerce.revenue",
+                "commerce.inventory",
+                "runtime.freshness",
+                "runtime.data_quality",
+            ],
+            "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+            "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+            "health_policy": {
+                "readiness_check": "metadata_only",
+                "supports_health_check": False,
+                "degraded_state": "degraded",
+            },
+            "required_scopes": ["spreadsheets.readonly"],
+            "rate_limit_policy": {
+                "default_timeout_seconds": 30,
+                "requests_per_minute": None,
+                "retry_policy": "adapter_default",
+            },
+        }
+    ]
+    assert "abc123" not in json.dumps(record.summary_metadata)
     assert record.connector_outcomes[0].connector_id == "sheet"
     assert record.connector_outcomes[0].connector_type == "google_sheets"
     assert record.connector_outcomes[0].status == "succeeded"
