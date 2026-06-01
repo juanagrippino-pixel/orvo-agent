@@ -129,7 +129,13 @@ def supported_runtime_connector_types() -> list[str]:
 
 
 def runtime_run_metadata(runtime: CompiledBusinessRuntime) -> dict[str, Any]:
-    """Return run-ledger-compatible metadata for a compiled runtime."""
+    """Return run-ledger-compatible metadata for a compiled runtime.
+
+    Connector refs intentionally expose registry/executor contract metadata and
+    secret reference labels, but not raw public params or legacy secret values.
+    Runtime metadata may be persisted in ledgers and worker summaries, so this
+    function stays on the compiled artifact side of the secret boundary.
+    """
 
     return {
         "runtime_id": runtime.runtime_id,
@@ -138,7 +144,29 @@ def runtime_run_metadata(runtime: CompiledBusinessRuntime) -> dict[str, Any]:
         "config_ref": runtime.runtime_id,
         "run_mode": runtime.run_mode,
         "connector_types": list(runtime.execution_plan.daily_connector_types),
+        "connector_refs": [_connector_run_metadata(connector) for connector in runtime.connectors],
         "report_types": list(runtime.execution_plan.report_types),
+    }
+
+
+def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, Any]:
+    """Return a safe registry-contract summary for run metadata."""
+
+    return {
+        "connector_id": connector.connector_id,
+        "connector_type": connector.connector_type,
+        "label": connector.label,
+        "secret_refs": dict(connector.secret_refs),
+        "required_params": list(connector.required_params),
+        "secret_param_names": list(connector.secret_param_names),
+        "legacy_secret_param_names": list(connector.legacy_secret_param_names),
+        "capabilities": list(connector.capabilities),
+        "emitted_metric_families": list(connector.emitted_metric_families),
+        "supported_runtime_modes": list(connector.supported_runtime_modes),
+        "executor_factory_path": connector.executor_factory_path,
+        "health_policy": dict(connector.health_policy),
+        "required_scopes": list(connector.required_scopes),
+        "rate_limit_policy": dict(connector.rate_limit_policy),
     }
 
 

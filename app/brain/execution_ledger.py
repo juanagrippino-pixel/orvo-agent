@@ -52,6 +52,7 @@ def begin_pipeline_run(
         "compiled_from_hash": runtime_metadata.get("compiled_from_hash"),
         "run_mode": runtime_metadata.get("run_mode"),
         "connector_types": runtime_metadata.get("connector_types", []),
+        "connector_refs": runtime_metadata.get("connector_refs", []),
         "report_types": runtime_metadata.get("report_types", []),
         **(summary_metadata or {}),
     }

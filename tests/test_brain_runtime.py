@@ -79,6 +79,85 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
     assert runtime.execution_plan.report_types == ["daily"]
 
 
+def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_params_or_raw_secrets():
+    from app.brain.runtime import compile_business_runtime, runtime_run_metadata
+
+    runtime = compile_business_runtime(make_business(), run_mode="forced")
+
+    metadata = runtime_run_metadata(runtime)
+
+    assert metadata["connector_types"] == ["google_sheets", "tiendanube"]
+    assert metadata["connector_refs"] == [
+        {
+            "connector_id": "sheet",
+            "connector_type": "google_sheets",
+            "label": "Sheet Artemea",
+            "secret_refs": {},
+            "required_params": ["spreadsheet_id", "range_name"],
+            "secret_param_names": [],
+            "legacy_secret_param_names": [],
+            "capabilities": ["daily_report", "sheet_import"],
+            "emitted_metric_families": [
+                "commerce.orders",
+                "commerce.revenue",
+                "commerce.inventory",
+                "runtime.freshness",
+                "runtime.data_quality",
+            ],
+            "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+            "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+            "health_policy": {
+                "readiness_check": "metadata_only",
+                "supports_health_check": False,
+                "degraded_state": "degraded",
+            },
+            "required_scopes": ["spreadsheets.readonly"],
+            "rate_limit_policy": {
+                "default_timeout_seconds": 30,
+                "requests_per_minute": None,
+                "retry_policy": "adapter_default",
+            },
+        },
+        {
+            "connector_id": "tn",
+            "connector_type": "tiendanube",
+            "label": "Tiendanube Artemea",
+            "secret_refs": {
+                "access_token": "secret://businesses/artemea/connectors/tn/access_token"
+            },
+            "required_params": ["store_id"],
+            "secret_param_names": ["access_token"],
+            "legacy_secret_param_names": ["access_token"],
+            "capabilities": ["daily_report", "commerce_metrics", "inventory_metrics"],
+            "emitted_metric_families": [
+                "commerce.orders",
+                "commerce.revenue",
+                "commerce.inventory",
+                "runtime.freshness",
+                "runtime.data_quality",
+            ],
+            "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+            "executor_factory_path": "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube",
+            "health_policy": {
+                "readiness_check": "metadata_only",
+                "supports_health_check": False,
+                "degraded_state": "degraded",
+            },
+            "required_scopes": ["orders.read", "products.read"],
+            "rate_limit_policy": {
+                "default_timeout_seconds": 30,
+                "requests_per_minute": 120,
+                "retry_policy": "adapter_default",
+            },
+        },
+    ]
+    serialized = str(metadata)
+    assert "tn_test_token" not in serialized
+    assert '"params"' not in serialized
+    assert "abc123" not in serialized
+    assert "12345" not in serialized
+
+
 def test_compile_business_runtime_rejects_missing_required_connector_params():
     from app.brain.runtime import RuntimeCompileError, compile_business_runtime
 
