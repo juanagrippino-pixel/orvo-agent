@@ -192,6 +192,22 @@ def test_simulate_case_workflow_rejects_unknown_action_key_before_projecting_act
     assert exc.value.code == "unknown_workflow_action_key"
 
 
+def test_simulate_case_workflow_rejects_action_key_for_unregistered_case_family():
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="wrong-family-suggestion",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[WorkflowAction(action_key="check_storefront", params={})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(11))
+
+    assert exc.value.code == "action_not_allowed_for_case_type"
+
+
 def test_simulate_case_workflow_rejects_unknown_trigger_before_projecting_actions():
     _, case = seed_case()
     rule = WorkflowRule(
