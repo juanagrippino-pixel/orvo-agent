@@ -51,6 +51,7 @@ from app.brain.operator_api import (
     list_run_history,
     list_top_actionable_cases_by_age,
     list_top_actionable_cases_by_priority,
+    list_top_actionable_degraded_cases,
     list_top_stalled_actionable_cases,
     summarize_case_queue,
     summarize_case_queue_by_case_type,
@@ -381,6 +382,22 @@ def internal_brain_cases_top_by_priority(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             list_top_actionable_cases_by_priority(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+                now=datetime.now(timezone.utc),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/top-degraded")
+def internal_brain_cases_top_degraded(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_top_actionable_degraded_cases(
                 case_store,
                 business_id=business_id,
                 limit=request.args.get("limit"),
