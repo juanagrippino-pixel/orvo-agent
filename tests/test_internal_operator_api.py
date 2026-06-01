@@ -248,6 +248,38 @@ def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, 
     assert len(reloaded.timeline) == len(case.timeline)
 
 
+def test_internal_case_action_actor_identity_comes_from_authenticated_header(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {**AUTH, "X-Orvo-Operator": "operator:trusted"}
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={
+            "action_key": "add_comment",
+            "comment": "Revisado por operaciones",
+            "actor": "operator:payload-spoof",
+            "actor_ref": "operator:payload-spoof-ref",
+        },
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "operator:payload-spoof" not in raw_body
+    body = response.get_json()
+    latest_event = body["data"]["case"]["timeline"][-1]
+    assert latest_event["event_type"] == "operator_comment"
+    assert latest_event["actor_ref"] == "operator:trusted"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.timeline[-1].actor_ref == "operator:trusted"
+    assert all("payload-spoof" not in event.actor_ref for event in reloaded.timeline)
+
+
 def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
