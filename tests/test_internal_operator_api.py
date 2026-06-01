@@ -1196,6 +1196,52 @@ def test_internal_viewer_role_can_read_operator_projections(monkeypatch, tmp_pat
     assert response.get_json()["data"]["cases"][0]["business_id"] == "artemea"
 
 
+def test_internal_read_endpoints_deny_unknown_role_and_audit_without_leaking_role_secret(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+    raw_role_secret = "raw_read_role_secret"
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?status=open",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": f"access_token={raw_role_secret}",
+            "X-Request-ID": "req-read-rbac-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "forbidden"
+    assert raw_role_secret not in response.get_data(as_text=True)
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    business_id, actor_ref, event_type, target_type, target_id, request_id, raw_data = rows[0]
+    assert business_id == "artemea"
+    assert actor_ref == "operator:juan"
+    assert event_type == "internal_operator_authorization_denied"
+    assert target_type == "internal_operator_api"
+    assert target_id == "/internal/brain/businesses/artemea/cases"
+    assert request_id == "req-read-rbac-denied"
+    assert raw_role_secret not in raw_data
+    assert json.loads(raw_data) == {
+        "method": "GET",
+        "permission": "role:known",
+        "reason": "unknown_operator_role",
+        "role": "access_token=[REDACTED]",
+        "status": "denied",
+        "status_code": 403,
+    }
+
+
 def test_internal_audit_events_endpoint_is_business_scoped_limited_and_redacted(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)

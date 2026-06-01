@@ -73,6 +73,7 @@ from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.operator_auth import (
     AUDIT_READ_PERMISSION,
     CASE_ACTION_PERMISSION,
+    INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
     build_internal_operator_principal,
     require_internal_permission,
@@ -212,7 +213,13 @@ def _internal_brain_db_path() -> str:
     return os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3")
 
 
-def _with_internal_stores(business_id: str, handler, *, include_audit: bool = False):
+def _with_internal_stores(
+    business_id: str,
+    handler,
+    *,
+    include_audit: bool = False,
+    enforce_read_permission: bool = True,
+):
     auth_error = _authorize_internal_operator(business_id)
     if auth_error is not None:
         return auth_error
@@ -221,8 +228,36 @@ def _with_internal_stores(business_id: str, handler, *, include_audit: bool = Fa
             init_schema(conn)
             case_store = SQLiteOperationalCaseStore(conn)
             run_ledger = SQLiteRunLedger(conn)
+            audit_store = SQLiteOperatorAuditStore(conn) if include_audit or enforce_read_permission else None
+            if enforce_read_permission:
+                try:
+                    principal = build_internal_operator_principal(
+                        actor_ref=request.headers.get("X-Orvo-Operator", ""),
+                        role=request.headers.get("X-Orvo-Role"),
+                    )
+                    require_internal_permission(principal, INTERNAL_READ_PERMISSION)
+                except InternalOperatorAuthorizationError as exc:
+                    assert audit_store is not None
+                    audit_store.append_event(
+                        business_id=business_id,
+                        actor_ref=request.headers.get("X-Orvo-Operator") or "anonymous",
+                        event_type="internal_operator_authorization_denied",
+                        target_type="internal_operator_api",
+                        target_id=request.path,
+                        request_id=_internal_request_id(),
+                        data={
+                            "status": "denied",
+                            "reason": exc.code,
+                            "status_code": exc.status_code,
+                            "method": request.method,
+                            "role": exc.role,
+                            "permission": exc.permission,
+                        },
+                    )
+                    return _internal_error(business_id, "forbidden", "Forbidden", status_code=403)
             if include_audit:
-                return handler(case_store, run_ledger, SQLiteOperatorAuditStore(conn))
+                assert audit_store is not None
+                return handler(case_store, run_ledger, audit_store)
             return handler(case_store, run_ledger)
     except OperatorAPIError as exc:
         return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
@@ -633,7 +668,7 @@ def internal_brain_case_action(business_id: str, case_id: str):
         )
         return _internal_success(business_id, result)
 
-    return _with_internal_stores(business_id, _handle, include_audit=True)
+    return _with_internal_stores(business_id, _handle, include_audit=True, enforce_read_permission=False)
 
 
 @app.get("/internal/brain/businesses/<business_id>/audit-events")
@@ -673,7 +708,7 @@ def internal_brain_audit_events(business_id: str):
             ),
         )
 
-    return _with_internal_stores(business_id, _handle, include_audit=True)
+    return _with_internal_stores(business_id, _handle, include_audit=True, enforce_read_permission=False)
 
 
 @app.get("/internal/brain/businesses/<business_id>/runs")
