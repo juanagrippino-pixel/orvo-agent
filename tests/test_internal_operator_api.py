@@ -392,6 +392,40 @@ def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_pat
     assert body["redaction_applied"] is True
 
 
+def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-session",
+        headers={**VIEWER_AUTH, "X-Orvo-Operator": "viewer:ana access_token=raw_operator_secret"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"] == {
+        "operator": {
+            "actor_ref": "[REDACTED]",
+            "role": "viewer",
+            "permissions": ["internal:read"],
+            "can_read_internal": True,
+            "can_mutate_cases": False,
+        }
+    }
+    assert "raw_operator_secret" not in response.get_data(as_text=True)
+
+
+def test_internal_operator_session_defaults_legacy_callers_to_operator_role(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/operator-session", headers=AUTH)
+
+    assert response.status_code == 200
+    operator = response.get_json()["data"]["operator"]
+    assert operator["role"] == "operator"
+    assert operator["permissions"] == ["case:action", "internal:read"]
+    assert operator["can_mutate_cases"] is True
+
+
 def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())

@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from app.brain.security.redaction import redact_text
+
 CASE_ACTION_PERMISSION: Final[str] = "case:action"
 INTERNAL_READ_PERMISSION: Final[str] = "internal:read"
 
@@ -80,3 +82,27 @@ def require_internal_permission(principal: InternalOperatorPrincipal, permission
             role=principal.role,
             permission=permission,
         )
+
+
+def permissions_for_role(role: str) -> list[str]:
+    """Return stable, sorted permissions for a normalized role."""
+
+    return sorted(_ROLE_PERMISSIONS.get(role, frozenset()))
+
+
+def project_internal_operator_session(principal: InternalOperatorPrincipal) -> dict[str, dict[str, object]]:
+    """Project a safe operator session for internal UIs and control surfaces."""
+
+    redacted_actor_ref = redact_text(principal.actor_ref) or "[REDACTED]"
+    if redacted_actor_ref != principal.actor_ref:
+        redacted_actor_ref = "[REDACTED]"
+    permissions = permissions_for_role(principal.role)
+    return {
+        "operator": {
+            "actor_ref": redacted_actor_ref,
+            "role": principal.role,
+            "permissions": permissions,
+            "can_read_internal": INTERNAL_READ_PERMISSION in permissions,
+            "can_mutate_cases": CASE_ACTION_PERMISSION in permissions,
+        }
+    }

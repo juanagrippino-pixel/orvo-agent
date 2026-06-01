@@ -75,6 +75,7 @@ from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
     build_internal_operator_principal,
+    project_internal_operator_session,
     require_internal_permission,
 )
 from app.brain.delivery_status import (
@@ -171,7 +172,7 @@ def _internal_brain_db_path() -> str:
     return os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3")
 
 
-def _require_internal_header_permission(business_id: str, permission: str):
+def _internal_principal_or_error(business_id: str, permission: str):
     try:
         principal = build_internal_operator_principal(
             actor_ref=request.headers.get("X-Orvo-Operator", ""),
@@ -179,8 +180,25 @@ def _require_internal_header_permission(business_id: str, permission: str):
         )
         require_internal_permission(principal, permission)
     except InternalOperatorAuthorizationError as exc:
-        return _internal_error(business_id, "forbidden", "Forbidden", status_code=exc.status_code)
-    return None
+        return None, _internal_error(business_id, "forbidden", "Forbidden", status_code=exc.status_code)
+    return principal, None
+
+
+def _require_internal_header_permission(business_id: str, permission: str):
+    _principal, permission_error = _internal_principal_or_error(business_id, permission)
+    return permission_error
+
+
+@app.get("/internal/brain/businesses/<business_id>/operator-session")
+def internal_brain_operator_session(business_id: str):
+    auth_error = _authorize_internal_operator(business_id)
+    if auth_error is not None:
+        return auth_error
+    principal, permission_error = _internal_principal_or_error(business_id, INTERNAL_READ_PERMISSION)
+    if permission_error is not None:
+        return permission_error
+    assert principal is not None
+    return _internal_success(business_id, project_internal_operator_session(principal))
 
 
 def _with_internal_stores(business_id: str, handler):
