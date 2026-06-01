@@ -30,7 +30,7 @@ Owner-facing WhatsApp/operator projections may only render suggested actions fro
 | Action key | Case families | Meaning | Notes |
 | --- | --- | --- | --- |
 | `check_storefront` | `sales_drop`, `spend_without_orders` | Inspect storefront/checkout availability. | Suggestion only until integrations prove status. |
-| `review_campaigns` | `spend_without_orders`, `channel_mix_shift` | Review active ad campaigns/spend. | Requires ads evidence before owner-facing use. |
+| `review_campaigns` | `spend_without_orders` | Review active ad campaigns/spend. | `channel_mix_shift` remains deferred until registry-backed channel metrics exist. |
 | `confirm_stock` | `stockout_risk` | Confirm physical/system stock. | No automatic stock mutation. |
 | `pause_promotion` | `stockout_risk`, `spend_without_orders` | Consider pausing promotion/spend. | Must be phrased as recommendation unless approved automation exists. |
 | `refresh_credentials` | `data_stale` | Refresh/reconnect credentials. | Do not expose token details. |

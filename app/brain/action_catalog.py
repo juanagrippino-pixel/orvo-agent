@@ -150,7 +150,7 @@ _ACTION_DEFINITIONS: tuple[ActionDefinition, ...] = (
         "suggestion",
         "none",
         api_mode="suggestion_only",
-        case_families=("spend_without_orders", "channel_mix_shift"),
+        case_families=("spend_without_orders",),
     ),
     ActionDefinition(
         "confirm_stock",
