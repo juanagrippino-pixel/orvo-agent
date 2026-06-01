@@ -49,6 +49,7 @@ from app.brain.operator_api import (
     list_case_queue,
     list_case_timeline,
     list_run_history,
+    list_recently_acknowledged_cases,
     list_recently_opened_cases,
     list_top_actionable_cases_by_age,
     list_top_actionable_cases_by_priority,
@@ -431,6 +432,21 @@ def internal_brain_cases_recently_opened(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             list_recently_opened_cases(
+                case_store,
+                business_id=business_id,
+                limit=request.args.get("limit"),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/recently-acknowledged")
+def internal_brain_cases_recently_acknowledged(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            list_recently_acknowledged_cases(
                 case_store,
                 business_id=business_id,
                 limit=request.args.get("limit"),
