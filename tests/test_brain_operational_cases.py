@@ -346,6 +346,40 @@ def test_operational_case_requires_acknowledged_before_resolved():
         )
 
 
+def test_acknowledged_at_records_first_acknowledgment_not_in_progress_start(conn):
+    """Time-to-ack SLA must not be inflated when an acknowledged case later starts handling."""
+
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run"), detected_at=utc_dt(8))
+        acknowledged = store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+        assert acknowledged.acknowledged_at == utc_dt(9)
+
+        in_progress = store.transition_case(
+            opened.case_id,
+            status="in_progress",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Empecé la reparación",
+            transitioned_at=utc_dt(11),
+        )
+
+        assert in_progress.status == "in_progress"
+        assert in_progress.acknowledged_at == utc_dt(9), (
+            f"{label}: acknowledged_at must preserve first acknowledgment for SLA metrics"
+        )
+        assert in_progress.timeline[-1].metadata == {"from_status": "acknowledged", "to_status": "in_progress"}
+
+
 @pytest.mark.parametrize("bad_comment", [None, "", "   "])
 def test_add_comment_requires_non_empty_comment_without_mutation(conn, bad_comment):
     for label, store in (
