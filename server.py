@@ -56,6 +56,7 @@ from app.brain.operator_api import (
     list_top_actionable_cases_by_priority,
     list_top_actionable_degraded_cases,
     list_top_stalled_actionable_cases,
+    parse_limit,
     summarize_case_queue,
     summarize_case_queue_by_case_type,
     summarize_case_queue_by_entity_kind,
@@ -547,7 +548,7 @@ def internal_brain_dashboard(business_id: str):
                 run_ledger,
                 business_id=business_id,
                 now=datetime.now(timezone.utc),
-                limit=int(limit) if limit else 10,
+                limit=parse_limit(limit, default=10),
             ),
         ),
     )
