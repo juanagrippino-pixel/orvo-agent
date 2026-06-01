@@ -3314,7 +3314,10 @@ def get_operator_dashboard(
     - resolution_latency_histogram: time-to-resolve distribution
     - acknowledgment_latency_histogram: time-to-acknowledge distribution
     - run_history: recent run executions
+    - builtin_case_view_totals: read-only saved-view match counts
     """
+    from app.brain.operator_views import summarize_builtin_case_view_totals
+
     return {
         "business_id": business_id,
         "now": _iso(now),
@@ -3332,6 +3335,9 @@ def get_operator_dashboard(
             store, business_id=business_id
         ),
         "acknowledgment_latency_histogram": summarize_case_acknowledgment_latency_histogram(
+            store, business_id=business_id
+        ),
+        "builtin_case_view_totals": summarize_builtin_case_view_totals(
             store, business_id=business_id
         ),
         "run_history": list_run_history(

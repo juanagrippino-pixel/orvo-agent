@@ -100,6 +100,7 @@ def test_dashboard_returns_aggregated_views() -> None:
     assert "resolution_latency_histogram" in result
     assert "acknowledgment_latency_histogram" in result
     assert "run_history" in result
+    assert "builtin_case_view_totals" in result
 
     # Verify case_queue_summary has counts
     summary = result["case_queue_summary"]
@@ -136,6 +137,15 @@ def test_dashboard_returns_aggregated_views() -> None:
     runs = result["run_history"]
     assert "runs" in runs
     assert len(runs["runs"]) == 2
+
+    # Verify built-in case view totals are computed with the same scoped JQL-lite views
+    view_totals = {view["view_id"]: view for view in result["builtin_case_view_totals"]["views"]}
+    assert view_totals["open_cases"]["total"] == 2
+    assert view_totals["critical_open"]["total"] == 2
+    assert view_totals["data_stale"]["total"] == 1
+    assert view_totals["connector_degraded"]["total"] == 3
+    assert view_totals["unassigned_actionable"]["total"] == 3
+    assert all(view["readonly"] is True for view in view_totals.values())
 
 
 def test_dashboard_handles_empty_stores() -> None:
@@ -183,6 +193,14 @@ def test_dashboard_scopes_to_business_id() -> None:
 
     assert result_a["case_queue_summary"]["total"] == 1
     assert result_a["top_actionable_cases"]["cases"][0]["case_type"] == "stockout_risk"
+    totals_a = {view["view_id"]: view["total"] for view in result_a["builtin_case_view_totals"]["views"]}
+    assert totals_a["open_cases"] == 1
+    assert totals_a["stockout_risk"] == 1
+    assert totals_a["connector_degraded"] == 1
 
     assert result_b["case_queue_summary"]["total"] == 1
     assert result_b["top_actionable_cases"]["cases"][0]["case_type"] == "sales_drop"
+    totals_b = {view["view_id"]: view["total"] for view in result_b["builtin_case_view_totals"]["views"]}
+    assert totals_b["open_cases"] == 1
+    assert totals_b["stockout_risk"] == 0
+    assert totals_b["connector_degraded"] == 1
