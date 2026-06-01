@@ -340,7 +340,7 @@ Goal: close the 2026-05-31 and 2026-06-01 architecture-review blockers before pr
 
 Dependency: dispatch after the current internal operator API action path is green. Do not combine with unrelated workflow or connector rewrites.
 
-Current source-of-truth check: the 2026-06-01 Architecture Review Board re-confirmed that current HEAD has role helpers but no durable `operator_audit` module/store, and code inspection still shows `/internal/brain/whatsapp/delivery-statuses` authenticates with the internal bearer token but does not enforce `INTERNAL_READ_PERMISSION`. Treat this packet as a security hardening blocker before adding more operator surfaces.
+Current source-of-truth check: the 2026-06-01 Architecture Review Board re-confirmed that current HEAD has role helpers but no durable `operator_audit` module/store. The narrow `/internal/brain/whatsapp/delivery-statuses` `INTERNAL_READ_PERMISSION` gap was closed by `b4f8240`; the remaining blocker is durable audit/least-privilege hardening before adding more operator surfaces.
 
 Read:
 
