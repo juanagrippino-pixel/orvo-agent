@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.brain.config import BusinessConfig, ReportSchedule
 from app.brain.delivery import WhatsAppDeliveryClient
+from app.brain.connector_registry import CAPABILITY_DAILY_REPORT, default_connector_registry
 from app.brain.dispatch import IdempotencyStore, dispatch_owner_case_brief
 from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failure, record_pipeline_success
 from app.brain.operational_cases import OperationalCaseStore
@@ -41,10 +42,13 @@ def _list_all_schedules(config_store, businesses: list[BusinessConfig]) -> list[
 
 
 def _enabled_daily_connector_types(business: BusinessConfig) -> list[str]:
-    supported = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube"}
+    registry = default_connector_registry()
     connector_types: list[str] = []
     for connector in business.connectors:
-        if not connector.enabled or connector.connector_type not in supported:
+        if not connector.enabled or not registry.has(connector.connector_type):
+            continue
+        spec = registry.get(connector.connector_type)
+        if CAPABILITY_DAILY_REPORT not in spec.capabilities:
             continue
         if connector.connector_type not in connector_types:
             connector_types.append(connector.connector_type)

@@ -68,6 +68,74 @@ def fake_sheets_service():
     return FakeService()
 
 
+def test_enabled_daily_connector_types_are_discovered_from_registry_metadata(monkeypatch):
+    from app.brain.connector_registry import (
+        CAPABILITY_DAILY_REPORT,
+        ConnectorRegistry,
+        ConnectorSpec,
+        get_connector_spec,
+    )
+    from app.brain.runner import _enabled_daily_connector_types
+
+    registry = ConnectorRegistry(
+        (
+            get_connector_spec("google_sheets"),
+            ConnectorSpec(
+                connector_type="shopify",
+                display_name="Shopify",
+                adapter_module="app.brain.adapters.csv_file",
+                report_factory="build_daily_report_from_csv_file",
+                capabilities=(CAPABILITY_DAILY_REPORT,),
+                required_config_fields=("shop_id",),
+            ),
+            ConnectorSpec(
+                connector_type="sample_payload",
+                display_name="Sample payload",
+                adapter_module="app.brain.adapters.sample",
+                report_factory="build_daily_report_from_payload",
+                capabilities=("manual_payload",),
+            ),
+        )
+    )
+    monkeypatch.setattr("app.brain.runner.default_connector_registry", lambda: registry)
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491149724933",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="manual",
+                connector_type="sample_payload",
+                label="Manual sample",
+                params={},
+            ),
+            ConnectorConfig(
+                connector_id="shopify-main",
+                connector_type="shopify",
+                label="Shopify main",
+                params={"shop_id": "ar-shop"},
+            ),
+            ConnectorConfig(
+                connector_id="sheet",
+                connector_type="google_sheets",
+                label="Sheet Artemea",
+                params={"spreadsheet_id": "abc123", "range_name": "Daily!A1:G1000"},
+            ),
+            ConnectorConfig(
+                connector_id="shopify-disabled",
+                connector_type="shopify",
+                label="Shopify disabled",
+                params={"shop_id": "disabled"},
+                enabled=False,
+            ),
+        ],
+    )
+
+    assert _enabled_daily_connector_types(business) == ["shopify", "google_sheets"]
+
+
 def test_run_due_daily_reports_dispatches_due_google_sheet_report():
     from app.brain.runner import run_due_daily_reports
 
