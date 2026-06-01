@@ -336,13 +336,16 @@ Acceptance:
 
 ## Packet O — Trust/Admin/Security audit closure
 
-Goal: close the 2026-05-31 architecture-review blockers before presenting Trust/Admin/Security as live-use ready.
+Goal: close the 2026-05-31 and 2026-06-01 architecture-review blockers before presenting Trust/Admin/Security as live-use ready.
 
 Dependency: dispatch after the current internal operator API action path is green. Do not combine with unrelated workflow or connector rewrites.
+
+Current source-of-truth check: the 2026-06-01 Architecture Review Board re-confirmed that current HEAD has role helpers but no durable `operator_audit` module/store, and code inspection still shows `/internal/brain/whatsapp/delivery-statuses` authenticates with the internal bearer token but does not enforce `INTERNAL_READ_PERMISSION`. Treat this packet as a security hardening blocker before adding more operator surfaces.
 
 Read:
 
 - `docs/architecture-reviews/2026-05-31-review.md`
+- `docs/architecture-reviews/2026-06-01-architecture-board-review.md`
 - `docs/specs/internal-operator-api-contract.md`
 - `docs/specs/tenant-secret-redaction-contract.md`
 - `docs/specs/testing-invariant-matrix.md`
@@ -359,6 +362,7 @@ Acceptance:
 - failed/denied case actions are audited where an authenticated actor/business/case context can be derived;
 - auth failures are either audited through a safe pre-auth event shape or explicitly documented as impossible without a trusted actor/business context;
 - audit payloads and actor/business/target fields are redacted before persistence;
+- every internal operator route, including `/internal/brain/whatsapp/delivery-statuses`, enforces the relevant role permission and has a regression test for viewer/operator/admin behavior;
 - minimal action-scope/RBAC behavior is implemented, or the branch is explicitly labeled audit-foundation-only;
 - full suite remains green.
 
@@ -442,6 +446,98 @@ Acceptance:
 - connector emission/report/case metric validation uses one canonical family vocabulary or shared constants;
 - `channel_mix_shift` remains deferred/internal unless Packet N acceptance gates are also satisfied;
 - no new dependency and no owner-facing wording changes.
+
+## Packet S — WorkItem envelope and status-category projection
+
+Goal: add the first Jira-like work-management projection layer without rewriting `OperationalCase` or making manually-created work the source of truth for deterministic cases.
+
+Dependency: dispatch only after Packet P/work-management lifecycle cleanup is green. This packet is a thin projection/schema slice; it must not change case detection, case storage semantics, or owner-facing WhatsApp/report copy.
+
+Source-of-truth check: current code has `OperationalCaseStatus` values and hardcoded transition rules, but no `Project`/`WorkItem` envelope, project key, issue-type registry, workflow scheme, or explicit status-category map.
+
+Read:
+
+- `docs/architecture-reviews/2026-06-01-architecture-board-review.md`
+- `docs/specs/operational-case-engine-contract.md`
+- `docs/specs/internal-operator-api-contract.md`
+- `docs/specs/integration-train-contract.md`
+
+Likely files:
+
+- `app/brain/work_items.py` or `app/brain/operator_api.py`
+- `app/brain/operational_cases.py`
+- `tests/test_work_items.py` or `tests/test_internal_operator_api.py`
+
+Acceptance:
+
+- projects are represented as a projection/envelope over `business_id` with stable project keys and no tenant-crossing leakage;
+- issue/work-item projection includes `work_item_id`, `project_key`, `issue_type`, `status`, `status_category`, priority, assignee/owner, created/updated timestamps, and canonical `case_id` for detected Operational Cases;
+- status categories are deterministic (`to_do`, `in_progress`, `done` or explicitly documented alternatives) and terminal flags match existing `resolved`/`dismissed` behavior;
+- API/projection callers can read WorkItem-shaped output without bypassing the Operational Case store;
+- no new lifecycle transitions, LLM decisions, or owner-facing copy changes are introduced.
+
+## Packet T — Metric registry enforcement for Operational Cases
+
+Goal: promote the semantic metric registry from advisory diagnostics to an enforced gate for deterministic Operational Case creation while keeping previews/imports compatible.
+
+Dependency: dispatch after Packet R connector/semantic family alignment is green and after current CSV/Sheets/Tiendanube compatibility tests pass. Do not combine with connector execution rewrites.
+
+Source-of-truth check: current case evidence uses `default_metric_registry()` and `validate_metrics(..., strict=False)` but stores `metric_registry_mode: advisory`; current report merging still sums duplicate numeric keys or last-wins non-numeric/unit-mismatched keys outside registry-owned aggregation policy.
+
+Read:
+
+- `docs/architecture-reviews/2026-06-01-architecture-board-review.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/testing-invariant-matrix.md`
+
+Likely files:
+
+- `app/brain/semantics/metric_registry.py`
+- `app/brain/operational_cases.py`
+- `app/brain/pipeline.py`
+- `tests/contracts/test_metric_registry_contract.py`
+- `tests/test_brain_operational_cases.py`
+
+Acceptance:
+
+- Operational Case detection rejects, quarantines, or opens/updates `data_stale` for unknown/invalid operational metrics instead of letting them create owner-facing cases;
+- enforcement modes are explicit, at minimum separating preview/import advisory behavior from runtime case-creation behavior;
+- CSV/Sheets unknown metrics are marked custom/non-operational unless mapped to registered metrics;
+- duplicate-key aggregation policy is registry-defined or explicitly blocked for non-aggregatable metrics before cases are created;
+- compatibility tests prove legacy aliases still resolve and existing valid Tiendanube/CSV/Sheets reports remain green.
+
+## Packet U — Workflow action ledger and approval object foundation
+
+Goal: introduce durable workflow/action bookkeeping before any workflow automation can mutate cases or call external systems.
+
+Dependency: dispatch after Packet O Trust/Admin/Security audit closure and current workflow dry-run tests are green. This packet must keep workflow automation projection-only unless the durable ledger gate is fully implemented and tested.
+
+Source-of-truth check: current `workflow_automation.py` creates redacted planned-action projections with deterministic idempotency keys and audit-shaped payloads, but there is no durable approval object, workflow action ledger, or manual case-action idempotency enforcement.
+
+Read:
+
+- `docs/architecture-reviews/2026-06-01-architecture-board-review.md`
+- `docs/specs/d2c-action-key-catalog.md`
+- `docs/specs/internal-operator-api-contract.md`
+- `docs/specs/storage-migration-contract.md`
+- `docs/specs/testing-invariant-matrix.md`
+
+Likely files:
+
+- `app/brain/workflow_automation.py`
+- `app/brain/operator_api.py`
+- `app/brain/storage.py`
+- `tests/test_workflow_automation.py`
+- `tests/test_operator_case_actions.py`
+
+Acceptance:
+
+- workflow action ledger records action key, case/work item ref, actor/source, idempotency key, approval state, execution state, timestamps, and redacted params;
+- duplicate idempotency keys are enforced against durable storage, not only within one dry-run projection;
+- approval-required actions produce durable approval requests with deterministic lifecycle states and cannot execute as side effects;
+- manual case mutations either accept/enforce idempotency keys or are explicitly documented as non-automated operator actions with audit coverage from Packet O;
+- no external side effects are executed and existing dry-run projections remain backward-compatible.
 
 ## Packet output format
 
