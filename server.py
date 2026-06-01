@@ -424,17 +424,6 @@ def internal_brain_dashboard(business_id: str):
     )
 
 
-@app.get("/internal/brain/businesses/<business_id>/case-actions")
-def internal_brain_case_actions_catalog(business_id: str):
-    return _with_internal_stores(
-        business_id,
-        lambda case_store, run_ledger: _internal_success(
-            business_id,
-            list_case_action_catalog(business_id=business_id),
-        ),
-    )
-
-
 @app.get("/internal/brain/businesses/<business_id>/case-views")
 def internal_brain_case_views(business_id: str):
     return _with_internal_stores(

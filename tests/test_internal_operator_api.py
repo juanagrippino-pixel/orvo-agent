@@ -390,6 +390,20 @@ def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_pat
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_action_catalog_has_single_route_binding(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from server import app
+
+    routes = [
+        rule
+        for rule in app.url_map.iter_rules()
+        if rule.rule == "/internal/brain/businesses/<business_id>/case-actions"
+        and "GET" in (rule.methods or set())
+    ]
+
+    assert [route.endpoint for route in routes] == ["internal_brain_case_actions"]
+
+
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_run(db_path, business_id="artemea", run_id="run-artemea")
