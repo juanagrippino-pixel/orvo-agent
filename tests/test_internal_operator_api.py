@@ -16,6 +16,7 @@ from app.brain.storage import init_schema
 
 
 AUTH = {"Authorization": "Bearer test-internal-token", "X-Orvo-Operator": "operator:juan", "X-Request-ID": "req-test"}
+VIEWER_AUTH = {**AUTH, "X-Orvo-Role": "viewer", "X-Orvo-Operator": "viewer:ana"}
 
 
 def _utc(hour: int) -> datetime:
@@ -389,6 +390,50 @@ def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_pat
     assert body["business_id"] == "artemea"
     assert body["error"]["code"] == "unauthorized"
     assert body["redaction_applied"] is True
+
+
+def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(f"/internal/brain/businesses/artemea/cases/{case.case_id}", headers=VIEWER_AUTH)
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["case"]["case_id"] == case.case_id
+
+
+def test_internal_case_action_rejects_viewer_role_without_mutation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=VIEWER_AUTH,
+        json={"action_key": "acknowledge_case"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["error"]["code"] == "forbidden"
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+
+
+def test_internal_read_rejects_unknown_role(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}",
+        headers={**AUTH, "X-Orvo-Role": "superuser"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["error"]["code"] == "forbidden"
 
 
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):

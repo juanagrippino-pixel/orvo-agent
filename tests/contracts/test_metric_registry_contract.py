@@ -194,6 +194,21 @@ def test_detectable_operational_case_types_are_semantic_registry_families_or_exp
     assert implemented_case_types <= registered_case_families | explicitly_deferred_case_types
 
 
+def test_owner_facing_operational_case_types_are_semantic_registry_families():
+    """Owner surfaces must not expose internal/deferred case families.
+
+    OperationalCaseType can include future catalog targets such as
+    channel_mix_shift, but WhatsApp/operator owner projections are limited to
+    families with CASE_FAMILY_METRICS evidence contracts.
+    """
+
+    from app.brain.operational_cases import OWNER_FACING_OPERATIONAL_CASE_TYPES
+    from app.brain.semantics.metric_registry import CASE_FAMILY_METRICS
+
+    assert OWNER_FACING_OPERATIONAL_CASE_TYPES == set(CASE_FAMILY_METRICS)
+    assert "channel_mix_shift" not in OWNER_FACING_OPERATIONAL_CASE_TYPES
+
+
 def test_connector_emitted_metric_families_are_registered_or_explicitly_compatible():
     from app.brain.connector_registry import list_connector_specs
     from app.brain.semantics.metric_registry import CONNECTOR_FAMILY_COMPATIBILITY, default_metric_registry

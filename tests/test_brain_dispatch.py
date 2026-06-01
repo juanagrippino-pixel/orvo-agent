@@ -17,11 +17,16 @@ def make_report():
     )
 
 
-def make_owner_case(case_id: str = "case-1", *, status: str = "open") -> OperationalCase:
+def make_owner_case(
+    case_id: str = "case-1",
+    *,
+    status: str = "open",
+    case_type: str = "stockout_risk",
+) -> OperationalCase:
     return OperationalCase(
         case_id=case_id,
         business_id="artemea",
-        case_type="stockout_risk",
+        case_type=case_type,  # type: ignore[arg-type]
         dedupe_key=f"artemea/stockout/{case_id}",
         title="Stock crítico access_token=raw_dispatch_secret",
         status=status,  # type: ignore[arg-type]
@@ -39,7 +44,7 @@ def make_owner_case(case_id: str = "case-1", *, status: str = "open") -> Operati
                 evidence_ref="evidence://tiendanube/stock?access_token=raw_dispatch_secret",
                 source="tiendanube",
                 source_label="Tiendanube",
-                case_type="stockout_risk",
+                case_type=case_type,  # type: ignore[arg-type]
                 summary="Quedan pocas unidades Bearer raw_dispatch_secret",
                 freshness_state="fresh",
                 metrics=[
@@ -131,6 +136,23 @@ def test_dispatch_owner_case_brief_skips_without_actionable_cases():
 
     result = dispatch_owner_case_brief(
         cases=[make_owner_case("resolved", status="resolved")],
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+
+    assert result is None
+    delivery_client.send_text.assert_not_called()
+
+
+def test_dispatch_owner_case_brief_skips_internal_only_case_families():
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+
+    result = dispatch_owner_case_brief(
+        cases=[make_owner_case("internal", case_type="channel_mix_shift")],
         business=make_business(),
         report_date=date(2026, 5, 19),
         delivery_client=delivery_client,

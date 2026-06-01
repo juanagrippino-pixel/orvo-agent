@@ -11,7 +11,7 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal, Protocol
+from typing import Any, Iterable, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -35,6 +35,7 @@ OperationalCaseType = Literal[
     "channel_mix_shift",
 ]
 DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
+OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
@@ -345,6 +346,22 @@ class OperationalCase(BaseModel):
         if self.status != "dismissed" and self.dismissed_at is not None:
             raise ValueError("only dismissed cases may have dismissed_at")
         return self
+
+
+def is_owner_facing_operational_case(case: OperationalCase) -> bool:
+    """Return whether a case family is promoted for owner-facing projections."""
+
+    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES
+
+
+def owner_facing_actionable_cases(cases: Iterable[OperationalCase]) -> list[OperationalCase]:
+    """Filter canonical cases to the subset eligible for owner-facing action surfaces."""
+
+    return [
+        case
+        for case in cases
+        if case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES and is_owner_facing_operational_case(case)
+    ]
 
 
 def _unique_snapshots(snapshots: list[OperationalCaseEvidenceSnapshot]) -> list[OperationalCaseEvidenceSnapshot]:
