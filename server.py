@@ -63,6 +63,7 @@ from app.brain.operator_api import (
     summarize_case_queue_by_priority_bracket,
     summarize_case_queue_by_source_connector,
     summarize_case_queue_aging,
+    summarize_case_queue_aging_by_case_type,
     summarize_case_queue_aging_by_priority_bracket,
     summarize_case_queue_aging_by_severity,
     summarize_case_queue_stagnation,
@@ -332,6 +333,21 @@ def internal_brain_cases_aging_by_priority_bracket(business_id: str):
         lambda case_store, run_ledger: _internal_success(
             business_id,
             summarize_case_queue_aging_by_priority_bracket(
+                case_store,
+                business_id=business_id,
+                now=datetime.now(timezone.utc),
+            ),
+        ),
+    )
+
+
+@app.get("/internal/brain/businesses/<business_id>/cases/aging/by-case-type")
+def internal_brain_cases_aging_by_case_type(business_id: str):
+    return _with_internal_stores(
+        business_id,
+        lambda case_store, run_ledger: _internal_success(
+            business_id,
+            summarize_case_queue_aging_by_case_type(
                 case_store,
                 business_id=business_id,
                 now=datetime.now(timezone.utc),
