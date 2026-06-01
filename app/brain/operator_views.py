@@ -91,6 +91,7 @@ _FIELD_SPECS: dict[str, FieldSpec] = {
     "latest_run_id": FieldSpec("string"),
     "source_connector": FieldSpec("string"),
     "degraded": FieldSpec("bool", None, frozenset({"=", "!="})),
+    "assigned": FieldSpec("bool", None, frozenset({"=", "!="})),
     "dedupe_key": FieldSpec("string", None, frozenset({"=", "!="})),
     "opened_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
     "updated_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
@@ -153,6 +154,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "label": "Connector degraded",
         "description": "Actionable cases whose evidence is stale, degraded, or missing.",
         "jql": "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "unassigned_actionable",
+        "label": "Unassigned actionable cases",
+        "description": "Open, acknowledged, or in-progress cases without an assigned operator.",
+        "jql": "status IN (open, acknowledged, in_progress) AND assigned = false ORDER BY priority_score DESC",
         "readonly": True,
     },
 )
@@ -379,6 +387,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_issue_type(case)
     if field == "status_category":
         return case_status_category(case)
+    if field == "assigned":
+        return case.assignee_ref is not None
     return getattr(case, field)
 
 
