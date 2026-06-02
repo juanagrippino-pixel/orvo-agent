@@ -12,8 +12,9 @@ Se completaron e integraron en orden los goals aprobados de `GROWTH_PLAN.md`:
 2. Goal 2 — Packet Q: secret-ref execution hardening.
 3. Goal 7 — Packet U: durable action ledger + approval object foundation, sin side effects externos.
 4. Goal 3 — product depth: `data_stale` + `stockout_risk` como case family existente.
+5. Goal 4 — connector nuevo read-only: WooCommerce daily report connector.
 
-No se ejecutó ningún side effect externo. No se avanzó sobre Goals 4, 5, 6, 8 ni 9.
+Se hizo push remoto de los commits locales anteriores y de Goal 4 por aprobación explícita del usuario. No se ejecutaron mutaciones reales ni side effects externos de negocio. No se avanzó sobre Goals 5, 6, 8 ni 9.
 
 ## Commits integrados
 
@@ -23,6 +24,7 @@ No se ejecutó ningún side effect externo. No se avanzó sobre Goals 4, 5, 6, 8
 | 2 | Goal 2 / Packet Q | `codex/growth-goal2-packet-q` / `/root/orvo-agent-worktrees/growth-goal2-packet-q` | `7adae3d` | `feat: harden connector secret ref execution` |
 | 3 | Goal 7 / Packet U | `codex/growth-goal7-packet-u` / `/root/orvo-agent-worktrees/growth-goal7-packet-u` | `14e4b52` | `feat: add workflow action approval ledger` |
 | 4 | Goal 3 product depth | `codex/growth-goal3-product-depth` / `/root/orvo-agent-worktrees/growth-goal3-product-depth` | `027123a` | `feat: suppress stale stockout cases` |
+| 5 | Goal 4 connector nuevo | `codex/growth-goal4-woocommerce` / `/root/orvo-agent-worktrees/growth-goal4-woocommerce` | `12f3a8b` | `feat: add woocommerce daily report connector` |
 
 ## Goal 1 — Packet O: audit/RBAC live-use gate
 
@@ -104,6 +106,28 @@ Verificación:
 - Suite post-merge: `1178 passed in 12.38s` (`/tmp/goal3_parent_full.txt`).
 - `docs/specs` diff: `0` bytes (`/tmp/goal3_specs.diff`).
 
+## Goal 4 — connector nuevo read-only: WooCommerce
+
+Implementado:
+
+- `app/brain/adapters/woocommerce.py` con acceso read-only a WooCommerce REST API para orders y products.
+- Connector registry para `woocommerce` con:
+  - `store_url` como config pública requerida.
+  - `consumer_key` y `consumer_secret` como `secret_refs` requeridas.
+  - scopes declarados `orders.read` y `products.read`.
+  - service binding `woocommerce_http_client` para tests/runtime sin llamadas reales.
+- Pipeline wrapper `run_woocommerce_daily_report_pipeline(...)` y soporte en runner/scheduled + script forced.
+- Metric registry extendido para autorizar `woocommerce` como source de commerce/runtime families existentes.
+- Tests nuevos para adapter, secret refs, redaction, envelope validation, pipeline dispatch y compiled runtime artifacts.
+
+Verificación:
+
+- Focused nuevo: `6 passed in 0.53s` (`tests/test_brain_woocommerce_adapter.py tests/test_brain_woocommerce_pipeline.py`).
+- Focused/contract set: `220 passed in 1.14s`.
+- Suite worktree: `1184 passed in 13.98s` (`/tmp/goal4_woocommerce_full.txt`).
+- Suite post-merge: `1184 passed in 13.19s` (`/tmp/goal4_parent_full.txt`).
+- `docs/specs` diff: `0` bytes (`/tmp/goal4_specs.diff`).
+
 ## Contratos / specs
 
 No se modificaron archivos bajo `docs/specs/` en ninguno de los goals ejecutados.
@@ -114,6 +138,7 @@ Verificación de diffs:
 - `/tmp/goal2_specs.diff`: `0` bytes.
 - `/tmp/goal7_specs.diff`: `0` bytes.
 - `/tmp/goal3_specs.diff`: `0` bytes.
+- `/tmp/goal4_specs.diff`: `0` bytes.
 
 ## Side effects externos
 
@@ -121,11 +146,11 @@ No ejecutados.
 
 En particular:
 
-- No se llamaron connectors reales.
+- No se llamaron connectors reales durante tests/verificación.
 - No se ejecutaron mutaciones reales.
 - No se enviaron mensajes a clientes.
 - No se avanzó Goal 9.
-- No se hizo push remoto durante esta corrida.
+- Se hizo push remoto de commits Git por aprobación explícita; no implica side effects de negocio.
 
 ## Blockers
 
@@ -140,7 +165,6 @@ Incidentes resueltos durante la corrida:
 
 No ejecutar sin aprobación nueva:
 
-- Goal 4 — connectors nuevos.
 - Goal 5 — explicaciones conversacionales.
 - Goal 6 — APM.
 - Goal 8 — onboarding multi-cliente.
@@ -149,11 +173,11 @@ No ejecutar sin aprobación nueva:
 Follow-ups no bloqueantes:
 
 - Mantener pendiente la parity Docker `python:3.13-slim` vs baseline local Python `3.11.15` si se decide formalizar esa matriz.
-- Decidir si se quiere push remoto de la rama `feat/orvo-brain-control-plane` con los commits locales; no se hizo para respetar el guardrail de no side effects externos.
+- Mantener WooCommerce como read-only hasta tener credenciales/sandbox y un runbook de primera conexión.
 
 ## Estado final verificado antes de este reporte
 
-- HEAD antes del reporte: `027123a feat: suppress stale stockout cases`.
+- HEAD antes del update de reporte Goal 4: `12f3a8b feat: add woocommerce daily report connector`.
 - Rama local: `feat/orvo-brain-control-plane`.
-- Estado Git antes del reporte: ahead de `origin/feat/orvo-brain-control-plane` por commits locales, sin cambios no commiteados salvo este reporte al momento de escribirlo.
-- Última suite post-merge de código: `1178 passed in 12.38s`.
+- Estado Git antes del update de reporte Goal 4: ahead de `origin/feat/orvo-brain-control-plane` por el commit Goal 4, sin cambios no commiteados salvo este reporte al momento de escribirlo.
+- Última suite post-merge de código: `1184 passed in 13.19s`.
