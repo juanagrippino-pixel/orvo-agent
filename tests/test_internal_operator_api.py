@@ -1196,6 +1196,118 @@ def test_internal_viewer_role_can_read_operator_projections(monkeypatch, tmp_pat
     assert response.get_json()["data"]["cases"][0]["business_id"] == "artemea"
 
 
+def test_internal_read_endpoint_allows_operator_with_matching_business_grant(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?status=open",
+        headers={**AUTH, "X-Orvo-Businesses": "other, artemea"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["cases"][0]["business_id"] == "artemea"
+
+
+def test_internal_read_endpoint_denies_operator_without_business_grant_and_audits(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+    raw_scope_secret = "raw_business_scope_secret"
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?status=open",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": f"other, access_token={raw_scope_secret}",
+            "X-Request-ID": "req-business-scope-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "forbidden"
+    assert raw_scope_secret not in response.get_data(as_text=True)
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    business_id, actor_ref, event_type, target_type, target_id, request_id, raw_data = rows[0]
+    assert business_id == "artemea"
+    assert actor_ref == "operator:juan"
+    assert event_type == "internal_operator_authorization_denied"
+    assert target_type == "internal_operator_api"
+    assert target_id == "/internal/brain/businesses/artemea/cases"
+    assert request_id == "req-business-scope-denied"
+    assert raw_scope_secret not in raw_data
+    assert json.loads(raw_data) == {
+        "allowed_businesses": ["other", "access_token=[REDACTED]"],
+        "method": "GET",
+        "permission": "business:access",
+        "reason": "business_scope_denied",
+        "role": "operator",
+        "status": "denied",
+        "status_code": 403,
+    }
+
+
+def test_internal_case_action_denies_operator_without_business_grant_before_mutation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "other",
+            "X-Request-ID": "req-business-scope-action-denied",
+        },
+        json={"action_key": "acknowledge_case"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "forbidden"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+    assert len(rows) == 1
+    business_id, actor_ref, event_type, target_type, target_id, request_id, raw_data = rows[0]
+    assert business_id == "artemea"
+    assert actor_ref == "operator:juan"
+    assert event_type == "internal_operator_authorization_denied"
+    assert target_type == "operational_case"
+    assert target_id == case.case_id
+    assert request_id == "req-business-scope-action-denied"
+    assert json.loads(raw_data) == {
+        "action_key": "acknowledge_case",
+        "allowed_businesses": ["other"],
+        "method": "POST",
+        "permission": "business:access",
+        "reason": "business_scope_denied",
+        "role": "operator",
+        "status": "denied",
+        "status_code": 403,
+    }
+
+
 def test_internal_read_endpoints_deny_unknown_role_and_audit_without_leaking_role_secret(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())

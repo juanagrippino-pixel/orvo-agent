@@ -114,6 +114,7 @@ Before exposing beyond local/dev:
 
 - authenticate operator identity;
 - scope access to business/tenant;
+- enforce operator business grants when `X-Orvo-Businesses` is present: comma-separated business IDs grant only those businesses, `*` grants all, and an empty/present header fails closed while legacy callers without the header remain token-scoped during migration;
 - log mutating actions with actor ref;
 - enforce role/scope authorization for mutating endpoints (initial roles: `viewer` is read-only, `operator`/`admin` may apply case actions; legacy authenticated callers without a role header default to `operator` until full RBAC is migrated);
 - audit authorization denials without persisting request payload secrets;
@@ -127,6 +128,7 @@ Before exposing beyond local/dev:
 - readiness endpoint redacts secret refs;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
+- internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial;
 - case action rejects unknown action keys;
 - audit event list is business-scoped, bounded, and redacted;
 - responses include `redaction_applied=true`.

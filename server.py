@@ -76,6 +76,7 @@ from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
     build_internal_operator_principal,
+    require_internal_business_scope,
     require_internal_permission,
 )
 from app.brain.delivery_status import (
@@ -209,6 +210,26 @@ def _authorize_internal_operator(business_id: str):
     return None
 
 
+def _authorization_denial_data(exc: InternalOperatorAuthorizationError) -> dict:
+    data = {
+        "status": "denied",
+        "reason": exc.code,
+        "status_code": exc.status_code,
+        "method": request.method,
+        "role": exc.role,
+        "permission": exc.permission,
+    }
+    if exc.allowed_businesses is not None:
+        data["allowed_businesses"] = list(exc.allowed_businesses)
+    return data
+
+
+def _internal_operator_business_grants_header() -> str | None:
+    if "X-Orvo-Businesses" not in request.headers:
+        return None
+    return request.headers.get("X-Orvo-Businesses", "")
+
+
 def _record_internal_authorization_denial(
     audit_store: SQLiteOperatorAuditStore,
     *,
@@ -224,14 +245,7 @@ def _record_internal_authorization_denial(
         target_type=target_type,
         target_id=target_id,
         request_id=_internal_request_id(),
-        data={
-            "status": "denied",
-            "reason": exc.code,
-            "status_code": exc.status_code,
-            "method": request.method,
-            "role": exc.role,
-            "permission": exc.permission,
-        },
+        data=_authorization_denial_data(exc),
     )
 
 
@@ -246,7 +260,9 @@ def _authorize_internal_read_permission(
         principal = build_internal_operator_principal(
             actor_ref=request.headers.get("X-Orvo-Operator", ""),
             role=request.headers.get("X-Orvo-Role"),
+            allowed_businesses_header=_internal_operator_business_grants_header(),
         )
+        require_internal_business_scope(principal, business_id)
         require_internal_permission(principal, INTERNAL_READ_PERMISSION)
     except InternalOperatorAuthorizationError as exc:
         _record_internal_authorization_denial(
@@ -645,7 +661,9 @@ def internal_brain_case_action(business_id: str, case_id: str):
             principal = build_internal_operator_principal(
                 actor_ref=actor_ref,
                 role=request.headers.get("X-Orvo-Role"),
+                allowed_businesses_header=_internal_operator_business_grants_header(),
             )
+            require_internal_business_scope(principal, business_id)
             require_internal_permission(principal, CASE_ACTION_PERMISSION)
         except InternalOperatorAuthorizationError as exc:
             audit_store.append_event(
@@ -655,15 +673,7 @@ def internal_brain_case_action(business_id: str, case_id: str):
                 target_type="operational_case",
                 target_id=case_id,
                 request_id=_internal_request_id(),
-                data={
-                    "status": "denied",
-                    "reason": exc.code,
-                    "status_code": exc.status_code,
-                    "method": request.method,
-                    "role": exc.role,
-                    "permission": exc.permission,
-                    "action_key": action_key,
-                },
+                data={**_authorization_denial_data(exc), "action_key": action_key},
             )
             raise OperatorAPIError("forbidden", "Forbidden", status_code=403) from exc
 
@@ -713,7 +723,9 @@ def internal_brain_audit_events(business_id: str):
             principal = build_internal_operator_principal(
                 actor_ref=request.headers.get("X-Orvo-Operator", ""),
                 role=request.headers.get("X-Orvo-Role"),
+                allowed_businesses_header=_internal_operator_business_grants_header(),
             )
+            require_internal_business_scope(principal, business_id)
             require_internal_permission(principal, AUDIT_READ_PERMISSION)
         except InternalOperatorAuthorizationError as exc:
             audit_store.append_event(
@@ -723,14 +735,7 @@ def internal_brain_audit_events(business_id: str):
                 target_type="operator_audit_events",
                 target_id=business_id,
                 request_id=_internal_request_id(),
-                data={
-                    "status": "denied",
-                    "reason": exc.code,
-                    "status_code": exc.status_code,
-                    "method": request.method,
-                    "role": exc.role,
-                    "permission": exc.permission,
-                },
+                data=_authorization_denial_data(exc),
             )
             raise OperatorAPIError("forbidden", "Forbidden", status_code=403) from exc
 
