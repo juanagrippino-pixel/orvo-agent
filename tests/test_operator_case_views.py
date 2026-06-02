@@ -662,3 +662,97 @@ def test_internal_case_view_unknown_view_returns_enveloped_404(monkeypatch, tmp_
     assert body["ok"] is False
     assert body["error"]["code"] == "case_view_not_found"
     assert body["redaction_applied"] is True
+
+
+def test_internal_case_view_export_returns_scoped_redacted_rows(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    exported = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-export",
+            title="Stock crítico access_token=raw_export_secret",
+            priority=95,
+            entity_scope={"kind": "sku", "id": "SKU-1", "label": "Campera"},
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-lower",
+            dedupe_suffix="stockout_risk/sku/LOW/inventory.on_hand/daily",
+            title="Stock menor",
+            priority=80,
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-other", business_id="other", priority=100))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views/open_cases/export?limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["view"] == {"view_id": "open_cases", "label": "Open cases", "readonly": True}
+    assert body["data"]["export"]["format"] == "case_view_rows_v1"
+    assert body["data"]["export"]["limit"] == 1
+    assert body["data"]["export"]["count"] == 1
+    assert body["data"]["export"]["total"] == 2
+    assert body["data"]["export"]["truncated"] is True
+    assert body["data"]["export"]["columns"] == [
+        "case_id",
+        "business_id",
+        "case_type",
+        "status",
+        "severity",
+        "priority_score",
+        "title",
+        "entity_kind",
+        "entity_id",
+        "entity_label",
+        "assignee_ref",
+        "opened_at",
+        "updated_at",
+        "latest_run_id",
+        "source_connectors",
+        "degraded",
+    ]
+    assert body["data"]["rows"] == [
+        {
+            "case_id": exported.case_id,
+            "business_id": "artemea",
+            "case_type": "stockout_risk",
+            "status": "open",
+            "severity": "critical",
+            "priority_score": 95,
+            "title": "Stock crítico access_token=[REDACTED]",
+            "entity_kind": "sku",
+            "entity_id": "SKU-1",
+            "entity_label": "Campera",
+            "assignee_ref": None,
+            "opened_at": exported.opened_at.isoformat(),
+            "updated_at": exported.updated_at.isoformat(),
+            "latest_run_id": "run-export",
+            "source_connectors": ["tiendanube"],
+            "degraded": False,
+        }
+    ]
+    raw_response = response.get_data(as_text=True)
+    assert "raw_export_secret" not in raw_response
+    assert "other" not in {row["business_id"] for row in body["data"]["rows"]}
+    assert body["redaction_applied"] is True
+
+
+def test_internal_case_view_export_rejects_unknown_view_without_echoing_secret(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views/access_token=raw_export_secret/export",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"]["code"] == "case_view_not_found"
+    assert "raw_export_secret" not in response.get_data(as_text=True)
