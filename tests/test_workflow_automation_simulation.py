@@ -23,7 +23,11 @@ from app.brain.workflow_automation import (
     make_workflow_idempotency_key,
     simulate_case_workflow,
 )
-from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+from app.brain.workflow_action_ledger import (
+    InMemoryWorkflowActionLedgerStore,
+    SQLiteWorkflowActionLedgerStore,
+    WorkflowActionLedgerError,
+)
 
 
 def utc(hour: int, minute: int = 0) -> datetime:
@@ -416,7 +420,11 @@ def test_workflow_action_ledger_records_approval_request_without_external_side_e
         actions=[
             WorkflowAction(
                 action_key="request_external_action",
-                params={"target": "supplier", "Authorization": "Basic raw_approval_secret"},
+                params={
+                    "target": "supplier",
+                    "reason": "Request emergency supplier restock",
+                    "Authorization": "Basic raw_approval_secret",
+                },
             )
         ],
     )
@@ -490,3 +498,123 @@ def test_workflow_action_ledger_enforces_duplicate_idempotency_keys_across_store
     assert second_ledger.list_approval_requests(business_id="artemea") == []
     assert "raw_durable_duplicate" not in str(first)
     assert "raw_durable_duplicate" not in str(second)
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_approval_decision_approves_pending_gate_without_executing_side_effects(tmp_path, store_factory):
+    _, case = seed_case()
+    ledger = store_factory(tmp_path)
+    rule = WorkflowRule(
+        rule_id="approve-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier",
+                    "reason": "Request supplier restock",
+                    "Authorization": "Basic raw_decision_planning_secret",
+                },
+            )
+        ],
+    )
+    planned = simulate_case_workflow(rule, case, now=utc(17), action_ledger=ledger, actor_ref="operator:ana")
+    approval_request_id = planned["actions"][0]["approval_request_id"]
+
+    decision = ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_request_id,
+        decision="approved",
+        actor_ref="manager token=raw_decision_actor_secret",
+        reason="Approved after call Authorization: Basic raw_decision_reason_secret",
+        now=utc(17, 30),
+    )
+
+    assert decision.record.approval_state == "approved"
+    assert decision.record.execution_state == "pending_execution"
+    assert decision.approval_request.status == "approved"
+    assert decision.approval_request.decided_at == utc(17, 30)
+    assert decision.approval_request.decision_actor_ref == "manager token=[REDACTED]"
+    assert decision.approval_request.decision_reason == "Approved after call Authorization: [REDACTED]"
+    assert decision.side_effects_executed == 0
+    assert decision.audit_event == {
+        "event_type": "workflow_approval_decided",
+        "business_id": "artemea",
+        "approval_request_id": approval_request_id,
+        "ledger_id": decision.record.ledger_id,
+        "case_id": case.case_id,
+        "action_key": "request_external_action",
+        "decision": "approved",
+        "approval_state": "approved",
+        "execution_state": "pending_execution",
+        "actor_ref": "manager token=[REDACTED]",
+        "reason": "Approved after call Authorization: [REDACTED]",
+        "created_at": "2026-05-31T17:30:00Z",
+    }
+    assert "raw_decision" not in str(decision)
+    [listed_record] = ledger.list_actions(business_id="artemea")
+    assert listed_record.approval_state == "approved"
+    assert listed_record.execution_state == "pending_execution"
+
+
+def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_decision(tmp_path):
+    _, case = seed_case()
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
+    rule = WorkflowRule(
+        rule_id="reject-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={"target": "supplier", "reason": "Request supplier restock"},
+            )
+        ],
+    )
+    planned = simulate_case_workflow(rule, case, now=utc(18), action_ledger=ledger, actor_ref="operator:ana")
+    approval_request_id = planned["actions"][0]["approval_request_id"]
+
+    with pytest.raises(WorkflowActionLedgerError) as cross_scope:
+        ledger.decide_approval_request(
+            business_id="other-business",
+            approval_request_id=approval_request_id,
+            decision="approved",
+            actor_ref="manager",
+            reason="Cross scope should not see this",
+            now=utc(18, 10),
+        )
+
+    assert cross_scope.value.code == "approval_request_not_found"
+
+    first_decision = ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_request_id,
+        decision="rejected",
+        actor_ref="manager",
+        reason="Do not restock",
+        now=utc(18, 15),
+    )
+
+    assert first_decision.record.approval_state == "rejected"
+    assert first_decision.record.execution_state == "failed"
+    with pytest.raises(WorkflowActionLedgerError) as second_decision:
+        ledger.decide_approval_request(
+            business_id="artemea",
+            approval_request_id=approval_request_id,
+            decision="approved",
+            actor_ref="manager",
+            reason="Cannot reverse rejected approval token=raw_second_decision_secret",
+            now=utc(18, 20),
+        )
+
+    assert second_decision.value.code == "approval_request_already_decided"
+    assert "raw_second_decision_secret" not in second_decision.value.message
