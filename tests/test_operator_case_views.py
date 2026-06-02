@@ -582,8 +582,44 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
         "status IN (open, acknowledged, in_progress) AND assigned = false ORDER BY priority_score DESC"
     )
     assert all(view["readonly"] is True for view in views.values())
+    assert all("total" not in view for view in views.values())
     assert "business_id" not in " ".join(view["jql"] for view in views.values())
     assert body["redaction_applied"] is True
+
+
+
+def test_internal_case_views_can_include_scoped_totals_without_returning_cases(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-open", priority=90))
+    _seed_case(db_path, _case_detection(run_id="run-other", business_id="other", priority=100))
+
+    response = client.get("/internal/brain/businesses/artemea/case-views?include_totals=true", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    views = {view["view_id"]: view for view in body["data"]["views"]}
+    assert views["open_cases"]["total"] == 1
+    assert views["stockout_risk"]["total"] == 1
+    assert views["unassigned_actionable"]["total"] == 1
+    assert views["actionable_cases"]["total"] == 1
+    assert all(view["readonly"] is True for view in views.values())
+    assert all("cases" not in view for view in views.values())
+    assert body["data"]["include_totals"] is True
+    assert body["redaction_applied"] is True
+
+
+
+def test_internal_case_views_reject_invalid_include_totals_without_echoing_secrets(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views?include_totals=access_token%3Draw_view_secret",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "invalid_include_totals"
+    assert "raw_view_secret" not in response.get_data(as_text=True)
 
 
 def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_path):
