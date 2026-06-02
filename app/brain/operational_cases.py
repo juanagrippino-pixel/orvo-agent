@@ -22,10 +22,18 @@ from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
 
 OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved", "dismissed"]
+OperationalCaseStatusCategory = Literal["to_do", "in_progress", "done"]
 ACTIONABLE_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset(
     {"open", "acknowledged", "in_progress"}
 )
 TERMINAL_OPERATIONAL_CASE_STATUSES: frozenset[OperationalCaseStatus] = frozenset({"resolved", "dismissed"})
+OPERATIONAL_CASE_STATUS_CATEGORIES: dict[OperationalCaseStatus, OperationalCaseStatusCategory] = {
+    "open": "to_do",
+    "acknowledged": "in_progress",
+    "in_progress": "in_progress",
+    "resolved": "done",
+    "dismissed": "done",
+}
 OperationalCaseType = Literal[
     "sales_drop",
     "stockout_risk",
@@ -50,7 +58,7 @@ TimelineEventType = Literal[
 ]
 ActorType = Literal["system", "operator"]
 
-_CASE_STATUS_TRANSITIONS: dict[str, set[str]] = {
+_CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]] = {
     "open": {"acknowledged", "in_progress", "dismissed"},
     "acknowledged": {"in_progress", "resolved", "dismissed"},
     "in_progress": {"resolved", "dismissed"},
@@ -61,6 +69,18 @@ _CASE_STATUS_TRANSITIONS: dict[str, set[str]] = {
 
 class OperationalCaseStatusError(ValueError):
     """Raised when a case lifecycle transition is invalid."""
+
+
+def operational_case_status_category(status: OperationalCaseStatus) -> OperationalCaseStatusCategory:
+    """Return the canonical Jira-like category for an Operational Case status."""
+
+    return OPERATIONAL_CASE_STATUS_CATEGORIES[status]
+
+
+def operational_case_status_transitions() -> dict[OperationalCaseStatus, frozenset[OperationalCaseStatus]]:
+    """Return a copy of the current deterministic case lifecycle transition table."""
+
+    return {status: frozenset(targets) for status, targets in _CASE_STATUS_TRANSITIONS.items()}
 
 
 def _now_utc() -> datetime:
