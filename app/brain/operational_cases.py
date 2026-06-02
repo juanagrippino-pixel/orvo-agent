@@ -372,9 +372,9 @@ class OperationalCase(BaseModel):
 
 
 def is_owner_facing_operational_case(case: OperationalCase) -> bool:
-    """Return whether a case family is promoted for owner-facing projections."""
+    """Return whether a case is eligible for owner-facing projections."""
 
-    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES
+    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES and bool(case.evidence_snapshots)
 
 
 def owner_facing_actionable_cases(cases: Iterable[OperationalCase]) -> list[OperationalCase]:
