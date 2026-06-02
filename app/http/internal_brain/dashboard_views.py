@@ -8,6 +8,7 @@ from app.brain.operator_api import *  # noqa: F401,F403
 from app.brain.operator_auth import CASE_ACTION_PERMISSION
 
 from .common import (
+    _append_operator_audit_event,
     _internal_success,
     _internal_error,
     _internal_principal_or_error,
@@ -96,10 +97,22 @@ def register_dashboard_view_routes(app):
         def _handle(case_store, run_ledger):
             permission_error = _require_internal_header_permission(business_id, CASE_ACTION_PERMISSION)
             if permission_error is not None:
+                _append_operator_audit_event(
+                    business_id=business_id,
+                    actor_ref=actor_ref,
+                    event_type="operator.case_action.denied",
+                    target_type="operational_case",
+                    target_id=case_id,
+                    data={
+                        "action_key": str(payload.get("action_key", "")),
+                        "permission": CASE_ACTION_PERMISSION,
+                        "status_code": 403,
+                        "payload": payload,
+                    },
+                )
                 return permission_error
-            return _internal_success(
-                business_id,
-                apply_case_action(
+            try:
+                data = apply_case_action(
                     case_store,
                     business_id=business_id,
                     case_id=case_id,
@@ -110,7 +123,22 @@ def register_dashboard_view_routes(app):
                     metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
                     assignee_ref=payload.get("assignee_ref"),
                     owner_ref=payload.get("owner_ref"),
-                ),
-            )
+                )
+            except OperatorAPIError as exc:
+                _append_operator_audit_event(
+                    business_id=business_id,
+                    actor_ref=actor_ref,
+                    event_type="operator.case_action.failed",
+                    target_type="operational_case",
+                    target_id=case_id,
+                    data={
+                        "action_key": str(payload.get("action_key", "")),
+                        "error_code": exc.code,
+                        "status_code": exc.status_code,
+                        "payload": payload,
+                    },
+                )
+                raise
+            return _internal_success(business_id, data)
 
         return _with_internal_stores(business_id, _handle)

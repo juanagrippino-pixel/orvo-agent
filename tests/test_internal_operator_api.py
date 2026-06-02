@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -1114,3 +1115,128 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
     assert missing.status_code == 401
     assert wrong.status_code == 401
     assert missing.get_json()["error"]["code"] == "unauthorized"
+
+
+def _audit_events(db_path) -> list[dict]:
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT event_id, business_id, actor_ref, event_type, target_type,
+               target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC, event_id ASC
+        """
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "event_id": event_id,
+            "business_id": business_id,
+            "actor_ref": actor_ref,
+            "event_type": event_type,
+            "target_type": target_type,
+            "target_id": target_id,
+            "request_id": request_id,
+            "data": json.loads(data),
+        }
+        for event_id, business_id, actor_ref, event_type, target_type, target_id, request_id, data in rows
+    ]
+
+
+def test_internal_case_action_denial_writes_redacted_operator_audit_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**VIEWER_AUTH, "X-Request-ID": "req-denied"},
+        json={
+            "action_key": "acknowledge_case",
+            "metadata": {"api_key": "raw_audit_secret"},
+        },
+    )
+
+    assert response.status_code == 403
+    raw_response = response.get_data(as_text=True)
+    assert "raw_audit_secret" not in raw_response
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "viewer:ana"
+    assert event["event_type"] == "operator.case_action.denied"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-denied"
+    assert event["data"]["action_key"] == "acknowledge_case"
+    assert event["data"]["permission"] == "case:action"
+    assert event["data"]["status_code"] == 403
+    assert event["data"]["payload"]["metadata"]["api_key"] == "[REDACTED]"
+    assert "raw_audit_secret" not in json.dumps(event, sort_keys=True)
+
+
+def test_internal_case_action_failure_writes_redacted_operator_audit_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-failed"},
+        json={
+            "action_key": "unknown_action",
+            "comment": "Authorization: Basic cmF3X2F1ZGl0X3NlY3JldA==",
+            "metadata": {"access_token": "raw_audit_secret"},
+        },
+    )
+
+    assert response.status_code == 400
+    raw_response = response.get_data(as_text=True)
+    assert "raw_audit_secret" not in raw_response
+    assert "cmF3X2F1ZGl0X3NlY3JldA==" not in raw_response
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "operator:juan"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-failed"
+    assert event["data"]["action_key"] == "unknown_action"
+    assert event["data"]["error_code"] == "unknown_action_key"
+    assert event["data"]["status_code"] == 400
+    serialized = json.dumps(event, sort_keys=True)
+    assert "raw_audit_secret" not in serialized
+    assert "cmF3X2F1ZGl0X3NlY3JldA==" not in serialized
+
+
+def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    viewer_case = _seed_case(db_path, _case_detection(run_id="run-viewer"))
+    operator_case = _seed_case(db_path, _case_detection(run_id="run-operator", dedupe_suffix="operator/case"))
+    admin_case = _seed_case(db_path, _case_detection(run_id="run-admin", dedupe_suffix="admin/case"))
+
+    viewer = client.post(
+        f"/internal/brain/businesses/artemea/cases/{viewer_case.case_id}/actions",
+        headers=VIEWER_AUTH,
+        json={"action_key": "acknowledge_case"},
+    )
+    operator = client.post(
+        f"/internal/brain/businesses/artemea/cases/{operator_case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "operator"},
+        json={"action_key": "acknowledge_case"},
+    )
+    admin = client.post(
+        f"/internal/brain/businesses/artemea/cases/{admin_case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+        json={"action_key": "acknowledge_case"},
+    )
+
+    assert viewer.status_code == 403
+    assert operator.status_code == 200
+    assert admin.status_code == 200
+    conn = sqlite3.connect(db_path)
+    store = SQLiteOperationalCaseStore(conn)
+    assert store.get_case(viewer_case.case_id).status == "open"  # type: ignore[union-attr]
+    assert store.get_case(operator_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
+    assert store.get_case(admin_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
+    conn.close()

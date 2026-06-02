@@ -9,6 +9,7 @@ from uuid import uuid4
 from flask import jsonify, request
 
 from app.brain.operator_api import OperatorAPIError
+from app.brain.operator_audit import SQLiteOperatorAuditStore
 
 from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
@@ -81,6 +82,30 @@ def _authorize_internal_operator(business_id: str):
 
 def _internal_brain_db_path() -> str:
     return os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3")
+
+
+def _append_operator_audit_event(
+    *,
+    business_id: str,
+    actor_ref: str,
+    event_type: str,
+    target_type: str,
+    target_id: str | None = None,
+    data: dict | None = None,
+):
+    """Append a redacted operator audit event using the durable Brain DB."""
+
+    with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+        init_schema(conn)
+        SQLiteOperatorAuditStore(conn).append_event(
+            business_id=business_id,
+            actor_ref=actor_ref,
+            event_type=event_type,
+            target_type=target_type,
+            target_id=target_id,
+            request_id=_internal_request_id(),
+            data=data or {},
+        )
 
 
 def _internal_principal_or_error(business_id: str, permission: str):
