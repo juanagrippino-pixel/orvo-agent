@@ -60,6 +60,7 @@ def run_connector_daily_report_pipeline(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
     secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
     """Build one connector report via registry metadata and dispatch it once.
@@ -77,6 +78,7 @@ def run_connector_daily_report_pipeline(
         tiendanube_http_client=tiendanube_http_client,
         mercadolibre_http_client=mercadolibre_http_client,
         meta_ads_http_client=meta_ads_http_client,
+        woocommerce_http_client=woocommerce_http_client,
         secret_resolver=secret_resolver,
     )
     dispatch = dispatch_daily_report(
@@ -192,6 +194,28 @@ def run_mercadolibre_daily_report_pipeline(
     )
 
 
+def run_woocommerce_daily_report_pipeline(
+    *,
+    business: BusinessConfig,
+    report_date: date,
+    delivery_client: WhatsAppDeliveryClient,
+    idempotency_store: IdempotencyStore,
+    http_client=None,
+    secret_resolver: SecretResolver | None = None,
+) -> PipelineResult:
+    """Build a daily report from WooCommerce and dispatch it to WhatsApp."""
+
+    return run_connector_daily_report_pipeline(
+        connector_type="woocommerce",
+        business=business,
+        report_date=report_date,
+        delivery_client=delivery_client,
+        idempotency_store=idempotency_store,
+        woocommerce_http_client=http_client,
+        secret_resolver=secret_resolver,
+    )
+
+
 def _build_daily_report_for_connector_type(
     *,
     connector_type: str,
@@ -201,6 +225,7 @@ def _build_daily_report_for_connector_type(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
     secret_resolver: SecretResolver | None = None,
 ) -> DailyReport:
     registry = default_connector_registry()
@@ -229,6 +254,7 @@ def _build_daily_report_for_connector_type(
             "tiendanube_http_client": tiendanube_http_client,
             "mercadolibre_http_client": mercadolibre_http_client,
             "meta_ads_http_client": meta_ads_http_client,
+            "woocommerce_http_client": woocommerce_http_client,
         },
     )
     report = spec.load_report_factory()(**kwargs)
@@ -248,6 +274,7 @@ def run_enabled_connectors_daily_report_pipeline(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
     secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
     """Build all enabled connector reports, merge metrics, then dispatch once."""
@@ -265,6 +292,7 @@ def run_enabled_connectors_daily_report_pipeline(
                     tiendanube_http_client=tiendanube_http_client,
                     mercadolibre_http_client=mercadolibre_http_client,
                     meta_ads_http_client=meta_ads_http_client,
+                    woocommerce_http_client=woocommerce_http_client,
                     secret_resolver=secret_resolver,
                 )
             )

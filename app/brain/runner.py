@@ -42,7 +42,7 @@ def _list_all_schedules(config_store, businesses: list[BusinessConfig]) -> list[
 
 
 def _enabled_daily_connector_types(business: BusinessConfig) -> list[str]:
-    supported = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube"}
+    supported = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube", "woocommerce"}
     connector_types: list[str] = []
     for connector in business.connectors:
         if not connector.enabled or connector.connector_type not in supported:
@@ -65,6 +65,7 @@ def run_due_daily_reports(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
     now: datetime | None = None,
     run_ledger: RunLedger | None = None,
     case_store: OperationalCaseStore | None = None,
@@ -121,6 +122,7 @@ def run_due_daily_reports(
                     tiendanube_http_client=tiendanube_http_client,
                     mercadolibre_http_client=mercadolibre_http_client,
                     meta_ads_http_client=meta_ads_http_client,
+                    woocommerce_http_client=woocommerce_http_client,
                     secret_resolver=secret_resolver,
                 ),
                 runtime_metadata,

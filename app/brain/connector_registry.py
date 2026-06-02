@@ -34,6 +34,7 @@ CONNECTOR_TYPE_MERCADOLIBRE = "mercadolibre"
 CONNECTOR_TYPE_META_ADS = "meta_ads"
 CONNECTOR_TYPE_SAMPLE = "sample"
 CONNECTOR_TYPE_TIENDANUBE = "tiendanube"
+CONNECTOR_TYPE_WOOCOMMERCE = "woocommerce"
 
 CAPABILITY_DAILY_REPORT = "daily_report"
 CAPABILITY_AD_METRICS = "ad_metrics"
@@ -597,6 +598,20 @@ def _access_token_requirement(
     )
 
 
+def _woocommerce_secret_requirement(
+    *,
+    name: str,
+    description: str,
+) -> SecretRequirement:
+    return SecretRequirement(
+        name=name,
+        provider="woocommerce_rest_api",
+        description=description,
+        scopes=("orders.read", "products.read"),
+        legacy_config_field=name,
+    )
+
+
 def _daily_executor(
     *,
     adapter_module: str,
@@ -793,6 +808,67 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             report_factory="build_daily_report_from_payload",
             supported_runtime_modes=(RUNTIME_MODE_PREVIEW, RUNTIME_MODE_OPERATOR_TRIGGERED),
         ),
+    ),
+    ConnectorSpec(
+        connector_type=CONNECTOR_TYPE_WOOCOMMERCE,
+        display_name="WooCommerce",
+        adapter_module="app.brain.adapters.woocommerce",
+        report_factory="build_daily_report_from_woocommerce",
+        capabilities=(
+            CAPABILITY_DAILY_REPORT,
+            CAPABILITY_COMMERCE_METRICS,
+            CAPABILITY_INVENTORY_METRICS,
+        ),
+        emitted_metric_families=(
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ),
+        required_config_fields=("store_url",),
+        optional_config_fields=("include_stock", "source_label"),
+        required_secret_refs=(
+            _woocommerce_secret_requirement(
+                name="consumer_key",
+                description="WooCommerce REST API consumer key reference.",
+            ),
+            _woocommerce_secret_requirement(
+                name="consumer_secret",
+                description="WooCommerce REST API consumer secret reference.",
+            ),
+        ),
+        legacy_secret_config_fields=("consumer_key", "consumer_secret"),
+        executor=_daily_executor(
+            adapter_module="app.brain.adapters.woocommerce",
+            report_factory="build_daily_report_from_woocommerce",
+            factory_params=(
+                *_common_daily_params(),
+                ConnectorFactoryParam("store_url", "connector_param", key="store_url"),
+                ConnectorFactoryParam("consumer_key", "connector_param", key="consumer_key"),
+                ConnectorFactoryParam("consumer_secret", "connector_param", key="consumer_secret"),
+                ConnectorFactoryParam(
+                    "http_client",
+                    "service_binding",
+                    key="woocommerce_http_client",
+                    required=False,
+                ),
+                ConnectorFactoryParam(
+                    "include_stock",
+                    "connector_param_bool",
+                    key="include_stock",
+                    required=False,
+                    fallback=False,
+                ),
+                ConnectorFactoryParam(
+                    "source_label",
+                    "connector_param_or_label",
+                    key="source_label",
+                ),
+            ),
+        ),
+        scopes=ConnectorScopeMetadata(required=("orders.read", "products.read")),
+        rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=30, requests_per_minute=120),
     ),
     ConnectorSpec(
         connector_type=CONNECTOR_TYPE_TIENDANUBE,
