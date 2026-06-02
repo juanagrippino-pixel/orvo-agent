@@ -63,6 +63,14 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
             "readiness_check": spec.health.readiness_check,
             "supports_health_check": spec.health.supports_health_check,
             "degraded_state": spec.health.degraded_state,
+            "allowed_states": [
+                "ok",
+                "degraded",
+                "stale",
+                "unauthorized",
+                "rate_limited",
+                "failed",
+            ],
         }
         assert spec.rate_limit_policy_metadata() == {
             "default_timeout_seconds": spec.rate_limit.default_timeout_seconds,

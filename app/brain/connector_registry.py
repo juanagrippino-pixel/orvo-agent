@@ -143,11 +143,24 @@ class ConnectorExecutorMetadata:
 
 @dataclass(frozen=True, slots=True)
 class ConnectorHealthMetadata:
-    """Readiness/health metadata; implementation remains a later runtime slice."""
+    """Readiness/health metadata for registry-driven connector planning.
+
+    ``allowed_states`` mirrors the connector-registry contract taxonomy so
+    compiled runtime/run metadata can expose stable health semantics before a
+    connector-specific health checker is implemented.
+    """
 
     readiness_check: str = "metadata_only"
     supports_health_check: bool = False
     degraded_state: str = "degraded"
+    allowed_states: tuple[str, ...] = (
+        "ok",
+        "degraded",
+        "stale",
+        "unauthorized",
+        "rate_limited",
+        "failed",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +238,7 @@ class ConnectorSpec:
             "readiness_check": self.health.readiness_check,
             "supports_health_check": self.health.supports_health_check,
             "degraded_state": self.health.degraded_state,
+            "allowed_states": list(self.health.allowed_states),
         }
 
     def rate_limit_policy_metadata(self) -> dict[str, Any]:

@@ -63,6 +63,14 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
         "readiness_check": "metadata_only",
         "supports_health_check": False,
         "degraded_state": "degraded",
+        "allowed_states": [
+            "ok",
+            "degraded",
+            "stale",
+            "unauthorized",
+            "rate_limited",
+            "failed",
+        ],
     }
     assert runtime.connectors[1].required_scopes == ["orders.read", "products.read"]
     assert runtime.connectors[1].rate_limit_policy == {
@@ -110,6 +118,14 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "readiness_check": "metadata_only",
                 "supports_health_check": False,
                 "degraded_state": "degraded",
+                "allowed_states": [
+                    "ok",
+                    "degraded",
+                    "stale",
+                    "unauthorized",
+                    "rate_limited",
+                    "failed",
+                ],
             },
             "required_scopes": ["spreadsheets.readonly"],
             "rate_limit_policy": {
@@ -142,6 +158,14 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "readiness_check": "metadata_only",
                 "supports_health_check": False,
                 "degraded_state": "degraded",
+                "allowed_states": [
+                    "ok",
+                    "degraded",
+                    "stale",
+                    "unauthorized",
+                    "rate_limited",
+                    "failed",
+                ],
             },
             "required_scopes": ["orders.read", "products.read"],
             "rate_limit_policy": {
