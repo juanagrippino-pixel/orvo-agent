@@ -436,6 +436,7 @@ def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor
             "permissions": ["internal:read"],
             "can_read_internal": True,
             "can_mutate_cases": False,
+            "can_read_operator_audit": False,
         }
     }
     assert "raw_operator_secret" not in response.get_data(as_text=True)
@@ -451,6 +452,24 @@ def test_internal_operator_session_defaults_legacy_callers_to_operator_role(monk
     assert operator["role"] == "operator"
     assert operator["permissions"] == ["case:action", "internal:read"]
     assert operator["can_mutate_cases"] is True
+    assert operator["can_read_operator_audit"] is False
+
+
+def test_internal_operator_session_projects_admin_audit_permission(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-session",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    operator = response.get_json()["data"]["operator"]
+    assert operator["role"] == "admin"
+    assert operator["permissions"] == ["case:action", "internal:read", "operator_audit:read"]
+    assert operator["can_read_internal"] is True
+    assert operator["can_mutate_cases"] is True
+    assert operator["can_read_operator_audit"] is True
 
 
 def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
@@ -1240,3 +1259,48 @@ def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypat
     assert store.get_case(operator_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
     assert store.get_case(admin_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
     conn.close()
+
+
+def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    failure = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-audit-source"},
+        json={
+            "action_key": "unknown_action",
+            "comment": "Authorization: Basic cmF3X2F1ZGl0X3NlY3JldA==",
+            "metadata": {"access_token": "raw_audit_secret"},
+        },
+    )
+    assert failure.status_code == 400
+
+    operator = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "operator"},
+    )
+    admin = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert operator.status_code == 403
+    assert operator.get_json()["error"]["code"] == "forbidden"
+    assert admin.status_code == 200
+    raw_body = admin.get_data(as_text=True)
+    assert "raw_audit_secret" not in raw_body
+    assert "cmF3X2F1ZGl0X3NlY3JldA==" not in raw_body
+    body = admin.get_json()
+    assert body["ok"] is True
+    assert body["redaction_applied"] is True
+    assert body["data"]["limit"] == 10
+    assert body["data"]["count"] == 1
+    event = body["data"]["events"][0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "operator:juan"
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-audit-source"
+    assert event["data"]["error_code"] == "unknown_action_key"
+    assert event["data"]["payload"]["metadata"]["access_token"] == "[REDACTED]"
