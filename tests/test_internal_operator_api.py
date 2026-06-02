@@ -1006,6 +1006,100 @@ def test_internal_workflow_throughput_by_severity_returns_scoped_envelope(monkey
     }
 
 
+def test_internal_case_acknowledgment_latency_histogram_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    fast = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-fast-ack",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-fast-ack/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        fast.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(minutes=30),
+    )
+    slow = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-slow-ack",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        slow.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=8),
+    )
+    unacknowledged = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-unacknowledged",
+            dedupe_suffix="stockout_risk/product/sku-unacknowledged/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-slow-ack",
+            dedupe_suffix="stockout_risk/product/sku-other-ack/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/acknowledgment-latency",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["acknowledged_total"] == 2
+    assert data["by_acknowledgment_bucket"] == {
+        "under_1h": 1,
+        "under_6h": 0,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_acknowledgment_bucket_severity"]["under_1h"] == {"critical": 1}
+    assert data["by_acknowledgment_bucket_severity"]["under_24h"] == {"warning": 1}
+    assert data["fastest_acknowledged"]["case_id"] == fast.case_id
+    assert data["fastest_acknowledged"]["time_to_acknowledge_seconds"] == 1800
+    assert data["slowest_acknowledged"]["case_id"] == slow.case_id
+    assert data["slowest_acknowledged"]["time_to_acknowledge_seconds"] == 28800
+    assert unacknowledged.case_id not in {
+        data["fastest_acknowledged"]["case_id"],
+        data["slowest_acknowledged"]["case_id"],
+    }
+
+
 def test_internal_case_handling_latency_histogram_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
