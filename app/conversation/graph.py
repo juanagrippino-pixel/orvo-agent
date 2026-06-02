@@ -1,3 +1,4 @@
+import logging
 import os
 import requests
 from typing import Annotated
@@ -16,6 +17,8 @@ from app.conversation.prompts import (
     LEAD_INTELLIGENCE_PROMPT,
     build_system_prompt,
 )
+
+_log = logging.getLogger(__name__)
 
 
 class OrvoState(TypedDict):
@@ -129,9 +132,13 @@ def notify_juan_node(state: OrvoState) -> dict:
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=10)
             if resp.status_code != 200:
-                print(f"[notify_juan] Error {resp.status_code}: {resp.text}")
-        except Exception as e:
-            print(f"[notify_juan] Exception: {e}")
+                _log.warning(
+                    "notify_juan failed status_code=%s",
+                    resp.status_code,
+                    extra={"event": "notify_juan_failed", "status_code": resp.status_code},
+                )
+        except Exception:
+            _log.exception("notify_juan exception", extra={"event": "notify_juan_exception"})
     return {}
 
 
