@@ -11,10 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from app.brain.security.redaction import redact_secrets, redact_text
 
@@ -29,6 +29,7 @@ ExecutionState = Literal[
     "failed",
 ]
 ApprovalRequestStatus = Literal["pending", "approved", "rejected", "cancelled"]
+ApprovalDecision = Literal["approved", "rejected"]
 ActionSource = Literal["workflow", "manual_operator"]
 
 
@@ -73,6 +74,25 @@ class WorkflowActionLedgerWrite:
     approval_request: WorkflowApprovalRequest | None = None
 
 
+@dataclass(frozen=True)
+class WorkflowApprovalDecisionRecord:
+    """Result of deciding an approval gate without executing the action."""
+
+    record: WorkflowActionLedgerRecord
+    approval_request: WorkflowApprovalRequest
+    audit_event: dict[str, Any]
+    side_effects_executed: int = 0
+
+
+class WorkflowActionLedgerError(Exception):
+    """Safe deterministic workflow action ledger error."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        self.message = redact_text(message) or "Workflow action ledger error"
+        super().__init__(self.message)
+
+
 class WorkflowActionLedgerStore(Protocol):
     def record_planned_action(
         self,
@@ -93,6 +113,17 @@ class WorkflowActionLedgerStore(Protocol):
     def list_actions(self, *, business_id: str) -> list[WorkflowActionLedgerRecord]: ...
 
     def list_approval_requests(self, *, business_id: str) -> list[WorkflowApprovalRequest]: ...
+
+    def decide_approval_request(
+        self,
+        *,
+        business_id: str,
+        approval_request_id: str,
+        decision: ApprovalDecision,
+        actor_ref: str,
+        reason: str,
+        now: datetime | None = None,
+    ) -> WorkflowApprovalDecisionRecord: ...
 
 
 def _now_utc() -> datetime:
@@ -132,6 +163,72 @@ def _json_loads_object(value: str | None) -> dict[str, Any]:
         return {}
     loaded = json.loads(value)
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _validate_approval_decision(decision: str) -> ApprovalDecision:
+    if decision not in {"approved", "rejected"}:
+        raise WorkflowActionLedgerError("invalid_approval_decision", "approval decision must be approved or rejected")
+    return cast(ApprovalDecision, decision)
+
+
+def _decision_states(decision: ApprovalDecision) -> tuple[ApprovalState, ExecutionState]:
+    if decision == "approved":
+        return "approved", "pending_execution"
+    return "rejected", "failed"
+
+
+def _safe_text(value: str | None) -> str | None:
+    return redact_text(value) if value else None
+
+
+def _decision_audit_event(
+    *,
+    record: WorkflowActionLedgerRecord,
+    approval_request: WorkflowApprovalRequest,
+    decision: ApprovalDecision,
+    actor_ref: str | None,
+    reason: str | None,
+    now: datetime,
+) -> dict[str, Any]:
+    event = {
+        "event_type": "workflow_approval_decided",
+        "business_id": record.business_id,
+        "approval_request_id": approval_request.approval_request_id,
+        "ledger_id": record.ledger_id,
+        "case_id": record.case_id,
+        "action_key": record.action_key,
+        "decision": decision,
+        "approval_state": record.approval_state,
+        "execution_state": record.execution_state,
+        "actor_ref": actor_ref,
+        "reason": reason,
+        "created_at": _iso(now),
+    }
+    redacted = redact_secrets(event)
+    return redacted if isinstance(redacted, dict) else event
+
+
+def _build_approval_decision_record(
+    *,
+    record: WorkflowActionLedgerRecord,
+    approval_request: WorkflowApprovalRequest,
+    decision: ApprovalDecision,
+    actor_ref: str | None,
+    reason: str | None,
+    now: datetime,
+) -> WorkflowApprovalDecisionRecord:
+    return WorkflowApprovalDecisionRecord(
+        record=record,
+        approval_request=approval_request,
+        audit_event=_decision_audit_event(
+            record=record,
+            approval_request=approval_request,
+            decision=decision,
+            actor_ref=actor_ref,
+            reason=reason,
+            now=now,
+        ),
+    )
 
 
 class InMemoryWorkflowActionLedgerStore:
@@ -206,6 +303,63 @@ class InMemoryWorkflowActionLedgerStore:
 
     def list_approval_requests(self, *, business_id: str) -> list[WorkflowApprovalRequest]:
         return [request for request in self._approvals.values() if request.business_id == business_id]
+
+    def decide_approval_request(
+        self,
+        *,
+        business_id: str,
+        approval_request_id: str,
+        decision: ApprovalDecision,
+        actor_ref: str,
+        reason: str,
+        now: datetime | None = None,
+    ) -> WorkflowApprovalDecisionRecord:
+        approved_decision = _validate_approval_decision(decision)
+        request = self._approvals.get(approval_request_id)
+        if request is None or request.business_id != business_id:
+            raise WorkflowActionLedgerError("approval_request_not_found", "approval request not found")
+        if request.status != "pending":
+            raise WorkflowActionLedgerError(
+                "approval_request_already_decided",
+                f"approval request already decided with status {request.status}",
+            )
+        record_key = next(
+            (
+                key
+                for key, action in self._actions.items()
+                if action.business_id == business_id and action.ledger_id == request.ledger_id
+            ),
+            None,
+        )
+        if record_key is None:
+            raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
+        timestamp = _coerce_utc(now)
+        approval_state, execution_state = _decision_states(approved_decision)
+        safe_actor_ref = _safe_text(actor_ref)
+        safe_reason = _safe_text(reason)
+        record = replace(
+            self._actions[record_key],
+            approval_state=approval_state,
+            execution_state=execution_state,
+            updated_at=timestamp,
+        )
+        decided_request = replace(
+            request,
+            status=approved_decision,
+            decided_at=timestamp,
+            decision_actor_ref=safe_actor_ref,
+            decision_reason=safe_reason,
+        )
+        self._actions[record_key] = record
+        self._approvals[approval_request_id] = decided_request
+        return _build_approval_decision_record(
+            record=record,
+            approval_request=decided_request,
+            decision=approved_decision,
+            actor_ref=safe_actor_ref,
+            reason=safe_reason,
+            now=timestamp,
+        )
 
 
 class SQLiteWorkflowActionLedgerStore:
@@ -387,6 +541,84 @@ class SQLiteWorkflowActionLedgerStore:
                 (business_id,),
             ).fetchall()
         return [_approval_from_row(row) for row in rows]
+
+    def decide_approval_request(
+        self,
+        *,
+        business_id: str,
+        approval_request_id: str,
+        decision: ApprovalDecision,
+        actor_ref: str,
+        reason: str,
+        now: datetime | None = None,
+    ) -> WorkflowApprovalDecisionRecord:
+        approved_decision = _validate_approval_decision(decision)
+        timestamp = _coerce_utc(now)
+        approval_state, execution_state = _decision_states(approved_decision)
+        safe_actor_ref = _safe_text(actor_ref)
+        safe_reason = _safe_text(reason)
+        with self._connect() as conn:
+            request_row = conn.execute(
+                "SELECT * FROM workflow_approval_requests WHERE business_id = ? AND approval_request_id = ?",
+                (business_id, approval_request_id),
+            ).fetchone()
+            if request_row is None:
+                raise WorkflowActionLedgerError("approval_request_not_found", "approval request not found")
+            request = _approval_from_row(request_row)
+            if request.status != "pending":
+                raise WorkflowActionLedgerError(
+                    "approval_request_already_decided",
+                    f"approval request already decided with status {request.status}",
+                )
+            record_row = conn.execute(
+                "SELECT * FROM workflow_action_ledger WHERE business_id = ? AND ledger_id = ?",
+                (business_id, request.ledger_id),
+            ).fetchone()
+            if record_row is None:
+                raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
+            conn.execute(
+                """
+                UPDATE workflow_approval_requests
+                SET status = ?, decided_at = ?, decision_actor_ref = ?, decision_reason = ?
+                WHERE business_id = ? AND approval_request_id = ?
+                """,
+                (
+                    approved_decision,
+                    _iso(timestamp),
+                    safe_actor_ref,
+                    safe_reason,
+                    business_id,
+                    approval_request_id,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE workflow_action_ledger
+                SET approval_state = ?, execution_state = ?, updated_at = ?
+                WHERE business_id = ? AND ledger_id = ?
+                """,
+                (approval_state, execution_state, _iso(timestamp), business_id, request.ledger_id),
+            )
+            updated_record = _record_from_row(
+                conn.execute(
+                    "SELECT * FROM workflow_action_ledger WHERE business_id = ? AND ledger_id = ?",
+                    (business_id, request.ledger_id),
+                ).fetchone()
+            )
+            updated_request = _approval_from_row(
+                conn.execute(
+                    "SELECT * FROM workflow_approval_requests WHERE business_id = ? AND approval_request_id = ?",
+                    (business_id, approval_request_id),
+                ).fetchone()
+            )
+        return _build_approval_decision_record(
+            record=updated_record,
+            approval_request=updated_request,
+            decision=approved_decision,
+            actor_ref=safe_actor_ref,
+            reason=safe_reason,
+            now=timestamp,
+        )
 
 
 def _record_from_row(row: sqlite3.Row) -> WorkflowActionLedgerRecord:

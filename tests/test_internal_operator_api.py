@@ -450,6 +450,7 @@ def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor
             "permissions": ["internal:read"],
             "can_read_internal": True,
             "can_mutate_cases": False,
+            "can_read_operator_audit": False,
         }
     }
     assert "raw_operator_secret" not in response.get_data(as_text=True)
@@ -465,6 +466,24 @@ def test_internal_operator_session_defaults_legacy_callers_to_operator_role(monk
     assert operator["role"] == "operator"
     assert operator["permissions"] == ["case:action", "internal:read"]
     assert operator["can_mutate_cases"] is True
+    assert operator["can_read_operator_audit"] is False
+
+
+def test_internal_operator_session_projects_admin_audit_permission(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-session",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    operator = response.get_json()["data"]["operator"]
+    assert operator["role"] == "admin"
+    assert operator["permissions"] == ["case:action", "internal:read", "operator_audit:read"]
+    assert operator["can_read_internal"] is True
+    assert operator["can_mutate_cases"] is True
+    assert operator["can_read_operator_audit"] is True
 
 
 def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
@@ -1001,6 +1020,228 @@ def test_internal_workflow_throughput_by_severity_returns_scoped_envelope(monkey
     }
 
 
+def test_internal_case_handling_latency_histogram_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    fast = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-fast-handled",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-fast-handled/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        fast.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        fast.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    slow = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-slow-handled",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        slow.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        slow.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=10),
+    )
+    unhandled = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-unhandled",
+            dedupe_suffix="stockout_risk/product/sku-unhandled/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        unhandled.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-handled",
+            dedupe_suffix="stockout_risk/product/sku-other-handled/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        other.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/handling-latency",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["handled_total"] == 2
+    assert data["by_handling_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_handling_bucket_severity"]["under_6h"] == {"critical": 1}
+    assert data["by_handling_bucket_severity"]["under_24h"] == {"warning": 1}
+    assert data["fastest_handled"]["case_id"] == fast.case_id
+    assert data["fastest_handled"]["time_to_handle_seconds"] == 7200
+    assert data["slowest_handled"]["case_id"] == slow.case_id
+    assert data["slowest_handled"]["time_to_handle_seconds"] == 32400
+
+
+def test_internal_handling_latency_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    high = store.upsert_detection(
+        _case_detection(
+            priority=95,
+            run_id="run-artemea-high-handled",
+            dedupe_suffix="stockout_risk/product/sku-high-handled/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        high.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        high.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    medium = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-medium-handled",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        medium.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        medium.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=10),
+    )
+    low_other_tenant = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            priority=20,
+            run_id="run-other-low-handled",
+            dedupe_suffix="stockout_risk/product/sku-low-handled/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        low_other_tenant.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        low_other_tenant.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/handling-latency/by-priority-bracket",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["handled_total"] == 2
+    assert data["by_handling_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_handling_bucket_priority_bracket"]["under_6h"] == {"high": 1}
+    assert data["by_handling_bucket_priority_bracket"]["under_24h"] == {"medium": 1}
+    assert data["by_handling_bucket_priority_bracket"]["over_7d"] == {}
+    assert data["fastest_handled"]["case_id"] == high.case_id
+    assert data["slowest_handled"]["case_id"] == medium.case_id
+
+
 def test_internal_top_actionable_by_age_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
@@ -1335,3 +1576,48 @@ def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypat
     assert store.get_case(operator_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
     assert store.get_case(admin_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
     conn.close()
+
+
+def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    failure = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-audit-source"},
+        json={
+            "action_key": "unknown_action",
+            "comment": "Authorization: Basic " + "cmF3X2F1ZGl0X3NlY3JldA==",
+            "metadata": {"access_token": "raw_audit_secret"},
+        },
+    )
+    assert failure.status_code == 400
+
+    operator = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "operator"},
+    )
+    admin = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert operator.status_code == 403
+    assert operator.get_json()["error"]["code"] == "forbidden"
+    assert admin.status_code == 200
+    raw_body = admin.get_data(as_text=True)
+    assert "raw_audit_secret" not in raw_body
+    assert "cmF3X2F1ZGl0X3NlY3JldA==" not in raw_body
+    body = admin.get_json()
+    assert body["ok"] is True
+    assert body["redaction_applied"] is True
+    assert body["data"]["limit"] == 10
+    assert body["data"]["count"] == 1
+    event = body["data"]["events"][0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "operator:juan"
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-audit-source"
+    assert event["data"]["error_code"] == "unknown_action_key"
+    assert event["data"]["payload"]["metadata"]["access_token"] == "[REDACTED]"

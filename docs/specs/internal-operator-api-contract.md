@@ -80,6 +80,16 @@ wired) so clients do not infer executable capabilities from docs or owner-facing
 copy. Enabled assignment entries must advertise required input fields without
 exposing unredacted assignee values.
 
+### Operator audit events
+
+```http
+GET /internal/brain/businesses/{business_id}/operator-audit-events
+```
+
+Admin-only projection over durable operator audit events. Returns redacted events
+scoped to the route `business_id`; viewer/operator roles must receive a safe
+`403` envelope.
+
 ## Response envelope
 
 ```json
