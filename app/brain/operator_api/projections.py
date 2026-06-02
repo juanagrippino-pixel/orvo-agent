@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from app.brain.action_catalog import ACTION_CATALOG
+from app.brain.work_items import case_work_item_projection
 
 from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 
 
 def case_queue_item(case: OperationalCase) -> dict[str, Any]:
+    work_item = case_work_item_projection(case)
     return redact_secrets(
         {
             "case_id": case.case_id,
@@ -14,6 +16,11 @@ def case_queue_item(case: OperationalCase) -> dict[str, Any]:
             "case_type": case.case_type,
             "title": case.title,
             "status": case.status,
+            "status_category": work_item["status_category"],
+            "project_key": work_item["project_key"],
+            "issue_type": work_item["issue_type"],
+            "work_item_id": work_item["work_item_id"],
+            "work_item": work_item,
             "severity": case.severity,
             "priority_score": case.priority_score,
             "entity_scope": case.entity_scope,
@@ -100,6 +107,7 @@ def _case_suggested_actions(case: OperationalCase) -> list[dict[str, Any]]:
     ]
 
 def case_detail(case: OperationalCase) -> dict[str, Any]:
+    work_item = case_work_item_projection(case)
     return redact_secrets(
         {
             "case_id": case.case_id,
@@ -108,6 +116,11 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "dedupe_key": case.dedupe_key,
             "title": case.title,
             "status": case.status,
+            "status_category": work_item["status_category"],
+            "project_key": work_item["project_key"],
+            "issue_type": work_item["issue_type"],
+            "work_item_id": work_item["work_item_id"],
+            "work_item": work_item,
             "severity": case.severity,
             "priority_score": case.priority_score,
             "entity_scope": case.entity_scope,
