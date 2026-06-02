@@ -23,6 +23,7 @@ from app.brain.workflow_automation import (
     make_workflow_idempotency_key,
     simulate_case_workflow,
 )
+from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
 
 
 def utc(hour: int, minute: int = 0) -> datetime:
@@ -364,3 +365,90 @@ def test_simulate_case_workflow_suppresses_duplicate_idempotency_key_plans_with_
         }
     ]
     assert "raw_duplicate_secret" not in str(result)
+
+
+def test_workflow_action_ledger_records_approval_request_without_external_side_effects(tmp_path):
+    _, case = seed_case()
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
+    rule = WorkflowRule(
+        rule_id="durable-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={"target": "supplier", "Authorization": "Basic raw_approval_secret"},
+            )
+        ],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(15), action_ledger=ledger, actor_ref="operator:ana")
+
+    assert result["side_effects_executed"] == 0
+    planned_action = result["actions"][0]
+    assert planned_action["execution_status"] == "blocked_approval_required"
+    assert planned_action["approval_state"] == "pending"
+    assert planned_action["ledger_id"].startswith("workflow-action/")
+    assert planned_action["approval_request_id"].startswith("workflow-approval/")
+    assert "raw_approval_secret" not in str(result)
+
+    [record] = ledger.list_actions(business_id="artemea")
+    assert record.action_key == "request_external_action"
+    assert record.actor_ref == "operator:ana"
+    assert record.source == "workflow"
+    assert record.execution_state == "blocked_approval_required"
+    assert record.approval_state == "pending"
+    assert record.params["Authorization"] == "[REDACTED]"
+    assert "raw_approval_secret" not in str(record)
+
+    [approval] = ledger.list_approval_requests(business_id="artemea")
+    assert approval.ledger_id == record.ledger_id
+    assert approval.status == "pending"
+    assert approval.requester_ref == "operator:ana"
+    assert approval.action_key == "request_external_action"
+
+
+def test_workflow_action_ledger_enforces_duplicate_idempotency_keys_across_store_instances(tmp_path):
+    _, case = seed_case()
+    db_path = tmp_path / "workflow-actions.sqlite3"
+    first_ledger = SQLiteWorkflowActionLedgerStore(str(db_path))
+    rule = WorkflowRule(
+        rule_id="durable-duplicate-ack",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[WorkflowAction(action_key="acknowledge_case", params={"reason": "token=raw_durable_duplicate"})],
+    )
+
+    first = simulate_case_workflow(rule, case, now=utc(16), action_ledger=first_ledger, actor_ref="operator:ana")
+    second_ledger = SQLiteWorkflowActionLedgerStore(str(db_path))
+    second = simulate_case_workflow(rule, case, now=utc(16, 5), action_ledger=second_ledger, actor_ref="operator:ana")
+
+    assert len(first["actions"]) == 1
+    assert first["actions"][0]["execution_status"] == "dry_run"
+    assert first["actions"][0]["approval_state"] == "not_required"
+    assert second["actions"] == []
+    assert second["skipped_actions"] == [
+        {
+            "action_key": "acknowledge_case",
+            "idempotency_key": first["actions"][0]["idempotency_key"],
+            "execution_status": "skipped_duplicate",
+            "reason": "duplicate_idempotency_key",
+            "ledger_id": first["actions"][0]["ledger_id"],
+            "audit_event": {
+                "event_type": "workflow_action_skipped_duplicate",
+                "rule_id": "durable-duplicate-ack",
+                "case_id": case.case_id,
+                "action_key": "acknowledge_case",
+                "idempotency_key": first["actions"][0]["idempotency_key"],
+                "execution_status": "skipped_duplicate",
+                "reason": "duplicate_idempotency_key",
+                "created_at": "2026-05-31T16:05:00Z",
+            },
+        }
+    ]
+    assert len(second_ledger.list_actions(business_id="artemea")) == 1
+    assert second_ledger.list_approval_requests(business_id="artemea") == []
+    assert "raw_durable_duplicate" not in str(first)
+    assert "raw_durable_duplicate" not in str(second)
