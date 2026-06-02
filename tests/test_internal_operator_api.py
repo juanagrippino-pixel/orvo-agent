@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -832,6 +833,56 @@ def test_internal_case_queue_aging_by_severity_returns_scoped_envelope(monkeypat
     assert data["oldest_actionable"]["severity"] in {"critical", "warning"}
 
 
+def test_internal_case_queue_aging_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-stockout",
+            case_type="stockout_risk",
+            dedupe_suffix="stockout_risk/product/sku-stockout/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-sales-drop",
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-stockout",
+            case_type="stockout_risk",
+            dedupe_suffix="stockout_risk/product/sku-other/commerce.inventory/daily",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/aging/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_age_bucket"]["under_6h"] == 2
+    assert data["by_age_bucket_case_type"]["under_6h"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert data["oldest_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
+
+
 def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
@@ -867,6 +918,87 @@ def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envel
     assert data["by_idle_bucket"]["under_6h"] == 1
     assert data["by_idle_bucket_priority_bracket"]["under_6h"] == {"high": 1}
     assert data["most_stalled_actionable"]["case_type"] == "stockout_risk"
+
+
+def test_internal_workflow_throughput_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    critical = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-critical-throughput",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-critical-throughput/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        critical.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        critical.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    warning = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-warning-throughput",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        warning.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=2),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical-throughput",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-other-throughput/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/workflow/throughput/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["total"] == 2
+    assert data["totals_by_severity"] == {"critical": 1, "warning": 1}
+    assert data["acknowledged_by_severity"] == {"critical": 1, "warning": 1}
+    assert data["resolved_by_severity"] == {"critical": 1}
+    assert data["time_to_acknowledge_seconds_by_severity"] == {
+        "critical": {"min": 3600, "max": 3600, "avg": 3600, "median": 3600},
+        "warning": {"min": 7200, "max": 7200, "avg": 7200, "median": 7200},
+    }
+    assert data["time_to_resolve_seconds_by_severity"] == {
+        "critical": {"min": 10800, "max": 10800, "avg": 10800, "median": 10800}
+    }
 
 
 def test_internal_top_actionable_by_age_returns_scoped_envelope(monkeypatch, tmp_path):
@@ -1047,6 +1179,24 @@ def test_internal_top_degraded_actionable_cases_endpoint_is_scoped_and_ordered(m
     assert all(case["source_connectors"] == ["tiendanube"] for case in data["cases"])
 
 
+def test_internal_dashboard_endpoint_rejects_non_integer_limit_with_safe_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/dashboard?limit=not-an-int",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_limit"
+    assert body["error"]["message"] == "limit must be an integer"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())
@@ -1060,3 +1210,128 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
     assert missing.status_code == 401
     assert wrong.status_code == 401
     assert missing.get_json()["error"]["code"] == "unauthorized"
+
+
+def _audit_events(db_path) -> list[dict]:
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        """
+        SELECT event_id, business_id, actor_ref, event_type, target_type,
+               target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC, event_id ASC
+        """
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "event_id": event_id,
+            "business_id": business_id,
+            "actor_ref": actor_ref,
+            "event_type": event_type,
+            "target_type": target_type,
+            "target_id": target_id,
+            "request_id": request_id,
+            "data": json.loads(data),
+        }
+        for event_id, business_id, actor_ref, event_type, target_type, target_id, request_id, data in rows
+    ]
+
+
+def test_internal_case_action_denial_writes_redacted_operator_audit_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**VIEWER_AUTH, "X-Request-ID": "req-denied"},
+        json={
+            "action_key": "acknowledge_case",
+            "metadata": {"api_key": "raw_audit_secret"},
+        },
+    )
+
+    assert response.status_code == 403
+    raw_response = response.get_data(as_text=True)
+    assert "raw_audit_secret" not in raw_response
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "viewer:ana"
+    assert event["event_type"] == "operator.case_action.denied"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-denied"
+    assert event["data"]["action_key"] == "acknowledge_case"
+    assert event["data"]["permission"] == "case:action"
+    assert event["data"]["status_code"] == 403
+    assert event["data"]["payload"]["metadata"]["api_key"] == "[REDACTED]"
+    assert "raw_audit_secret" not in json.dumps(event, sort_keys=True)
+
+
+def test_internal_case_action_failure_writes_redacted_operator_audit_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-failed"},
+        json={
+            "action_key": "unknown_action",
+            "comment": "Authorization: Basic cmF3X2F1ZGl0X3NlY3JldA==",
+            "metadata": {"access_token": "raw_audit_secret"},
+        },
+    )
+
+    assert response.status_code == 400
+    raw_response = response.get_data(as_text=True)
+    assert "raw_audit_secret" not in raw_response
+    assert "cmF3X2F1ZGl0X3NlY3JldA==" not in raw_response
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "operator:juan"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-failed"
+    assert event["data"]["action_key"] == "unknown_action"
+    assert event["data"]["error_code"] == "unknown_action_key"
+    assert event["data"]["status_code"] == 400
+    serialized = json.dumps(event, sort_keys=True)
+    assert "raw_audit_secret" not in serialized
+    assert "cmF3X2F1ZGl0X3NlY3JldA==" not in serialized
+
+
+def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    viewer_case = _seed_case(db_path, _case_detection(run_id="run-viewer"))
+    operator_case = _seed_case(db_path, _case_detection(run_id="run-operator", dedupe_suffix="operator/case"))
+    admin_case = _seed_case(db_path, _case_detection(run_id="run-admin", dedupe_suffix="admin/case"))
+
+    viewer = client.post(
+        f"/internal/brain/businesses/artemea/cases/{viewer_case.case_id}/actions",
+        headers=VIEWER_AUTH,
+        json={"action_key": "acknowledge_case"},
+    )
+    operator = client.post(
+        f"/internal/brain/businesses/artemea/cases/{operator_case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "operator"},
+        json={"action_key": "acknowledge_case"},
+    )
+    admin = client.post(
+        f"/internal/brain/businesses/artemea/cases/{admin_case.case_id}/actions",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+        json={"action_key": "acknowledge_case"},
+    )
+
+    assert viewer.status_code == 403
+    assert operator.status_code == 200
+    assert admin.status_code == 200
+    conn = sqlite3.connect(db_path)
+    store = SQLiteOperationalCaseStore(conn)
+    assert store.get_case(viewer_case.case_id).status == "open"  # type: ignore[union-attr]
+    assert store.get_case(operator_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
+    assert store.get_case(admin_case.case_id).status == "acknowledged"  # type: ignore[union-attr]
+    conn.close()

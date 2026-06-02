@@ -157,6 +157,19 @@ Run time: 2026-05-31 16:21 UTC
 Integration branch: `feat/orvo-brain-control-plane`
 Base before attempted merge: `72dd737` (`docs: refresh architecture review board report`)
 
+## Supersession note — later 2026-05-31 integration state
+
+This file is a historical record of the **16:21 UTC blocked integration attempt**. Do not use its branch inventory as the current merge queue without checking later git history and `docs/specs/integration-train-contract.md`.
+
+Later same-day integration work moved the canonical branch past this failed attempt:
+
+- `9ad3c8b` merged a work-management slice that expanded OperationalCase lifecycle/action behavior.
+- `4d979c9` merged a connector-platform slice that routed daily connector report execution through registry executor metadata.
+- `aec6f57` refreshed the post-merge integration train recommendations in `docs/specs/integration-train-contract.md`.
+- Current evidence during this docs sync: `feat/orvo-brain-control-plane` was at `0e01326` (`claude: wire severity case aging endpoint`).
+
+The blocker below remains useful as incident history: the first attempt correctly refused to promote a branch while full-suite fixtures failed. The current planning source is the integration-train contract's "Current next recommendations train", not the stale queue listed in this historical report.
+
 ## Result
 
 No implementation worker branch was promoted in this run.
@@ -214,7 +227,7 @@ Required fix before retry:
 - Keep the new production invariant; do not weaken it to make fixtures pass.
 - Re-run the focused queue-summary slices plus `pytest -q` after the fixture fix.
 
-## Historical branch inventory from that run
+## Historical branch inventory at this run time
 
 ### Merge-ready after blocker fix / dependency order
 

@@ -1,12 +1,6 @@
-import os
-from langchain_anthropic import ChatAnthropic
+"""Backward-compatible import alias for conversation model wiring."""
 
-MODEL = "claude-haiku-4-5-20251001"
+from app.conversation import models as _models
+import sys as _sys
 
-
-def get_llm() -> ChatAnthropic:
-    return ChatAnthropic(
-        model=MODEL,
-        api_key=os.environ["ANTHROPIC_API_KEY"],
-        temperature=0.3,
-    )
+_sys.modules[__name__] = _models

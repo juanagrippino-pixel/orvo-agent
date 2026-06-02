@@ -19,6 +19,7 @@ from app.brain.action_catalog import ActionDefinition as WorkflowActionDefinitio
 from app.brain.action_catalog import workflow_action_registry
 from app.brain.operational_cases import OperationalCase
 from app.brain.security.redaction import redact_secrets, redact_text
+from app.brain.workflow_action_ledger import WorkflowActionLedgerStore
 
 WorkflowTrigger = Literal["case_opened", "case_updated", "manual"]
 WORKFLOW_TRIGGER_VALUES = {"case_opened", "case_updated", "manual"}
@@ -231,6 +232,7 @@ def _skipped_duplicate_action_projection(
     action_key: str,
     idempotency_key: str,
     now: datetime,
+    ledger_id: str | None = None,
 ) -> dict[str, Any]:
     status = "skipped_duplicate"
     reason = "duplicate_idempotency_key"
@@ -244,15 +246,16 @@ def _skipped_duplicate_action_projection(
         "reason": reason,
         "created_at": _iso(now),
     }
-    return redact_secrets(
-        {
-            "action_key": action_key,
-            "idempotency_key": idempotency_key,
-            "execution_status": status,
-            "reason": reason,
-            "audit_event": audit_event,
-        }
-    )
+    projection = {
+        "action_key": action_key,
+        "idempotency_key": idempotency_key,
+        "execution_status": status,
+        "reason": reason,
+        "audit_event": audit_event,
+    }
+    if ledger_id is not None:
+        projection["ledger_id"] = ledger_id
+    return redact_secrets(projection)
 
 
 def _dedupe_planned_actions(
@@ -260,6 +263,8 @@ def _dedupe_planned_actions(
     rule: WorkflowRule,
     case: OperationalCase,
     now: datetime,
+    action_ledger: WorkflowActionLedgerStore | None = None,
+    actor_ref: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     actions: list[dict[str, Any]] = []
     skipped_actions: list[dict[str, Any]] = []
@@ -279,11 +284,52 @@ def _dedupe_planned_actions(
             )
             continue
         seen_idempotency_keys.add(idempotency_key)
+        if action_ledger is not None:
+            write = action_ledger.record_planned_action(
+                business_id=case.business_id,
+                case_id=case.case_id,
+                action_key=action.action_key,
+                idempotency_key=idempotency_key,
+                execution_state=planned_action["execution_status"],
+                approval_required=bool(planned_action["requires_approval"]),
+                source="workflow",
+                actor_ref=actor_ref,
+                params=action.params,
+                rule_id=rule.rule_id,
+                now=now,
+            )
+            if not write.created:
+                skipped_actions.append(
+                    _skipped_duplicate_action_projection(
+                        rule=rule,
+                        case=case,
+                        action_key=action.action_key,
+                        idempotency_key=idempotency_key,
+                        now=now,
+                        ledger_id=write.record.ledger_id,
+                    )
+                )
+                continue
+            planned_action.update(
+                {
+                    "ledger_id": write.record.ledger_id,
+                    "approval_state": write.record.approval_state,
+                }
+            )
+            if write.approval_request is not None:
+                planned_action["approval_request_id"] = write.approval_request.approval_request_id
         actions.append(planned_action)
     return actions, skipped_actions
 
 
-def simulate_case_workflow(rule: WorkflowRule, case: OperationalCase, *, now: datetime | None = None) -> dict[str, Any]:
+def simulate_case_workflow(
+    rule: WorkflowRule,
+    case: OperationalCase,
+    *,
+    now: datetime | None = None,
+    action_ledger: WorkflowActionLedgerStore | None = None,
+    actor_ref: str | None = None,
+) -> dict[str, Any]:
     """Dry-run a workflow rule against one canonical Operational Case.
 
     The function validates action keys before evaluating conditions so invented
@@ -299,7 +345,13 @@ def simulate_case_workflow(rule: WorkflowRule, case: OperationalCase, *, now: da
     actions: list[dict[str, Any]] = []
     skipped_actions: list[dict[str, Any]] = []
     if matched:
-        actions, skipped_actions = _dedupe_planned_actions(rule=rule, case=case, now=generated_at)
+        actions, skipped_actions = _dedupe_planned_actions(
+            rule=rule,
+            case=case,
+            now=generated_at,
+            action_ledger=action_ledger,
+            actor_ref=actor_ref,
+        )
     return redact_secrets(
         {
             "rule_id": rule.rule_id,
