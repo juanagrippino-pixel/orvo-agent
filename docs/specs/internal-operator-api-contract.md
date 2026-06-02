@@ -73,11 +73,14 @@ Actions must use registered action keys and append timeline events.
 
 ```http
 GET /internal/brain/businesses/{business_id}/operator-audit-events
+GET /internal/brain/businesses/{business_id}/operator-audit-events?limit=50&retention_days=90
 ```
 
 Admin-only projection over durable operator audit events. Returns redacted events
 scoped to the route `business_id`; viewer/operator roles must receive a safe
-`403` envelope.
+`403` envelope. Exports default to a 90-day retention window and reject
+`retention_days` values above the configured maximum instead of allowing
+unbounded historical export.
 
 ## Response envelope
 

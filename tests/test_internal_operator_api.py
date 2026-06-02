@@ -12,6 +12,7 @@ from app.brain.operational_cases import (
     OperationalCaseType,
     SQLiteOperationalCaseStore,
 )
+from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, RunStatus, SQLiteRunLedger
 from app.brain.storage import init_schema
 
@@ -1607,3 +1608,57 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     assert event["request_id"] == "req-audit-source"
     assert event["data"]["error_code"] == "unknown_action_key"
     assert event["data"]["payload"]["metadata"]["access_token"] == "[REDACTED]"
+
+
+def test_internal_operator_audit_export_enforces_retention_window(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    now = datetime.now(timezone.utc)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    old_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:old",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={"access_token": "old_raw_audit_secret"},
+        created_at=now - timedelta(days=91),
+    )
+    recent_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:recent",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={"access_token": "recent_raw_audit_secret"},
+        created_at=now - timedelta(days=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "old_raw_audit_secret" not in raw_body
+    assert "recent_raw_audit_secret" not in raw_body
+    body = response.get_json()
+    assert body["data"]["retention_days"] == 90
+    assert [event["event_id"] for event in body["data"]["events"]] == [recent_id]
+    assert old_id not in raw_body
+
+
+def test_internal_operator_audit_export_rejects_retention_abuse(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?retention_days=3650",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_retention_days"
+    assert body["redaction_applied"] is True
