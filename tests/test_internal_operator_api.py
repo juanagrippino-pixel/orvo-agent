@@ -166,6 +166,27 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["degraded"] is False
 
 
+def test_internal_case_titles_are_redacted_in_queue_and_detail(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(
+        db_path,
+        _case_detection(title="Stock crítico access_token=raw_case_title_secret"),
+    )
+
+    queue_response = client.get("/internal/brain/businesses/artemea/cases?status=open", headers=AUTH)
+    detail_response = client.get(f"/internal/brain/businesses/artemea/cases/{case.case_id}", headers=AUTH)
+
+    assert queue_response.status_code == 200
+    assert detail_response.status_code == 200
+    assert "raw_case_title_secret" not in queue_response.get_data(as_text=True)
+    assert "raw_case_title_secret" not in detail_response.get_data(as_text=True)
+    queue_case = queue_response.get_json()["data"]["cases"][0]
+    detail_case = detail_response.get_json()["data"]["case"]
+    assert queue_case["title"] == "Stock crítico access_token=[REDACTED]"
+    assert detail_case["title"] == "Stock crítico access_token=[REDACTED]"
+    assert detail_case["timeline"][0]["summary"] == "Opened stockout_risk case from deterministic detection."
+
+
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
