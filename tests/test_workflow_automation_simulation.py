@@ -258,6 +258,28 @@ def test_simulate_case_workflow_rejects_unknown_trigger_before_projecting_action
     assert exc.value.code == "unsupported_workflow_trigger"
 
 
+def test_simulate_case_workflow_rejects_cross_business_rule_before_projecting_actions():
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="cross-tenant-ack",
+        business_id="other-business",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="acknowledge_case",
+                params={"Authorization": "Basic " + "cross_tenant_secret"},
+            )
+        ],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(11))
+
+    assert exc.value.code == "business_scope_mismatch"
+    assert "cross_tenant_secret" not in str(exc.value)
+
+
 def test_simulate_case_workflow_returns_no_actions_when_conditions_do_not_match():
     _, case = seed_case(priority_score=40)
     rule = WorkflowRule(
