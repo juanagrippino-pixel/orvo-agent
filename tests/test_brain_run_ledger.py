@@ -164,8 +164,20 @@ def test_secret_redaction_covers_common_metadata_keys_error_text_and_reference_u
         business_id="artemea",
         trigger_type="manual",
         config_ref="https://config.example/runtime?token=config-secret&version=1",
+        summary_metadata={
+            "connector_refs": [
+                {
+                    "connector_id": "tn-main",
+                    "secret_refs": {
+                        "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
+                    },
+                }
+            ]
+        },
     )
 
+    assert run.summary_metadata["connector_refs"][0]["secret_refs"] == {"access_token": "[REDACTED]"}
+    assert "secret://businesses/artemea" not in run.model_dump_json()
     assert "raw-token" not in (artifact.uri or "")
     assert "sig-secret" not in (artifact.uri or "")
     assert "raw-secret" not in (dispatch.provider_response_ref or "")

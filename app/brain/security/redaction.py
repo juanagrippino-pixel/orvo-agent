@@ -24,6 +24,9 @@ _SECRET_KEY_PARTS = (
     "secret",
     "token",
 )
+_SAFE_SECRET_CONTRACT_KEYS = {"secret_param_names", "legacy_secret_param_names"}
+_SAFE_SECRET_REF_KEYS = {"secret_refs"}
+
 
 _BEARER_RE = re.compile(r"Bearer\s+[^\s,;]+", flags=re.IGNORECASE)
 _BASIC_AUTH_HEADER_RE = re.compile(
@@ -129,6 +132,51 @@ def redact_uri(value: str | None) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, safe_query, parts.fragment))
 
 
+def _sanitize_secret_ref(value: str) -> str:
+    """Redact query credentials from an opaque secret-reference URI."""
+
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "[REDACTED]"
+    if parts.scheme != "secret":
+        return "[REDACTED]"
+    if not parts.query:
+        return value
+    safe_query = urlencode(
+        [
+            (key, "[REDACTED]" if _is_secret_query_key(key) else query_value)
+            for key, query_value in parse_qsl(parts.query, keep_blank_values=True)
+        ],
+        doseq=True,
+    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, safe_query, parts.fragment))
+
+
+def _redact_secret_refs(value: Any) -> Any:
+    """Preserve secret-reference labels while redacting raw values.
+
+    ``secret_refs`` is connector contract metadata, not secret material. Its keys
+    are secret parameter names and its safe values are opaque ``secret://``
+    references. Any non-reference value remains redacted.
+    """
+
+    if isinstance(value, dict):
+        return {
+            str(raw_key): (
+                _sanitize_secret_ref(raw_value)
+                if isinstance(raw_value, str) and raw_value.startswith("secret://")
+                else "[REDACTED]"
+            )
+            for raw_key, raw_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_secret_refs(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_secret_refs(item) for item in value)
+    return "[REDACTED]"
+
+
 def redact_secrets(value: Any) -> Any:
     """Recursively redact secrets while preserving safe operational identifiers."""
 
@@ -136,7 +184,13 @@ def redact_secrets(value: Any) -> Any:
         redacted: dict[str, Any] = {}
         for raw_key, raw_value in value.items():
             key = str(raw_key)
-            redacted[key] = "[REDACTED]" if is_secret_key(key) else redact_secrets(raw_value)
+            normalized_key = key.lower().replace("-", "_")
+            if normalized_key in _SAFE_SECRET_REF_KEYS:
+                redacted[key] = _redact_secret_refs(raw_value)
+            elif normalized_key in _SAFE_SECRET_CONTRACT_KEYS:
+                redacted[key] = redact_secrets(raw_value)
+            else:
+                redacted[key] = "[REDACTED]" if is_secret_key(key) else redact_secrets(raw_value)
         return redacted
     if isinstance(value, list):
         return [redact_secrets(item) for item in value]
