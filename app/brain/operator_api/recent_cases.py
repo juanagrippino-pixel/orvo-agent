@@ -223,6 +223,60 @@ def list_recently_in_progress_cases(
     )
 
 
+def list_recently_reopened_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N recently-reopened actionable cases for a business.
+
+    Reopened cases are recurrence signals emitted by the canonical case store
+    when a deterministic detection returns after a terminal state. This
+    read-only projection keeps operator queues focused on actionable recurrences:
+    it includes only non-terminal cases with a ``case_reopened`` timeline event,
+    orders by the latest reopen timestamp DESC with ``case_id`` ASC as a stable
+    tie-breaker, and redacts at the API boundary.
+    """
+
+    parsed_limit = parse_limit(limit)
+    reopened: list[tuple[datetime, str, OperationalCase]] = []
+    for status in ("open", "acknowledged", "in_progress"):
+        for case in store.list_cases(business_id=business_id, status=status, limit=None):
+            reopened_events = [
+                event.created_at for event in case.timeline if event.event_type == "case_reopened"
+            ]
+            if not reopened_events:
+                continue
+            reopened_at = max(event.astimezone(timezone.utc) for event in reopened_events)
+            reopened.append((reopened_at, case.case_id, case))
+
+    reopened.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = reopened[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "reopened_at": reopened_at.isoformat(),
+            "time_to_reopen_seconds": int((reopened_at - case.opened_at).total_seconds()),
+        }
+        for reopened_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "reopened_total": len(reopened),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def list_recently_dismissed_cases(
     store: OperationalCaseStore,
     *,
