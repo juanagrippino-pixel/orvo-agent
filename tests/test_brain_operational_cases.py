@@ -21,6 +21,7 @@ from app.brain.operational_cases import (
     OperationalCaseStatusError,
     SQLiteOperationalCaseStore,
     detect_cases_from_report,
+    owner_facing_actionable_cases,
 )
 from app.brain.operator_api.projections import case_detail
 from app.brain.storage import init_schema
@@ -138,6 +139,26 @@ def test_evidence_update_timeline_references_canonical_snapshot_id_when_duplicat
     assert updated.case_id == opened.case_id
     assert [snapshot.snapshot_id for snapshot in updated.evidence_snapshots] == ["snapshot-original"]
     assert updated.timeline[-1].evidence_snapshot_ids == ["snapshot-original"]
+
+
+def test_owner_facing_actionable_cases_excludes_legacy_cases_without_evidence_snapshots():
+    store = InMemoryOperationalCaseStore()
+    with_evidence = store.upsert_detection(
+        make_stockout_detection(run_id="run-visible", snapshots=[make_stock_snapshot(run_id="run-visible")]),
+        detected_at=utc_dt(8),
+    )
+    legacy_without_snapshot = OperationalCase.model_validate(
+        {
+            **with_evidence.model_dump(),
+            "case_id": "case-legacy-no-snapshot",
+            "dedupe_key": "artemea/stockout_risk/business/legacy/commerce.inventory/daily",
+            "evidence_snapshots": [],
+        }
+    )
+
+    owner_cases = owner_facing_actionable_cases([legacy_without_snapshot, with_evidence])
+
+    assert [case.case_id for case in owner_cases] == [with_evidence.case_id]
 
 
 def test_detect_cases_from_report_synthesizes_minimal_evidence_snapshots():
