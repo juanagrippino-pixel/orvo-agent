@@ -543,6 +543,7 @@ def _detection_mutation_metadata(
         "to_priority_score": detection.priority_score,
     }
 
+
 class OperationalCaseStore(Protocol):
     def upsert_detection(
         self,
