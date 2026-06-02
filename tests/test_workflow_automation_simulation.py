@@ -28,6 +28,7 @@ from app.brain.workflow_action_ledger import (
     SQLiteWorkflowActionLedgerStore,
     WorkflowActionLedgerError,
 )
+from app.brain.workflow_execution_queue import list_workflow_execution_queue
 
 
 def utc(hour: int, minute: int = 0) -> datetime:
@@ -618,3 +619,136 @@ def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_d
 
     assert second_decision.value.code == "approval_request_already_decided"
     assert "raw_second_decision_secret" not in second_decision.value.message
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_execution_queue_projects_only_approved_pending_actions_without_side_effects(tmp_path, store_factory):
+    ledger = store_factory(tmp_path)
+    later = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-later",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-queue/case-later/request_external_action/later",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator token=raw_queue_actor_secret",
+        params={
+            "target": "supplier-b",
+            "reason": "Restock later",
+            "Authorization": "Basic raw_queue_later_secret",
+        },
+        rule_id="execution-queue",
+        now=utc(19),
+    )
+    earlier = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-earlier",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-queue/case-earlier/request_external_action/earlier",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator",
+        params={
+            "target": "supplier-a",
+            "reason": "Restock earlier",
+            "Authorization": "Basic raw_queue_earlier_secret",
+        },
+        rule_id="execution-queue",
+        now=utc(19, 5),
+    )
+    rejected = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-rejected",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-queue/case-rejected/request_external_action/rejected",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-c", "reason": "Rejected"},
+        rule_id="execution-queue",
+        now=utc(19, 10),
+    )
+    ledger.record_planned_action(
+        business_id="other-business",
+        case_id="case-other",
+        action_key="request_external_action",
+        idempotency_key="workflow/other-business/execution-queue/case-other/request_external_action/other",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-x", "reason": "Other business"},
+        rule_id="execution-queue",
+        now=utc(19, 15),
+    )
+    unknown = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-unknown",
+        action_key="invented_llm_action",
+        idempotency_key="workflow/artemea/execution-queue/case-unknown/invented_llm_action/unknown",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-y", "reason": "Unknown action"},
+        rule_id="execution-queue",
+        now=utc(19, 20),
+    )
+
+    assert later.approval_request is not None
+    assert earlier.approval_request is not None
+    assert rejected.approval_request is not None
+    assert unknown.approval_request is not None
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=later.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Approved later",
+        now=utc(19, 40),
+    )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=earlier.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Approved earlier",
+        now=utc(19, 30),
+    )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=rejected.approval_request.approval_request_id,
+        decision="rejected",
+        actor_ref="manager",
+        reason="Do not execute",
+        now=utc(19, 35),
+    )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=unknown.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Unknown actions must remain outside execution queue",
+        now=utc(19, 45),
+    )
+
+    queue = list_workflow_execution_queue(ledger, business_id="artemea")
+
+    assert queue["business_id"] == "artemea"
+    assert queue["execution_enabled"] is False
+    assert queue["side_effects_executed"] == 0
+    assert queue["total"] == 2
+    assert [action["case_id"] for action in queue["actions"]] == ["case-earlier", "case-later"]
+    assert [action["execution_state"] for action in queue["actions"]] == ["pending_execution", "pending_execution"]
+    assert [action["approval_state"] for action in queue["actions"]] == ["approved", "approved"]
+    assert queue["actions"][0]["params"]["Authorization"] == "[REDACTED]"
+    assert queue["actions"][0]["side_effects_executed"] == 0
+    assert queue["actions"][0]["executor_state"] == "not_implemented"
+    assert "case-rejected" not in str(queue)
+    assert "case-other" not in str(queue)
+    assert "case-unknown" not in str(queue)
+    assert "invented_llm_action" not in str(queue)
+    assert "raw_queue" not in str(queue)
