@@ -63,4 +63,17 @@ def list_case_facets(
 
     return facet_case_queue(store, business_id=business_id, field=field, jql=jql, limit=limit)
 
+
+def export_builtin_case_view(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    view_id: str,
+    limit: str | None,
+) -> dict[str, Any]:
+    from app.brain.operator_views import export_builtin_case_view_rows
+
+    return export_builtin_case_view_rows(store, business_id=business_id, view_id=view_id, limit=limit)
+
+
 __all__ = [name for name in globals() if not name.startswith("__")]
