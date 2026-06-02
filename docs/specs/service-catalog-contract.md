@@ -54,7 +54,7 @@ The initial catalog covers the current Orvo Brain control-plane spine:
 4. `run_ledger` — runtime execution provenance and status.
 5. `operational_cases` — WorkItem/OperationalCase lifecycle source of truth.
 6. `operator_api` — internal operator API projection layer.
-7. `gateway_policy` — shared auth, permission, rate-limit, idempotency, and audit-decision conventions for internal edges.
+7. `gateway_policy` — shared auth, permission, rate-limit, idempotency, request/trace provenance, and audit-decision conventions for internal edges.
 8. `delivery_dispatch` — dispatch/idempotency boundary for report and owner brief delivery.
 9. `edge_developer_platform` — in-repo platform conventions and catalog contract.
 

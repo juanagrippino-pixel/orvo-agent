@@ -24,6 +24,8 @@ def test_default_service_catalog_covers_core_control_plane_components():
     assert catalog.get("gateway_policy").runtime_surfaces == ("operator_api", "developer_platform")
     assert "actor_id_redacted" in catalog.get("gateway_policy").observability_signals
     assert "rate_limit_key_redacted" in catalog.get("gateway_policy").observability_signals
+    assert "request_id_redacted" in catalog.get("gateway_policy").observability_signals
+    assert "trace_id_redacted" in catalog.get("gateway_policy").observability_signals
     assert "docs/specs/compiled-runtime-contract.md" in catalog.get("compiled_runtime").docs
 
 

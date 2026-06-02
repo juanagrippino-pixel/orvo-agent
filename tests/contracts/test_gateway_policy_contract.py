@@ -217,7 +217,39 @@ def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_i
         "decision_code": "allowed",
         "idempotency_key_present": True,
         "rate_limit_key": "operator_api_mutation:artemea:operator:ana",
+        "request_id": None,
+        "trace_id": None,
     }
+
+
+def test_gateway_policy_projects_safe_request_provenance_without_idempotency_values():
+    from app.brain.gateway_policy import (
+        GatewayPrincipal,
+        GatewayRequestContext,
+        default_gateway_policy_registry,
+    )
+
+    decision = default_gateway_policy_registry().evaluate(
+        GatewayRequestContext(
+            route_key="runtime.force_run.mutate",
+            method="POST",
+            business_id="artemea",
+            principal=GatewayPrincipal(
+                actor_id="operator:ana",
+                business_ids=("artemea",),
+                permissions=(RUNTIME_EXECUTE_PERMISSION,),
+            ),
+            idempotency_key="force-run:artemea:2026-06-02:v1",
+            request_id="req_access_token=raw_gateway_secret",
+            trace_id="trace-20260602-0001",
+        )
+    )
+
+    assert decision.allowed is True
+    assert decision.audit_event["request_id"] == "[REDACTED]"
+    assert decision.audit_event["trace_id"] == "trace-20260602-0001"
+    assert "force-run:artemea" not in repr(decision.model_dump())
+    assert "raw_gateway_secret" not in repr(decision.model_dump())
 
 
 def test_gateway_policy_redacts_actor_id_in_decision_audit_event():

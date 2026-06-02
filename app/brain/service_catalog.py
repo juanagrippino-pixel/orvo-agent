@@ -232,6 +232,8 @@ def default_service_catalog() -> ServiceCatalog:
                     "decision_code",
                     "rate_limit_key_redacted",
                     "idempotency_key_present",
+                    "request_id_redacted",
+                    "trace_id_redacted",
                 ),
             ),
             ServiceComponent(

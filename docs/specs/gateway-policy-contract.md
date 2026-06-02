@@ -26,7 +26,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 4. Business scope is evaluated from the authenticated principal, not from caller-supplied prose.
 5. Permission checks are allowlisted by route policy and reuse the canonical internal operator permission constants in `app.brain.operator_auth`; wildcard grants are for tests/admin bootstrap only.
 6. Rate-limit keys are deterministic and safe to log after boundary redaction: `<bucket>:<business_id>:<redacted_actor_id>`.
-7. Audit events record decision codes and whether an idempotency key was present, but not the idempotency key value itself. Actor identifiers are passed through the shared redaction helper before projection.
+7. Audit events record decision codes, redacted request/trace provenance identifiers, and whether an idempotency key was present, but not the idempotency key value itself. Actor identifiers are passed through the shared redaction helper before projection.
 8. Idempotency keys for mutating routes must be scoped to the target business, must not contain whitespace, must fit within the documented key-size budget, and must not contain secret-shaped material.
 
 ## Current schema
@@ -44,7 +44,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 | `idempotency_required` | Whether requests must carry an idempotency key before execution. |
 | `audit_event_type` | Stable audit/provenance event name emitted by policy decisions. |
 
-`GatewayRequestContext` carries only request facts needed for evaluation: route key, method, business ID, optional authenticated principal, and optional idempotency key. Mutating-route idempotency keys are accepted only when they are 1-200 characters, whitespace-free, secret-safe after shared redaction inspection, and contain the target `business_id` as a colon-delimited segment. `GatewayPolicyDecision` returns a safe decision envelope with status code, decision code, rate-limit key, idempotency requirement, and audit event metadata.
+`GatewayRequestContext` carries only request facts needed for evaluation: route key, method, business ID, optional authenticated principal, optional idempotency key, and optional request/trace provenance identifiers. Mutating-route idempotency keys are accepted only when they are 1-200 characters, whitespace-free, secret-safe after shared redaction inspection, and contain the target `business_id` as a colon-delimited segment. `GatewayPolicyDecision` returns a safe decision envelope with status code, decision code, rate-limit key, idempotency requirement, and audit event metadata. Audit events include redacted `request_id` and `trace_id` fields when supplied, but never include the idempotency key value.
 
 ## Initial route policies
 
@@ -75,8 +75,9 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 - the default registry covers the current internal boundaries in stable order;
 - public manifests are deterministic and secret-safe;
 - policy evaluation rejects missing auth, cross-business access, missing permissions, missing idempotency keys, and invalid/cross-business/secret-shaped idempotency keys;
-- allowed decisions emit stable audit metadata and redacted rate-limit keys;
-- actor identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;
+- allowed decisions emit stable audit metadata, redacted request/trace provenance identifiers, and redacted rate-limit keys;
+- actor/request identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;
+- idempotency key values never appear in decision envelopes or audit events;
 - duplicate route keys and unknown route lookups are rejected.
 
 ## Next extensions

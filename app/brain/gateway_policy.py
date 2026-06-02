@@ -18,7 +18,7 @@ from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     RUNTIME_EXECUTE_PERMISSION,
 )
-from app.brain.security.redaction import redact_text
+from app.brain.security.redaction import is_secret_key, redact_text
 
 GatewayMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 GatewaySurface = Literal["operator_api", "runtime"]
@@ -97,6 +97,8 @@ class GatewayRequestContext(BaseModel):
     business_id: str
     principal: GatewayPrincipal | None = None
     idempotency_key: str | None = None
+    request_id: str | None = None
+    trace_id: str | None = None
 
 
 class GatewayPolicyDecision(BaseModel):
@@ -292,6 +294,18 @@ def _safe_actor_id(context: GatewayRequestContext) -> str:
     return redact_text(context.principal.actor_id) or "[REDACTED]"
 
 
+def _safe_optional_identifier(value: str | None) -> str | None:
+    if value is None:
+        return None
+    redacted = redact_text(value) or "[REDACTED]"
+    key, separator, _rest = redacted.partition("=")
+    if separator and redacted == value and is_secret_key(key):
+        return "[REDACTED]"
+    if redacted == value and is_secret_key(value):
+        return "[REDACTED]"
+    return redacted
+
+
 def _decision(
     policy: GatewayRoutePolicy,
     context: GatewayRequestContext,
@@ -318,5 +332,7 @@ def _decision(
             "decision_code": code,
             "idempotency_key_present": bool(context.idempotency_key),
             "rate_limit_key": rate_limit_key,
+            "request_id": _safe_optional_identifier(context.request_id),
+            "trace_id": _safe_optional_identifier(context.trace_id),
         },
     )
