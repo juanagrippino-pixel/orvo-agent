@@ -110,9 +110,12 @@ def test_service_management_projection_maps_record_types_owner_status_and_waitin
     assert by_id[problem.case_id]["service_record_type"]["code"] == "problem"
     assert by_id[waiting_owner.case_id]["service_record_type"]["code"] == "service_request"
     assert by_id[waiting_owner.case_id]["owner_status"]["code"] == "waiting_owner"
-    assert by_id[waiting_owner.case_id]["owner_status"]["status_category"] == "waiting"
+    assert by_id[waiting_owner.case_id]["owner_status"]["status_category"] == "in_progress"
     assert by_id[waiting_external.case_id]["owner_status"]["code"] == "waiting_external"
-    assert by_id[waiting_external.case_id]["owner_status"]["status_category"] == "waiting"
+    assert by_id[waiting_external.case_id]["owner_status"]["status_category"] == "in_progress"
+    assert {
+        item["owner_status"]["status_category"] for item in result["service_cases"]
+    } <= {"to_do", "in_progress", "done"}
     assert result["by_service_record_type"] == {"incident": 2, "problem": 1, "service_request": 1}
     assert result["by_owner_status"] == {
         "new": 2,

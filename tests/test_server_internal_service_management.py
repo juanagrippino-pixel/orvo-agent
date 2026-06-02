@@ -94,6 +94,7 @@ def test_internal_service_management_cases_endpoint_returns_scoped_enveloped_pro
     assert row["case_id"] == waiting.case_id
     assert row["service_record_type"]["code"] == "incident"
     assert row["owner_status"]["code"] == "waiting_external"
+    assert row["owner_status"]["status_category"] == "in_progress"
     assert row["owner_status"]["source_status"] == "acknowledged"
     assert row["needs_escalation"] is True
     assert {reason["code"] for reason in row["escalation_reasons"]} >= {"waiting_external"}

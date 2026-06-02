@@ -39,8 +39,20 @@ _OWNER_STATUS_BY_CASE_STATUS: dict[str, dict[str, str]] = {
 }
 
 _WAITING_OWNER_STATUSES: dict[str, dict[str, str]] = {
-    "owner": {"code": "waiting_owner", "label_es": "Esperando al dueño", "status_category": "waiting"},
-    "external": {"code": "waiting_external", "label_es": "Esperando a un tercero", "status_category": "waiting"},
+    # Jira/Atlassian status categories are coarse buckets (to_do,
+    # in_progress, done). Waiting states remain owner-friendly Orvo status
+    # codes, but they still live in the in-progress category so downstream JQL
+    # and queue groupings do not invent a fourth source-of-truth category.
+    "owner": {
+        "code": "waiting_owner",
+        "label_es": "Esperando al dueño",
+        "status_category": "in_progress",
+    },
+    "external": {
+        "code": "waiting_external",
+        "label_es": "Esperando a un tercero",
+        "status_category": "in_progress",
+    },
 }
 
 _FIRST_RESPONSE_TARGET_SECONDS: dict[str, int] = {
