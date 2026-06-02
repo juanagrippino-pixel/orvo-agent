@@ -1,0 +1,29 @@
+# Worker handoff manifest — eng-factory-audit-export-admin-replay-20260602
+
+- task_id: eng-factory-audit-export-admin-replay-20260602
+- objective: Replay and verify the admin-only internal operator audit export endpoint on the current control-plane integration branch.
+- bounded_context: Trust/Admin/Security + Operator Surfaces integration
+- worktree_path: /root/orvo-agent-worktrees/eng-factory-audit-export-admin-replay-20260602
+- branch: codex/eng-factory-audit-export-admin-replay-20260602
+- base_sha: 2f7a0b1
+- head_sha: branch HEAD at final report
+- status: review-ready
+- files_changed:
+  - app/brain/operator_auth.py
+  - app/http/internal_brain/__init__.py
+  - app/http/internal_brain/operator_audit.py
+  - docs/specs/internal-operator-api-contract.md
+  - docs/workers/eng-factory-audit-export-admin-replay-20260602.md
+  - tests/test_internal_operator_api.py
+- tests_run:
+  - `pytest tests/test_internal_operator_api.py -q` => pass, 38 passed in 3.76s
+  - `pytest -q` => pass, 1195 passed in 17.25s
+- docs_updated:
+  - docs/specs/internal-operator-api-contract.md
+  - docs/workers/eng-factory-audit-export-admin-replay-20260602.md
+- risks:
+  - Adds a read-only internal admin endpoint; live exposure still depends on the existing internal token/header auth and future durable operator-to-business grants.
+  - Route uses the existing operator audit store directly, matching nearby internal route patterns; future growth should move larger audit query logic behind a dedicated service/projection helper.
+- secrets_checked: yes; test fixtures use placeholder/raw_* strings only, route/doc diff inspected for tokens, and no .env/API credentials were added.
+- integration_notes: Cherry-picked the approved feature commit 0f1faef onto current feat/orvo-brain-control-plane after workflow automation had already merged; fixed trailing newline in the new route file. Merge after review; no migrations beyond existing init_schema operator_audit_events table.
+- recommended_next_action: review then merge
