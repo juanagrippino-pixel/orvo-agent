@@ -26,6 +26,7 @@ from app.brain.semantics.metric_registry import (
     find_value_kind_violations,
     validate_metrics,
 )
+from app.brain.worker_contracts import validate_daily_report_adapter
 
 CONNECTOR_TYPE_CSV = "csv"
 CONNECTOR_TYPE_GOOGLE_SHEETS = "google_sheets"
@@ -137,9 +138,7 @@ class ConnectorExecutorMetadata:
 
         module = import_module(self.adapter_module)
         factory = getattr(module, self.report_factory)
-        if not callable(factory):
-            raise TypeError(f"Connector executor factory is not callable: {self.factory_path}")
-        return factory
+        return validate_daily_report_adapter(factory)
 
 @dataclass(frozen=True, slots=True)
 class ConnectorHealthMetadata:

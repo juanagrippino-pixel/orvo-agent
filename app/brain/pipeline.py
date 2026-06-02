@@ -10,8 +10,8 @@ from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.connector_registry import CAPABILITY_DAILY_REPORT, default_connector_registry
 from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore, ReportDispatchResult, dispatch_daily_report
-from app.brain.insights import generate_insights
-from app.brain.models import DailyReport, Metric
+from app.brain.models import DailyReport
+from app.brain.report_merge_policy import merge_daily_reports
 
 
 class PipelineResult(BaseModel):
@@ -42,54 +42,6 @@ def _find_enabled_connector_for_type(business: BusinessConfig, connector_type: s
         if connector.enabled and connector.connector_type == connector_type:
             return connector
     return None
-
-
-def _is_number(value: float | int | str) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def merge_daily_reports(reports: list[DailyReport], *, business: BusinessConfig | None = None) -> DailyReport:
-    """Merge adapter reports into one DailyReport.
-
-    Duplicate metric keys are collapsed so downstream insight/report code sees a
-    single canonical key. Numeric duplicates with the same unit are summed and
-    their evidence is combined; non-numeric or unit-mismatched duplicates use
-    last-wins to keep the key unique and deterministic.
-    """
-    if not reports:
-        raise ValueError("at least one report is required to merge daily reports")
-    if len(reports) == 1 and business is None:
-        return reports[0]
-
-    merged_by_key = {}
-    for report in reports:
-        for metric in report.metrics:
-            existing = merged_by_key.get(metric.key)
-            if existing is None:
-                merged_by_key[metric.key] = metric
-                continue
-
-            if _is_number(existing.value) and _is_number(metric.value) and existing.unit == metric.unit:
-                evidence = [*existing.evidence]
-                seen = {(item.source, item.label) for item in evidence}
-                for item in metric.evidence:
-                    key = (item.source, item.label)
-                    if key not in seen:
-                        evidence.append(item)
-                        seen.add(key)
-                merged_by_key[metric.key] = existing.model_copy(
-                    update={"value": existing.value + metric.value, "evidence": evidence}
-                )
-            else:
-                merged_by_key[metric.key] = metric
-
-    metrics = list(merged_by_key.values())
-    return DailyReport(
-        business_name=reports[0].business_name,
-        report_date=reports[0].report_date,
-        metrics=metrics,
-        insights=generate_insights(metrics, thresholds=business.insight_thresholds if business else None),
-    )
 
 
 def run_connector_daily_report_pipeline(
