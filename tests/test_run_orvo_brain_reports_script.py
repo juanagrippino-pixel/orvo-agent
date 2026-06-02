@@ -1,0 +1,469 @@
+from datetime import date
+from unittest.mock import MagicMock
+
+import pytest
+
+from app.brain.config import BusinessConfig, ConnectorConfig
+from app.brain.delivery import DeliveryResult
+from app.brain.dispatch import InMemoryIdempotencyStore
+from app.brain.run_ledger import InMemoryRunLedger
+from app.brain.operational_cases import InMemoryOperationalCaseStore
+import scripts.run_orvo_brain_reports as reports_script
+
+
+class FakeTiendanubeHTTPClient:
+    def get(self, url, headers=None, params=None):
+        response = MagicMock()
+        response.status_code = 200
+        response.headers = {}
+        if url.endswith("/orders"):
+            response.json.return_value = [
+                {"id": 1, "status": "paid", "total": "1000.00"},
+                {"id": 2, "status": "cancelled", "total": "999.00"},
+            ]
+        elif url.endswith("/products"):
+            response.json.return_value = []
+        else:
+            response.json.return_value = []
+        return response
+
+
+class FakeMercadoLibreHTTPClient:
+    def get(self, url, headers=None, params=None):
+        response = MagicMock()
+        response.status_code = 200
+        response.headers = {}
+        response.json.return_value = {
+            "results": [
+                {"id": 1, "status": "paid", "total_amount": 5000.0},
+                {"id": 2, "status": "cancelled", "total_amount": 999.0},
+            ],
+            "paging": {"total": 2, "offset": 0, "limit": 50},
+        }
+        return response
+
+
+class FakeMetaAdsHTTPClient:
+    def get(self, url, params=None):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "data": [
+                {"spend": "725.25", "impressions": "9000", "clicks": "210", "purchase_roas": []}
+            ]
+        }
+        return response
+
+
+def make_tiendanube_business():
+    return BusinessConfig(
+        business_id="demo-shop",
+        business_name="Demo Shop",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-tiendanube",
+                connector_type="tiendanube",
+                label="Tiendanube Demo",
+                params={"store_id": "123", "access_token": "tn_test_token", "include_stock": False},
+            )
+        ],
+    )
+
+
+def test_force_report_uses_tiendanube_pipeline_without_loading_sheets():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for tiendanube"))
+
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+    )
+
+    assert result.report.business_name == "Demo Shop"
+    assert {metric.key: metric.value for metric in result.report.metrics}["revenue_today"] == 1000.0
+    assert result.dispatch.status == "sent"
+    assert result.runtime_metadata["run_mode"] == "forced"
+    assert result.runtime_metadata["config_digest"].startswith("sha256:")
+    assert result.runtime_metadata["config_ref"].startswith("runtime:demo-shop:")
+    assert "tn_test_token" not in str(result.runtime_metadata)
+    sheets_service_factory.assert_not_called()
+
+
+def test_force_report_records_successful_run_in_ledger_without_raw_secrets():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    ledger = InMemoryRunLedger()
+
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        run_ledger=ledger,
+    )
+
+    assert result.runtime_metadata["run_id"]
+    [record] = ledger.list_runs(business_id="demo-shop")
+    assert record.run_id == result.runtime_metadata["run_id"]
+    assert record.trigger_type == "forced"
+    assert record.status == "succeeded"
+    assert record.config_digest == result.runtime_metadata["config_digest"]
+    assert record.summary_metadata["run_mode"] == "forced"
+    assert record.summary_metadata["connector_types"] == ["tiendanube"]
+    assert record.connector_outcomes[0].connector_id == "demo-tiendanube"
+    assert record.connector_outcomes[0].connector_type == "tiendanube"
+    assert record.connector_outcomes[0].status == "succeeded"
+    assert record.connector_outcomes[0].metrics_count == len(result.report.metrics)
+    assert record.dispatch_outcomes[0].status == "sent"
+    assert record.dispatch_outcomes[0].message_id == "dry-run"
+    assert record.artifacts[0].artifact_type == "daily_report"
+    assert "tn_test_token" not in record.model_dump_json()
+
+
+def test_force_report_ledger_only_records_connector_that_forced_path_executed():
+    business = make_tiendanube_business().model_copy(
+        update={
+            "connectors": [
+                *make_tiendanube_business().connectors,
+                ConnectorConfig(
+                    connector_id="demo-meta",
+                    connector_type="meta_ads",
+                    label="Meta Ads Demo",
+                    params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
+                ),
+            ]
+        }
+    )
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    ledger = InMemoryRunLedger()
+
+    reports_script.run_forced_report(
+        business=business,
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        meta_ads_http_client=MagicMock(side_effect=AssertionError("forced path should not call second connector")),
+        run_ledger=ledger,
+    )
+
+    [record] = ledger.list_runs(business_id="demo-shop")
+    assert [(out.connector_id, out.connector_type) for out in record.connector_outcomes] == [
+        ("demo-tiendanube", "tiendanube")
+    ]
+    assert record.artifacts[0].evidence_refs == ["evidence://demo-tiendanube/2026-05-19"]
+    assert record.summary_metadata["connector_types"] == ["tiendanube"]
+
+
+def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():
+    class FailingTiendanubeHTTPClient:
+        def get(self, url, headers=None, params=None):
+            raise RuntimeError("401 access_token=raw_failure_secret")
+
+    delivery = MagicMock()
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(RuntimeError):
+        reports_script.run_forced_report(
+            business=make_tiendanube_business(),
+            report_date=date(2026, 5, 19),
+            delivery_client=delivery,
+            idempotency_store=InMemoryIdempotencyStore(),
+            sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+            tiendanube_http_client=FailingTiendanubeHTTPClient(),
+            run_ledger=run_ledger,
+            case_store=case_store,
+        )
+
+    [case] = case_store.list_cases(business_id="demo-shop")
+    assert case.case_type == "data_stale"
+    assert case.dedupe_key == "demo-shop/data_stale/connector/tiendanube/runtime.freshness/daily"
+    assert "raw_failure_secret" not in case.model_dump_json()
+
+    [run] = run_ledger.list_runs(business_id="demo-shop")
+    assert run.status == "failed"
+    assert len(run.connector_outcomes) == 1
+    failed_connector = run.connector_outcomes[0]
+    assert failed_connector.connector_id == "demo-tiendanube"
+    assert failed_connector.connector_type == "tiendanube"
+    assert failed_connector.status == "failed"
+    assert failed_connector.finished_at is not None
+    assert failed_connector.error_summary is not None
+    assert "raw_failure_secret" not in failed_connector.error_summary
+    assert run.artifacts == []
+    assert run.dispatch_outcomes == []
+    assert run.summary_metadata["cases_opened"] == 1
+    assert run.summary_metadata["cases_updated"] == 0
+    assert "raw_failure_secret" not in run.model_dump_json()
+    delivery.send_text.assert_not_called()
+
+
+def test_force_report_persists_operational_cases_and_links_ledger_artifact(tmp_path):
+    csv_path = tmp_path / "crisis.csv"
+    csv_path.write_text(
+        "fecha,ventas,ordenes,stock,conversaciones_sin_responder,gasto_ads\n"
+        "2026-05-18,100000,10,10,1,0\n"
+        "2026-05-19,70000,8,3,8,18500\n"
+    )
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    result = reports_script.run_forced_report(
+        business=make_csv_business(str(csv_path)),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube should not be loaded")),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    cases = case_store.list_cases(business_id="demo-csv")
+    assert {case.case_type for case in cases} == {"sales_drop", "stockout_risk", "unanswered_conversations"}
+    assert all(case.latest_run_id == result.runtime_metadata["run_id"] for case in cases)
+
+    [run] = run_ledger.list_runs(business_id="demo-csv")
+    assert set(run.artifacts[0].operational_case_ids) == {case.case_id for case in cases}
+    assert run.summary_metadata["cases_opened"] == 3
+    assert run.summary_metadata["cases_updated"] == 0
+
+
+def test_force_report_dispatches_owner_case_brief_and_records_it_in_ledger(tmp_path):
+    csv_path = tmp_path / "case_brief.csv"
+    csv_path.write_text(
+        "fecha,ventas,ordenes,stock,conversaciones_sin_responder,gasto_ads\n"
+        "2026-05-18,100000,10,10,1,0\n"
+        "2026-05-19,70000,8,3,8,18500\n"
+    )
+    delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="dry-run-daily", error=None),
+        DeliveryResult(success=True, message_id="dry-run-case-brief", error=None),
+    ]
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    result = reports_script.run_forced_report(
+        business=make_csv_business(str(csv_path)),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+
+    assert result.case_brief_dispatch is not None
+    assert result.case_brief_dispatch.status == "sent"
+    assert result.case_brief_dispatch.idempotency_key == "demo-csv/2026-05-19/owner_case_brief"
+    assert delivery.send_text.call_count == 2
+    _daily_phone, daily_text = delivery.send_text.call_args_list[0].args
+    brief_phone, brief_text = delivery.send_text.call_args_list[1].args
+    assert brief_phone == "+5491100000000"
+    assert "Orvo Brain" in daily_text
+    assert "Brief operativo" in brief_text
+    assert "Caso:" in brief_text
+
+    [run] = run_ledger.list_runs(business_id="demo-csv")
+    assert [out.metadata.get("message_type") for out in run.dispatch_outcomes] == ["daily_report", "owner_case_brief"]
+    assert [out.idempotency_key for out in run.dispatch_outcomes] == [
+        "demo-csv/2026-05-19/daily",
+        "demo-csv/2026-05-19/owner_case_brief",
+    ]
+    assert run.summary_metadata["case_brief_dispatch_status"] == "sent"
+    assert run.status == "succeeded"
+
+
+def make_mercadolibre_business():
+    return BusinessConfig(
+        business_id="demo-ml",
+        business_name="Demo ML",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-mercadolibre",
+                connector_type="mercadolibre",
+                label="MercadoLibre Demo",
+                params={"seller_id": "123", "access_token": "ml_test_token", "site_id": "MLA"},
+            )
+        ],
+    )
+
+
+def test_force_report_uses_mercadolibre_pipeline_without_loading_sheets_or_tiendanube():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for mercadolibre"))
+
+    result = reports_script.run_forced_report(
+        business=make_mercadolibre_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube must not be called for mercadolibre")),
+        mercadolibre_http_client=FakeMercadoLibreHTTPClient(),
+    )
+
+    assert result.report.business_name == "Demo ML"
+    assert {metric.key: metric.value for metric in result.report.metrics}["revenue_today"] == 5000.0
+    assert result.dispatch.status == "sent"
+    sheets_service_factory.assert_not_called()
+
+
+def make_meta_ads_business():
+    return BusinessConfig(
+        business_id="demo-meta",
+        business_name="Demo Meta",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-meta",
+                connector_type="meta_ads",
+                label="Meta Ads Demo",
+                params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
+            )
+        ],
+    )
+
+
+def test_force_report_uses_meta_ads_pipeline_without_loading_other_clients():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for meta_ads"))
+
+    result = reports_script.run_forced_report(
+        business=make_meta_ads_business(),
+        report_date=date(2026, 5, 17),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube must not be called for meta_ads")),
+        mercadolibre_http_client=MagicMock(side_effect=AssertionError("mercadolibre must not be called for meta_ads")),
+        meta_ads_http_client=FakeMetaAdsHTTPClient(),
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    assert result.report.business_name == "Demo Meta"
+    assert metrics["ad_spend_today"] == pytest.approx(725.25)
+    assert result.dispatch.status == "sent"
+    sheets_service_factory.assert_not_called()
+
+
+def test_force_report_rejects_unsupported_connector_type():
+    business = BusinessConfig(
+        business_id="unknown",
+        business_name="Unknown",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="unknown-conn",
+                connector_type="shopify",
+                label="Shopify",
+                params={},
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="no supported enabled connector"):
+        reports_script.run_forced_report(
+            business=business,
+            report_date=date(2026, 5, 19),
+            delivery_client=MagicMock(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            sheets_service_factory=MagicMock(),
+        )
+
+
+def make_csv_business(csv_path: str, *, label: str = "CSV Demo") -> BusinessConfig:
+    return BusinessConfig(
+        business_id="demo-csv",
+        business_name="Demo CSV",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-csv-conn",
+                connector_type="csv",
+                label=label,
+                params={"csv_path": csv_path},
+            )
+        ],
+    )
+
+
+def test_force_report_uses_csv_pipeline_without_loading_sheets():
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded for csv"))
+
+    result = reports_script.run_forced_report(
+        business=make_csv_business("examples/artemea_daily.csv"),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=sheets_service_factory,
+        tiendanube_http_client=MagicMock(side_effect=AssertionError("tiendanube must not be called for csv")),
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    assert result.report.business_name == "Demo CSV"
+    assert metrics["revenue_today"] == 260000.0
+    assert result.dispatch.status == "sent"
+    sheets_service_factory.assert_not_called()
+    delivery.send_text.assert_called_once()
+    assert any(
+        ev.source == "csv" and "CSV Demo" in ev.label
+        for metric in result.report.metrics
+        for ev in metric.evidence
+    )
+
+
+def test_force_report_csv_requires_csv_path():
+    business = BusinessConfig(
+        business_id="bad-csv",
+        business_name="Bad CSV",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="bad-csv-conn",
+                connector_type="csv",
+                label="Bad CSV",
+                params={},
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="csv_path"):
+        reports_script.run_forced_report(
+            business=business,
+            report_date=date(2026, 5, 19),
+            delivery_client=MagicMock(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            sheets_service_factory=MagicMock(),
+        )

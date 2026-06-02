@@ -1,0 +1,19 @@
+{
+  "business_id": "demo-meta",
+  "business_name": "Demo Meta",
+  "owner_phone": "+5491150380097",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "currency": "ARS",
+  "connectors": [
+    {
+      "connector_id": "demo-meta-ads",
+      "connector_type": "meta_ads",
+      "label": "Meta Ads - Demo Meta",
+      "params": {
+        "ad_account_id": "act_1234567890",
+        "access_token": "[REDACTED]"
+      },
+      "enabled": true
+    }
+  ]
+}

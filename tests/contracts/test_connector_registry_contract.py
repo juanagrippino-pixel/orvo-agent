@@ -1,0 +1,409 @@
+def test_default_connector_specs_expose_control_plane_runtime_modes_and_metric_families():
+    from app.brain.connector_registry import (
+        CONNECTOR_TYPE_CSV,
+        CONNECTOR_TYPE_GOOGLE_SHEETS,
+        CONNECTOR_TYPE_TIENDANUBE,
+        get_connector_spec,
+    )
+
+    expected_modes = ("preview", "forced", "scheduled", "operator_triggered")
+    for connector_type in (CONNECTOR_TYPE_CSV, CONNECTOR_TYPE_GOOGLE_SHEETS, CONNECTOR_TYPE_TIENDANUBE):
+        spec = get_connector_spec(connector_type)
+        assert spec.executor.supported_runtime_modes == expected_modes
+        assert "runtime.freshness" in spec.emitted_metric_families
+        assert "runtime.data_quality" in spec.emitted_metric_families
+
+    tiendanube = get_connector_spec(CONNECTOR_TYPE_TIENDANUBE)
+    assert "commerce.orders" in tiendanube.emitted_metric_families
+    assert "commerce.revenue" in tiendanube.emitted_metric_families
+    assert "commerce.inventory" in tiendanube.emitted_metric_families
+
+
+def test_runtime_compiler_uses_connector_registry_contract_not_private_duplicate_descriptors():
+    from app.brain.config import BusinessConfig, ConnectorConfig
+    from app.brain.connector_registry import CAPABILITY_COMMERCE_METRICS
+    from app.brain.runtime import compile_business_runtime
+
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491149724933",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="Tiendanube principal",
+                params={"store_id": "12345", "access_token": "tn_test_token"},
+            )
+        ],
+    )
+
+    runtime = compile_business_runtime(business)
+
+    assert CAPABILITY_COMMERCE_METRICS in runtime.connectors[0].capabilities
+    assert runtime.connectors[0].required_params == ["store_id"]
+    assert runtime.connectors[0].secret_refs == {
+        "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
+    }
+
+
+def test_sample_connector_is_not_declared_as_forced_or_scheduled_daily_runtime():
+    from app.brain.connector_registry import CAPABILITY_DAILY_REPORT, CONNECTOR_TYPE_SAMPLE, get_connector_spec
+
+    sample = get_connector_spec(CONNECTOR_TYPE_SAMPLE)
+
+    assert CAPABILITY_DAILY_REPORT not in sample.capabilities
+    assert sample.executor.supported_runtime_modes == ("preview", "operator_triggered")
+
+
+def test_connector_spec_validate_emitted_metrics_composes_unknown_source_and_family_diagnostics():
+    """ConnectorSpec.validate_emitted_metrics must compose the three semantic
+    envelope diagnostics deterministically so the runtime/control-plane can
+    rely on one call to inspect adapter output against a connector envelope.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    issues = tiendanube.validate_emitted_metrics(
+        (
+            "orders_today",
+            "mystery_metric",
+            "ad_spend_today",
+            "ad_roas_today",
+        )
+    )
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "ad_spend_today", 2),
+        ("disallowed_source", "ad_roas_today", 3),
+        ("undeclared_family", "ad_spend_today", 2),
+        ("undeclared_family", "ad_roas_today", 3),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
+def test_connector_spec_validate_emitted_metrics_returns_empty_for_in_envelope_keys():
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    assert tiendanube.validate_emitted_metrics(
+        ("orders_today", "revenue_today", "stock_units")
+    ) == []
+
+
+def test_connector_spec_validate_emitted_metrics_is_deterministic_across_runs():
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+    keys = ("ad_spend_today", "orders_today", "mystery_metric")
+
+    first = meta_ads.validate_emitted_metrics(keys)
+    second = meta_ads.validate_emitted_metrics(keys)
+    assert first == second
+
+
+def test_validate_emitted_metrics_for_connector_module_function_matches_spec_method():
+    from app.brain.connector_registry import (
+        get_connector_spec,
+        validate_emitted_metrics_for_connector,
+    )
+
+    keys = ("orders_today", "ad_spend_today", "mystery_metric")
+    spec_result = get_connector_spec("tiendanube").validate_emitted_metrics(keys)
+    free_result = validate_emitted_metrics_for_connector("tiendanube", keys)
+
+    assert free_result == spec_result
+
+
+def test_validate_emitted_metrics_for_connector_raises_for_unknown_connector_type():
+    import pytest
+
+    from app.brain.connector_registry import (
+        UnknownConnectorError,
+        validate_emitted_metrics_for_connector,
+    )
+
+    with pytest.raises(UnknownConnectorError):
+        validate_emitted_metrics_for_connector("not_a_connector", ("orders_today",))
+
+
+def test_semantics_package_reexports_family_envelope_helper_for_runtime_callers():
+    """Runtime callers depend on `app.brain.semantics` as the public surface."""
+
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_family_envelope_violations")
+    assert "find_family_envelope_violations" in semantics.__all__
+
+
+def _evidence(source: str):
+    from app.brain.models import Evidence
+
+    return Evidence(source=source, label=f"{source} run")
+
+
+def _metric(key: str, *sources: str, value: float | int | str = 1, unit: str | None = None):
+    from app.brain.models import Metric
+
+    return Metric(
+        key=key,
+        label=key,
+        value=value,
+        unit=unit,
+        evidence=[_evidence(source) for source in sources],
+    )
+
+
+def test_connector_spec_validate_emitted_metric_objects_composes_all_four_diagnostics_in_fixed_order():
+    """ConnectorSpec.validate_emitted_metric_objects must compose unknown_metric,
+    disallowed_source, undeclared_family, and evidence_source_mismatch
+    deterministically so the runtime can validate adapter-emitted Metric objects
+    in a single call. The fixed order matches the key-only composition and
+    appends evidence_source_mismatch last.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    metrics = [
+        _metric("orders_today", "tiendanube"),
+        _metric("mystery_metric", "tiendanube"),
+        _metric("ad_spend_today", "tiendanube", unit="ARS"),
+        _metric("revenue_today", "mercadolibre", unit="ARS"),
+    ]
+
+    issues = tiendanube.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "ad_spend_today", 2),
+        ("undeclared_family", "ad_spend_today", 2),
+        ("evidence_source_mismatch", "ad_spend_today", 2),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
+def test_connector_spec_validate_emitted_metric_objects_returns_empty_for_in_envelope_metrics():
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    assert tiendanube.validate_emitted_metric_objects(
+        [
+            _metric("orders_today", "tiendanube"),
+            _metric("revenue_today", "tiendanube", unit="ARS"),
+            _metric("stock_units", "tiendanube"),
+        ]
+    ) == []
+
+
+def test_connector_spec_validate_emitted_metric_objects_is_deterministic_across_runs():
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+    metrics = [
+        _metric("ad_spend_today", "tiendanube"),
+        _metric("orders_today", "tiendanube"),
+        _metric("mystery_metric", "tiendanube"),
+    ]
+
+    first = meta_ads.validate_emitted_metric_objects(metrics)
+    second = meta_ads.validate_emitted_metric_objects(metrics)
+    assert first == second
+
+
+def test_validate_emitted_metric_objects_for_connector_module_function_matches_spec_method():
+    from app.brain.connector_registry import (
+        get_connector_spec,
+        validate_emitted_metric_objects_for_connector,
+    )
+
+    metrics = [
+        _metric("orders_today", "tiendanube"),
+        _metric("ad_spend_today", "tiendanube"),
+        _metric("mystery_metric", "tiendanube"),
+    ]
+    spec_result = get_connector_spec("tiendanube").validate_emitted_metric_objects(metrics)
+    free_result = validate_emitted_metric_objects_for_connector("tiendanube", metrics)
+
+    assert free_result == spec_result
+
+
+def test_validate_emitted_metric_objects_for_connector_raises_for_unknown_connector_type():
+    import pytest
+
+    from app.brain.connector_registry import (
+        UnknownConnectorError,
+        validate_emitted_metric_objects_for_connector,
+    )
+
+    with pytest.raises(UnknownConnectorError):
+        validate_emitted_metric_objects_for_connector(
+            "not_a_connector", [_metric("orders_today", "tiendanube")]
+        )
+
+
+def test_connector_spec_validate_emitted_metric_objects_matches_key_path_when_no_evidence_violations():
+    """When all evidence sources are allowed, validate_emitted_metric_objects
+    must yield exactly the same diagnostics as validate_emitted_metrics. This
+    pins the symmetry so callers can freely upgrade from keys to objects."""
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    metrics = [
+        _metric("orders_today", "tiendanube"),
+        _metric("mystery_metric", "tiendanube"),
+        _metric("ad_spend_today", "google_sheets", unit="ARS"),
+        _metric("ad_roas_today", "meta_ads"),
+    ]
+    keys = [metric.key for metric in metrics]
+
+    object_issues = tiendanube.validate_emitted_metric_objects(metrics)
+    key_issues = tiendanube.validate_emitted_metrics(keys)
+
+    assert object_issues == key_issues
+
+
+def test_connector_spec_validate_emitted_metric_objects_appends_value_kind_after_evidence():
+    """ConnectorSpec.validate_emitted_metric_objects must append
+    value_kind_mismatch as the fifth diagnostic in the fixed composition order
+    so the runtime can detect canonical unit/value-type mismatches alongside
+    the four envelope diagnostics in a single call.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+
+    metrics = [
+        _metric("ad_spend_today", "meta_ads", unit="ARS"),
+        _metric("mystery_metric", "meta_ads"),
+        _metric("orders_today", "meta_ads"),
+        _metric("ad_roas_today", "meta_ads", value="0.5"),
+    ]
+
+    issues = meta_ads.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "orders_today", 2),
+        ("undeclared_family", "orders_today", 2),
+        ("evidence_source_mismatch", "orders_today", 2),
+        ("value_kind_mismatch", "ad_roas_today", 3),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
+def test_connector_spec_validate_emitted_metric_objects_appends_money_currency_after_value_kind():
+    """ConnectorSpec.validate_emitted_metric_objects must append
+    money_currency_missing as the sixth diagnostic in the fixed composition
+    order so the runtime can detect money metrics emitted without a currency
+    string alongside the five upstream diagnostics in a single call. This
+    mirrors the slot reserved by
+    :func:`validate_report_metric_objects`,
+    :func:`validate_case_metric_objects`, and
+    :func:`validate_surface_metric_objects` so connector-, report-, case-, and
+    surface-side compositions stay symmetric.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+
+    metrics = [
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
+        _metric("mystery_metric", "meta_ads"),
+        _metric("orders_today", "meta_ads"),
+        _metric("ad_roas_today", "meta_ads", value="0.5"),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+    ]
+
+    issues = meta_ads.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "orders_today", 2),
+        ("undeclared_family", "orders_today", 2),
+        ("evidence_source_mismatch", "orders_today", 2),
+        ("value_kind_mismatch", "ad_roas_today", 3),
+        ("money_currency_missing", "ad_spend_today", 4),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
+def test_connector_spec_validate_emitted_metric_objects_slots_evidence_missing_between_family_and_evidence_source():
+    """ConnectorSpec.validate_emitted_metric_objects must slot evidence_missing
+    immediately after undeclared_family and before evidence_source_mismatch so
+    structural ``no evidence at all`` diagnostics surface before content
+    diagnostics about wrong-source evidence. This mirrors the slot reserved by
+    :func:`validate_report_metric_objects` and :func:`validate_case_metric_objects`
+    and keeps the connector composition shaped as ``unknown_metric`` ->
+    ``disallowed_source`` -> ``undeclared_family`` -> ``evidence_missing`` ->
+    ``evidence_source_mismatch`` -> ``value_kind_mismatch``. Mapping form is
+    required for the evidence-missing entry because Pydantic ``Metric`` enforces
+    ``min_length=1`` on evidence and cannot represent the missing case directly.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    metrics = [
+        {
+            "key": "orders_today",
+            "value": 12,
+            "unit": None,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "mystery_metric",
+            "value": 1,
+            "unit": None,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+        {
+            "key": "ad_spend_today",
+            "value": 1500,
+            "unit": "ARS",
+            "evidence": [{"source": "meta_ads", "label": "ads run"}],
+        },
+        {"key": "commerce.revenue.total", "value": 90000, "unit": "ARS", "evidence": []},
+        {
+            "key": "revenue_today",
+            "value": 90000,
+            "unit": "ARS",
+            "evidence": [{"source": "whatsapp", "label": "wa run"}],
+        },
+        {
+            "key": "orders_today",
+            "value": "not a number",
+            "unit": None,
+            "evidence": [{"source": "tiendanube", "label": "tn run"}],
+        },
+    ]
+
+    issues = tiendanube.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "ad_spend_today", 2),
+        ("undeclared_family", "ad_spend_today", 2),
+        ("evidence_missing", "commerce.revenue.total", 3),
+        ("evidence_source_mismatch", "revenue_today", 4),
+        ("value_kind_mismatch", "orders_today", 5),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
