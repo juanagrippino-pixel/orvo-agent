@@ -483,6 +483,54 @@ def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
     assert response.get_json()["data"]["case"]["case_id"] == case.case_id
 
 
+def test_internal_read_allows_matching_operator_business_grant(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}",
+        headers={**AUTH, "X-Orvo-Businesses": "other, artemea"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["case"]["case_id"] == case.case_id
+
+
+def test_internal_read_denies_mismatched_operator_business_grant_and_audits(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "other, demo-secret access_token=raw_grant_secret",
+            "X-Request-ID": "req-business-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_grant_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "operator:juan"
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-business-denied"
+    assert event["data"]["reason"] == "business_scope_denied"
+    assert event["data"]["permission"] == "business:access"
+    assert event["data"]["allowed_businesses"] == ["other", "[REDACTED]"]
+    assert "raw_grant_secret" not in json.dumps(event, sort_keys=True)
+
+
 def test_internal_case_action_rejects_viewer_role_without_mutation(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
