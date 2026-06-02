@@ -500,6 +500,11 @@ def _snapshots_for_detection(
     )
 
 
+def _assert_mutation_timestamp_is_current(record: "OperationalCase", timestamp: datetime) -> None:
+    if timestamp < record.updated_at:
+        raise ValueError("mutation timestamp cannot be earlier than current case updated_at")
+
+
 class OperationalCaseStore(Protocol):
     def upsert_detection(
         self,
@@ -608,6 +613,7 @@ class _OperationalCaseMutations:
                 ],
             )
         else:
+            _assert_mutation_timestamp_is_current(existing, detected_at)
             is_recurrence = existing.status in {"resolved", "dismissed"}
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
@@ -672,6 +678,7 @@ class _OperationalCaseMutations:
         if actor_type == "operator" and status in TERMINAL_OPERATIONAL_CASE_STATUSES and normalized_reason is None:
             raise OperationalCaseStatusError(f"operator transition to {status} requires a non-empty reason")
         transitioned_at = _as_utc(transitioned_at) if transitioned_at is not None else _now_utc()
+        _assert_mutation_timestamp_is_current(record, transitioned_at)
         update: dict[str, Any] = {
             "status": status,
             "updated_at": transitioned_at,
@@ -714,6 +721,7 @@ class _OperationalCaseMutations:
         if not normalized_comment:
             raise ValueError("comment must be non-empty")
         commented_at = _as_utc(commented_at) if commented_at is not None else _now_utc()
+        _assert_mutation_timestamp_is_current(record, commented_at)
         updated = record.model_copy(
             update={
                 "updated_at": commented_at,
@@ -755,6 +763,7 @@ class _OperationalCaseMutations:
         if record.assignee_ref == redacted_assignee_ref:
             return record.model_copy(deep=True)
         assigned_at = _as_utc(assigned_at) if assigned_at is not None else _now_utc()
+        _assert_mutation_timestamp_is_current(record, assigned_at)
         updated = record.model_copy(
             update={
                 "assignee_ref": redacted_assignee_ref,
