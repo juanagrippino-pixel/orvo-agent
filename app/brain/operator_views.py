@@ -174,6 +174,25 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
     },
 )
 
+_CASE_VIEW_EXPORT_COLUMNS: tuple[str, ...] = (
+    "case_id",
+    "business_id",
+    "case_type",
+    "status",
+    "severity",
+    "priority_score",
+    "title",
+    "entity_kind",
+    "entity_id",
+    "entity_label",
+    "assignee_ref",
+    "opened_at",
+    "updated_at",
+    "latest_run_id",
+    "source_connectors",
+    "degraded",
+)
+
 
 def builtin_case_views() -> list[dict[str, Any]]:
     return redact_secrets([dict(view) for view in _BUILTIN_CASE_VIEWS])
@@ -265,6 +284,63 @@ def summarize_builtin_case_view_totals(store: OperationalCaseStore, *, business_
             }
         )
     return redact_secrets({"business_id": business_id, "views": views})
+
+
+def export_builtin_case_view_rows(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    view_id: str,
+    limit: str | None,
+) -> dict[str, Any]:
+    """Return a stable, scoped export projection for a read-only built-in view.
+
+    The export is intentionally JSON-row shaped instead of SQL/CSV generated:
+    it reuses the same built-in JQL-lite execution path, business scoping, limit
+    handling, deterministic ordering, and API-boundary redaction as the case
+    queue. The response is a projection only and does not persist saved views.
+    """
+
+    view = get_builtin_case_view(view_id)
+    queue = query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
+    rows = [_case_view_export_row(case) for case in queue["cases"]]
+    return redact_secrets(
+        {
+            "view": queue["view"],
+            "export": {
+                "format": "case_view_rows_v1",
+                "columns": list(_CASE_VIEW_EXPORT_COLUMNS),
+                "limit": queue["limit"],
+                "count": queue["count"],
+                "total": queue["total"],
+                "truncated": queue["truncated"],
+            },
+            "rows": rows,
+        }
+    )
+
+
+def _case_view_export_row(case: dict[str, Any]) -> dict[str, Any]:
+    raw_entity_scope = case.get("entity_scope")
+    entity_scope: dict[str, Any] = raw_entity_scope if isinstance(raw_entity_scope, dict) else {}
+    return {
+        "case_id": case.get("case_id"),
+        "business_id": case.get("business_id"),
+        "case_type": case.get("case_type"),
+        "status": case.get("status"),
+        "severity": case.get("severity"),
+        "priority_score": case.get("priority_score"),
+        "title": case.get("title"),
+        "entity_kind": entity_scope.get("kind"),
+        "entity_id": entity_scope.get("id"),
+        "entity_label": entity_scope.get("label"),
+        "assignee_ref": case.get("assignee_ref"),
+        "opened_at": case.get("opened_at"),
+        "updated_at": case.get("updated_at"),
+        "latest_run_id": case.get("latest_run_id"),
+        "source_connectors": case.get("source_connectors", []),
+        "degraded": case.get("degraded"),
+    }
 
 
 def _split_order_by(raw: str) -> tuple[str, tuple[tuple[str, str], ...]]:
