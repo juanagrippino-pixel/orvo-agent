@@ -457,6 +457,66 @@ def test_operator_terminal_transition_requires_non_empty_reason_without_mutation
     assert after == before
 
 
+@pytest.mark.parametrize("mutation", ["detection", "transition", "comment", "assign"])
+def test_case_mutations_reject_backdated_timestamps_without_rewinding_timeline(conn, mutation):
+    """WorkItem history must be monotonic; stale operator writes cannot reorder the audit trail."""
+
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run"), detected_at=utc_dt(8))
+        commented = store.add_comment(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="juan",
+            comment="Primera revisión",
+            commented_at=utc_dt(9),
+        )
+        before = store.get_case(opened.case_id)
+        assert before == commented
+
+        with pytest.raises(ValueError, match="mutation timestamp cannot be earlier than current case updated_at"):
+            if mutation == "detection":
+                store.upsert_detection(
+                    make_stockout_detection(
+                        run_id=f"{label}-late-old-run",
+                        evidence_ref="evidence://tn/stock/2026-05-25",
+                    ),
+                    detected_at=utc_dt(8, 30),
+                )
+            elif mutation == "transition":
+                store.transition_case(
+                    opened.case_id,
+                    status="acknowledged",
+                    actor_type="operator",
+                    actor_ref="juan",
+                    reason="Backdated ack",
+                    transitioned_at=utc_dt(8, 30),
+                )
+            elif mutation == "comment":
+                store.add_comment(
+                    opened.case_id,
+                    actor_type="operator",
+                    actor_ref="juan",
+                    comment="Comentario viejo",
+                    commented_at=utc_dt(8, 30),
+                )
+            else:
+                store.assign_case(
+                    opened.case_id,
+                    actor_type="operator",
+                    actor_ref="juan",
+                    assignee_ref="ops:ana",
+                    assigned_at=utc_dt(8, 30),
+                )
+
+        after = store.get_case(opened.case_id)
+        assert after is not None
+        assert after == before, f"{label}: rejected {mutation} must not mutate case history"
+        assert [event.created_at for event in after.timeline] == [utc_dt(8), utc_dt(9)]
+
+
 def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reopen():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
