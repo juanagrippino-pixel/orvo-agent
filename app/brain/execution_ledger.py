@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Sequence
 
 from app.brain.config import BusinessConfig
+from app.brain.connector_health import classify_connector_failure_health_state
 from app.brain.connector_registry import (
     UnknownConnectorError,
     default_connector_registry,
@@ -180,6 +181,7 @@ def _failed_connector_outcome(
         connector_id=connector_id,
         connector_type=connector_type,
         status="failed",
+        health_state=classify_connector_failure_health_state(error_summary),
         started_at=failed_at,
         finished_at=failed_at,
         error_summary=error_summary,
