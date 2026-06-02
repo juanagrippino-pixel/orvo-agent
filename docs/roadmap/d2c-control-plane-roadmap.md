@@ -74,19 +74,26 @@ Exit criteria:
 
 Outcome: Orvo's Jira-like `OperationalCase` / WorkItem surface gains stable project, issue-type, workflow, and status-category semantics before saved filters, SLA queues, or multi-operator expansion depend on derived status sets.
 
-Current shipped checkpoint, grounded in `app/brain/operational_cases.py` and `app/brain/operator_views.py`:
+Current shipped checkpoint, grounded in `app/brain/operational_cases.py`, `app/brain/work_items.py`, `app/brain/operator_views.py`, and `app/brain/operator_api/projections.py`:
 
-- `OperationalCase` is the durable work item source of truth with tenant scope via `business_id`, deterministic case types, timeline/evidence snapshots, and hardcoded lifecycle transitions.
-- JQL-lite and built-in operator views are read-only projections over cases; they do not translate user input to SQL or persist custom saved views.
-- There is not yet a first-class `Project`, `IssueType`/`CaseTypeDefinition`, `WorkflowDefinition`, `StatusDefinition`, or `StatusCategory` registry.
+- `OperationalCase` is still the durable work item source of truth with tenant scope via `business_id`, deterministic case types, timeline/evidence snapshots, and hardcoded lifecycle transitions.
+- A read-only WorkItem projection layer now exposes project keys, work item IDs, issue types, workflow/status definitions, and canonical status categories (`to_do`, `in_progress`, `done`) without creating a parallel task store.
+- JQL-lite and built-in operator views now support WorkItem projection fields including `project`, `issue_type`, `status_category`, and `assignee_ref`; they remain route/business-scoped projections and do not translate user input to SQL or persist custom saved views.
+- There is still no separate persisted `Project`/`WorkItem` table, tenant-custom workflow scheme, or writable saved-view layer; treat those as post-v1 platform work until a concrete operator workflow requires them.
 
-Deliverables:
+Delivered / keep green:
 
 - additive project/work-item envelope over `business_id`, with stable project keys and no tenant-crossing leakage;
 - internal status-category mapping for existing statuses: `open -> to_do`, `acknowledged/in_progress -> in_progress`, `resolved/dismissed -> done`;
 - explicit issue-type/case-type registry wrapper for current D2C case families, without introducing tenant-custom workflows yet;
 - workflow definition registry that documents current allowed transitions before any executor/SLA layer consumes them;
-- JQL-lite additions only after the canonical fields exist (`project`, `status_category`, `assignee_ref`, and `issue_type` aliasing), with route-owned business scope.
+- JQL-lite additions for canonical fields (`project`, `status_category`, `assignee_ref`, and `issue_type`), with route-owned business scope.
+
+Next hardening deliverables:
+
+- retire or rebase any branch/doc that uses the non-canonical `todo` category spelling;
+- namespace service-management/customer-visible categories separately from canonical WorkItem `status_category` before merging SLA/service queues;
+- preserve the projection-only boundary in operator/API docs and tests whenever queue, analytics, export, or WhatsApp surfaces include WorkItem fields.
 
 Exit criteria:
 
