@@ -61,6 +61,20 @@ def register_case_activity_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/resolution-latency")
+    def internal_brain_cases_resolution_latency(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_resolution_latency_histogram(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/handling-latency")
     def internal_brain_cases_handling_latency(business_id: str):
         return _with_internal_stores(
