@@ -17,6 +17,7 @@ from app.brain.pipeline import PipelineResult, run_enabled_connectors_daily_repo
 from app.brain.run_ledger import RunLedger
 from app.brain.runtime import compile_business_runtime, runtime_run_metadata
 from app.brain.scheduler import due_schedules
+from app.brain.secret_refs import SecretResolver
 
 _log = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ def run_due_daily_reports(
     now: datetime | None = None,
     run_ledger: RunLedger | None = None,
     case_store: OperationalCaseStore | None = None,
+    secret_resolver: SecretResolver | None = None,
 ) -> list[ScheduledPipelineResult]:
     """Run every due daily report from the config store."""
 
@@ -119,6 +121,7 @@ def run_due_daily_reports(
                     tiendanube_http_client=tiendanube_http_client,
                     mercadolibre_http_client=mercadolibre_http_client,
                     meta_ads_http_client=meta_ads_http_client,
+                    secret_resolver=secret_resolver,
                 ),
                 runtime_metadata,
             )
