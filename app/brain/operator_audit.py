@@ -9,11 +9,67 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
 from app.brain.security.redaction import redact_secrets, redact_text
+
+
+DEFAULT_OPERATOR_AUDIT_RETENTION_DAYS = 90
+MAX_OPERATOR_AUDIT_RETENTION_DAYS = 90
+
+
+class OperatorAuditExportError(Exception):
+    """Safe error raised for invalid operator-audit export controls."""
+
+    def __init__(self, code: str, message: str, *, status_code: int = 400) -> None:
+        self.code = code
+        self.message = redact_text(message) or "Operator audit export error"
+        self.status_code = status_code
+        super().__init__(self.message)
+
+
+def parse_audit_retention_days(
+    value: str | None,
+    *,
+    default: int = DEFAULT_OPERATOR_AUDIT_RETENTION_DAYS,
+    max_days: int = MAX_OPERATOR_AUDIT_RETENTION_DAYS,
+) -> int:
+    """Return a bounded retention window for admin audit exports.
+
+    Audit events are durable, but operator-facing exports must remain bounded so
+    an overbroad admin query cannot accidentally expose historical tenant
+    activity beyond the approved operational window.
+    """
+
+    if value in (None, ""):
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise OperatorAuditExportError(
+            "invalid_retention_days",
+            "retention_days must be an integer",
+            status_code=400,
+        ) from exc
+    if parsed < 1:
+        raise OperatorAuditExportError(
+            "invalid_retention_days",
+            "retention_days must be positive",
+            status_code=400,
+        )
+    if parsed > max_days:
+        raise OperatorAuditExportError(
+            "invalid_retention_days",
+            f"retention_days must be <= {max_days}",
+            status_code=400,
+        )
+    return parsed
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class SQLiteOperatorAuditStore:
@@ -63,19 +119,27 @@ class SQLiteOperatorAuditStore:
         self._conn.commit()
         return event_id
 
-    def list_events(self, *, business_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def list_events(
+        self,
+        *,
+        business_id: str,
+        limit: int = 100,
+        retention_days: int = DEFAULT_OPERATOR_AUDIT_RETENTION_DAYS,
+    ) -> list[dict[str, Any]]:
         """Return newest audit events for one business with payloads redacted."""
+
+        cutoff = (_utc_now() - timedelta(days=retention_days)).isoformat().replace("+00:00", "Z")
 
         rows = self._conn.execute(
             """
             SELECT event_id, business_id, actor_ref, event_type, target_type,
                    target_id, request_id, created_at, data
             FROM operator_audit_events
-            WHERE business_id = ?
+            WHERE business_id = ? AND created_at >= ?
             ORDER BY created_at DESC, event_id DESC
             LIMIT ?
             """,
-            (business_id, limit),
+            (business_id, cutoff, limit),
         ).fetchall()
         events: list[dict[str, Any]] = []
         for (

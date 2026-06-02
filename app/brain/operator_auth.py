@@ -13,6 +13,7 @@ from typing import Final
 
 from app.brain.security.redaction import redact_text
 
+BUSINESS_ACCESS_PERMISSION: Final[str] = "business:access"
 CASE_ACTION_PERMISSION: Final[str] = "case:action"
 INTERNAL_READ_PERMISSION: Final[str] = "internal:read"
 OPERATOR_AUDIT_READ_PERMISSION: Final[str] = "operator_audit:read"
@@ -31,17 +32,28 @@ class InternalOperatorPrincipal:
 
     actor_ref: str
     role: str
+    allowed_businesses: tuple[str, ...] | None = None
 
 
 class InternalOperatorAuthorizationError(Exception):
     """Safe authorization failure for internal operator API enforcement."""
 
-    def __init__(self, code: str, message: str, *, role: str, permission: str, status_code: int = 403) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        role: str,
+        permission: str,
+        status_code: int = 403,
+        allowed_businesses: tuple[str, ...] | None = None,
+    ) -> None:
         self.code = code
         self.message = message
         self.role = role
         self.permission = permission
         self.status_code = status_code
+        self.allowed_businesses = allowed_businesses
         super().__init__(message)
 
 
@@ -65,11 +77,33 @@ def normalize_operator_role(role: str | None) -> str:
     return normalized
 
 
-def build_internal_operator_principal(*, actor_ref: str | None, role: str | None) -> InternalOperatorPrincipal:
+def parse_allowed_businesses(value: str | None) -> tuple[str, ...] | None:
+    """Parse an optional comma-separated operator business allowlist.
+
+    ``None`` means legacy internal callers did not send a grant header and stay
+    token-scoped during migration. A present but empty header becomes an empty
+    grant set and therefore fails closed for every route business.
+    """
+
+    if value is None:
+        return None
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def build_internal_operator_principal(
+    *,
+    actor_ref: str | None,
+    role: str | None,
+    allowed_businesses_header: str | None = None,
+) -> InternalOperatorPrincipal:
     """Build an authorization principal from authenticated operator headers."""
 
     safe_actor_ref = actor_ref.strip() if isinstance(actor_ref, str) and actor_ref.strip() else "anonymous"
-    return InternalOperatorPrincipal(actor_ref=safe_actor_ref, role=normalize_operator_role(role))
+    return InternalOperatorPrincipal(
+        actor_ref=safe_actor_ref,
+        role=normalize_operator_role(role),
+        allowed_businesses=parse_allowed_businesses(allowed_businesses_header),
+    )
 
 
 def require_internal_permission(principal: InternalOperatorPrincipal, permission: str) -> None:
@@ -83,6 +117,21 @@ def require_internal_permission(principal: InternalOperatorPrincipal, permission
             role=principal.role,
             permission=permission,
         )
+
+
+def require_internal_business_scope(principal: InternalOperatorPrincipal, business_id: str) -> None:
+    """Fail closed when an explicit business grant excludes ``business_id``."""
+
+    allowed_businesses = principal.allowed_businesses
+    if allowed_businesses is None or "*" in allowed_businesses or business_id in allowed_businesses:
+        return
+    raise InternalOperatorAuthorizationError(
+        "business_scope_denied",
+        "Operator is not granted access to this business.",
+        role=principal.role,
+        permission=BUSINESS_ACCESS_PERMISSION,
+        allowed_businesses=allowed_businesses,
+    )
 
 
 def permissions_for_role(role: str) -> list[str]:

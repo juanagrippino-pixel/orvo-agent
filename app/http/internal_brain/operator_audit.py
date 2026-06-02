@@ -6,7 +6,7 @@ from contextlib import closing
 from flask import request
 
 from app.brain.operator_api import OperatorAPIError, parse_limit
-from app.brain.operator_audit import SQLiteOperatorAuditStore
+from app.brain.operator_audit import OperatorAuditExportError, SQLiteOperatorAuditStore, parse_audit_retention_days
 from app.brain.operator_auth import OPERATOR_AUDIT_READ_PERMISSION
 from app.brain.storage import init_schema
 
@@ -30,17 +30,25 @@ def register_operator_audit_routes(app):
             return permission_error
         try:
             limit = parse_limit(request.args.get("limit"), default=50)
+            retention_days = parse_audit_retention_days(request.args.get("retention_days"))
         except OperatorAPIError as exc:
+            return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
+        except OperatorAuditExportError as exc:
             return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
 
         with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
             init_schema(conn)
-            events = SQLiteOperatorAuditStore(conn).list_events(business_id=business_id, limit=limit)
+            events = SQLiteOperatorAuditStore(conn).list_events(
+                business_id=business_id,
+                limit=limit,
+                retention_days=retention_days,
+            )
         return _internal_success(
             business_id,
             {
                 "events": events,
                 "count": len(events),
                 "limit": limit,
+                "retention_days": retention_days,
             },
         )

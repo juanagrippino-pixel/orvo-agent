@@ -16,6 +16,7 @@ from app.brain.operator_auth import (
     InternalOperatorAuthorizationError,
     build_internal_operator_principal,
     permissions_for_role,
+    require_internal_business_scope,
     require_internal_permission,
 )
 from app.brain.security.redaction import redact_secrets, redact_text
@@ -108,27 +109,74 @@ def _append_operator_audit_event(
         )
 
 
-def _internal_principal_or_error(business_id: str, permission: str):
+def _internal_operator_businesses_header() -> str | None:
+    if "X-Orvo-Businesses" not in request.headers:
+        return None
+    return request.headers.get("X-Orvo-Businesses", "")
+
+
+def _safe_audit_values(values: tuple[str, ...] | None) -> list[str] | None:
+    if values is None:
+        return None
+    safe_values: list[str] = []
+    for value in values:
+        redacted = redact_text(value) or "[REDACTED]"
+        safe_values.append(redacted if redacted == value else "[REDACTED]")
+    return safe_values
+
+
+def _authorization_denial_data(exc: InternalOperatorAuthorizationError) -> dict:
+    data = {
+        "status": "denied",
+        "reason": exc.code,
+        "status_code": exc.status_code,
+        "method": request.method,
+        "role": exc.role,
+        "permission": exc.permission,
+    }
+    safe_allowed_businesses = _safe_audit_values(exc.allowed_businesses)
+    if safe_allowed_businesses is not None:
+        data["allowed_businesses"] = safe_allowed_businesses
+    return data
+
+
+def _record_internal_authorization_denial(*, business_id: str, actor_ref: str, exc: InternalOperatorAuthorizationError):
+    _append_operator_audit_event(
+        business_id=business_id,
+        actor_ref=actor_ref,
+        event_type="operator.authorization.denied",
+        target_type="internal_operator_api",
+        target_id=business_id,
+        data=_authorization_denial_data(exc),
+    )
+
+
+def _internal_principal_or_error(business_id: str, permission: str, *, audit_denial: bool = False):
+    actor_ref = request.headers.get("X-Orvo-Operator", "")
     try:
         principal = build_internal_operator_principal(
-            actor_ref=request.headers.get("X-Orvo-Operator", ""),
+            actor_ref=actor_ref,
             role=request.headers.get("X-Orvo-Role"),
+            allowed_businesses_header=_internal_operator_businesses_header(),
         )
+        require_internal_business_scope(principal, business_id)
         require_internal_permission(principal, permission)
     except InternalOperatorAuthorizationError as exc:
+        if audit_denial:
+            _record_internal_authorization_denial(business_id=business_id, actor_ref=actor_ref or "anonymous", exc=exc)
         return None, _internal_error(business_id, "forbidden", "Forbidden", status_code=exc.status_code)
     return principal, None
 
 
-def _require_internal_header_permission(business_id: str, permission: str):
-    _principal, permission_error = _internal_principal_or_error(business_id, permission)
+def _require_internal_header_permission(business_id: str, permission: str, *, audit_denial: bool = False):
+    _principal, permission_error = _internal_principal_or_error(business_id, permission, audit_denial=audit_denial)
     return permission_error
 
 def _with_internal_stores(business_id: str, handler):
     auth_error = _authorize_internal_operator(business_id)
     if auth_error is not None:
         return auth_error
-    permission_error = _require_internal_header_permission(business_id, INTERNAL_READ_PERMISSION)
+    permission_error = _require_internal_header_permission(business_id, INTERNAL_READ_PERMISSION, audit_denial=True)
     if permission_error is not None:
         return permission_error
     try:
