@@ -1,68 +1,84 @@
 # Reporte ejecutivo autónomo — Orvo Codex Board
 
-Fecha de corte: 2026-06-01 17:02 UTC<br>
+Fecha de corte: 2026-06-02 03:37 UTC<br>
 Repo: `/root/orvo-agent`<br>
-Rama canónica: `feat/orvo-brain-control-plane` @ `f683c9e`<br>
-Estado verificado en este refresh: parent repo limpio después de preservar el reporte ARB; promoción secuencial de `codex/work-management`; focused Work Management/owner-brief suite `102 passed`; full suite `1149 passed`.
+Rama canónica: `feat/orvo-brain-control-plane`; código/producto verificado hasta `ee524b4` antes de este reporte docs-only<br>
+Estado verificado en este refresh: parent repo limpio antes del reporte; worktrees externos sin dirty status detectado; cron Orvo de coding/management con `workdir=/root/orvo-agent`; no se tocaron cron jobs.
 
 ## Qué shipped en la rama canónica
 
-Desde el último reporte board, la rama canónica avanzó de `166545e` a `f683c9e` y corrigió drift importante del tren:
+Desde el último reporte board (`f683c9e`), la rama canónica avanzó a `ee524b4` con 28 commits nuevos. Lo importante:
 
-- `8d4641f` — integró el paid-pilot close kit docs-only; ya no es candidato pendiente.
-- `20b385f` — alineó familias detectables con el semantic registry: `fulfillment_backlog` es representable como `OperationalCaseType`, `channel_mix_shift` queda interno/deferido al no estar en `CASE_FAMILY_METRICS`, y hay contract tests para registry/action/catalog alignment.
-- `29558ba` — agregó el Architecture Review Board report del 2026-06-01; su hallazgo de case-family drift ya fue resuelto por `20b385f` en el head actual.
-- `d9c7fa5` — agregó guard de regresión de colección pytest; no permitir suites verdes por borrar tests.
-- `df1ced3` — expuso endpoint interno de degraded actionable cases.
-- `099c00a` — integró workflow action case-family gating; el dry-run rechaza acciones declaradas para otra familia.
-- `178c0a8` — integró guard de idempotency frente a secret rotation en workflow planning.
-- `e4bd410` — expuso endpoint interno de recently opened cases.
-- `e4e112d` — preservó el reporte Architecture Review Board del 2026-06-01 que había quedado como deliverable no commiteado.
-- `f683c9e` — promovió `codex/work-management`: comentarios de casos no pueden quedar vacíos/whitespace y `resolved_at` queda consistente con el lifecycle (`resolved` lo requiere; estados no resueltos no lo pueden cargar).
+- **Control-plane/operator analytics:**
+  - `4b4380a` — action catalog role-aware: reduce duplicación de metadata de acciones y fortalece whitelisting por rol.
+  - `ca3b830` — endpoint/proyección de workflow throughput por case type.
+  - `2f4097c` / `0c2cbd0` — endpoint de case aging por case type integrado.
+  - `ee524b4` — endpoint de severity throughput.
+- **Trust/Admin/Security:**
+  - `b4f8240` — enforce RBAC en delivery status endpoint.
+  - `a3f5bdb` — refresh del trust packet después del fix RBAC.
+  - `1b94def` — operator action audit gate.
+- **Workflow/automation governance:**
+  - `7adae3d` — hardening de secret refs en connector execution.
+  - `14e4b52` — workflow action approval ledger.
+  - `027123a` — supresión de stockout cases con datos stale.
+- **Runtime/product expansion controlada:**
+  - `12f3a8b` — WooCommerce daily report connector.
+  - `365dd92` / `998b984` — autonomous run reports actualizados para WooCommerce.
+- **Arquitectura/refactor:**
+  - `4cb56c3`, `b04b402`, `7c52612`, `6bcdb6d` — separación conversación/brain, descomposición de operator HTTP surface, contratos de adapters y baseline de observabilidad.
+  - `c52aa76` / `54b1068` — guard de tenant scoping en workflow.
+  - `4aec06a`, `ebca6e8`, `d2e88eb`, `5bb9848`, `b0e5046`, `6934fa1` — docs de refactor, growth plan, worker packets, integration train supersession y wedge ICP agency-assisted.
 
-Lectura producto: Orvo sigue moviéndose desde “reporte” hacia control-plane: casos persistentes, acciones whitelisteadas, workflow dry-run, query/search, endpoints operables y ahora un contrato más fuerte entre semantic registry, case types y actions.
+Lectura producto: el sistema ya no es “un reporte”; está acumulando piezas de control-plane vendibles: RBAC, auditoría, approval ledger, operator analytics, evidencia/estado canónico y conectores extendibles. El riesgo ahora es integrar ramas viejas sin rebase y reintroducir duplicación o drift.
 
-## Qué está corriendo / higiene operativa
+## Qué está corriendo / departamentos activos
 
-- Regla operativa vigente: parent repo canónico limpio; implementación en `/root/orvo-agent-worktrees/*`; integración secuencial con tests.
-- El integration train fue refrescado para dejar de recomendar como pendientes el paid-pilot docs branch, el case-family gate core, el coverage guard, el workflow idempotency guard y los primeros endpoints de operator case-list que ya están integrados.
-- `channel_mix_shift` sigue siendo diseño post-pilot/deferido hasta tener métricas channel-scoped, freshness policy cross-source y tests de dedupe/entity scope; WhatsApp/reportes siguen siendo superficies, no source of truth.
+- **Release / Integration, QA / Red Team, SRE / Ops, Engineering Factory:** activos cada 240m.
+- **Knowledge / Roadmap, Workflow Automation, Connector Platform, Search/Analytics, Operator Surfaces, Trust/Admin/Security:** activos cada 480m.
+- **Work Management Core:** activo cada 360m.
+- **COO/Strategic Planner, Architecture Review Board, Service Management/SLA, Edge/Developer Platform:** activos cada 720m.
+- **Market ICP, GTM/Pricing/Packaging, Board Reporter:** activos cada 1440m.
+- **Build loop:** activo cada 180m.
+- **Daily WhatsApp report:** activo a las 11:00 UTC.
 
-## Bloqueos / ramas que necesitan decisión o integración
+Higiene: los jobs autónomos de coding/management tienen `workdir=/root/orvo-agent`. Observación para SRE: watchdogs/daily report aparecen con `workdir=None`; no los modifiqué por charter, pero conviene que SRE confirme si usan paths absolutos o si deben fijar workdir explícito.
+
+## Bloqueos / ramas que necesitan integración o decisión
 
 ### Promoción próxima recomendada
 
-1. `codex/qa-owner-brief-actionable` @ `c3f0954` — revisar ahora después del merge Work Management; promover solo tests/guards únicos para briefs owner-facing accionables.
-2. QA uniqueness review — revisar `codex/channel-mix-case-gate` @ `4f366cb`, `qa/case-family-registry-drift` @ `b78e65e` y `codex/coverage-regression-guard-20260531-0330` @ `d2d171d` solo para rescatar tests únicos. No mergear código stale sobre los fixes ya integrados (`20b385f`, `d9c7fa5`).
-3. `codex/trust-admin-security` @ `518e36b` — prioridad alta, pero necesita tighten/rebase antes de promover: permission gap del delivery-status route, audit durable y least-privilege.
-4. `codex/operator-surfaces` @ `50cbfdb` — reconciliar contra `action_catalog.py`, actor identity, whitelist ordering, sesión interna y endpoints actuales antes de promover.
-5. `codex/service-management` @ `285d60b` y `codex/edge-developer-platform` @ `b0dbf2f` — valiosos, pero detrás de estabilización Work Management/Operator API/Trust.
+1. `docs/gtm-paid-pilot-onboarding-2026-06-02` @ `4597657` — branch docs-only encima de HEAD; parece el candidato más barato para promover si el checklist es útil para vender pilotos.
+2. `codex/eng-factory-audit-export-admin-20260602` @ `e27ee08` — admin operator audit events; cerca del foco Trust/Admin, requiere focused security/API tests antes de merge.
+3. `codex/workflow-automation` @ `67b645e` — required action params + approval gate projection; integrar solo si mantiene dry-run/projection y no ejecuta side effects.
+4. `codex/recently-acknowledged-endpoint-20260601` @ `0e35e30` y `codex/operator-surfaces` @ `1fcb66d` — valor operador, pero reconciliar contra endpoints ya shipped y `action_catalog.py` para no duplicar acción/metadata.
+5. `codex/trust-admin-security` @ `d4ceb10` — sigue siendo prioridad alta; contiene auth denials/audit/export/read-role/delivery-status RBAC, pero necesita rebase y una sola promoción secuencial.
 
-### Ramas ya absorbidas o candidatas a limpieza segura
+### Ramas con riesgo de stale/overlap
 
-- `docs/gtm-paid-pilot-roi-20260601` @ `93c582e`
-- `codex/eng-factory-coverage-regression-guard-20260601` @ `d9c7fa5`
-- `codex/qa-workflow-secret-idempotency` @ `efdc221`
-- `codex/top-degraded-endpoint-20260601` @ `df1ced3`
-- `codex-operator-recently-opened-endpoint-20260601` @ `e4bd410`
-
-Limpieza solo con `git branch -d`/`merge-base --is-ancestor`; no usar force-delete sobre ramas no verificadas.
+- `codex/work-management` @ `aa87e14` — 7 commits ahead pero mucho overlap con invariantes ya shipped; revisar sólo `case reassignment idempotent`/ack timestamp/terminal reasons únicos.
+- `codex/search-analytics` @ `eb6c49f` — 4 commits ahead; potencialmente útil, pero esperar a estabilizar operator surfaces/trust.
+- `codex/connector-platform` @ `56c4eb3` — 8 commits ahead con registry/daily connector discovery/certification; revisar contra WooCommerce y secret-ref hardening ya shipped.
+- `codex/service-management` @ `285d60b` y `codex/edge-developer-platform` @ `b0dbf2f` — mantener detrás de Trust/Operator; son plataforma expansiva, no urgente para paid pilot.
+- QA ramas antiguas (`codex/channel-mix-case-gate`, `qa/case-family-registry-drift`, `codex/coverage-regression-guard-20260531-0330`, `codex/qa-owner-brief-actionable`) deben tratarse como fuentes de tests únicos, no merges directos.
 
 ## Riesgos que importan
 
-- **Owner-facing projections:** varios endpoints nuevos aumentan el valor operador, pero el próximo riesgo es que owner-facing briefs muestren casos resueltos/no accionables si la policy no se integra con tests.
-- **Trust/Admin/Security:** aún no hay boundary sellable completo: faltan scoped principals, least privilege, failure audit y append-only guarantees.
-- **QA stale branches:** ya hay fixes mainline para registry drift y coverage collection; fusionar ramas viejas puede reintroducir comportamiento anterior.
-- **Scope creep:** mantener foco D2C control-plane; WhatsApp y reportes son delivery/projections, no estado canónico.
+- **Integración:** hay muchas ramas ahead con merges intermedios; integración debe seguir siendo una rama por corrida + focused/full tests.
+- **Security boundary:** RBAC avanzó, pero audit admin/export/read-role/delivery status todavía está distribuido en ramas no integradas.
+- **Connector expansion:** WooCommerce shipped; evitar que conectores nuevos salteen registry, run ledger, metric registry, evidence y case services.
+- **Operator surface sprawl:** endpoints analytics crecen rápido; controllers deben seguir thin y usar service-layer/action catalog.
+- **Ops cron/workdir:** coding jobs están bien scoped; watchdog/report jobs con `workdir=None` requieren confirmación SRE, no acción desde este reporter.
 
 ## Próximas acciones autónomas
 
-- Release/Integration: revisar `codex/qa-owner-brief-actionable` y QA uniqueness review para ramas stale; integrar como máximo una rama verificada por corrida.
-- QA/Red Team: rescatar solo regresiones no cubiertas de case-family/coverage stale branches y validar owner-brief actionable invariant post-policy.
-- Operator Surfaces + Trust/Admin: freshen contra `f683c9e`; no duplicar action metadata en controllers.
-- Knowledge/Roadmap: mantener el integration train como navegación actual y marcar reportes ARB históricos como evidencia, no como estado vivo cuando el código ya corrigió un hallazgo.
-- SRE/Ops: mantener vigilancia de higiene de worktrees y no tocar cron desde jobs no autorizados.
+- **Release/Integration:** promover primero docs-only onboarding si pasa checks; luego audit export/admin o workflow approval gate, una por una.
+- **QA/Red Team:** convertir cualquier reviewer blocker en regression tests antes de merge; revisar ramas stale sólo por cobertura única.
+- **Trust/Admin/Security:** cerrar boundary RBAC + audit durable antes de platform expansion.
+- **Operator Surfaces:** reconciliar recent-ack/dismissed projections con severity/case-type analytics ya shipped.
+- **SRE/Ops:** verificar cron workdir de watchdogs/daily report y mantener parent/worktrees limpios.
+- **GTM/COO:** usar close kit + onboarding checklist para buscar los primeros pilotos pagos, sin prometer automatizaciones fuera de governance.
 
 ## Decisión pedida a Juan
 
-¿Autorizamos priorizar **Trust/Admin/Security** inmediatamente después del QA owner-brief/actionable guard, manteniendo congeladas las expansiones genéricas de platform/edge hasta cerrar RBAC + audit durable?
+¿Priorizamos la próxima ventana en **Trust/Admin/Security + audit admin** antes de seguir con más analytics/operator endpoints, para dejar la frontera vendible del paid pilot más segura?
