@@ -10,8 +10,13 @@ from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.connector_registry import CAPABILITY_DAILY_REPORT, default_connector_registry
 from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore, ReportDispatchResult, dispatch_daily_report
-from app.brain.insights import generate_insights
-from app.brain.models import DailyReport, Metric
+from app.brain.models import DailyReport
+from app.brain.report_merge_policy import merge_daily_reports
+from app.brain.secret_refs import (
+    SecretResolutionError,
+    SecretResolver,
+    connector_with_resolved_secrets,
+)
 
 
 class PipelineResult(BaseModel):
@@ -44,54 +49,6 @@ def _find_enabled_connector_for_type(business: BusinessConfig, connector_type: s
     return None
 
 
-def _is_number(value: float | int | str) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def merge_daily_reports(reports: list[DailyReport], *, business: BusinessConfig | None = None) -> DailyReport:
-    """Merge adapter reports into one DailyReport.
-
-    Duplicate metric keys are collapsed so downstream insight/report code sees a
-    single canonical key. Numeric duplicates with the same unit are summed and
-    their evidence is combined; non-numeric or unit-mismatched duplicates use
-    last-wins to keep the key unique and deterministic.
-    """
-    if not reports:
-        raise ValueError("at least one report is required to merge daily reports")
-    if len(reports) == 1 and business is None:
-        return reports[0]
-
-    merged_by_key = {}
-    for report in reports:
-        for metric in report.metrics:
-            existing = merged_by_key.get(metric.key)
-            if existing is None:
-                merged_by_key[metric.key] = metric
-                continue
-
-            if _is_number(existing.value) and _is_number(metric.value) and existing.unit == metric.unit:
-                evidence = [*existing.evidence]
-                seen = {(item.source, item.label) for item in evidence}
-                for item in metric.evidence:
-                    key = (item.source, item.label)
-                    if key not in seen:
-                        evidence.append(item)
-                        seen.add(key)
-                merged_by_key[metric.key] = existing.model_copy(
-                    update={"value": existing.value + metric.value, "evidence": evidence}
-                )
-            else:
-                merged_by_key[metric.key] = metric
-
-    metrics = list(merged_by_key.values())
-    return DailyReport(
-        business_name=reports[0].business_name,
-        report_date=reports[0].report_date,
-        metrics=metrics,
-        insights=generate_insights(metrics, thresholds=business.insight_thresholds if business else None),
-    )
-
-
 def run_connector_daily_report_pipeline(
     *,
     connector_type: str,
@@ -103,6 +60,8 @@ def run_connector_daily_report_pipeline(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
+    secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
     """Build one connector report via registry metadata and dispatch it once.
 
@@ -119,6 +78,8 @@ def run_connector_daily_report_pipeline(
         tiendanube_http_client=tiendanube_http_client,
         mercadolibre_http_client=mercadolibre_http_client,
         meta_ads_http_client=meta_ads_http_client,
+        woocommerce_http_client=woocommerce_http_client,
+        secret_resolver=secret_resolver,
     )
     dispatch = dispatch_daily_report(
         report=report,
@@ -156,6 +117,7 @@ def run_tiendanube_daily_report_pipeline(
     delivery_client: WhatsAppDeliveryClient,
     idempotency_store: IdempotencyStore,
     http_client=None,
+    secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
     """Build a daily report from Tiendanube and dispatch it to WhatsApp."""
 
@@ -166,6 +128,7 @@ def run_tiendanube_daily_report_pipeline(
         delivery_client=delivery_client,
         idempotency_store=idempotency_store,
         tiendanube_http_client=http_client,
+        secret_resolver=secret_resolver,
     )
 
 
@@ -194,6 +157,7 @@ def run_meta_ads_daily_report_pipeline(
     delivery_client: WhatsAppDeliveryClient,
     idempotency_store: IdempotencyStore,
     http_client=None,
+    secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
     """Build a daily report from Meta Ads and dispatch it to WhatsApp."""
 
@@ -204,6 +168,7 @@ def run_meta_ads_daily_report_pipeline(
         delivery_client=delivery_client,
         idempotency_store=idempotency_store,
         meta_ads_http_client=http_client,
+        secret_resolver=secret_resolver,
     )
 
 
@@ -214,6 +179,7 @@ def run_mercadolibre_daily_report_pipeline(
     delivery_client: WhatsAppDeliveryClient,
     idempotency_store: IdempotencyStore,
     http_client=None,
+    secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
     """Build a daily report from MercadoLibre and dispatch it to WhatsApp."""
 
@@ -224,6 +190,29 @@ def run_mercadolibre_daily_report_pipeline(
         delivery_client=delivery_client,
         idempotency_store=idempotency_store,
         mercadolibre_http_client=http_client,
+        secret_resolver=secret_resolver,
+    )
+
+
+def run_woocommerce_daily_report_pipeline(
+    *,
+    business: BusinessConfig,
+    report_date: date,
+    delivery_client: WhatsAppDeliveryClient,
+    idempotency_store: IdempotencyStore,
+    http_client=None,
+    secret_resolver: SecretResolver | None = None,
+) -> PipelineResult:
+    """Build a daily report from WooCommerce and dispatch it to WhatsApp."""
+
+    return run_connector_daily_report_pipeline(
+        connector_type="woocommerce",
+        business=business,
+        report_date=report_date,
+        delivery_client=delivery_client,
+        idempotency_store=idempotency_store,
+        woocommerce_http_client=http_client,
+        secret_resolver=secret_resolver,
     )
 
 
@@ -236,6 +225,8 @@ def _build_daily_report_for_connector_type(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
+    secret_resolver: SecretResolver | None = None,
 ) -> DailyReport:
     registry = default_connector_registry()
     spec = registry.get(connector_type)
@@ -245,9 +236,17 @@ def _build_daily_report_for_connector_type(
     connector = _find_enabled_connector_for_type(business, connector_type)
     if connector is None:
         raise ValueError(f"Business {business.business_id} has no enabled {connector_type} connector")
+    if any(connector.params.get(field) in (None, "") for field in spec.required_config_fields):
+        execution_connector = connector
+    else:
+        execution_connector = connector_with_resolved_secrets(
+            connector=connector,
+            spec=spec,
+            secret_resolver=secret_resolver,
+        )
 
     kwargs = spec.build_report_factory_kwargs(
-        connector=connector,
+        connector=execution_connector,
         business=business,
         report_date=report_date,
         service_bindings={
@@ -255,6 +254,7 @@ def _build_daily_report_for_connector_type(
             "tiendanube_http_client": tiendanube_http_client,
             "mercadolibre_http_client": mercadolibre_http_client,
             "meta_ads_http_client": meta_ads_http_client,
+            "woocommerce_http_client": woocommerce_http_client,
         },
     )
     report = spec.load_report_factory()(**kwargs)
@@ -274,6 +274,8 @@ def run_enabled_connectors_daily_report_pipeline(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
+    secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
     """Build all enabled connector reports, merge metrics, then dispatch once."""
 
@@ -290,9 +292,13 @@ def run_enabled_connectors_daily_report_pipeline(
                     tiendanube_http_client=tiendanube_http_client,
                     mercadolibre_http_client=mercadolibre_http_client,
                     meta_ads_http_client=meta_ads_http_client,
+                    woocommerce_http_client=woocommerce_http_client,
+                    secret_resolver=secret_resolver,
                 )
             )
         except PipelineConnectorError:
+            raise
+        except SecretResolutionError:
             raise
         except Exception as exc:
             raise PipelineConnectorError(

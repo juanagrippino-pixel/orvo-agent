@@ -23,6 +23,7 @@ from app.brain.pipeline import (
     run_mercadolibre_daily_report_pipeline,
     run_meta_ads_daily_report_pipeline,
     run_tiendanube_daily_report_pipeline,
+    run_woocommerce_daily_report_pipeline,
 )
 from app.brain.runner import run_due_daily_reports
 from app.brain.run_ledger import RunLedger
@@ -72,6 +73,7 @@ def run_forced_report(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
     run_ledger: RunLedger | None = None,
     case_store: OperationalCaseStore | None = None,
 ):
@@ -127,6 +129,14 @@ def run_forced_report(
                 delivery_client=delivery_client,
                 idempotency_store=idempotency_store,
                 http_client=meta_ads_http_client,
+            )
+        elif connector_type == "woocommerce":
+            result = run_woocommerce_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                http_client=woocommerce_http_client,
             )
         elif connector_type == "csv":
             result = run_csv_daily_report_pipeline(

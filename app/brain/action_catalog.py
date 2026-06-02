@@ -39,19 +39,23 @@ class ActionDefinition:
     case_families: tuple[str, ...] = field(default_factory=tuple)
     notes: str | None = None
 
-    def operator_projection(self) -> dict[str, Any]:
+    def operator_projection(self, *, can_execute_case_actions: bool = True) -> dict[str, Any]:
         """Return the redacted stable contract used by internal operator APIs."""
 
+        operator_executable = self.api_enabled and can_execute_case_actions
         payload: dict[str, Any] = {
             "action_key": self.action_key,
             "label": self.label,
             "mode": self.api_mode or self.mode,
             "api_enabled": self.api_enabled,
+            "operator_executable": operator_executable,
             "status_effect": self.status_effect,
             "requires_reason": self.requires_reason,
             "requires_comment": self.requires_comment,
             "approval_required": self.requires_approval,
         }
+        if not operator_executable:
+            payload["disabled_reason"] = "api_disabled" if not self.api_enabled else "missing_case_action_permission"
         if self.input_fields:
             payload["input_fields"] = list(self.input_fields)
         if self.case_families:
@@ -216,19 +220,30 @@ def workflow_action_registry() -> dict[str, ActionDefinition]:
     return dict(ACTION_CATALOG)
 
 
-def list_case_action_catalog(*, business_id: str) -> dict[str, Any]:
+def list_case_action_catalog(*, business_id: str, can_execute_case_actions: bool = True) -> dict[str, Any]:
     """Return the internal operator action contract for one business.
 
     This is a projection over registered action keys. It explicitly marks catalog
     actions that are not enabled in this API slice so clients do not infer
-    executable capabilities from docs or owner-facing copy.
+    executable capabilities from docs or owner-facing copy. ``api_enabled`` stays
+    the global transport contract; ``operator_executable`` is the caller-specific
+    RBAC projection for internal UIs.
     """
 
+    operator_executable_action_keys = [
+        definition.action_key
+        for definition in _ACTION_DEFINITIONS
+        if definition.api_enabled and can_execute_case_actions
+    ]
     redacted = redact_secrets(
         {
             "business_id": business_id,
             "api_enabled_action_keys": list(API_ENABLED_CASE_ACTION_KEYS),
-            "actions": [definition.operator_projection() for definition in _ACTION_DEFINITIONS],
+            "operator_executable_action_keys": operator_executable_action_keys,
+            "actions": [
+                definition.operator_projection(can_execute_case_actions=can_execute_case_actions)
+                for definition in _ACTION_DEFINITIONS
+            ],
         }
     )
     return redacted if isinstance(redacted, dict) else {}

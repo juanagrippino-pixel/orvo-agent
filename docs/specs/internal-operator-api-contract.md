@@ -69,6 +69,16 @@ POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 
 Actions must use registered action keys and append timeline events.
 
+### Operator audit events
+
+```http
+GET /internal/brain/businesses/{business_id}/operator-audit-events
+```
+
+Admin-only projection over durable operator audit events. Returns redacted events
+scoped to the route `business_id`; viewer/operator roles must receive a safe
+`403` envelope.
+
 ## Response envelope
 
 ```json

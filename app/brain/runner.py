@@ -17,6 +17,7 @@ from app.brain.pipeline import PipelineResult, run_enabled_connectors_daily_repo
 from app.brain.run_ledger import RunLedger
 from app.brain.runtime import compile_business_runtime, runtime_run_metadata
 from app.brain.scheduler import due_schedules
+from app.brain.secret_refs import SecretResolver
 
 _log = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ def _list_all_schedules(config_store, businesses: list[BusinessConfig]) -> list[
 
 
 def _enabled_daily_connector_types(business: BusinessConfig) -> list[str]:
-    supported = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube"}
+    supported = {"csv", "google_sheets", "mercadolibre", "meta_ads", "tiendanube", "woocommerce"}
     connector_types: list[str] = []
     for connector in business.connectors:
         if not connector.enabled or connector.connector_type not in supported:
@@ -64,9 +65,11 @@ def run_due_daily_reports(
     tiendanube_http_client=None,
     mercadolibre_http_client=None,
     meta_ads_http_client=None,
+    woocommerce_http_client=None,
     now: datetime | None = None,
     run_ledger: RunLedger | None = None,
     case_store: OperationalCaseStore | None = None,
+    secret_resolver: SecretResolver | None = None,
 ) -> list[ScheduledPipelineResult]:
     """Run every due daily report from the config store."""
 
@@ -119,6 +122,8 @@ def run_due_daily_reports(
                     tiendanube_http_client=tiendanube_http_client,
                     mercadolibre_http_client=mercadolibre_http_client,
                     meta_ads_http_client=meta_ads_http_client,
+                    woocommerce_http_client=woocommerce_http_client,
+                    secret_resolver=secret_resolver,
                 ),
                 runtime_metadata,
             )

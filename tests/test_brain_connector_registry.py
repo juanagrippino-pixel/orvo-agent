@@ -12,6 +12,7 @@ EXPECTED_CONNECTOR_TYPES = (
     "meta_ads",
     "sample",
     "tiendanube",
+    "woocommerce",
 )
 
 EXPECTED_PUBLIC_REQUIRED_FIELDS = {
@@ -21,9 +22,15 @@ EXPECTED_PUBLIC_REQUIRED_FIELDS = {
     "meta_ads": ("ad_account_id",),
     "sample": (),
     "tiendanube": ("store_id",),
+    "woocommerce": ("store_url",),
 }
 
-SECRET_BEARING_CONNECTORS = {"mercadolibre", "meta_ads", "tiendanube"}
+EXPECTED_SECRET_FIELDS = {
+    "mercadolibre": ("access_token",),
+    "meta_ads": ("access_token",),
+    "tiendanube": ("access_token",),
+    "woocommerce": ("consumer_key", "consumer_secret"),
+}
 
 
 def test_default_registry_contains_current_brain_connector_specs():
@@ -181,10 +188,11 @@ def test_default_specs_separate_public_required_fields_from_secret_refs():
         assert "access_token" not in spec.required_config_fields
 
         secret_ref_names = tuple(secret.name for secret in spec.required_secret_refs)
-        if spec.connector_type in SECRET_BEARING_CONNECTORS:
-            assert secret_ref_names == ("access_token",)
-            assert spec.legacy_secret_config_fields == ("access_token",)
-            assert spec.secret_config_fields == ("access_token",)
+        expected_secret_fields = EXPECTED_SECRET_FIELDS.get(spec.connector_type, ())
+        if expected_secret_fields:
+            assert secret_ref_names == expected_secret_fields
+            assert spec.legacy_secret_config_fields == expected_secret_fields
+            assert spec.secret_config_fields == expected_secret_fields
         else:
             assert secret_ref_names == ()
             assert spec.legacy_secret_config_fields == ()

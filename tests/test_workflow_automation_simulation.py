@@ -23,6 +23,12 @@ from app.brain.workflow_automation import (
     make_workflow_idempotency_key,
     simulate_case_workflow,
 )
+from app.brain.workflow_action_ledger import (
+    InMemoryWorkflowActionLedgerStore,
+    SQLiteWorkflowActionLedgerStore,
+    WorkflowActionLedgerError,
+)
+from app.brain.workflow_execution_queue import list_workflow_execution_queue
 
 
 def utc(hour: int, minute: int = 0) -> datetime:
@@ -159,7 +165,11 @@ def test_simulate_case_workflow_blocks_external_action_behind_approval_gate_and_
         actions=[
             WorkflowAction(
                 action_key="request_external_action",
-                params={"target": "supplier", "Authorization": "Basic raw_external_secret"},
+                params={
+                    "target": "supplier",
+                    "reason": "Ask supplier for emergency restock",
+                    "Authorization": "Basic raw_external_secret",
+                },
             )
         ],
     )
@@ -170,10 +180,44 @@ def test_simulate_case_workflow_blocks_external_action_behind_approval_gate_and_
     assert planned_action["action_key"] == "request_external_action"
     assert planned_action["mode"] == "approval_required"
     assert planned_action["requires_approval"] is True
+    assert planned_action["approval_gate"] == {
+        "required": True,
+        "state": "pending_approval",
+        "reason": "approval_required_before_execution",
+    }
     assert planned_action["execution_status"] == "blocked_approval_required"
     assert planned_action["side_effect"] == "external"
     assert "raw_external_secret" not in str(result)
     assert planned_action["params"]["Authorization"] == "[REDACTED]"
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_missing"),
+    [
+        (WorkflowAction(action_key="resolve_case", params={}), "reason"),
+        (WorkflowAction(action_key="dismiss_case", params={"reason": "   "}), "reason"),
+        (WorkflowAction(action_key="request_external_action", params={"Authorization": "Basic raw_missing_reason_secret"}), "reason"),
+        (WorkflowAction(action_key="add_comment", params={}), "comment"),
+        (WorkflowAction(action_key="assign_owner", params={"assignee_ref": ""}), "assignee_ref"),
+    ],
+)
+def test_simulate_case_workflow_rejects_actions_missing_catalog_required_params(action, expected_missing):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id=f"missing-{action.action_key}-param",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[action],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(10, 30))
+
+    assert exc.value.code == "missing_workflow_action_params"
+    assert action.action_key in exc.value.message
+    assert expected_missing in exc.value.message
+    assert "raw_missing_reason_secret" not in exc.value.message
 
 
 def test_workflow_idempotency_keys_are_stable_across_secret_rotation_but_sensitive_to_action_intent():
@@ -256,6 +300,28 @@ def test_simulate_case_workflow_rejects_unknown_trigger_before_projecting_action
         simulate_case_workflow(rule, case, now=utc(11))
 
     assert exc.value.code == "unsupported_workflow_trigger"
+
+
+def test_simulate_case_workflow_rejects_cross_business_rule_before_projecting_actions():
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="cross-tenant-ack",
+        business_id="other-business",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="acknowledge_case",
+                params={"Authorization": "Basic " + "cross_tenant_secret"},
+            )
+        ],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(11))
+
+    assert exc.value.code == "business_scope_mismatch"
+    assert "cross_tenant_secret" not in str(exc.value)
 
 
 def test_simulate_case_workflow_returns_no_actions_when_conditions_do_not_match():
@@ -342,3 +408,347 @@ def test_simulate_case_workflow_suppresses_duplicate_idempotency_key_plans_with_
         }
     ]
     assert "raw_duplicate_secret" not in str(result)
+
+
+def test_workflow_action_ledger_records_approval_request_without_external_side_effects(tmp_path):
+    _, case = seed_case()
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
+    rule = WorkflowRule(
+        rule_id="durable-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier",
+                    "reason": "Request emergency supplier restock",
+                    "Authorization": "Basic raw_approval_secret",
+                },
+            )
+        ],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(15), action_ledger=ledger, actor_ref="operator:ana")
+
+    assert result["side_effects_executed"] == 0
+    planned_action = result["actions"][0]
+    assert planned_action["execution_status"] == "blocked_approval_required"
+    assert planned_action["approval_state"] == "pending"
+    assert planned_action["ledger_id"].startswith("workflow-action/")
+    assert planned_action["approval_request_id"].startswith("workflow-approval/")
+    assert "raw_approval_secret" not in str(result)
+
+    [record] = ledger.list_actions(business_id="artemea")
+    assert record.action_key == "request_external_action"
+    assert record.actor_ref == "operator:ana"
+    assert record.source == "workflow"
+    assert record.execution_state == "blocked_approval_required"
+    assert record.approval_state == "pending"
+    assert record.params["Authorization"] == "[REDACTED]"
+    assert "raw_approval_secret" not in str(record)
+
+    [approval] = ledger.list_approval_requests(business_id="artemea")
+    assert approval.ledger_id == record.ledger_id
+    assert approval.status == "pending"
+    assert approval.requester_ref == "operator:ana"
+    assert approval.action_key == "request_external_action"
+
+
+def test_workflow_action_ledger_enforces_duplicate_idempotency_keys_across_store_instances(tmp_path):
+    _, case = seed_case()
+    db_path = tmp_path / "workflow-actions.sqlite3"
+    first_ledger = SQLiteWorkflowActionLedgerStore(str(db_path))
+    rule = WorkflowRule(
+        rule_id="durable-duplicate-ack",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[WorkflowAction(action_key="acknowledge_case", params={"reason": "token=raw_durable_duplicate"})],
+    )
+
+    first = simulate_case_workflow(rule, case, now=utc(16), action_ledger=first_ledger, actor_ref="operator:ana")
+    second_ledger = SQLiteWorkflowActionLedgerStore(str(db_path))
+    second = simulate_case_workflow(rule, case, now=utc(16, 5), action_ledger=second_ledger, actor_ref="operator:ana")
+
+    assert len(first["actions"]) == 1
+    assert first["actions"][0]["execution_status"] == "dry_run"
+    assert first["actions"][0]["approval_state"] == "not_required"
+    assert second["actions"] == []
+    assert second["skipped_actions"] == [
+        {
+            "action_key": "acknowledge_case",
+            "idempotency_key": first["actions"][0]["idempotency_key"],
+            "execution_status": "skipped_duplicate",
+            "reason": "duplicate_idempotency_key",
+            "ledger_id": first["actions"][0]["ledger_id"],
+            "audit_event": {
+                "event_type": "workflow_action_skipped_duplicate",
+                "rule_id": "durable-duplicate-ack",
+                "case_id": case.case_id,
+                "action_key": "acknowledge_case",
+                "idempotency_key": first["actions"][0]["idempotency_key"],
+                "execution_status": "skipped_duplicate",
+                "reason": "duplicate_idempotency_key",
+                "created_at": "2026-05-31T16:05:00Z",
+            },
+        }
+    ]
+    assert len(second_ledger.list_actions(business_id="artemea")) == 1
+    assert second_ledger.list_approval_requests(business_id="artemea") == []
+    assert "raw_durable_duplicate" not in str(first)
+    assert "raw_durable_duplicate" not in str(second)
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_approval_decision_approves_pending_gate_without_executing_side_effects(tmp_path, store_factory):
+    _, case = seed_case()
+    ledger = store_factory(tmp_path)
+    rule = WorkflowRule(
+        rule_id="approve-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier",
+                    "reason": "Request supplier restock",
+                    "Authorization": "Basic raw_decision_planning_secret",
+                },
+            )
+        ],
+    )
+    planned = simulate_case_workflow(rule, case, now=utc(17), action_ledger=ledger, actor_ref="operator:ana")
+    approval_request_id = planned["actions"][0]["approval_request_id"]
+
+    decision = ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_request_id,
+        decision="approved",
+        actor_ref="manager token=raw_decision_actor_secret",
+        reason="Approved after call Authorization: Basic raw_decision_reason_secret",
+        now=utc(17, 30),
+    )
+
+    assert decision.record.approval_state == "approved"
+    assert decision.record.execution_state == "pending_execution"
+    assert decision.approval_request.status == "approved"
+    assert decision.approval_request.decided_at == utc(17, 30)
+    assert decision.approval_request.decision_actor_ref == "manager token=[REDACTED]"
+    assert decision.approval_request.decision_reason == "Approved after call Authorization: [REDACTED]"
+    assert decision.side_effects_executed == 0
+    assert decision.audit_event == {
+        "event_type": "workflow_approval_decided",
+        "business_id": "artemea",
+        "approval_request_id": approval_request_id,
+        "ledger_id": decision.record.ledger_id,
+        "case_id": case.case_id,
+        "action_key": "request_external_action",
+        "decision": "approved",
+        "approval_state": "approved",
+        "execution_state": "pending_execution",
+        "actor_ref": "manager token=[REDACTED]",
+        "reason": "Approved after call Authorization: [REDACTED]",
+        "created_at": "2026-05-31T17:30:00Z",
+    }
+    assert "raw_decision" not in str(decision)
+    [listed_record] = ledger.list_actions(business_id="artemea")
+    assert listed_record.approval_state == "approved"
+    assert listed_record.execution_state == "pending_execution"
+
+
+def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_decision(tmp_path):
+    _, case = seed_case()
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
+    rule = WorkflowRule(
+        rule_id="reject-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={"target": "supplier", "reason": "Request supplier restock"},
+            )
+        ],
+    )
+    planned = simulate_case_workflow(rule, case, now=utc(18), action_ledger=ledger, actor_ref="operator:ana")
+    approval_request_id = planned["actions"][0]["approval_request_id"]
+
+    with pytest.raises(WorkflowActionLedgerError) as cross_scope:
+        ledger.decide_approval_request(
+            business_id="other-business",
+            approval_request_id=approval_request_id,
+            decision="approved",
+            actor_ref="manager",
+            reason="Cross scope should not see this",
+            now=utc(18, 10),
+        )
+
+    assert cross_scope.value.code == "approval_request_not_found"
+
+    first_decision = ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_request_id,
+        decision="rejected",
+        actor_ref="manager",
+        reason="Do not restock",
+        now=utc(18, 15),
+    )
+
+    assert first_decision.record.approval_state == "rejected"
+    assert first_decision.record.execution_state == "failed"
+    with pytest.raises(WorkflowActionLedgerError) as second_decision:
+        ledger.decide_approval_request(
+            business_id="artemea",
+            approval_request_id=approval_request_id,
+            decision="approved",
+            actor_ref="manager",
+            reason="Cannot reverse rejected approval token=raw_second_decision_secret",
+            now=utc(18, 20),
+        )
+
+    assert second_decision.value.code == "approval_request_already_decided"
+    assert "raw_second_decision_secret" not in second_decision.value.message
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_execution_queue_projects_only_approved_pending_actions_without_side_effects(tmp_path, store_factory):
+    ledger = store_factory(tmp_path)
+    later = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-later",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-queue/case-later/request_external_action/later",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator token=raw_queue_actor_secret",
+        params={
+            "target": "supplier-b",
+            "reason": "Restock later",
+            "Authorization": "Basic raw_queue_later_secret",
+        },
+        rule_id="execution-queue",
+        now=utc(19),
+    )
+    earlier = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-earlier",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-queue/case-earlier/request_external_action/earlier",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator",
+        params={
+            "target": "supplier-a",
+            "reason": "Restock earlier",
+            "Authorization": "Basic raw_queue_earlier_secret",
+        },
+        rule_id="execution-queue",
+        now=utc(19, 5),
+    )
+    rejected = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-rejected",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-queue/case-rejected/request_external_action/rejected",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-c", "reason": "Rejected"},
+        rule_id="execution-queue",
+        now=utc(19, 10),
+    )
+    ledger.record_planned_action(
+        business_id="other-business",
+        case_id="case-other",
+        action_key="request_external_action",
+        idempotency_key="workflow/other-business/execution-queue/case-other/request_external_action/other",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-x", "reason": "Other business"},
+        rule_id="execution-queue",
+        now=utc(19, 15),
+    )
+    unknown = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-unknown",
+        action_key="invented_llm_action",
+        idempotency_key="workflow/artemea/execution-queue/case-unknown/invented_llm_action/unknown",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-y", "reason": "Unknown action"},
+        rule_id="execution-queue",
+        now=utc(19, 20),
+    )
+
+    assert later.approval_request is not None
+    assert earlier.approval_request is not None
+    assert rejected.approval_request is not None
+    assert unknown.approval_request is not None
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=later.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Approved later",
+        now=utc(19, 40),
+    )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=earlier.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Approved earlier",
+        now=utc(19, 30),
+    )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=rejected.approval_request.approval_request_id,
+        decision="rejected",
+        actor_ref="manager",
+        reason="Do not execute",
+        now=utc(19, 35),
+    )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=unknown.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Unknown actions must remain outside execution queue",
+        now=utc(19, 45),
+    )
+
+    queue = list_workflow_execution_queue(ledger, business_id="artemea")
+
+    assert queue["business_id"] == "artemea"
+    assert queue["execution_enabled"] is False
+    assert queue["side_effects_executed"] == 0
+    assert queue["total"] == 2
+    assert [action["case_id"] for action in queue["actions"]] == ["case-earlier", "case-later"]
+    assert [action["execution_state"] for action in queue["actions"]] == ["pending_execution", "pending_execution"]
+    assert [action["approval_state"] for action in queue["actions"]] == ["approved", "approved"]
+    assert queue["actions"][0]["params"]["Authorization"] == "[REDACTED]"
+    assert queue["actions"][0]["side_effects_executed"] == 0
+    assert queue["actions"][0]["executor_state"] == "not_implemented"
+    assert "case-rejected" not in str(queue)
+    assert "case-other" not in str(queue)
+    assert "case-unknown" not in str(queue)
+    assert "invented_llm_action" not in str(queue)
+    assert "raw_queue" not in str(queue)

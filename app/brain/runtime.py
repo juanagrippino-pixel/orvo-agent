@@ -344,12 +344,11 @@ def _missing_required_secret_refs(connector: ConnectorConfig, spec: ConnectorSpe
     missing: list[str] = []
     for secret in spec.required_secret_refs:
         legacy_field = secret.legacy_config_field or secret.name
-        # Until the config model grows explicit secret_refs, legacy inline config
-        # proves the execution path has a resolvable secret. The compiled runtime
-        # still strips the raw value and emits only a deterministic secret ref.
-        value = connector.params.get(legacy_field)
-        if value is None or value == "":
-            missing.append(secret.name)
+        ref_value = connector.secret_refs.get(secret.name)
+        inline_value = connector.params.get(legacy_field)
+        if ref_value not in (None, "") or inline_value not in (None, ""):
+            continue
+        missing.append(secret.name)
     return missing
 
 
@@ -365,7 +364,12 @@ def _public_params(params: dict, legacy_secret_names: Sequence[str]) -> dict[str
 def _secret_refs_for(business_id: str, connector: ConnectorConfig, spec: ConnectorSpec) -> dict[str, str]:
     refs: dict[str, str] = {}
     for secret in spec.required_secret_refs:
-        refs[secret.name] = f"secret://businesses/{business_id}/connectors/{connector.connector_id}/{secret.name}"
+        configured_ref = connector.secret_refs.get(secret.name)
+        refs[secret.name] = (
+            configured_ref
+            if configured_ref not in (None, "")
+            else f"secret://businesses/{business_id}/connectors/{connector.connector_id}/{secret.name}"
+        )
     return refs
 
 
