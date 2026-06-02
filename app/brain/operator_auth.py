@@ -21,7 +21,14 @@ OPERATOR_AUDIT_READ_PERMISSION: Final[str] = "operator_audit:read"
 _ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
     "viewer": frozenset({INTERNAL_READ_PERMISSION}),
     "operator": frozenset({INTERNAL_READ_PERMISSION, CASE_ACTION_PERMISSION}),
-    "admin": frozenset({INTERNAL_READ_PERMISSION, CASE_ACTION_PERMISSION, OPERATOR_AUDIT_READ_PERMISSION}),
+    "admin": frozenset(
+        {
+            INTERNAL_READ_PERMISSION,
+            CASE_ACTION_PERMISSION,
+            OPERATOR_AUDIT_READ_PERMISSION,
+            RUNTIME_EXECUTE_PERMISSION,
+        }
+    ),
 }
 _DEFAULT_OPERATOR_ROLE: Final[str] = "operator"
 
@@ -106,6 +113,7 @@ def project_internal_operator_session(principal: InternalOperatorPrincipal) -> d
             "permissions": permissions,
             "can_read_internal": INTERNAL_READ_PERMISSION in permissions,
             "can_mutate_cases": CASE_ACTION_PERMISSION in permissions,
+            "can_execute_runtime": RUNTIME_EXECUTE_PERMISSION in permissions,
             "can_read_operator_audit": OPERATOR_AUDIT_READ_PERMISSION in permissions,
         }
     }

@@ -108,6 +108,18 @@ Error envelope:
 }
 ```
 
+## Internal role projection
+
+`GET /internal/brain/businesses/{business_id}/operator-session` projects the authenticated internal principal and its canonical permission set. Current least-privilege role mapping is:
+
+| Role | Permissions | Session booleans |
+| --- | --- | --- |
+| `viewer` | `internal:read` | `can_read_internal=true`, no mutation/runtime/audit capability |
+| `operator` | `internal:read`, `case:action` | can read and mutate cases, cannot force runtime execution or read operator audit |
+| `admin` | `internal:read`, `case:action`, `operator_audit:read`, `runtime:execute` | can read, mutate cases, read operator audit, and satisfy gateway force-run policy |
+
+The role header remains trusted only after the configured internal bearer-token boundary. External/public callers must not be allowed to self-assert these roles.
+
 ## Authorization minimum before live use
 
 Before exposing beyond local/dev:

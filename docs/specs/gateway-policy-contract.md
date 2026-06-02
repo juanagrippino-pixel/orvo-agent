@@ -24,7 +24,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 2. Gateway policy manifests are metadata only and must never contain bearer values, raw tokens, OAuth material, connector credentials, or environment variables.
 3. Mutating routes that can create side effects must declare `idempotency_required=true` before being exposed as automated/operator actions.
 4. Business scope is evaluated from the authenticated principal, not from caller-supplied prose.
-5. Permission checks are allowlisted by route policy and reuse the canonical internal operator permission constants in `app.brain.operator_auth`; wildcard grants are for tests/admin bootstrap only.
+5. Permission checks are allowlisted by route policy and reuse the canonical internal operator permission constants in `app.brain.operator_auth`; wildcard grants are for tests/admin bootstrap only. Runtime execution (`runtime:execute`) is an admin-only capability in the current internal role map and is intentionally separate from case mutation (`case:action`).
 6. Rate-limit keys are deterministic and safe to log after boundary redaction: `<bucket>:<business_id>:<redacted_actor_id>`.
 7. Audit events record decision codes, redacted request/trace provenance identifiers, and whether an idempotency key was present, but not the idempotency key value itself. Actor identifiers are passed through the shared redaction helper before projection.
 8. Idempotency keys for mutating routes must be scoped to the target business, must not contain whitespace, must fit within the documented key-size budget, and must not contain secret-shaped material.
@@ -78,6 +78,7 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 - allowed decisions emit stable audit metadata, redacted request/trace provenance identifiers, and redacted rate-limit keys;
 - actor/request identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;
 - idempotency key values never appear in decision envelopes or audit events;
+- role-derived permissions allow operator case mutation while reserving runtime force-run permission for admin principals;
 - duplicate route keys and unknown route lookups are rejected.
 
 ## Next extensions

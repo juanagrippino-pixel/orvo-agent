@@ -436,6 +436,7 @@ def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor
             "permissions": ["internal:read"],
             "can_read_internal": True,
             "can_mutate_cases": False,
+            "can_execute_runtime": False,
             "can_read_operator_audit": False,
         }
     }
@@ -452,6 +453,7 @@ def test_internal_operator_session_defaults_legacy_callers_to_operator_role(monk
     assert operator["role"] == "operator"
     assert operator["permissions"] == ["case:action", "internal:read"]
     assert operator["can_mutate_cases"] is True
+    assert operator["can_execute_runtime"] is False
     assert operator["can_read_operator_audit"] is False
 
 
@@ -466,9 +468,10 @@ def test_internal_operator_session_projects_admin_audit_permission(monkeypatch, 
     assert response.status_code == 200
     operator = response.get_json()["data"]["operator"]
     assert operator["role"] == "admin"
-    assert operator["permissions"] == ["case:action", "internal:read", "operator_audit:read"]
+    assert operator["permissions"] == ["case:action", "internal:read", "operator_audit:read", "runtime:execute"]
     assert operator["can_read_internal"] is True
     assert operator["can_mutate_cases"] is True
+    assert operator["can_execute_runtime"] is True
     assert operator["can_read_operator_audit"] is True
 
 

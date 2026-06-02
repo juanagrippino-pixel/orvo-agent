@@ -4,6 +4,7 @@ from app.brain.operator_auth import (
     CASE_ACTION_PERMISSION,
     INTERNAL_READ_PERMISSION,
     RUNTIME_EXECUTE_PERMISSION,
+    permissions_for_role,
 )
 
 def test_default_gateway_policy_registry_covers_current_internal_boundaries():
@@ -250,6 +251,50 @@ def test_gateway_policy_projects_safe_request_provenance_without_idempotency_val
     assert decision.audit_event["trace_id"] == "trace-20260602-0001"
     assert "force-run:artemea" not in repr(decision.model_dump())
     assert "raw_gateway_secret" not in repr(decision.model_dump())
+
+
+def test_gateway_policy_runtime_execute_permission_is_granted_only_to_admin_role():
+    from app.brain.gateway_policy import (
+        GatewayPrincipal,
+        GatewayRequestContext,
+        default_gateway_policy_registry,
+    )
+
+    registry = default_gateway_policy_registry()
+    base = GatewayRequestContext(
+        route_key="runtime.force_run.mutate",
+        method="POST",
+        business_id="artemea",
+        idempotency_key="force-run:artemea:2026-06-02:v1",
+    )
+
+    operator_decision = registry.evaluate(
+        base.model_copy(
+            update={
+                "principal": GatewayPrincipal(
+                    actor_id="operator:ana",
+                    business_ids=("artemea",),
+                    permissions=tuple(permissions_for_role("operator")),
+                )
+            }
+        )
+    )
+    assert operator_decision.allowed is False
+    assert operator_decision.code == "permission_denied"
+
+    admin_decision = registry.evaluate(
+        base.model_copy(
+            update={
+                "principal": GatewayPrincipal(
+                    actor_id="admin:sol",
+                    business_ids=("artemea",),
+                    permissions=tuple(permissions_for_role("admin")),
+                )
+            }
+        )
+    )
+    assert admin_decision.allowed is True
+    assert admin_decision.code == "allowed"
 
 
 def test_gateway_policy_redacts_actor_id_in_decision_audit_event():
