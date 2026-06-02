@@ -15,11 +15,12 @@ from app.brain.operational_cases import (
     OperationalCase,
     OperationalCaseSeverity,
     OperationalCaseStatus,
+    OperationalCaseStatusCategory,
     OperationalCaseStore,
     OperationalCaseType,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
-from app.brain.operator_case_projections import is_case_degraded, source_connectors
+from app.brain.operator_case_projections import case_status_category, is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets
 
 _MAX_JQL_LENGTH = 512
@@ -28,6 +29,7 @@ _MAX_IN_VALUES = 20
 _DEFAULT_SORT: tuple[tuple[str, str], ...] = (("priority_score", "DESC"), ("opened_at", "ASC"))
 _ALLOWED_SORT_FIELDS = {"priority_score", "opened_at", "updated_at"}
 _ALLOWED_STATUS = set(get_args(OperationalCaseStatus))
+_ALLOWED_STATUS_CATEGORIES = set(get_args(OperationalCaseStatusCategory))
 _ALLOWED_CASE_TYPES = set(get_args(OperationalCaseType))
 _ALLOWED_SEVERITY = set(get_args(OperationalCaseSeverity))
 
@@ -71,6 +73,7 @@ class ParsedCaseJQL:
 
 _FIELD_SPECS: dict[str, FieldSpec] = {
     "status": FieldSpec("enum", _ALLOWED_STATUS),
+    "status_category": FieldSpec("enum", _ALLOWED_STATUS_CATEGORIES),
     "case_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
     "severity": FieldSpec("enum", _ALLOWED_SEVERITY),
     "priority_score": FieldSpec("int", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
@@ -362,6 +365,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case.entity_scope.get("label")
     if field == "degraded":
         return is_case_degraded(case)
+    if field == "status_category":
+        return case_status_category(case)
     return getattr(case, field)
 
 

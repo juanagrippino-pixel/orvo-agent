@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
+from app.brain.operational_cases import SQLiteOperationalCaseStore, operational_case_status_category
 from app.brain.operator_api import OperatorAPIError
 from app.brain.operator_views import parse_case_jql
+from app.brain.storage import init_schema
 from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
 
 
@@ -75,6 +79,27 @@ def test_parse_case_jql_supports_degraded_boolean_filter():
     assert sql_shape.value.code == "invalid_jql"
 
 
+def test_operational_case_status_category_registry_is_canonical():
+    assert operational_case_status_category("open") == "todo"
+    assert operational_case_status_category("acknowledged") == "in_progress"
+    assert operational_case_status_category("in_progress") == "in_progress"
+    assert operational_case_status_category("resolved") == "done"
+    assert operational_case_status_category("dismissed") == "done"
+
+
+def test_parse_case_jql_supports_status_category_filter():
+    assert parse_case_jql("status_category = in_progress").normalized == (
+        "status_category = in_progress ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("status_category IN (todo, done)").normalized == (
+        "status_category IN (todo, done) ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_category:
+        parse_case_jql("status_category = waiting")
+    assert unsupported_category.value.code == "unsupported_jql_value"
+
+
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
@@ -134,6 +159,79 @@ def test_internal_case_queue_filters_degraded_cases_and_keeps_business_scope(mon
     assert body["data"]["normalized_jql"] == "degraded = true ORDER BY priority_score DESC, opened_at ASC"
     assert [case["case_id"] for case in body["data"]["cases"]] == [degraded_case.case_id]
     assert body["data"]["cases"][0]["degraded"] is True
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_filters_by_status_category_and_projects_category(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-open", priority=95))
+    acknowledged = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-ack",
+            dedupe_suffix="stockout_risk/sku/ACK/commerce.inventory/daily",
+            priority=90,
+        ),
+    )
+    in_progress = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-progress",
+            dedupe_suffix="stockout_risk/sku/PROGRESS/commerce.inventory/daily",
+            priority=85,
+        ),
+    )
+    resolved = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-resolved",
+            dedupe_suffix="stockout_risk/sku/RESOLVED/commerce.inventory/daily",
+            priority=100,
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other", priority=99))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.transition_case(
+        acknowledged.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+    )
+    store.transition_case(
+        in_progress.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="fixture completed",
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=status_category%20%3D%20in_progress",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "status_category = in_progress ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [acknowledged.case_id, in_progress.case_id]
+    assert [case["status_category"] for case in body["data"]["cases"]] == ["in_progress", "in_progress"]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 

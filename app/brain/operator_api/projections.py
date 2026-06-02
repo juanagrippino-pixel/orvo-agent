@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.brain.action_catalog import ACTION_CATALOG
+from app.brain.operator_case_projections import case_status_category as _case_status_category
 
 from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
@@ -14,6 +15,7 @@ def case_queue_item(case: OperationalCase) -> dict[str, Any]:
             "case_type": case.case_type,
             "title": case.title,
             "status": case.status,
+            "status_category": _case_status_category(case),
             "severity": case.severity,
             "priority_score": case.priority_score,
             "entity_scope": case.entity_scope,
@@ -108,6 +110,7 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "dedupe_key": case.dedupe_key,
             "title": case.title,
             "status": case.status,
+            "status_category": _case_status_category(case),
             "severity": case.severity,
             "priority_score": case.priority_score,
             "entity_scope": case.entity_scope,

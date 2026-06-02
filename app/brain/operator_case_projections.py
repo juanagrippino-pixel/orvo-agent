@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.brain.operational_cases import OperationalCase
+from app.brain.operational_cases import (
+    OperationalCase,
+    OperationalCaseStatusCategory,
+    operational_case_status_category,
+)
 
 _DEGRADED_FRESHNESS_STATES = frozenset({"stale", "degraded", "missing"})
 
@@ -26,3 +30,7 @@ def source_connectors(case: OperationalCase) -> list[str]:
 
 def is_case_degraded(case: OperationalCase) -> bool:
     return any(snapshot.freshness_state in _DEGRADED_FRESHNESS_STATES for snapshot in case.evidence_snapshots)
+
+
+def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory:
+    return operational_case_status_category(case.status)
