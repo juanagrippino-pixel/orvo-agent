@@ -22,6 +22,7 @@ from app.brain.operational_cases import (
     SQLiteOperationalCaseStore,
     detect_cases_from_report,
 )
+from app.brain.operator_api.projections import case_detail
 from app.brain.storage import init_schema
 
 
@@ -1001,3 +1002,110 @@ def test_upsert_data_stale_cases_is_noop_when_store_or_business_missing():
     assert no_business.opened_count == 0
     assert no_business.updated_count == 0
     assert store.list_cases() == [], "missing business_id must not persist any case"
+
+def test_detect_cases_from_report_suppresses_stale_stockout_source_into_data_stale_case():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=2, unit="units", evidence=[source]),
+            Metric(
+                key="runtime.freshness.age_seconds",
+                label="Edad de datos Tiendanube",
+                value=172800,
+                unit="seconds",
+                evidence=[source],
+            ),
+            Metric(
+                key="runtime.connector.status",
+                label="Estado Tiendanube",
+                value="stale",
+                evidence=[source],
+            ),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan pocas unidades, pero la fuente está stale.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-stale-stock",
+        artifact_ref="ledger://runs/run-stale-stock/daily-report",
+    )
+
+    assert [detection.case_type for detection in detections] == ["data_stale"]
+    stale = detections[0]
+    assert stale.dedupe_key == "artemea/data_stale/connector/tiendanube/runtime.freshness/daily"
+    assert stale.metadata["affected_case_families"] == ["stockout_risk"]
+    assert stale.metadata["suppressed_case_families"] == ["stockout_risk"]
+    assert stale.metadata["suggested_action_keys"] == ["refresh_credentials", "retry_connector"]
+    assert len(stale.evidence_snapshots) == 1
+    snapshot = stale.evidence_snapshots[0]
+    assert snapshot.freshness_state == "stale"
+    assert snapshot.case_type == "data_stale"
+    assert [metric.metric_key for metric in snapshot.metrics] == [
+        "runtime.freshness.age_seconds",
+        "runtime.connector.status",
+    ]
+
+
+def test_stockout_detection_with_fresh_source_keeps_registered_metrics_and_action_keys():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source]),
+            Metric(
+                key="runtime.freshness.age_seconds",
+                label="Edad de datos Tiendanube",
+                value=300,
+                unit="seconds",
+                evidence=[source],
+            ),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan pocas unidades y los datos están frescos.",
+                recommended_action="Confirmar stock.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(business_id="artemea", report=report, run_id="run-fresh-stock")
+
+    assert [detection.case_type for detection in detections] == ["stockout_risk"]
+    detection = detections[0]
+    assert detection.metadata["suggested_action_keys"] == ["confirm_stock", "pause_promotion"]
+    snapshot = detection.evidence_snapshots[0]
+    assert snapshot.freshness_state == "fresh"
+    assert [metric.metric_key for metric in snapshot.metrics] == [
+        "commerce.inventory.available_units",
+        "runtime.freshness.age_seconds",
+    ]
+
+
+def test_case_detail_projects_registered_suggested_actions_only():
+    store = InMemoryOperationalCaseStore()
+    case = store.upsert_detection(
+        make_stockout_detection(),
+        detected_at=utc_dt(8),
+    )
+    case.metadata["suggested_action_keys"] = ["confirm_stock", "invented_action"]
+
+    projection = case_detail(case)
+
+    assert [action["action_key"] for action in projection["suggested_actions"]] == ["confirm_stock"]
+    assert projection["suggested_action_keys"] == ["confirm_stock"]

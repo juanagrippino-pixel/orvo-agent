@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.brain.action_catalog import ACTION_CATALOG
 from app.brain.models import DailyReport, Insight, Metric
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
@@ -898,6 +899,110 @@ def _metric_sources(metric: Metric) -> set[str]:
     return {evidence.source for evidence in metric.evidence}
 
 
+def _suggested_action_keys_for_case_type(case_type: OperationalCaseType) -> list[str]:
+    return [
+        action_key
+        for action_key, definition in ACTION_CATALOG.items()
+        if case_type in definition.case_families
+    ]
+
+
+def _metric_value_for_source(report: DailyReport, *, source: str, canonical_key: str) -> Any:
+    registry = default_metric_registry()
+    for metric in report.metrics:
+        if registry.try_resolve_key(metric.key) == canonical_key and source in _metric_sources(metric):
+            return metric.value
+    return None
+
+
+def _source_freshness_state(report: DailyReport, *, source: str) -> EvidenceFreshnessState:
+    raw_status = _metric_value_for_source(report, source=source, canonical_key="runtime.connector.status")
+    if isinstance(raw_status, str):
+        normalized = raw_status.strip().lower()
+        if normalized in {"stale", "missing", "degraded"}:
+            return normalized  # type: ignore[return-value]
+        if normalized in {"failed", "failure", "error", "unauthorized", "expired"}:
+            return "stale"
+        if normalized in {"fresh", "ok", "healthy", "success", "true"}:
+            return "fresh"
+    elif raw_status is False:
+        return "stale"
+
+    raw_age = _metric_value_for_source(report, source=source, canonical_key="runtime.freshness.age_seconds")
+    try:
+        age_seconds = float(raw_age) if raw_age is not None else None
+    except (TypeError, ValueError):
+        age_seconds = None
+    if age_seconds is None:
+        return "unknown"
+    if age_seconds >= 86400:
+        return "stale"
+    if age_seconds >= 21600:
+        return "degraded"
+    return "fresh"
+
+
+def _stale_sources_for_insight(report: DailyReport, insight: Insight) -> dict[str, EvidenceFreshnessState]:
+    states: dict[str, EvidenceFreshnessState] = {}
+    for evidence in insight.evidence:
+        state = _source_freshness_state(report, source=evidence.source)
+        if state in {"stale", "degraded", "missing"}:
+            states[evidence.source] = state
+    return states
+
+
+def _data_stale_detection_for_suppressed_case(
+    *,
+    business_id: str,
+    report: DailyReport,
+    insight: Insight,
+    suppressed_case_type: OperationalCaseType,
+    source: str,
+    freshness_state: EvidenceFreshnessState,
+    run_id: str | None,
+    artifact_ref: str | None,
+) -> OperationalCaseDetection:
+    source_label = next((evidence.label for evidence in insight.evidence if evidence.source == source), source)
+    detection = make_data_stale_detection(
+        business_id=business_id,
+        connector_type=source,
+        run_id=run_id,
+        error_summary=f"{source} data is {freshness_state}; suppressed {suppressed_case_type} detection until source freshness recovers.",
+    )
+    evidence_ref = f"evidence://{source}/{report.report_date.isoformat()}/data_stale"
+    snapshot = _minimal_snapshot_from_detection(
+        detection,
+        evidence_ref=evidence_ref,
+        artifact_ref=artifact_ref,
+        source_label=source_label,
+    ).model_copy(
+        update={
+            "freshness_state": freshness_state,
+            "metrics": _case_evidence_metrics_for_source(report=report, case_type="data_stale", source=source),
+        },
+        deep=True,
+    )
+    return OperationalCaseDetection.model_validate(
+        detection.model_copy(
+            update={
+                "evidence_refs": [evidence_ref],
+                "artifact_refs": [artifact_ref] if artifact_ref else [],
+                "metadata": {
+                    **detection.metadata,
+                    "freshness_state": freshness_state,
+                    "affected_case_families": [suppressed_case_type],
+                    "suppressed_case_families": [suppressed_case_type],
+                    "insight_title": insight.title,
+                    "suggested_action_keys": _suggested_action_keys_for_case_type("data_stale"),
+                    **_metric_registry_metadata(report),
+                },
+                "evidence_snapshots": [snapshot],
+            },
+            deep=True,
+        ).model_dump()
+    )
+
+
 def _case_evidence_metrics_for_source(
     *,
     report: DailyReport,
@@ -1033,9 +1138,27 @@ def detect_cases_from_report(
     artifact_ref: str | None = None,
 ) -> list[OperationalCaseDetection]:
     detections: list[OperationalCaseDetection] = []
+    seen_dedupe_keys: set[str] = set()
     for insight in report.insights:
         case_type = _case_type_for_insight(insight)
         if case_type is None:
+            continue
+        stale_sources = _stale_sources_for_insight(report, insight)
+        if stale_sources:
+            for source, freshness_state in stale_sources.items():
+                stale_detection = _data_stale_detection_for_suppressed_case(
+                    business_id=business_id,
+                    report=report,
+                    insight=insight,
+                    suppressed_case_type=case_type,
+                    source=source,
+                    freshness_state=freshness_state,
+                    run_id=run_id,
+                    artifact_ref=artifact_ref,
+                )
+                if stale_detection.dedupe_key not in seen_dedupe_keys:
+                    detections.append(stale_detection)
+                    seen_dedupe_keys.add(stale_detection.dedupe_key)
             continue
         detection = OperationalCaseDetection(
             business_id=business_id,
@@ -1052,23 +1175,30 @@ def detect_cases_from_report(
                 "insight_title": insight.title,
                 "insight_explanation": insight.explanation,
                 "recommended_action": insight.recommended_action,
+                "suggested_action_keys": _suggested_action_keys_for_case_type(case_type),
                 **_metric_registry_metadata(report),
             },
         )
-        detection = detection.model_copy(
-            update={
-                "evidence_snapshots": _evidence_snapshots_for_insight(
-                    insight,
-                    report,
-                    case_type,
-                    detection,
-                    artifact_ref,
-                )
-            },
-            deep=True,
+        source_states = {evidence.source: _source_freshness_state(report, source=evidence.source) for evidence in insight.evidence}
+        snapshots = _evidence_snapshots_for_insight(
+            insight,
+            report,
+            case_type,
+            detection,
+            artifact_ref,
         )
+        snapshots = [
+            snapshot.model_copy(
+                update={"freshness_state": source_states.get(snapshot.source or "", "unknown")},
+                deep=True,
+            )
+            for snapshot in snapshots
+        ]
+        detection = detection.model_copy(update={"evidence_snapshots": snapshots}, deep=True)
         detection = OperationalCaseDetection.model_validate(detection.model_dump())
-        detections.append(detection)
+        if detection.dedupe_key not in seen_dedupe_keys:
+            detections.append(detection)
+            seen_dedupe_keys.add(detection.dedupe_key)
     return detections
 
 

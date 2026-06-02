@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.brain.action_catalog import ACTION_CATALOG
+
 from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 
@@ -74,6 +76,29 @@ def timeline_event_projection(case: OperationalCase, event: Any) -> dict[str, An
         "metadata": event.metadata,
     }
 
+
+def _case_suggested_action_keys(case: OperationalCase) -> list[str]:
+    raw_keys = case.metadata.get("suggested_action_keys")
+    if not isinstance(raw_keys, list):
+        return []
+    keys: list[str] = []
+    for raw_key in raw_keys:
+        if not isinstance(raw_key, str):
+            continue
+        definition = ACTION_CATALOG.get(raw_key)
+        if definition is None or case.case_type not in definition.case_families:
+            continue
+        if raw_key not in keys:
+            keys.append(raw_key)
+    return keys
+
+
+def _case_suggested_actions(case: OperationalCase) -> list[dict[str, Any]]:
+    return [
+        ACTION_CATALOG[action_key].operator_projection(can_execute_case_actions=False)
+        for action_key in _case_suggested_action_keys(case)
+    ]
+
 def case_detail(case: OperationalCase) -> dict[str, Any]:
     return redact_secrets(
         {
@@ -100,6 +125,8 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "evidence_snapshot_count": len(case.evidence_snapshots),
             "evidence_snapshots": [evidence_snapshot_projection(snapshot) for snapshot in case.evidence_snapshots],
             "timeline": [timeline_event_projection(case, event) for event in case.timeline],
+            "suggested_action_keys": _case_suggested_action_keys(case),
+            "suggested_actions": _case_suggested_actions(case),
             "metadata": case.metadata,
         }
     )
