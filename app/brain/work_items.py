@@ -16,6 +16,8 @@ from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
+    DETECTABLE_OPERATIONAL_CASE_TYPES,
+    OWNER_FACING_OPERATIONAL_CASE_TYPES,
     TERMINAL_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
     OperationalCaseSeverity,
@@ -223,18 +225,26 @@ def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
     }
 
 
-def operational_case_issue_type_definitions() -> list[dict[str, str]]:
+def operational_case_issue_type_definitions() -> list[dict[str, Any]]:
     """Expose current D2C case families as issue-type definitions."""
 
-    return [
-        {
-            "issue_type": case_type,
-            "case_type": case_type,
-            "scheme_id": _DEFAULT_CASE_TYPE_SCHEME_ID,
-            "release_state": case_type_release_state(case_type),
-        }
-        for case_type in get_args(OperationalCaseType)
-    ]
+    definitions: list[dict[str, Any]] = []
+    for case_type in get_args(OperationalCaseType):
+        detectable = case_type in DETECTABLE_OPERATIONAL_CASE_TYPES
+        owner_facing = case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES
+        definitions.append(
+            {
+                "issue_type": case_type,
+                "case_type": case_type,
+                "scheme_id": _DEFAULT_CASE_TYPE_SCHEME_ID,
+                "release_state": case_type_release_state(case_type),
+                "detectable": detectable,
+                "owner_facing": owner_facing,
+                "visibility": "owner_facing" if owner_facing else "internal_deferred",
+                "required_metric_keys": list(CASE_FAMILY_METRICS.get(case_type, ())),
+            }
+        )
+    return definitions
 
 
 def operational_case_status_definitions() -> list[dict[str, Any]]:

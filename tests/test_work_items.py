@@ -146,6 +146,29 @@ def test_priority_definitions_are_canonical_work_item_semantics(tmp_path):
     ]
 
 
+def test_issue_type_definitions_expose_owner_visibility_and_metric_gates():
+    definitions = {definition["issue_type"]: definition for definition in operational_case_issue_type_definitions()}
+
+    stockout = definitions["stockout_risk"]
+    channel_mix = definitions["channel_mix_shift"]
+
+    assert stockout["case_type"] == "stockout_risk"
+    assert stockout["scheme_id"] == "d2c-default-case-types"
+    assert stockout["detectable"] is True
+    assert stockout["owner_facing"] is True
+    assert stockout["visibility"] == "owner_facing"
+    assert stockout["required_metric_keys"] == [
+        "commerce.inventory.available_units",
+        "commerce.orders.count",
+        "runtime.freshness.age_seconds",
+    ]
+
+    assert channel_mix["detectable"] is False
+    assert channel_mix["owner_facing"] is False
+    assert channel_mix["visibility"] == "internal_deferred"
+    assert channel_mix["required_metric_keys"] == []
+
+
 def test_status_and_workflow_definitions_expose_current_transition_table(tmp_path):
     db_path = tmp_path / "workflow-definition.sqlite3"
     case = _seed_case(db_path, _case_detection(run_id="run-status"))
