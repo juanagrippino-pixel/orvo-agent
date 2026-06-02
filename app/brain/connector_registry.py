@@ -218,6 +218,33 @@ class ConnectorSpec:
 
         return f"{self.adapter_module}.{self.report_factory}"
 
+    def health_policy_metadata(self) -> dict[str, Any]:
+        """Return serializable connector health policy metadata."""
+
+        return {
+            "readiness_check": self.health.readiness_check,
+            "supports_health_check": self.health.supports_health_check,
+            "degraded_state": self.health.degraded_state,
+        }
+
+    def rate_limit_policy_metadata(self) -> dict[str, Any]:
+        """Return serializable connector rate-limit policy metadata."""
+
+        return {
+            "default_timeout_seconds": self.rate_limit.default_timeout_seconds,
+            "requests_per_minute": self.rate_limit.requests_per_minute,
+            "retry_policy": self.rate_limit.retry_policy,
+        }
+
+    def lifecycle_metadata(self) -> dict[str, str]:
+        """Return serializable connector lifecycle metadata."""
+
+        return {
+            "status": self.lifecycle.status,
+            "owner": self.lifecycle.owner,
+            "version": self.lifecycle.version,
+        }
+
     def load_report_factory(self):
         """Import the configured report-builder callable from executor metadata."""
 

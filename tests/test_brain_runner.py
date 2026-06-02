@@ -232,6 +232,16 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
             "runtime.data_quality",
         ],
         "required_scopes": ["spreadsheets.readonly"],
+        "health_policy": {
+            "readiness_check": "metadata_only",
+            "supports_health_check": False,
+            "degraded_state": "degraded",
+        },
+        "rate_limit_policy": {
+            "default_timeout_seconds": 30,
+            "requests_per_minute": None,
+            "retry_policy": "adapter_default",
+        },
         "metric_certification": {
             "status": "warning",
             "issue_count": 1,
@@ -308,6 +318,16 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
             "runtime.data_quality",
         ],
         "required_scopes": ["spreadsheets.readonly"],
+        "health_policy": {
+            "readiness_check": "metadata_only",
+            "supports_health_check": False,
+            "degraded_state": "degraded",
+        },
+        "rate_limit_policy": {
+            "default_timeout_seconds": 30,
+            "requests_per_minute": None,
+            "retry_policy": "adapter_default",
+        },
     }
     assert run.artifacts == []
     assert run.dispatch_outcomes == []

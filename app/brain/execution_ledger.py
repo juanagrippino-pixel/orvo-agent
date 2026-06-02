@@ -117,6 +117,8 @@ def _connector_contract_metadata(
             "capabilities": list(spec.capabilities),
             "emitted_metric_families": list(spec.emitted_metric_families),
             "required_scopes": list(spec.scopes.required),
+            "health_policy": spec.health_policy_metadata(),
+            "rate_limit_policy": spec.rate_limit_policy_metadata(),
         }
     )
     return metadata

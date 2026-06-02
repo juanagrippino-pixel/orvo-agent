@@ -295,37 +295,13 @@ def _compile_connectors(
                 emitted_metric_families=list(spec.emitted_metric_families),
                 supported_runtime_modes=supported_runtime_modes,
                 executor_factory_path=spec.factory_path,
-                health_policy=_health_policy_for(spec),
+                health_policy=spec.health_policy_metadata(),
                 required_scopes=list(spec.scopes.required),
-                rate_limit_policy=_rate_limit_policy_for(spec),
-                lifecycle=_lifecycle_metadata_for(spec),
+                rate_limit_policy=spec.rate_limit_policy_metadata(),
+                lifecycle=spec.lifecycle_metadata(),
             )
         )
     return compiled
-
-
-def _health_policy_for(spec: ConnectorSpec) -> dict[str, Any]:
-    return {
-        "readiness_check": spec.health.readiness_check,
-        "supports_health_check": spec.health.supports_health_check,
-        "degraded_state": spec.health.degraded_state,
-    }
-
-
-def _rate_limit_policy_for(spec: ConnectorSpec) -> dict[str, Any]:
-    return {
-        "default_timeout_seconds": spec.rate_limit.default_timeout_seconds,
-        "requests_per_minute": spec.rate_limit.requests_per_minute,
-        "retry_policy": spec.rate_limit.retry_policy,
-    }
-
-
-def _lifecycle_metadata_for(spec: ConnectorSpec) -> dict[str, str]:
-    return {
-        "status": spec.lifecycle.status,
-        "owner": spec.lifecycle.owner,
-        "version": spec.lifecycle.version,
-    }
 
 
 def _compile_schedules(

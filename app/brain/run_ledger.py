@@ -37,6 +37,36 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _redact_run_ledger_secret_refs(value: Any) -> Any:
+    """Redact raw secret-ref URI values before persisting run-ledger metadata.
+
+    ``secret_refs`` keys are useful operational hints, but their values include
+    tenant/business/connector paths. Ledger records should keep only the secret
+    parameter names and never serialize the raw secret-reference URI.
+    """
+
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            key = str(raw_key)
+            normalized_key = key.lower().replace("-", "_")
+            if normalized_key == "secret_refs":
+                if isinstance(raw_value, dict):
+                    redacted[key] = {str(secret_key): "[REDACTED]" for secret_key in raw_value}
+                elif isinstance(raw_value, list):
+                    redacted[key] = ["[REDACTED]" for _ in raw_value]
+                else:
+                    redacted[key] = "[REDACTED]"
+            else:
+                redacted[key] = _redact_run_ledger_secret_refs(raw_value)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_run_ledger_secret_refs(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_run_ledger_secret_refs(item) for item in value)
+    return value
+
+
 def redact_metadata(value: Any) -> Any:
     """Recursively redact secret-shaped metadata values.
 
@@ -45,7 +75,7 @@ def redact_metadata(value: Any) -> Any:
     actual redaction rules in app.brain.security.redaction.
     """
 
-    return redact_secrets(value)
+    return _redact_run_ledger_secret_refs(redact_secrets(value))
 
 
 class ArtifactRef(BaseModel):
