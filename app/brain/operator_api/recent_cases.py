@@ -157,6 +157,72 @@ def list_recently_acknowledged_cases(
     )
 
 
+def _case_transitioned_to_at(case: OperationalCase, status: str) -> datetime:
+    """Return the canonical timeline timestamp for a status transition.
+
+    ``in_progress`` has no dedicated model timestamp yet. The case timeline is
+    the source of truth for lifecycle events, so derive the projection timestamp
+    from the status-change event instead of treating updated_at/comments as the
+    lifecycle transition. ``updated_at`` remains a backward-compatible fallback
+    for older fixtures that predate timeline metadata.
+    """
+
+    for event in reversed(case.timeline):
+        if event.event_type != "status_changed":
+            continue
+        if event.metadata.get("to_status") == status:
+            return event.created_at
+    return case.updated_at
+
+
+def list_recently_in_progress_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-started in-progress cases for a business.
+
+    Complements recently-opened/acknowledged/resolved/dismissed projections with
+    the active-work slice needed by internal queues. Only cases currently in
+    ``in_progress`` status are included; terminal cases that passed through
+    in-progress belong to terminal projections. Ordered by the canonical
+    timeline transition into ``in_progress`` DESC with ``case_id`` ASC as a
+    deterministic tie-breaker.
+    """
+
+    parsed_limit = parse_limit(limit)
+    in_progress: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="in_progress", limit=None):
+        in_progress_at = _case_transitioned_to_at(case, "in_progress")
+        in_progress.append((in_progress_at.astimezone(timezone.utc), case.case_id, case))
+
+    in_progress.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = in_progress[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "in_progress_at": in_progress_at.isoformat(),
+            "time_to_in_progress_seconds": int((in_progress_at - case.opened_at).total_seconds()),
+        }
+        for in_progress_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "in_progress_total": len(in_progress),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def list_recently_dismissed_cases(
     store: OperationalCaseStore,
     *,
