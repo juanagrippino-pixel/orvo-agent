@@ -26,12 +26,20 @@ from app.brain.models import InsightThresholds
 
 
 class ConnectorConfig(BaseModel):
-    """Configuration for one data-source connector attached to a business."""
+    """Configuration for one data-source connector attached to a business.
+
+    ``params`` carries non-secret public connector settings. ``secret_refs``
+    carries durable secret handles (for example ``access_token`` ->
+    ``secret://...``); raw credential values must be resolved only at the
+    execution boundary and must not be serialized into compiled runtime
+    artifacts or ledgers.
+    """
 
     connector_id: str = Field(..., min_length=1)
     connector_type: str = Field(..., min_length=1)
     label: str = Field(..., min_length=1)
     params: dict = Field(default_factory=dict)
+    secret_refs: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
 
 
