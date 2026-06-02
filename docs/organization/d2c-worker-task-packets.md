@@ -366,30 +366,38 @@ Acceptance:
 - minimal action-scope/RBAC behavior is implemented, or the branch is explicitly labeled audit-foundation-only;
 - full suite remains green.
 
-## Packet P — Work-management contract cleanup
+## Packet P — Work-management lifecycle regression cleanup
 
-Goal: reconcile merged workflow behavior with the Operational Case contract and avoid silent Jira-parity drift.
+Status: mostly satisfied in the current baseline; dispatch only as a narrow regression/fixer packet if tests or review show one of these invariants has drifted. Do **not** merge or revive the stale `codex/work-management` branches wholesale; the 2026-06-02 Architecture Review Board marked them selective-salvage/likely-superseded because their tree shape predates the current operator API package split and current control-plane files.
 
-Dependency: dispatch after `codex/work-management` merges are present in the target branch.
+Goal: keep merged lifecycle behavior aligned with the Operational Case contract while separating registry/Jira-parity work into Packet S.
+
+Dependency: current internal operator case-action path and `tests/test_internal_operator_api.py` / `tests/test_brain_operational_cases.py` are green. If those tests already prove the invariant, update docs/reports rather than rewriting code.
+
+Current source-of-truth check:
+
+- `app/brain/operator_api/actions.py` requires a non-empty reason for terminal actions (`resolve_case`, `dismiss_case`).
+- `app/brain/operational_cases.py` hardcodes lifecycle transitions and intentionally does not allow direct `open -> resolved`.
+- `app/brain/operator_views.py` provides read-only JQL-lite/built-in views over cases, not a canonical workflow registry.
 
 Read:
 
-- `docs/architecture-reviews/2026-05-31-review.md`
+- `docs/architecture-reviews/2026-06-02-review.md`
 - `docs/specs/operational-case-engine-contract.md`
 - `docs/specs/d2c-action-key-catalog.md`
 
-Likely files:
+Likely files, only if a regression is found:
 
 - `app/brain/operational_cases.py`
-- `app/brain/operator_api.py`
+- `app/brain/operator_api/actions.py`
 - `tests/test_brain_operational_cases.py`
-- `tests/test_operator_case_actions.py`
+- `tests/test_internal_operator_api.py`
 
 Acceptance:
 
-- manual `resolve_case` requires a non-empty reason just like `dismiss_case`;
+- terminal actions still require a non-empty reason;
 - lifecycle transition tests assert the contract table, including the intentional absence of direct `open -> resolved`;
-- project abstraction, issue-type registry/versioning, and status-category work are documented as separate follow-up packets rather than hidden in this cleanup;
+- project abstraction, issue-type registry/versioning, workflow-definition registry, and status-category work remain Packet S rather than hidden in this cleanup;
 - no owner-facing projection changes unless required by the contract.
 
 ## Packet Q — Connector registry secret-ref runtime hardening
@@ -451,30 +459,35 @@ Acceptance:
 
 Goal: add the first Jira-like work-management projection layer without rewriting `OperationalCase` or making manually-created work the source of truth for deterministic cases.
 
-Dependency: dispatch only after Packet P/work-management lifecycle cleanup is green. This packet is a thin projection/schema slice; it must not change case detection, case storage semantics, or owner-facing WhatsApp/report copy.
+Dependency: dispatch after current case-action, built-in view, and JQL-lite tests are green, and after Packet P is confirmed satisfied or explicitly unnecessary. This packet is a thin registry/projection/schema slice; it must not change case detection, case storage semantics, lifecycle transitions, or owner-facing WhatsApp/report copy.
 
-Source-of-truth check: current code has `OperationalCaseStatus` values and hardcoded transition rules, but no `Project`/`WorkItem` envelope, project key, issue-type registry, workflow scheme, or explicit status-category map.
+Source-of-truth check: the 2026-06-02 Architecture Review Board found that current code has `OperationalCaseStatus` values, deterministic case types, read-only JQL-lite views, and hardcoded transition rules, but no `Project`/`WorkItem` envelope, project key, issue-type registry, workflow scheme, status definition registry, or explicit status-category map. Add these as additive helpers/projections; do not revive stale monolithic `app/brain/operator_api.py` branch shapes.
 
 Read:
 
-- `docs/architecture-reviews/2026-06-01-architecture-board-review.md`
+- `docs/architecture-reviews/2026-06-02-review.md`
+- `docs/roadmap/d2c-control-plane-roadmap.md`
 - `docs/specs/operational-case-engine-contract.md`
 - `docs/specs/internal-operator-api-contract.md`
 - `docs/specs/integration-train-contract.md`
 
 Likely files:
 
-- `app/brain/work_items.py` or `app/brain/operator_api.py`
-- `app/brain/operational_cases.py`
-- `tests/test_work_items.py` or `tests/test_internal_operator_api.py`
+- `app/brain/work_items.py` or a similarly narrow projection module
+- `app/brain/operational_cases.py` only for exported constants/helpers, not lifecycle rewrites
+- `app/brain/operator_api/projections.py` or current package modules, not a restored monolithic `operator_api.py`
+- `app/brain/operator_views.py` only after canonical status/category helpers exist
+- `tests/test_work_items.py` or focused additions to `tests/test_internal_operator_api.py` / `tests/test_operator_case_views.py`
 
 Acceptance:
 
 - projects are represented as a projection/envelope over `business_id` with stable project keys and no tenant-crossing leakage;
 - issue/work-item projection includes `work_item_id`, `project_key`, `issue_type`, `status`, `status_category`, priority, assignee/owner, created/updated timestamps, and canonical `case_id` for detected Operational Cases;
 - status categories are deterministic (`to_do`, `in_progress`, `done` or explicitly documented alternatives) and terminal flags match existing `resolved`/`dismissed` behavior;
+- workflow/status definition helpers expose the current transition table for projection/validation without enabling tenant-custom workflows yet;
+- JQL-lite grows `project`, `status_category`, `assignee_ref`, and `issue_type` fields only after they derive from the canonical projection helpers;
 - API/projection callers can read WorkItem-shaped output without bypassing the Operational Case store;
-- no new lifecycle transitions, LLM decisions, or owner-facing copy changes are introduced.
+- no new lifecycle transitions, LLM decisions, manual work creation, or owner-facing copy changes are introduced.
 
 ## Packet T — Metric registry enforcement for Operational Cases
 

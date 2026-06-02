@@ -2,6 +2,7 @@
 
 Status: Working roadmap
 Date: 2026-05-24
+Last reconciled: 2026-06-02
 Related: `docs/plans/2026-05-24-d2c-control-plane-first-product.md`
 
 ## Priority rule
@@ -68,6 +69,31 @@ Exit criteria:
 - Owner-facing brief can cite case/evidence refs.
 - Operator can inspect open cases and run health.
 - Missing/stale sources suppress/narrow advice.
+
+## Milestone 3A — Work-management registry stabilization
+
+Outcome: Orvo's Jira-like `OperationalCase` / WorkItem surface gains stable project, issue-type, workflow, and status-category semantics before saved filters, SLA queues, or multi-operator expansion depend on derived status sets.
+
+Current shipped checkpoint, grounded in `app/brain/operational_cases.py` and `app/brain/operator_views.py`:
+
+- `OperationalCase` is the durable work item source of truth with tenant scope via `business_id`, deterministic case types, timeline/evidence snapshots, and hardcoded lifecycle transitions.
+- JQL-lite and built-in operator views are read-only projections over cases; they do not translate user input to SQL or persist custom saved views.
+- There is not yet a first-class `Project`, `IssueType`/`CaseTypeDefinition`, `WorkflowDefinition`, `StatusDefinition`, or `StatusCategory` registry.
+
+Deliverables:
+
+- additive project/work-item envelope over `business_id`, with stable project keys and no tenant-crossing leakage;
+- internal status-category mapping for existing statuses: `open -> to_do`, `acknowledged/in_progress -> in_progress`, `resolved/dismissed -> done`;
+- explicit issue-type/case-type registry wrapper for current D2C case families, without introducing tenant-custom workflows yet;
+- workflow definition registry that documents current allowed transitions before any executor/SLA layer consumes them;
+- JQL-lite additions only after the canonical fields exist (`project`, `status_category`, `assignee_ref`, and `issue_type` aliasing), with route-owned business scope.
+
+Exit criteria:
+
+- Operator/API projections can return WorkItem-shaped output while `OperationalCase` remains the source of truth.
+- Built-in views and any new JQL fields derive from canonical registry/mapping helpers, not duplicated status literals.
+- No new lifecycle transitions, LLM decisions, manual work creation, or owner-facing WhatsApp/report copy changes are introduced.
+- Full suite and focused operator-case/query tests remain green.
 
 ## Milestone 4 — Sellable Tiendanube/WhatsApp pilot operations
 
