@@ -167,6 +167,7 @@ def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, An
         "health_policy": dict(connector.health_policy),
         "required_scopes": list(connector.required_scopes),
         "rate_limit_policy": dict(connector.rate_limit_policy),
+        "lifecycle": dict(connector.lifecycle),
     }
 
 

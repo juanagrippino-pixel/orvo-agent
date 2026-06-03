@@ -73,6 +73,28 @@ def test_compiled_runtime_hash_is_stable_when_only_raw_legacy_secret_value_chang
     assert "tn_rotated_secret" not in second.model_dump_json()
 
 
+def test_compile_business_runtime_does_not_mutate_source_business_config():
+    """Runtime compilation must not silently rewrite durable control-plane config."""
+
+    from app.brain.runtime import compile_business_runtime
+
+    business = _business_with_tiendanube_token("tn_original_runtime_boundary_token")
+    before = business.model_dump(mode="json")
+
+    runtime = compile_business_runtime(business, schedules=[_daily_schedule()], run_mode="forced")
+
+    assert business.model_dump(mode="json") == before
+    assert business.connectors[0].params == {
+        "store_id": "12345",
+        "access_token": "tn_original_runtime_boundary_token",
+        "include_stock": True,
+    }
+    assert runtime.connectors[0].params == {"store_id": "12345", "include_stock": True}
+    assert runtime.connectors[0].secret_refs == {
+        "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
+    }
+
+
 @pytest.mark.parametrize(
     ("connector_type", "connector_id", "public_params", "secret_refs"),
     [

@@ -12,6 +12,8 @@ This directory is the durable source of truth for the autonomous product organiz
 ## Current files
 
 - [Codex 24/7 autonomous operating system](2026-05-30-codex-24-7-autonomous-operating-system.md) — active execution mode after Codex plan renewal.
+- [D2C autonomous worker addendum](d2c-autonomous-worker-addendum.md) — binding worker preamble and source-of-truth list for the Tiendanube/WhatsApp-first control-plane wedge.
+- [D2C worker task packets](d2c-worker-task-packets.md) — bounded dispatchable packet catalog tied to the integration-train contract.
 - [Orvo operating toolchain blueprint](orvo-operating-toolchain-blueprint.md)
 - [Autonomous organization operating plan](autonomous-org-operating-plan.md)
 - [Autonomous org research v2](autonomous-org-research-v2.md)
