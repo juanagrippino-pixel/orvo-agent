@@ -90,8 +90,11 @@ and duplicate pending/failed keys are rejected with a safe `409` envelope.
 Built-in case views are read-only projections over the canonical Operational Case
 store; view execution, exports, and summaries must remain route-scoped by
 `business_id`, use allowlisted JQL-lite definitions, and return redacted
-enveloped responses. View summaries return aggregate facets only, not raw case
-rows.
+enveloped responses. JQL-lite may filter evidence freshness through the
+allowlisted `freshness_state` values (`fresh`, `stale`, `degraded`, `missing`,
+`unknown`) derived from persisted case evidence snapshots. View summaries return
+aggregate facets only, not raw case rows, including evidence freshness-state
+counts where available.
 
 ### Operator audit events
 
