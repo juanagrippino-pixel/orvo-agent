@@ -68,6 +68,74 @@ def fake_sheets_service():
     return FakeService()
 
 
+def test_enabled_daily_connector_types_are_discovered_from_registry_metadata(monkeypatch):
+    from app.brain.connector_registry import (
+        CAPABILITY_DAILY_REPORT,
+        ConnectorRegistry,
+        ConnectorSpec,
+        get_connector_spec,
+    )
+    from app.brain.runner import _enabled_daily_connector_types
+
+    registry = ConnectorRegistry(
+        (
+            get_connector_spec("google_sheets"),
+            ConnectorSpec(
+                connector_type="shopify",
+                display_name="Shopify",
+                adapter_module="app.brain.adapters.csv_file",
+                report_factory="build_daily_report_from_csv_file",
+                capabilities=(CAPABILITY_DAILY_REPORT,),
+                required_config_fields=("shop_id",),
+            ),
+            ConnectorSpec(
+                connector_type="sample_payload",
+                display_name="Sample payload",
+                adapter_module="app.brain.adapters.sample",
+                report_factory="build_daily_report_from_payload",
+                capabilities=("manual_payload",),
+            ),
+        )
+    )
+    monkeypatch.setattr("app.brain.runner.default_connector_registry", lambda: registry)
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491149724933",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="manual",
+                connector_type="sample_payload",
+                label="Manual sample",
+                params={},
+            ),
+            ConnectorConfig(
+                connector_id="shopify-main",
+                connector_type="shopify",
+                label="Shopify main",
+                params={"shop_id": "ar-shop"},
+            ),
+            ConnectorConfig(
+                connector_id="sheet",
+                connector_type="google_sheets",
+                label="Sheet Artemea",
+                params={"spreadsheet_id": "abc123", "range_name": "Daily!A1:G1000"},
+            ),
+            ConnectorConfig(
+                connector_id="shopify-disabled",
+                connector_type="shopify",
+                label="Shopify disabled",
+                params={"shop_id": "disabled"},
+                enabled=False,
+            ),
+        ],
+    )
+
+    assert _enabled_daily_connector_types(business) == ["shopify", "google_sheets"]
+
+
 def test_run_due_daily_reports_dispatches_due_google_sheet_report():
     from app.brain.runner import run_due_daily_reports
 
@@ -116,9 +184,93 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.config_digest == results[0].runtime_metadata["config_digest"]
     assert record.summary_metadata["schedule_id"] == "artemea-daily-report"
     assert record.summary_metadata["report_type"] == "daily"
+    assert record.summary_metadata["connector_refs"] == [
+        {
+            "connector_id": "sheet",
+            "connector_type": "google_sheets",
+            "label": "Sheet Artemea",
+            "secret_refs": {},
+            "required_params": ["spreadsheet_id", "range_name"],
+            "secret_param_names": [],
+            "legacy_secret_param_names": [],
+            "capabilities": ["daily_report", "sheet_import"],
+            "emitted_metric_families": [
+                "commerce.orders",
+                "commerce.revenue",
+                "commerce.inventory",
+                "runtime.freshness",
+                "runtime.data_quality",
+            ],
+            "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+            "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+            "health_policy": {
+                "readiness_check": "metadata_only",
+                "supports_health_check": False,
+                "degraded_state": "degraded",
+                "allowed_states": [
+                    "ok",
+                    "degraded",
+                    "stale",
+                    "unauthorized",
+                    "rate_limited",
+                    "failed",
+                ],
+            },
+            "required_scopes": ["spreadsheets.readonly"],
+            "rate_limit_policy": {
+                "default_timeout_seconds": 30,
+                "requests_per_minute": None,
+                "retry_policy": "adapter_default",
+            },
+        }
+    ]
+    assert "abc123" not in json.dumps(record.summary_metadata)
     assert record.connector_outcomes[0].connector_id == "sheet"
     assert record.connector_outcomes[0].connector_type == "google_sheets"
     assert record.connector_outcomes[0].status == "succeeded"
+    assert record.connector_outcomes[0].metadata == {
+        "label": "Sheet Artemea",
+        "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "capabilities": ["daily_report", "sheet_import"],
+        "emitted_metric_families": [
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ],
+        "required_scopes": ["spreadsheets.readonly"],
+        "health_policy": {
+            "readiness_check": "metadata_only",
+            "supports_health_check": False,
+            "degraded_state": "degraded",
+            "allowed_states": [
+                "ok",
+                "degraded",
+                "stale",
+                "unauthorized",
+                "rate_limited",
+                "failed",
+            ],
+        },
+        "rate_limit_policy": {
+            "default_timeout_seconds": 30,
+            "requests_per_minute": None,
+            "retry_policy": "adapter_default",
+        },
+        "metric_certification": {
+            "status": "warning",
+            "issue_count": 1,
+            "issues": [
+                {
+                    "code": "undeclared_family",
+                    "key": "unanswered_conversations",
+                    "index": 4,
+                }
+            ],
+        },
+    }
+    assert "abc123" not in json.dumps(record.connector_outcomes[0].metadata)
     assert record.dispatch_outcomes[0].status == "sent"
     assert record.dispatch_outcomes[0].message_id == "wamid.ledger"
     assert record.artifacts[0].artifact_type == "daily_report"
@@ -169,6 +321,38 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
     assert failed_connector.finished_at is not None
     assert failed_connector.error_summary is not None
     assert "raw_failure_secret" not in failed_connector.error_summary
+    assert failed_connector.metadata == {
+        "failure_stage": "pre_dispatch",
+        "label": "Sheet Artemea",
+        "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "capabilities": ["daily_report", "sheet_import"],
+        "emitted_metric_families": [
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ],
+        "required_scopes": ["spreadsheets.readonly"],
+        "health_policy": {
+            "readiness_check": "metadata_only",
+            "supports_health_check": False,
+            "degraded_state": "degraded",
+            "allowed_states": [
+                "ok",
+                "degraded",
+                "stale",
+                "unauthorized",
+                "rate_limited",
+                "failed",
+            ],
+        },
+        "rate_limit_policy": {
+            "default_timeout_seconds": 30,
+            "requests_per_minute": None,
+            "retry_policy": "adapter_default",
+        },
+    }
     assert run.artifacts == []
     assert run.dispatch_outcomes == []
     assert run.summary_metadata["schedule_id"] == "artemea-daily-report"

@@ -47,6 +47,34 @@ def register_case_activity_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/acknowledgment-latency")
+    def internal_brain_cases_acknowledgment_latency(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_acknowledgment_latency_histogram(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/cases/resolution-latency")
+    def internal_brain_cases_resolution_latency(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_resolution_latency_histogram(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/handling-latency")
     def internal_brain_cases_handling_latency(business_id: str):
         return _with_internal_stores(
@@ -124,6 +152,20 @@ def register_case_activity_routes(app):
             lambda case_store, run_ledger: _internal_success(
                 business_id,
                 summarize_case_workflow_throughput_by_case_type(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/workflow/throughput/by-source-connector")
+    def internal_brain_workflow_throughput_by_source_connector(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_workflow_throughput_by_source_connector(
                     case_store,
                     business_id=business_id,
                 ),

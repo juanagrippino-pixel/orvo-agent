@@ -129,7 +129,13 @@ def supported_runtime_connector_types() -> list[str]:
 
 
 def runtime_run_metadata(runtime: CompiledBusinessRuntime) -> dict[str, Any]:
-    """Return run-ledger-compatible metadata for a compiled runtime."""
+    """Return run-ledger-compatible metadata for a compiled runtime.
+
+    Connector refs intentionally expose registry/executor contract metadata and
+    secret reference labels, but not raw public params or legacy secret values.
+    Runtime metadata may be persisted in ledgers and worker summaries, so this
+    function stays on the compiled artifact side of the secret boundary.
+    """
 
     return {
         "runtime_id": runtime.runtime_id,
@@ -138,7 +144,29 @@ def runtime_run_metadata(runtime: CompiledBusinessRuntime) -> dict[str, Any]:
         "config_ref": runtime.runtime_id,
         "run_mode": runtime.run_mode,
         "connector_types": list(runtime.execution_plan.daily_connector_types),
+        "connector_refs": [_connector_run_metadata(connector) for connector in runtime.connectors],
         "report_types": list(runtime.execution_plan.report_types),
+    }
+
+
+def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, Any]:
+    """Return a safe registry-contract summary for run metadata."""
+
+    return {
+        "connector_id": connector.connector_id,
+        "connector_type": connector.connector_type,
+        "label": connector.label,
+        "secret_refs": dict(connector.secret_refs),
+        "required_params": list(connector.required_params),
+        "secret_param_names": list(connector.secret_param_names),
+        "legacy_secret_param_names": list(connector.legacy_secret_param_names),
+        "capabilities": list(connector.capabilities),
+        "emitted_metric_families": list(connector.emitted_metric_families),
+        "supported_runtime_modes": list(connector.supported_runtime_modes),
+        "executor_factory_path": connector.executor_factory_path,
+        "health_policy": dict(connector.health_policy),
+        "required_scopes": list(connector.required_scopes),
+        "rate_limit_policy": dict(connector.rate_limit_policy),
     }
 
 
@@ -267,37 +295,13 @@ def _compile_connectors(
                 emitted_metric_families=list(spec.emitted_metric_families),
                 supported_runtime_modes=supported_runtime_modes,
                 executor_factory_path=spec.factory_path,
-                health_policy=_health_policy_for(spec),
+                health_policy=spec.health_policy_metadata(),
                 required_scopes=list(spec.scopes.required),
-                rate_limit_policy=_rate_limit_policy_for(spec),
-                lifecycle=_lifecycle_metadata_for(spec),
+                rate_limit_policy=spec.rate_limit_policy_metadata(),
+                lifecycle=spec.lifecycle_metadata(),
             )
         )
     return compiled
-
-
-def _health_policy_for(spec: ConnectorSpec) -> dict[str, Any]:
-    return {
-        "readiness_check": spec.health.readiness_check,
-        "supports_health_check": spec.health.supports_health_check,
-        "degraded_state": spec.health.degraded_state,
-    }
-
-
-def _rate_limit_policy_for(spec: ConnectorSpec) -> dict[str, Any]:
-    return {
-        "default_timeout_seconds": spec.rate_limit.default_timeout_seconds,
-        "requests_per_minute": spec.rate_limit.requests_per_minute,
-        "retry_policy": spec.rate_limit.retry_policy,
-    }
-
-
-def _lifecycle_metadata_for(spec: ConnectorSpec) -> dict[str, str]:
-    return {
-        "status": spec.lifecycle.status,
-        "owner": spec.lifecycle.owner,
-        "version": spec.lifecycle.version,
-    }
 
 
 def _compile_schedules(

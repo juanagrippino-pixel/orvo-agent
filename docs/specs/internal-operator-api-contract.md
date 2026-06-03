@@ -86,11 +86,14 @@ exposing unredacted assignee values.
 
 ```http
 GET /internal/brain/businesses/{business_id}/operator-audit-events
+GET /internal/brain/businesses/{business_id}/operator-audit-events?limit=50&retention_days=90
 ```
 
 Admin-only projection over durable operator audit events. Returns redacted events
 scoped to the route `business_id`; viewer/operator roles must receive a safe
-`403` envelope.
+`403` envelope. Exports default to a 90-day retention window and reject
+`retention_days` values above the configured maximum instead of allowing
+unbounded historical export.
 
 ## Response envelope
 
@@ -127,6 +130,7 @@ Before exposing beyond local/dev:
 
 - authenticate operator identity;
 - scope access to business/tenant;
+- enforce explicit `X-Orvo-Businesses` operator grants when present: comma-separated business IDs grant only those businesses, `*` grants all businesses, and an empty/present header fails closed while legacy callers without the header remain token-scoped during migration;
 - log mutating actions with actor ref;
 - rate-limit force-run endpoints;
 - require approval for external side effects;
@@ -138,6 +142,7 @@ Before exposing beyond local/dev:
 - readiness endpoint redacts secret refs;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
+- internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
 - case action rejects unknown action keys;
 - case action catalog is authenticated, tenant-scoped, redacted, and marks disabled catalog actions as not executable;
 - responses include `redaction_applied=true`.

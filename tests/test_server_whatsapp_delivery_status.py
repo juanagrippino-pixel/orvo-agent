@@ -65,6 +65,57 @@ def _read_status_rows(db_path):
 # ---------------------------------------------------------------------------
 
 
+def test_webhook_get_verification_accepts_valid_meta_challenge(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr("server.VERIFY_TOKEN", "verify-me")
+
+    response = client.get(
+        "/webhook",
+        query_string={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "verify-me",
+            "hub.challenge": "challenge-123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "challenge-123"
+
+
+def test_webhook_get_verification_rejects_invalid_meta_token(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr("server.VERIFY_TOKEN", "verify-me")
+
+    response = client.get(
+        "/webhook",
+        query_string={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "wrong-token",
+            "hub.challenge": "challenge-123",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.get_data(as_text=True) == "Forbidden"
+
+
+def test_webhook_get_verification_rejects_when_verify_token_unconfigured(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr("server.VERIFY_TOKEN", "")
+
+    response = client.get(
+        "/webhook",
+        query_string={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "",
+            "hub.challenge": "challenge-123",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.get_data(as_text=True) == "Forbidden"
+
+
 def test_webhook_persists_status_only_payload(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     response = client.post("/webhook", json=_status_payload())
