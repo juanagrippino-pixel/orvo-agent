@@ -65,6 +65,10 @@ _CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]
     "resolved": set(),
     "dismissed": set(),
 }
+_SYSTEM_REOPEN_TRANSITIONS: dict[OperationalCaseStatus, OperationalCaseStatus] = {
+    "resolved": "open",
+    "dismissed": "open",
+}
 
 
 class OperationalCaseStatusError(ValueError):
@@ -81,6 +85,18 @@ def operational_case_status_transitions() -> dict[OperationalCaseStatus, frozens
     """Return a copy of the current deterministic case lifecycle transition table."""
 
     return {status: frozenset(targets) for status, targets in _CASE_STATUS_TRANSITIONS.items()}
+
+
+def operational_case_system_reopen_transitions() -> dict[OperationalCaseStatus, OperationalCaseStatus]:
+    """Return deterministic recurrence-driven reopen transitions.
+
+    These transitions are performed only by detection upserts when the same
+    dedupe key recurs after a terminal operator decision. They are intentionally
+    separate from operator status transitions so workflow projections can expose
+    the full lifecycle without allowing manual reopen actions.
+    """
+
+    return dict(_SYSTEM_REOPEN_TRANSITIONS)
 
 
 def _now_utc() -> datetime:
