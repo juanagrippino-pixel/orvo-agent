@@ -856,6 +856,9 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert queue["side_effects_executed"] == 0
     assert queue["total"] == 2
     assert [action["case_id"] for action in queue["actions"]] == ["case-earlier", "case-later"]
+    assert [action["mode"] for action in queue["actions"]] == ["approval_required", "approval_required"]
+    assert [action["side_effect"] for action in queue["actions"]] == ["external", "external"]
+    assert [action["requires_approval"] for action in queue["actions"]] == [True, True]
     assert [action["execution_state"] for action in queue["actions"]] == ["pending_execution", "pending_execution"]
     assert [action["approval_state"] for action in queue["actions"]] == ["approved", "approved"]
     assert queue["actions"][0]["params"]["Authorization"] == "[REDACTED]"
