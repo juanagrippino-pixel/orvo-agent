@@ -70,11 +70,13 @@ def health():
 register_internal_brain_routes(app)
 register_brain_report_routes(app)
 
+
+@app.get("/webhook")
 def verify():
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
-    if mode == "subscribe" and token == VERIFY_TOKEN:
+    if VERIFY_TOKEN and mode == "subscribe" and token == VERIFY_TOKEN and challenge is not None:
         return challenge, 200
     return "Forbidden", 403
 
