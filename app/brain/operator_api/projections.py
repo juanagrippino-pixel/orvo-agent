@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.brain.action_catalog import ACTION_CATALOG
+from app.brain.run_ledger import redact_metadata
 from app.brain.work_items import case_work_item_projection
 
 from .common import *  # noqa: F401,F403
@@ -144,8 +145,21 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
         }
     )
 
+def _redact_run_projection(value: Any) -> Any:
+    """Redact run-ledger data again at the operator API boundary.
+
+    Run ledger stores normally validate and redact records on write/read, but
+    internal API projections should also be defensive for legacy rows or custom
+    ledger implementations. In particular, compiled-runtime ``secret_refs`` URI
+    values are useful inside runtime metadata but must not cross operator API
+    boundaries.
+    """
+
+    return redact_metadata(value)
+
+
 def run_history_item(run: RunRecord) -> dict[str, Any]:
-    return redact_secrets(
+    return _redact_run_projection(
         {
             "run_id": run.run_id,
             "business_id": run.business_id,
@@ -162,7 +176,8 @@ def run_history_item(run: RunRecord) -> dict[str, Any]:
         }
     )
 
+
 def run_detail(run: RunRecord) -> dict[str, Any]:
-    return redact_secrets(run.model_dump(mode="json"))
+    return _redact_run_projection(run.model_dump(mode="json"))
 
 __all__ = [name for name in globals() if not name.startswith("__")]

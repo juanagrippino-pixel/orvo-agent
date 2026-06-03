@@ -32,6 +32,18 @@ def test_project_projection_derives_stable_project_key_from_business_scope():
     }
 
 
+def test_project_key_for_business_avoids_truncation_collisions():
+    first = project_key_for_business("north buenos aires demo store warehouse alpha")
+    second = project_key_for_business("north buenos aires demo store warehouse beta")
+
+    assert first != second
+    assert len(first) <= 32
+    assert len(second) <= 32
+    assert first.startswith("NORTH_BUENOS_AIRES_DEMO_")
+    assert second.startswith("NORTH_BUENOS_AIRES_DEMO_")
+    assert project_key_for_business("north buenos aires demo store warehouse alpha") == first
+
+
 def test_case_work_item_projection_wraps_operational_case_without_changing_source_of_truth(tmp_path):
     db_path = tmp_path / "work-items.sqlite3"
     case = _seed_case(db_path, _case_detection(run_id="run-work-item", priority=87))
