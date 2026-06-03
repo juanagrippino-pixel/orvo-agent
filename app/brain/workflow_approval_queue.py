@@ -34,6 +34,11 @@ def _is_pending_approval(
 ) -> bool:
     return (
         record is not None
+        and request.ledger_id == record.ledger_id
+        and request.business_id == record.business_id
+        and request.case_id == record.case_id
+        and request.action_key == record.action_key
+        and request.approval_request_id == record.approval_request_id
         and request.status == "pending"
         and record.action_key in ACTION_CATALOG
         and record.approval_state == "pending"

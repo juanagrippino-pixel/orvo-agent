@@ -26,7 +26,9 @@ from app.brain.workflow_automation import (
 from app.brain.workflow_action_ledger import (
     InMemoryWorkflowActionLedgerStore,
     SQLiteWorkflowActionLedgerStore,
+    WorkflowActionLedgerRecord,
     WorkflowActionLedgerError,
+    WorkflowApprovalRequest,
 )
 from app.brain.workflow_approval_queue import list_workflow_approval_queue
 from app.brain.workflow_execution_queue import list_workflow_execution_queue
@@ -733,6 +735,50 @@ def test_workflow_approval_queue_projects_only_pending_requests_without_side_eff
     assert "case-other" not in str(queue)
     assert "case-no-approval" not in str(queue)
     assert "raw_approval_queue" not in str(queue)
+
+
+def test_workflow_approval_queue_rejects_mismatched_ledger_backed_request_metadata():
+    record = WorkflowActionLedgerRecord(
+        ledger_id="ledger/artemea/mismatch",
+        business_id="artemea",
+        case_id="case-canonical",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/mismatch",
+        approval_state="pending",
+        execution_state="blocked_approval_required",
+        params={"target": "supplier-a", "reason": "Restock"},
+        rule_id="approval-queue",
+        approval_request_id="approval/artemea/mismatch",
+        created_at=utc(20),
+        updated_at=utc(20),
+    )
+    mismatched_request = WorkflowApprovalRequest(
+        approval_request_id="approval/artemea/mismatch",
+        ledger_id=record.ledger_id,
+        business_id="artemea",
+        case_id="case-forged",
+        action_key="pause_promotion",
+        requester_ref="operator",
+        status="pending",
+        requested_at=utc(20),
+    )
+
+    class MismatchedLedger(InMemoryWorkflowActionLedgerStore):
+        def list_actions(self, *, business_id: str):
+            return [record]
+
+        def list_approval_requests(self, *, business_id: str):
+            return [mismatched_request]
+
+    queue = list_workflow_approval_queue(MismatchedLedger(), business_id="artemea")
+
+    assert queue["total"] == 0
+    assert queue["returned"] == 0
+    assert queue["approval_requests"] == []
+    assert "case-forged" not in str(queue)
+    assert "pause_promotion" not in str(queue)
 
 
 @pytest.mark.parametrize(
