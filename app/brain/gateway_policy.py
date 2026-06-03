@@ -22,6 +22,7 @@ from app.brain.security.redaction import is_secret_key, redact_text
 
 GatewayMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 GatewaySurface = Literal["operator_api", "runtime"]
+GatewayEnforcementState = Literal["contract_only", "enforced"]
 
 GATEWAY_POLICY_SCHEMA_VERSION = "2026-05-31.gateway-policy.v1"
 
@@ -56,6 +57,7 @@ class GatewayRoutePolicy(BaseModel):
     rate_limit: GatewayRateLimitPolicy = Field(default_factory=lambda: GatewayRateLimitPolicy(bucket="default"))
     idempotency_required: bool = False
     audit_event_type: str
+    enforcement_state: GatewayEnforcementState = "contract_only"
 
     def public_manifest(self) -> dict[str, Any]:
         return {
@@ -67,6 +69,7 @@ class GatewayRoutePolicy(BaseModel):
             "rate_limit": self.rate_limit.public_manifest(),
             "idempotency_required": self.idempotency_required,
             "audit_event_type": self.audit_event_type,
+            "enforcement_state": self.enforcement_state,
         }
 
 
@@ -250,6 +253,7 @@ def default_gateway_policy_registry() -> GatewayPolicyRegistry:
                 rate_limit=GatewayRateLimitPolicy(bucket="operator_api_mutation", requests_per_minute=60, burst=10),
                 idempotency_required=True,
                 audit_event_type="operator_case_action_requested",
+                enforcement_state="enforced",
             ),
             GatewayRoutePolicy(
                 route_key="runtime.force_run.mutate",
