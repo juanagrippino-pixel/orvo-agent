@@ -28,6 +28,7 @@ from app.brain.workflow_action_ledger import (
     SQLiteWorkflowActionLedgerStore,
     WorkflowActionLedgerError,
 )
+from app.brain.workflow_approval_queue import list_workflow_approval_queue
 from app.brain.workflow_execution_queue import list_workflow_execution_queue
 
 
@@ -628,6 +629,119 @@ def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_d
         lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
     ],
 )
+def test_workflow_approval_queue_projects_only_pending_requests_without_side_effects(tmp_path, store_factory):
+    ledger = store_factory(tmp_path)
+    later = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-later",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/approval-queue/case-later/request_external_action/later",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator token=raw_approval_queue_actor_secret",
+        params={
+            "target": "supplier-b",
+            "reason": "Restock later Authorization: Basic raw_approval_queue_later_secret",
+        },
+        rule_id="approval-queue",
+        now=utc(19),
+    )
+    earlier = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-earlier",
+        action_key="pause_promotion",
+        idempotency_key="workflow/artemea/approval-queue/case-earlier/pause_promotion/earlier",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator",
+        params={
+            "target": "campaign-a",
+            "reason": "Pause promotion early token=raw_approval_queue_earlier_secret",
+        },
+        rule_id="approval-queue",
+        now=utc(19, 5),
+    )
+    approved = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approved",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/approval-queue/case-approved/request_external_action/approved",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-c", "reason": "Already approved"},
+        rule_id="approval-queue",
+        now=utc(19, 10),
+    )
+    ledger.record_planned_action(
+        business_id="other-business",
+        case_id="case-other",
+        action_key="request_external_action",
+        idempotency_key="workflow/other-business/approval-queue/case-other/request_external_action/other",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-x", "reason": "Other business"},
+        rule_id="approval-queue",
+        now=utc(19, 15),
+    )
+    no_approval = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-no-approval",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/approval-queue/case-no-approval/acknowledge_case/no-approval",
+        execution_state="dry_run",
+        approval_required=False,
+        params={"reason": "No approval needed"},
+        rule_id="approval-queue",
+        now=utc(19, 20),
+    )
+
+    assert later.approval_request is not None
+    assert earlier.approval_request is not None
+    assert approved.approval_request is not None
+    assert no_approval.approval_request is None
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approved.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Approved already",
+        now=utc(19, 30),
+    )
+
+    queue = list_workflow_approval_queue(ledger, business_id="artemea", limit=1)
+
+    assert queue["business_id"] == "artemea"
+    assert queue["approval_execution_enabled"] is False
+    assert queue["side_effects_executed"] == 0
+    assert queue["total"] == 2
+    assert queue["returned"] == 1
+    assert [request["case_id"] for request in queue["approval_requests"]] == ["case-later"]
+    [request] = queue["approval_requests"]
+    assert request["status"] == "pending"
+    assert request["approval_state"] == "pending"
+    assert request["execution_state"] == "blocked_approval_required"
+    assert request["approval_request_id"] == later.approval_request.approval_request_id
+    assert request["ledger_id"] == later.record.ledger_id
+    assert request["action_key"] == "request_external_action"
+    assert request["params"]["reason"] == "Restock later Authorization: [REDACTED]"
+    assert request["side_effects_executed"] == 0
+    assert request["decision_state"] == "pending_human_approval"
+    assert "case-earlier" not in str(queue["approval_requests"])
+    assert "case-approved" not in str(queue)
+    assert "case-other" not in str(queue)
+    assert "case-no-approval" not in str(queue)
+    assert "raw_approval_queue" not in str(queue)
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
 def test_workflow_execution_queue_projects_only_approved_pending_actions_without_side_effects(tmp_path, store_factory):
     ledger = store_factory(tmp_path)
     later = ledger.record_planned_action(
@@ -742,6 +856,9 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert queue["side_effects_executed"] == 0
     assert queue["total"] == 2
     assert [action["case_id"] for action in queue["actions"]] == ["case-earlier", "case-later"]
+    assert [action["mode"] for action in queue["actions"]] == ["approval_required", "approval_required"]
+    assert [action["side_effect"] for action in queue["actions"]] == ["external", "external"]
+    assert [action["requires_approval"] for action in queue["actions"]] == [True, True]
     assert [action["execution_state"] for action in queue["actions"]] == ["pending_execution", "pending_execution"]
     assert [action["approval_state"] for action in queue["actions"]] == ["approved", "approved"]
     assert queue["actions"][0]["params"]["Authorization"] == "[REDACTED]"
