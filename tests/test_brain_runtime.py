@@ -133,6 +133,11 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "requests_per_minute": None,
                 "retry_policy": "adapter_default",
             },
+            "lifecycle": {
+                "status": "active",
+                "owner": "orvo-brain",
+                "version": "phase-a",
+            },
         },
         {
             "connector_id": "tn",
@@ -172,6 +177,11 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "default_timeout_seconds": 30,
                 "requests_per_minute": 120,
                 "retry_policy": "adapter_default",
+            },
+            "lifecycle": {
+                "status": "active",
+                "owner": "orvo-brain",
+                "version": "phase-a",
             },
         },
     ]
