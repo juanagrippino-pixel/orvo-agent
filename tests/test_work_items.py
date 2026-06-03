@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 
 from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.storage import init_schema
@@ -61,8 +62,43 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["assignee_ref"] is None
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
+    assert projection["comment_count"] == 0
+    assert projection["last_commented_at"] is None
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
+
+
+def test_case_work_item_projection_summarizes_comments_without_copying_bodies(tmp_path):
+    db_path = tmp_path / "work-item-comments.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-comments"))
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    first_comment_at = datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc)
+    second_comment_at = datetime(2026, 6, 3, 12, 5, tzinfo=timezone.utc)
+
+    store.add_comment(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Initial follow-up note",
+        commented_at=first_comment_at,
+    )
+    commented = store.add_comment(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Private owner context should stay in timeline, not queue summary",
+        commented_at=second_comment_at,
+    )
+    conn.close()
+
+    projection = case_work_item_projection(commented)
+
+    assert projection["comment_count"] == 2
+    assert projection["last_commented_at"] == "2026-06-03T12:05:00Z"
+    assert "Initial follow-up note" not in projection.values()
+    assert "Private owner context" not in str(projection)
 
 
 def test_issue_type_definitions_expose_owner_visibility_and_metric_gates():
