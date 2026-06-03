@@ -52,6 +52,9 @@ RUNTIME_MODE_SCHEDULED = "scheduled"
 RUNTIME_MODE_OPERATOR_TRIGGERED = "operator_triggered"
 RUNTIME_MODE_HEALTH_CHECK = "health_check"
 
+EVENT_FAMILY_CONNECTOR_EXECUTION = "connector.execution"
+EVENT_FAMILY_CONNECTOR_HEALTH = "connector.health"
+
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 
@@ -197,6 +200,10 @@ class ConnectorSpec:
     report_factory: str
     capabilities: tuple[str, ...]
     emitted_metric_families: tuple[str, ...] = ()
+    emitted_event_families: tuple[str, ...] = (
+        EVENT_FAMILY_CONNECTOR_EXECUTION,
+        EVENT_FAMILY_CONNECTOR_HEALTH,
+    )
     required_config_fields: tuple[str, ...] = ()
     optional_config_fields: tuple[str, ...] = ()
     required_secret_refs: tuple[SecretRequirement, ...] = ()
