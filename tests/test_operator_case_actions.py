@@ -18,6 +18,7 @@ AUTH = {
     "Authorization": "Bearer test-internal-token",
     "X-Orvo-Operator": "operator@example.com",
     "X-Request-ID": "req-comment-test",
+    "X-Idempotency-Key": "case-action:artemea:comment-test",
 }
 
 

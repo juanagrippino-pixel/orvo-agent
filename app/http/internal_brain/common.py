@@ -4,16 +4,24 @@ import hmac
 import os
 import sqlite3
 from contextlib import closing
+from typing import cast
 from uuid import uuid4
 
 from flask import jsonify, request
 
+from app.brain.gateway_policy import (
+    GatewayMethod,
+    GatewayPrincipal,
+    GatewayRequestContext,
+    default_gateway_policy_registry,
+)
 from app.brain.operator_api import OperatorAPIError
 from app.brain.operator_audit import SQLiteOperatorAuditStore
 
 from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
+    InternalOperatorPrincipal,
     build_internal_operator_principal,
     permissions_for_role,
     require_internal_business_scope,
@@ -171,6 +179,42 @@ def _internal_principal_or_error(business_id: str, permission: str, *, audit_den
 def _require_internal_header_permission(business_id: str, permission: str, *, audit_denial: bool = False):
     _principal, permission_error = _internal_principal_or_error(business_id, permission, audit_denial=audit_denial)
     return permission_error
+
+
+def _internal_gateway_principal(principal: InternalOperatorPrincipal) -> GatewayPrincipal:
+    business_ids = principal.allowed_businesses if principal.allowed_businesses is not None else ("*",)
+    return GatewayPrincipal(
+        actor_id=principal.actor_ref,
+        business_ids=business_ids,
+        permissions=tuple(permissions_for_role(principal.role)),
+    )
+
+
+def _idempotency_key_from_headers() -> str | None:
+    return request.headers.get("X-Idempotency-Key") or request.headers.get("Idempotency-Key")
+
+
+def _gateway_policy_or_error(*, route_key: str, business_id: str, principal: InternalOperatorPrincipal):
+    decision = default_gateway_policy_registry().evaluate(
+        GatewayRequestContext(
+            route_key=route_key,
+            method=cast(GatewayMethod, request.method),
+            business_id=business_id,
+            principal=_internal_gateway_principal(principal),
+            idempotency_key=_idempotency_key_from_headers(),
+            request_id=_internal_request_id(),
+            trace_id=request.headers.get("X-Trace-ID"),
+        )
+    )
+    if decision.allowed:
+        return decision, None
+    return decision, _internal_error(
+        business_id,
+        decision.code,
+        decision.reason,
+        status_code=decision.status_code,
+    )
+
 
 def _with_internal_stores(business_id: str, handler):
     auth_error = _authorize_internal_operator(business_id)

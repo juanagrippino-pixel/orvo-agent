@@ -54,7 +54,7 @@ The first registry covers high-value internal boundaries without broad routing r
 2. `operator_api.case_action.mutate` — case lifecycle/comment/assignment actions; requires `case:action`; idempotency key required.
 3. `runtime.force_run.mutate` — operator-triggered runtime execution; requires `runtime:execute`; idempotency key required.
 
-These are conventions and contract tests first. Existing Flask handlers can be wired to them in a later slice without changing the public response envelope.
+These policies started as conventions and contract tests. The current Python runtime now enforces `operator_api.case_action.mutate` for the internal case-action route before mutation, including the business-scoped idempotency-key requirement and denied-decision audit projection. Read-route and force-run middleware wiring remain later slices and must preserve the public response envelope.
 
 ## Decision codes
 
@@ -75,6 +75,7 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 - the default registry covers the current internal boundaries in stable order;
 - public manifests are deterministic and secret-safe;
 - policy evaluation rejects missing auth, cross-business access, missing permissions, missing idempotency keys, and invalid/cross-business/secret-shaped idempotency keys;
+- the internal case-action HTTP route enforces `operator_api.case_action.mutate` before mutation and records redacted denied gateway decisions in operator audit;
 - allowed decisions emit stable audit metadata, redacted request/trace provenance identifiers, and redacted rate-limit keys;
 - actor/request identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;
 - idempotency key values never appear in decision envelopes or audit events;
@@ -83,6 +84,6 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 
 ## Next extensions
 
-- Wire `_with_internal_stores`/internal operator routes through `GatewayPolicyRegistry.evaluate` while preserving current response envelopes.
+- Wire remaining `_with_internal_stores` read boundaries and runtime force-run handlers through `GatewayPolicyRegistry.evaluate` while preserving current response envelopes.
 - Persist denied/allowed gateway decisions into the audit/run ledger once the Trust/Admin branch supplies a canonical audit store.
 - Add per-route certification fixtures for connector provisioning and broker operations before adding new external infrastructure.

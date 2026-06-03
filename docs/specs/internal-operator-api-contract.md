@@ -67,7 +67,7 @@ GET /internal/brain/businesses/{business_id}/cases/{case_id}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
 
-Actions must use registered action keys and append timeline events.
+Actions must use registered action keys, carry a business-scoped `X-Idempotency-Key` (or `Idempotency-Key`) accepted by `operator_api.case_action.mutate` in `GatewayPolicyRegistry`, and append timeline events only after the gateway policy allows the request. Missing or invalid idempotency keys return the shared safe error envelope before case mutation.
 
 ### Operator audit events
 

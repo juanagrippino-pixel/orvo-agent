@@ -9,10 +9,9 @@ from app.brain.operator_auth import CASE_ACTION_PERMISSION
 
 from .common import (
     _append_operator_audit_event,
+    _gateway_policy_or_error,
     _internal_success,
-    _internal_error,
     _internal_principal_or_error,
-    _require_internal_header_permission,
     _with_internal_stores,
 )
 
@@ -95,7 +94,7 @@ def register_dashboard_view_routes(app):
         actor_ref = request.headers.get("X-Orvo-Operator", "")
 
         def _handle(case_store, run_ledger):
-            permission_error = _require_internal_header_permission(business_id, CASE_ACTION_PERMISSION)
+            principal, permission_error = _internal_principal_or_error(business_id, CASE_ACTION_PERMISSION)
             if permission_error is not None:
                 _append_operator_audit_event(
                     business_id=business_id,
@@ -111,6 +110,27 @@ def register_dashboard_view_routes(app):
                     },
                 )
                 return permission_error
+            gateway_decision, gateway_error = _gateway_policy_or_error(
+                route_key="operator_api.case_action.mutate",
+                business_id=business_id,
+                principal=principal,
+            )
+            if gateway_error is not None:
+                _append_operator_audit_event(
+                    business_id=business_id,
+                    actor_ref=actor_ref,
+                    event_type="operator.case_action.denied",
+                    target_type="operational_case",
+                    target_id=case_id,
+                    data={
+                        "action_key": str(payload.get("action_key", "")),
+                        "permission": CASE_ACTION_PERMISSION,
+                        "status_code": gateway_decision.status_code,
+                        "gateway_policy": gateway_decision.audit_event,
+                        "payload": payload,
+                    },
+                )
+                return gateway_error
             try:
                 data = apply_case_action(
                     case_store,

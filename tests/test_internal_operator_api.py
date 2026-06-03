@@ -18,7 +18,12 @@ from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, RunStatus, SQL
 from app.brain.storage import init_schema
 
 
-AUTH = {"Authorization": "Bearer test-internal-token", "X-Orvo-Operator": "operator:juan", "X-Request-ID": "req-test"}
+AUTH = {
+    "Authorization": "Bearer test-internal-token",
+    "X-Orvo-Operator": "operator:juan",
+    "X-Request-ID": "req-test",
+    "X-Idempotency-Key": "case-action:artemea:test",
+}
 VIEWER_AUTH = {**AUTH, "X-Orvo-Role": "viewer", "X-Orvo-Operator": "viewer:ana"}
 
 
@@ -230,6 +235,48 @@ def test_internal_case_action_cannot_cross_business_scope_or_mutate_foreign_case
     assert reloaded.status == "open"
     assert len(reloaded.timeline) == len(other_case.timeline)
     assert all(event.actor_ref != "operator:juan" for event in reloaded.timeline)
+
+
+def test_internal_case_action_requires_gateway_idempotency_key_before_mutation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {key: value for key, value in AUTH.items() if key != "X-Idempotency-Key"}
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**headers, "X-Request-ID": "req-missing-idempotency"},
+        json={
+            "action_key": "acknowledge_case",
+            "metadata": {"access_token": "raw_idempotency_secret"},
+        },
+    )
+
+    assert response.status_code == 428
+    raw_body = response.get_data(as_text=True)
+    assert "raw_idempotency_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "missing_idempotency_key"
+    assert body["redaction_applied"] is True
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.case_action.denied"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-missing-idempotency"
+    assert event["data"]["gateway_policy"]["route_key"] == "operator_api.case_action.mutate"
+    assert event["data"]["gateway_policy"]["decision_code"] == "missing_idempotency_key"
+    assert event["data"]["gateway_policy"]["idempotency_key_present"] is False
+    assert "raw_idempotency_secret" not in json.dumps(event, sort_keys=True)
 
 
 def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, tmp_path):
