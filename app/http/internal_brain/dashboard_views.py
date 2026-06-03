@@ -83,6 +83,20 @@ def register_dashboard_view_routes(app):
             ),
         )
 
+    @app.get("/internal/brain/businesses/<business_id>/case-views/<view_id>/summary")
+    def internal_brain_case_view_summary(business_id: str, view_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_view(
+                    case_store,
+                    business_id=business_id,
+                    view_id=view_id,
+                ),
+            ),
+        )
+
 
     @app.get("/internal/brain/businesses/<business_id>/cases/facets")
     def internal_brain_case_facets(business_id: str):
