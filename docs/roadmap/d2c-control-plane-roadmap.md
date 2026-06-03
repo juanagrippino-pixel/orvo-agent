@@ -78,7 +78,7 @@ Current shipped checkpoint, grounded in `app/brain/operational_cases.py`, `app/b
 
 - `OperationalCase` is still the durable work item source of truth with tenant scope via `business_id`, deterministic case types, timeline/evidence snapshots, and hardcoded lifecycle transitions.
 - A read-only WorkItem projection layer now exposes project keys, work item IDs, issue types, workflow/status definitions, and canonical status categories (`to_do`, `in_progress`, `done`) without creating a parallel task store.
-- JQL-lite and built-in operator views now support WorkItem projection fields including `project`, `issue_type`, `status_category`, and `assignee_ref`; they remain route/business-scoped projections and do not translate user input to SQL or persist custom saved views.
+- JQL-lite and built-in operator views now support WorkItem projection fields including `project`, `issue_type`, `status_category`, `work_item_id`, and `assignee_ref`; they remain route/business-scoped projections and do not translate user input to SQL or persist custom saved views.
 - There is still no separate persisted `Project`/`WorkItem` table, tenant-custom workflow scheme, or writable saved-view layer; treat those as post-v1 platform work until a concrete operator workflow requires them.
 
 Delivered / keep green:
@@ -87,7 +87,7 @@ Delivered / keep green:
 - internal status-category mapping for existing statuses: `open -> to_do`, `acknowledged/in_progress -> in_progress`, `resolved/dismissed -> done`;
 - explicit issue-type/case-type registry wrapper for current D2C case families, without introducing tenant-custom workflows yet;
 - workflow definition registry that documents current allowed transitions before any executor/SLA layer consumes them;
-- JQL-lite additions for canonical fields (`project`, `status_category`, `assignee_ref`, and `issue_type`), with route-owned business scope.
+- JQL-lite additions for canonical fields (`project`, `status_category`, `work_item_id`, `assignee_ref`, and `issue_type`), with route-owned business scope.
 
 Next hardening deliverables:
 
