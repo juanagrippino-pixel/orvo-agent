@@ -24,6 +24,7 @@ from app.brain.operational_cases import (
     OperationalCaseType,
     operational_case_status_category,
     operational_case_status_transitions,
+    operational_case_system_reopen_transitions,
 )
 from app.brain.semantics import CASE_FAMILY_METRICS
 
@@ -124,6 +125,7 @@ def operational_case_status_definitions() -> list[dict[str, Any]]:
     """Expose current status metadata without enabling custom workflows."""
 
     transitions = operational_case_status_transitions()
+    system_reopen_transitions = operational_case_system_reopen_transitions()
     return [
         {
             "status": status,
@@ -131,6 +133,7 @@ def operational_case_status_definitions() -> list[dict[str, Any]]:
             "actionable": status in ACTIONABLE_OPERATIONAL_CASE_STATUSES,
             "terminal": status in TERMINAL_OPERATIONAL_CASE_STATUSES,
             "transitions": sorted(transitions[status]),
+            "system_reopen_transition": system_reopen_transitions.get(status),
         }
         for status in get_args(OperationalCaseStatus)
     ]
@@ -140,11 +143,22 @@ def operational_case_workflow_definition() -> dict[str, Any]:
     """Expose the current deterministic OperationalCase workflow definition."""
 
     transitions = operational_case_status_transitions()
+    operator_transitions = {status: sorted(targets) for status, targets in transitions.items()}
+    system_reopen_transitions = operational_case_system_reopen_transitions()
+    system_recurrence_transitions = {
+        status: [target_status]
+        for status, target_status in system_reopen_transitions.items()
+    }
     return {
         "workflow_id": _DEFAULT_WORKFLOW_ID,
         "workflow_scheme_id": _DEFAULT_WORKFLOW_SCHEME_ID,
         "statuses": operational_case_status_definitions(),
-        "transitions": {status: sorted(targets) for status, targets in transitions.items()},
+        "transitions": operator_transitions,
+        "system_reopen_transitions": system_reopen_transitions,
+        "transition_actor_boundaries": {
+            "operator": operator_transitions,
+            "system_recurrence": system_recurrence_transitions,
+        },
         "tenant_customizable": False,
     }
 
