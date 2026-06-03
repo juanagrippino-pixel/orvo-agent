@@ -334,3 +334,108 @@ def test_service_management_projection_exposes_deterministic_escalation_reasons(
             "source": "owner_status",
         }
     ]
+
+
+def test_service_management_projection_summarizes_next_sla_status_and_counts():
+    store = InMemoryOperationalCaseStore()
+    breached = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="summary-breached/business/monitored/inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-sla-breached",
+        ),
+        detected_at=NOW - timedelta(minutes=90),
+    )
+    paused = store.upsert_detection(
+        _detection(
+            case_type="data_stale",
+            dedupe_suffix="summary-paused/connector/tiendanube/freshness/daily",
+            severity="warning",
+            priority=80,
+            run_id="run-sla-paused",
+            metadata={"waiting_on": "external"},
+        ),
+        detected_at=NOW - timedelta(hours=10),
+    )
+    store.transition_case(
+        paused.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=6),
+    )
+    on_track = store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="summary-on-track/channel/all/revenue/daily",
+            severity="warning",
+            priority=70,
+            run_id="run-sla-on-track",
+        ),
+        detected_at=NOW - timedelta(hours=2),
+    )
+    resolved = store.upsert_detection(
+        _detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="summary-completed/channel/whatsapp/support/daily",
+            severity="info",
+            priority=50,
+            run_id="run-sla-completed",
+        ),
+        detected_at=NOW - timedelta(hours=3),
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=2, minutes=30),
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        reason="Owner confirmed the queue was cleared.",
+        transitioned_at=NOW - timedelta(hours=1),
+    )
+
+    result = list_service_management_cases(store, business_id="artemea", now=NOW, limit=10)
+    by_id = {item["case_id"]: item for item in result["service_cases"]}
+
+    assert by_id[breached.case_id]["sla_status"] == {
+        "code": "breached",
+        "label_es": "SLA vencido",
+        "active_policy_key": "first_response_critical_60m",
+        "due_at": "2026-05-24T11:30:00Z",
+        "remaining_seconds": 0,
+    }
+    assert by_id[paused.case_id]["sla_status"] == {
+        "code": "paused",
+        "label_es": "SLA pausado",
+        "active_policy_key": "resolution_warning_1440m",
+        "due_at": "2026-05-25T02:00:00Z",
+        "remaining_seconds": 72000,
+    }
+    assert by_id[on_track.case_id]["sla_status"] == {
+        "code": "on_track",
+        "label_es": "SLA en curso",
+        "active_policy_key": "first_response_warning_240m",
+        "due_at": "2026-05-24T14:00:00Z",
+        "remaining_seconds": 7200,
+    }
+    assert by_id[resolved.case_id]["sla_status"] == {
+        "code": "completed",
+        "label_es": "SLA completado",
+        "active_policy_key": None,
+        "due_at": None,
+        "remaining_seconds": None,
+    }
+    assert result["by_sla_status"] == {
+        "breached": 1,
+        "completed": 1,
+        "on_track": 1,
+        "paused": 1,
+    }

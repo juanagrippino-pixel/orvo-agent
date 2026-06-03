@@ -90,12 +90,15 @@ def test_internal_service_management_cases_endpoint_returns_scoped_enveloped_pro
     assert data["total"] == 1
     assert data["by_service_record_type"] == {"incident": 1}
     assert data["by_owner_status"] == {"waiting_external": 1}
+    assert data["by_sla_status"] == {"paused": 1}
     row = data["service_cases"][0]
     assert row["case_id"] == waiting.case_id
     assert row["service_record_type"]["code"] == "incident"
     assert row["owner_status"]["code"] == "waiting_external"
     assert row["owner_status"]["status_category"] == "in_progress"
     assert row["owner_status"]["source_status"] == "acknowledged"
+    assert row["sla_status"]["code"] == "paused"
+    assert row["sla_status"]["active_policy_key"] == "resolution_warning_1440m"
     assert row["needs_escalation"] is True
     assert {reason["code"] for reason in row["escalation_reasons"]} >= {"waiting_external"}
     assert {"code": "waiting_external", "label_es": "Bloqueado por un tercero", "source": "owner_status"} in row[
