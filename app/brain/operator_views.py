@@ -326,6 +326,52 @@ def export_builtin_case_view_rows(
     )
 
 
+def summarize_builtin_case_view(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    view_id: str,
+) -> dict[str, Any]:
+    """Return scoped facet counts for a read-only built-in case view.
+
+    This is a dashboard/analytics projection over canonical Operational Cases:
+    it reuses the registered built-in view JQL, applies route-owned business
+    scoping, returns aggregate counts only, and does not persist or mutate views.
+    """
+
+    view = get_builtin_case_view(view_id)
+    parsed = parse_case_jql(view["jql"])
+    cases = store.list_cases(business_id=business_id, limit=None)
+    matching = [case for case in cases if _matches(case, parsed.clauses)]
+    return redact_secrets(
+        {
+            "view": {key: view[key] for key in ("view_id", "label", "readonly")},
+            "jql": parsed.raw,
+            "normalized_jql": parsed.normalized,
+            "summary": {
+                "total": len(matching),
+                "status_counts": _sorted_counts(case.status for case in matching),
+                "status_category_counts": _sorted_counts(case_status_category(case) for case in matching),
+                "severity_counts": _sorted_counts(case.severity for case in matching),
+                "case_type_counts": _sorted_counts(case.case_type for case in matching),
+                "source_connector_counts": _sorted_counts(
+                    source for case in matching for source in _case_source_connectors(case)
+                ),
+                "degraded_total": sum(1 for case in matching if is_case_degraded(case)),
+                "unassigned_total": sum(1 for case in matching if case.assignee_ref is None),
+            },
+        }
+    )
+
+
+def _sorted_counts(values) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value)
+        counts[key] = counts.get(key, 0) + 1
+    return {key: counts[key] for key in sorted(counts)}
+
+
 def _case_view_export_row(case: dict[str, Any]) -> dict[str, Any]:
     raw_entity_scope = case.get("entity_scope")
     entity_scope: dict[str, Any] = raw_entity_scope if isinstance(raw_entity_scope, dict) else {}
