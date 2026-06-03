@@ -182,6 +182,14 @@ def test_status_and_workflow_definitions_expose_current_transition_table(tmp_pat
     assert "acknowledged" in workflow["transitions"]["open"]
     assert "resolved" in workflow["transitions"]["in_progress"]
     assert workflow["transitions"]["resolved"] == []
+    assert status_by_key["resolved"]["system_reopen_transition"] == "open"
+    assert status_by_key["dismissed"]["system_reopen_transition"] == "open"
+    assert status_by_key["open"]["system_reopen_transition"] is None
+    assert workflow["system_reopen_transitions"] == {"resolved": "open", "dismissed": "open"}
+    assert workflow["transition_actor_boundaries"] == {
+        "operator": workflow["transitions"],
+        "system_recurrence": {"resolved": ["open"], "dismissed": ["open"]},
+    }
 
 
 def test_query_field_registry_is_canonical_work_item_semantics():
