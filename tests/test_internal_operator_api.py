@@ -1915,6 +1915,73 @@ def test_internal_top_degraded_actionable_cases_endpoint_is_scoped_and_ordered(m
     assert all(case["source_connectors"] == ["tiendanube"] for case in data["cases"])
 
 
+def test_internal_recently_in_progress_cases_endpoint_is_scoped_and_ordered(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    reference = datetime.now(timezone.utc)
+    older = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            run_id="run-progress-older",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+        ),
+        detected_at=reference - timedelta(days=2),
+    )
+    store.transition_case(
+        older.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=reference - timedelta(days=1),
+    )
+    newer = store.upsert_detection(
+        _case_detection(
+            run_id="run-progress-newer",
+            dedupe_suffix="stockout_risk/product/sku-progress/commerce.inventory/daily",
+        ),
+        detected_at=reference - timedelta(hours=4),
+    )
+    store.transition_case(
+        newer.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=reference - timedelta(hours=1),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-progress",
+            dedupe_suffix="stockout_risk/product/sku-other-progress/commerce.inventory/daily",
+        ),
+        detected_at=reference - timedelta(hours=2),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/recently-in-progress?limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["in_progress_total"] == 2
+    assert data["limit"] == 1
+    assert data["count"] == 1
+    assert data["cases"][0]["case_id"] == newer.case_id
+    assert data["cases"][0]["status"] == "in_progress"
+    assert data["cases"][0]["time_to_in_progress_seconds"] >= 0
+
+
 def test_internal_dashboard_endpoint_rejects_non_integer_limit_with_safe_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())

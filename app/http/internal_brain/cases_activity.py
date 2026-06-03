@@ -295,6 +295,21 @@ def register_case_activity_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/recently-in-progress")
+    def internal_brain_cases_recently_in_progress(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_recently_in_progress_cases(
+                    case_store,
+                    business_id=business_id,
+                    limit=request.args.get("limit"),
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/recently-resolved")
     def internal_brain_cases_recently_resolved(business_id: str):
         return _with_internal_stores(
