@@ -67,6 +67,10 @@ def test_internal_service_management_cases_endpoint_returns_scoped_enveloped_pro
             transitioned_at=_utc(9),
         )
         store.upsert_detection(
+            _detection(case_type="stockout_risk", run_id="run-breached"),
+            detected_at=_utc(7),
+        )
+        store.upsert_detection(
             _detection(business_id="other-shop", run_id="run-other"),
             detected_at=_utc(7),
         )
@@ -75,7 +79,7 @@ def test_internal_service_management_cases_endpoint_returns_scoped_enveloped_pro
     response = client.get(
         "/internal/brain/businesses/artemea/service-management/cases",
         headers=AUTH,
-        query_string={"limit": "1"},
+        query_string={"limit": "1", "sla_status": "paused"},
     )
 
     assert response.status_code == 200
@@ -88,9 +92,11 @@ def test_internal_service_management_cases_endpoint_returns_scoped_enveloped_pro
     assert data["limit"] == 1
     assert data["count"] == 1
     assert data["total"] == 1
-    assert data["by_service_record_type"] == {"incident": 1}
-    assert data["by_owner_status"] == {"waiting_external": 1}
-    assert data["by_sla_status"] == {"paused": 1}
+    assert data["unfiltered_total"] == 2
+    assert data["filters"] == {"sla_status": "paused"}
+    assert data["by_service_record_type"] == {"incident": 2}
+    assert data["by_owner_status"] == {"new": 1, "waiting_external": 1}
+    assert data["by_sla_status"] == {"breached": 1, "paused": 1}
     row = data["service_cases"][0]
     assert row["case_id"] == waiting.case_id
     assert row["service_record_type"]["code"] == "incident"
@@ -122,3 +128,19 @@ def test_internal_service_management_cases_endpoint_rejects_invalid_limit(_isola
     body = response.get_json()
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_limit"
+
+
+def test_internal_service_management_cases_endpoint_rejects_invalid_sla_status(_isolate_db):
+    from server import app
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"sla_status": "waiting_external"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_sla_status"

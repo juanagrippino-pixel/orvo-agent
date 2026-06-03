@@ -67,6 +67,8 @@ _RESOLUTION_TARGET_SECONDS: dict[str, int] = {
     "info": 72 * 60 * 60,
 }
 
+ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES = frozenset({"breached", "on_track", "paused", "completed"})
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -84,6 +86,14 @@ def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_sla_status_filter(sla_status: str | None) -> str | None:
+    if sla_status in (None, ""):
+        return None
+    if sla_status not in ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES:
+        raise ValueError(f"unsupported sla_status: {sla_status}")
+    return str(sla_status)
 
 
 def _service_record_type(case: OperationalCase) -> dict[str, str]:
@@ -313,30 +323,39 @@ def list_service_management_cases(
     business_id: str,
     limit: int | None = 50,
     now: datetime | None = None,
+    sla_status: str | None = None,
 ) -> dict[str, Any]:
     """List service-management projections for cases in one business scope."""
 
     reference = _normalize_reference_time(now)
+    parsed_sla_status = _normalize_sla_status_filter(sla_status)
     all_cases = store.list_cases(business_id=business_id, limit=None)
-    limited_cases = all_cases[:limit] if limit is not None else all_cases
-    rows = [service_management_case_item(case, now=reference) for case in limited_cases]
+    all_rows = [service_management_case_item(case, now=reference) for case in all_cases]
+    filtered_rows = (
+        [row for row in all_rows if row["sla_status"]["code"] == parsed_sla_status]
+        if parsed_sla_status is not None
+        else all_rows
+    )
+    rows = filtered_rows[:limit] if limit is not None else filtered_rows
     by_record_type: dict[str, int] = {}
     by_owner_status: dict[str, int] = {}
     by_sla_status: dict[str, int] = {}
-    for case in all_cases:
-        record_type = _service_record_type(case)["code"]
-        status = _owner_status(case)["code"]
-        sla_status = service_management_case_item(case, now=reference)["sla_status"]["code"]
+    for row in all_rows:
+        record_type = row["service_record_type"]["code"]
+        status = row["owner_status"]["code"]
+        row_sla_status = row["sla_status"]["code"]
         by_record_type[record_type] = by_record_type.get(record_type, 0) + 1
         by_owner_status[status] = by_owner_status.get(status, 0) + 1
-        by_sla_status[sla_status] = by_sla_status.get(sla_status, 0) + 1
+        by_sla_status[row_sla_status] = by_sla_status.get(row_sla_status, 0) + 1
     return redact_secrets(
         {
             "business_id": business_id,
             "now": _iso(reference),
             "limit": limit,
             "count": len(rows),
-            "total": len(all_cases),
+            "total": len(filtered_rows),
+            "unfiltered_total": len(all_rows),
+            "filters": {"sla_status": parsed_sla_status} if parsed_sla_status is not None else {},
             "by_service_record_type": by_record_type,
             "by_owner_status": by_owner_status,
             "by_sla_status": by_sla_status,
