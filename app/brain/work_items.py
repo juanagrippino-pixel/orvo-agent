@@ -208,6 +208,23 @@ def case_work_item_id(case: OperationalCase) -> str:
     return f"{case_project_key(case)}:{case.case_id}"
 
 
+def _case_comment_events(case: OperationalCase) -> list[Any]:
+    """Return timeline-backed comments without copying bodies into queue projections."""
+
+    return [event for event in case.timeline if event.event_type == "operator_comment"]
+
+
+def case_comment_count(case: OperationalCase) -> int:
+    return len(_case_comment_events(case))
+
+
+def case_last_commented_at(case: OperationalCase) -> str | None:
+    comment_events = _case_comment_events(case)
+    if not comment_events:
+        return None
+    return _iso_utc(max(event.created_at for event in comment_events))
+
+
 def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
     """Project an OperationalCase as a WorkItem-shaped API object."""
 
@@ -220,6 +237,8 @@ def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
         "assignee_ref": case.assignee_ref,
+        "comment_count": case_comment_count(case),
+        "last_commented_at": case_last_commented_at(case),
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
         "case_id": case.case_id,
