@@ -222,6 +222,11 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
                 "requests_per_minute": None,
                 "retry_policy": "adapter_default",
             },
+            "lifecycle": {
+                "status": "active",
+                "owner": "orvo-brain",
+                "version": "phase-a",
+            },
         }
     ]
     assert "abc123" not in json.dumps(record.summary_metadata)
