@@ -91,6 +91,27 @@ def test_parse_case_jql_supports_degraded_boolean_filter():
     assert sql_shape.value.code == "invalid_jql"
 
 
+def test_parse_case_jql_supports_evidence_freshness_state_filter():
+    assert parse_case_jql("freshness_state IN (stale, missing)").normalized == (
+        "freshness_state IN (stale, missing) ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("freshness_state != fresh").normalized == (
+        "freshness_state != fresh ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_operator:
+        parse_case_jql("freshness_state > stale")
+    assert unsupported_operator.value.code == "unsupported_jql_operator"
+
+    with pytest.raises(OperatorAPIError) as unsupported_value:
+        parse_case_jql("freshness_state = expired")
+    assert unsupported_value.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as sql_shape:
+        parse_case_jql("freshness_state = stale OR 1 = 1")
+    assert sql_shape.value.code == "invalid_jql"
+
+
 def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("project = ARTEMEA AND issue_type = stockout_risk AND status_category = to_do").normalized == (
         "project = ARTEMEA AND issue_type = stockout_risk AND status_category = to_do "
@@ -252,6 +273,63 @@ def test_internal_case_queue_redacts_secret_shaped_jql_error_messages(monkeypatc
     assert body["error"]["code"] == "unsupported_jql_value"
     assert body["error"]["safe_to_show_owner"] is False
     assert "[REDACTED]" in body["error"]["message"]
+
+
+def test_internal_case_queue_filters_by_evidence_freshness_state_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-fresh", freshness_state="fresh"))
+    stale_case = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-stale-filter",
+            freshness_state="stale",
+            dedupe_suffix="stockout_risk/sku/STALE_FILTER/inventory.on_hand/daily",
+            priority=95,
+        ),
+    )
+    missing_case = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-missing-filter",
+            freshness_state="missing",
+            dedupe_suffix="stockout_risk/sku/MISSING_FILTER/inventory.on_hand/daily",
+            priority=90,
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-other-stale-filter",
+            freshness_state="stale",
+            business_id="other",
+            priority=99,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=freshness_state%20IN%20(stale%2C%20missing)",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        "freshness_state IN (stale, missing) ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [stale_case.case_id, missing_case.case_id]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+    not_fresh_response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=freshness_state%20!%3D%20fresh",
+        headers=AUTH,
+    )
+    assert not_fresh_response.status_code == 200
+    not_fresh_body = not_fresh_response.get_json()
+    assert [case["case_id"] for case in not_fresh_body["data"]["cases"]] == [stale_case.case_id, missing_case.case_id]
 
 
 def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(monkeypatch, tmp_path):
@@ -872,6 +950,7 @@ def test_internal_case_view_summary_returns_scoped_facets_without_cases(monkeypa
         "severity_counts": {"critical": 2},
         "case_type_counts": {"stockout_risk": 2},
         "source_connector_counts": {"meta_ads": 1, "tiendanube": 1},
+        "freshness_state_counts": {"fresh": 1, "stale": 1},
         "degraded_total": 1,
         "unassigned_total": 1,
     }
