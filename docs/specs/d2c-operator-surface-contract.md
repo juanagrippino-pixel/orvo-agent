@@ -84,6 +84,7 @@ Queue filters:
 
 - open;
 - acknowledged;
+- recently assigned;
 - in progress;
 - resolved recently;
 - reopened;

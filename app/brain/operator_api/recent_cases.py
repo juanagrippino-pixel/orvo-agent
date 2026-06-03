@@ -157,6 +157,56 @@ def list_recently_acknowledged_cases(
     )
 
 
+def list_recently_assigned_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-assigned actionable cases for a business.
+
+    Assignment is an operator ownership projection, not a lifecycle source of
+    truth. Include only currently-actionable cases so closed work remains owned
+    by terminal projections; order by ``assigned_at`` DESC with ``case_id`` ASC
+    as a deterministic tie-breaker. Assignee refs are already redacted before
+    persistence, and the whole payload is redacted again at the surface boundary.
+    """
+
+    parsed_limit = parse_limit(limit)
+    assigned: list[tuple[datetime, str, OperationalCase]] = []
+    for status in ("open", "acknowledged", "in_progress"):
+        for case in store.list_cases(business_id=business_id, status=status, limit=None):
+            if case.assigned_at is None:
+                continue
+            assigned.append((case.assigned_at.astimezone(timezone.utc), case.case_id, case))
+
+    assigned.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = assigned[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "assigned_at": assigned_at.isoformat(),
+            "assignee_ref": case.assignee_ref,
+            "assignment_seconds": int((assigned_at - case.opened_at).total_seconds()),
+        }
+        for assigned_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "assigned_total": len(assigned),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def _case_transitioned_to_at(case: OperationalCase, status: str) -> datetime:
     """Return the canonical timeline timestamp for a status transition.
 
