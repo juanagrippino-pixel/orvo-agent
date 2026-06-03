@@ -112,6 +112,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "runtime.freshness",
                 "runtime.data_quality",
             ],
+            "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
             "health_policy": {
@@ -157,6 +158,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "runtime.freshness",
                 "runtime.data_quality",
             ],
+            "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube",
             "health_policy": {

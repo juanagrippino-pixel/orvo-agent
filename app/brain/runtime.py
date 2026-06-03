@@ -51,6 +51,7 @@ class CompiledConnectorRuntime(BaseModel):
     legacy_secret_param_names: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     emitted_metric_families: list[str] = Field(default_factory=list)
+    emitted_event_families: list[str] = Field(default_factory=list)
     supported_runtime_modes: list[str] = Field(default_factory=list)
     executor_factory_path: str
     health_policy: dict[str, Any] = Field(default_factory=dict)
@@ -162,6 +163,7 @@ def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, An
         "legacy_secret_param_names": list(connector.legacy_secret_param_names),
         "capabilities": list(connector.capabilities),
         "emitted_metric_families": list(connector.emitted_metric_families),
+        "emitted_event_families": list(connector.emitted_event_families),
         "supported_runtime_modes": list(connector.supported_runtime_modes),
         "executor_factory_path": connector.executor_factory_path,
         "health_policy": dict(connector.health_policy),
@@ -294,6 +296,7 @@ def _compile_connectors(
                 legacy_secret_param_names=legacy_secret_names,
                 capabilities=list(spec.capabilities),
                 emitted_metric_families=list(spec.emitted_metric_families),
+                emitted_event_families=list(spec.emitted_event_families),
                 supported_runtime_modes=supported_runtime_modes,
                 executor_factory_path=spec.factory_path,
                 health_policy=spec.health_policy_metadata(),
