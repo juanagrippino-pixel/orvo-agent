@@ -58,6 +58,7 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
             else ("preview", "forced", "scheduled", "operator_triggered")
         )
         assert spec.executor.supported_runtime_modes == expected_modes
+        assert spec.emitted_event_families == ("connector.execution", "connector.health")
         assert spec.health.readiness_check == "metadata_only"
         assert spec.health_policy_metadata() == {
             "readiness_check": spec.health.readiness_check,
