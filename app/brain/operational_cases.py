@@ -505,6 +505,24 @@ def _assert_mutation_timestamp_is_current(record: "OperationalCase", timestamp: 
         raise ValueError("mutation timestamp cannot be earlier than current case updated_at")
 
 
+def _detection_mutation_metadata(
+    *,
+    existing: "OperationalCase",
+    detection: OperationalCaseDetection,
+    to_status: OperationalCaseStatus,
+) -> dict[str, Any]:
+    """Audit before/after fields for deterministic detection-driven mutations."""
+
+    return {
+        "dedupe_key": detection.dedupe_key,
+        "from_status": existing.status,
+        "to_status": to_status,
+        "from_severity": existing.severity,
+        "to_severity": detection.severity,
+        "from_priority_score": existing.priority_score,
+        "to_priority_score": detection.priority_score,
+    }
+
 class OperationalCaseStore(Protocol):
     def upsert_detection(
         self,
@@ -617,10 +635,11 @@ class _OperationalCaseMutations:
             is_recurrence = existing.status in {"resolved", "dismissed"}
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
+            new_status: OperationalCaseStatus = "open" if is_recurrence else existing.status
             merged_snapshots = _unique_snapshots([*existing.evidence_snapshots, *detection_snapshots])
             update: dict[str, Any] = {
                 "title": detection.title,
-                "status": "open" if is_recurrence else existing.status,
+                "status": new_status,
                 "severity": detection.severity,
                 "priority_score": detection.priority_score,
                 "entity_scope": detection.entity_scope or existing.entity_scope,
@@ -646,7 +665,11 @@ class _OperationalCaseMutations:
                         evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"{event_verb} {detection.case_type} case from deterministic detection.",
-                        metadata={"dedupe_key": detection.dedupe_key},
+                        metadata=_detection_mutation_metadata(
+                            existing=existing,
+                            detection=detection,
+                            to_status=new_status,
+                        ),
                     ),
                 ],
             }
