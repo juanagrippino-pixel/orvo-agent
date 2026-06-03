@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from app.brain.operational_cases import (
     OperationalCaseDetection,
@@ -250,6 +251,84 @@ def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, 
     assert reloaded is not None
     assert reloaded.status == "open"
     assert len(reloaded.timeline) == len(case.timeline)
+
+
+def test_internal_case_action_rejects_registered_external_action_at_operator_api_boundary_without_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    external_action_calls = []
+
+    import app.brain.external_actions as external_actions
+
+    def _forbidden_external_action_call(*args, **kwargs):
+        external_action_calls.append((args, kwargs))
+        raise AssertionError("operator API must not call the external action provider boundary")
+
+    monkeypatch.setattr(external_actions, "execute_external_action", _forbidden_external_action_call)
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Request-ID": "req-external-boundary"},
+        json={
+            "action_key": "request_external_action",
+            "reason": "Create CRM ticket access_token=raw_external_boundary_secret",
+            "metadata": {
+                "provider": "pipedream",
+                "toolkit": "hubspot",
+                "external_action_key": "hubspot.create_ticket",
+                "api_key": "raw_external_boundary_secret",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_external_boundary_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "case_action_api_disabled"
+    assert body["redaction_applied"] is True
+    assert external_action_calls == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    events = _audit_events(db_path)
+    matching_events = [event for event in events if event["request_id"] == "req-external-boundary"]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["data"]["action_key"] == "request_external_action"
+    assert event["data"]["error_code"] == "case_action_api_disabled"
+    assert event["data"]["payload"]["metadata"]["api_key"] == "[REDACTED]"
+    assert "raw_external_boundary_secret" not in json.dumps(event, sort_keys=True)
+
+
+def test_internal_operator_api_does_not_import_external_action_execution_boundary():
+    repo_root = Path(__file__).resolve().parents[1]
+    checked_paths = [
+        *sorted((repo_root / "app" / "brain" / "operator_api").glob("*.py")),
+        *sorted((repo_root / "app" / "http" / "internal_brain").glob("*.py")),
+    ]
+    forbidden_imports = {}
+    for path in checked_paths:
+        source = path.read_text(encoding="utf-8")
+        forbidden_tokens = [
+            token
+            for token in ("app.brain.external_actions", "execute_external_action")
+            if token in source
+        ]
+        if forbidden_tokens:
+            forbidden_imports[str(path.relative_to(repo_root))] = forbidden_tokens
+
+    assert forbidden_imports == {}
 
 
 def test_internal_case_action_actor_identity_comes_from_authenticated_header(monkeypatch, tmp_path):
