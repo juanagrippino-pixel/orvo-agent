@@ -66,6 +66,42 @@ def _public_error_response(payload: dict, status_code: int):
     return jsonify(redact_secrets(payload)), status_code
 
 
+def _authorization_scheme(value: str) -> str | None:
+    if not value.strip():
+        return None
+    scheme = value.strip().split(None, 1)[0]
+    return redact_text(scheme) or "[REDACTED]"
+
+
+def _record_internal_authentication_denial(*, business_id: str, actor_ref: str, supplied_authorization: str):
+    """Best-effort audit for failed internal bearer-token authentication.
+
+    The raw Authorization header is intentionally not persisted; only safe shape
+    metadata is kept so operators can investigate auth abuse without leaking
+    bearer-token tails into the durable audit log.
+    """
+
+    try:
+        _append_operator_audit_event(
+            business_id=business_id,
+            actor_ref=actor_ref or "anonymous",
+            event_type="operator.authentication.denied",
+            target_type="internal_operator_api",
+            target_id=business_id,
+            data={
+                "status": "denied",
+                "reason": "invalid_internal_token",
+                "method": request.method,
+                "header_present": bool(supplied_authorization),
+                "scheme": _authorization_scheme(supplied_authorization),
+            },
+        )
+    except Exception:
+        # Authentication must still fail closed even if the audit sink is
+        # temporarily unavailable. Do not expose persistence details to callers.
+        return
+
+
 def _authorize_internal_operator(business_id: str):
     expected = os.environ.get("ORVO_INTERNAL_OPERATOR_TOKEN", "")
     if not expected:
@@ -77,6 +113,12 @@ def _authorize_internal_operator(business_id: str):
         )
     supplied = request.headers.get("Authorization", "")
     if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+        if supplied:
+            _record_internal_authentication_denial(
+                business_id=business_id,
+                actor_ref=request.headers.get("X-Orvo-Operator", ""),
+                supplied_authorization=supplied,
+            )
         return _internal_error(business_id, "unauthorized", "Unauthorized", status_code=401)
     return None
 

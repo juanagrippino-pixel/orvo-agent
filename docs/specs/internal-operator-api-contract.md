@@ -118,6 +118,7 @@ Before exposing beyond local/dev:
 - authenticate operator identity;
 - scope access to business/tenant;
 - enforce explicit `X-Orvo-Businesses` operator grants when present: comma-separated business IDs grant only those businesses, `*` grants all businesses, and an empty/present header fails closed while legacy callers without the header remain token-scoped during migration;
+- audit failed internal bearer-token authentication attempts without persisting raw `Authorization` header values or token tails;
 - log mutating actions with actor ref;
 - rate-limit force-run endpoints;
 - require approval for external side effects;
@@ -127,6 +128,7 @@ Before exposing beyond local/dev:
 
 - compile preview does not execute connectors;
 - readiness endpoint redacts secret refs;
+- invalid internal bearer-token attempts create redacted operator audit events without persisting raw `Authorization` headers;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;

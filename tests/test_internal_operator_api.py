@@ -1940,12 +1940,39 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
     missing = client.get("/internal/brain/businesses/artemea/cases")
     wrong = client.get(
         "/internal/brain/businesses/artemea/cases",
-        headers={"Authorization": "Bearer wrong", "X-Orvo-Operator": "operator:juan"},
+        headers={
+            "Authorization": "Bearer wrong access_token=raw_bad_bearer_secret",
+            "X-Orvo-Operator": "operator:juan access_token=raw_bad_actor_secret",
+            "X-Request-ID": "req-bad-token",
+        },
     )
 
     assert missing.status_code == 401
     assert wrong.status_code == 401
     assert missing.get_json()["error"]["code"] == "unauthorized"
+    assert wrong.get_json()["error"]["code"] == "unauthorized"
+    assert "raw_bad_bearer_secret" not in wrong.get_data(as_text=True)
+    assert "raw_bad_actor_secret" not in wrong.get_data(as_text=True)
+
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["event_type"] == "operator.authentication.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-bad-token"
+    assert event["data"] == {
+        "status": "denied",
+        "reason": "invalid_internal_token",
+        "method": "GET",
+        "header_present": True,
+        "scheme": "Bearer",
+    }
+    serialized = json.dumps(event, sort_keys=True)
+    assert "raw_bad_bearer_secret" not in serialized
+    assert "raw_bad_actor_secret" not in serialized
 
 
 def _audit_events(db_path) -> list[dict]:
