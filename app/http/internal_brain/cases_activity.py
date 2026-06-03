@@ -323,6 +323,20 @@ def register_case_activity_routes(app):
             ),
         )
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/recently-commented")
+    def internal_brain_cases_recently_commented(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_recently_commented_cases(
+                    case_store,
+                    business_id=business_id,
+                    limit=request.args.get("limit"),
+                ),
+            ),
+        )
+
     @app.get("/internal/brain/businesses/<business_id>/cases/recently-reopened")
     def internal_brain_cases_recently_reopened(business_id: str):
         return _with_internal_stores(

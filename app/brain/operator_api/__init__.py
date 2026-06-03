@@ -13,6 +13,7 @@ from .stagnation_core import *  # noqa: F401,F403
 from .stagnation_splits import *  # noqa: F401,F403
 from .top_cases import *  # noqa: F401,F403
 from .recent_cases import *  # noqa: F401,F403
+from .commented_cases import *  # noqa: F401,F403
 from .workflow import *  # noqa: F401,F403
 from .histograms_resolution import *  # noqa: F401,F403
 from .histograms_ack import *  # noqa: F401,F403
