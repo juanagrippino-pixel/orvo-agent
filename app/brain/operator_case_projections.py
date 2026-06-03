@@ -34,5 +34,9 @@ def entity_kind(case: OperationalCase) -> str:
     return normalized or "unknown"
 
 
+def evidence_freshness_states(case: OperationalCase) -> list[str]:
+    return sorted({snapshot.freshness_state for snapshot in case.evidence_snapshots if snapshot.freshness_state})
+
+
 def is_case_degraded(case: OperationalCase) -> bool:
     return any(snapshot.freshness_state in _DEGRADED_FRESHNESS_STATES for snapshot in case.evidence_snapshots)

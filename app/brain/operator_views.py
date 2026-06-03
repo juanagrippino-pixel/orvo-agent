@@ -17,7 +17,7 @@ from app.brain.operational_cases import (
     OperationalCaseStore,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
-from app.brain.operator_case_projections import is_case_degraded, source_connectors
+from app.brain.operator_case_projections import evidence_freshness_states, is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
@@ -382,6 +382,9 @@ def summarize_builtin_case_view(
                 "source_connector_counts": _sorted_counts(
                     source for case in matching for source in _case_source_connectors(case)
                 ),
+                "freshness_state_counts": _sorted_counts(
+                    state for case in matching for state in _case_freshness_states(case)
+                ),
                 "degraded_total": sum(1 for case in matching if is_case_degraded(case)),
                 "unassigned_total": sum(1 for case in matching if case.assignee_ref is None),
             },
@@ -530,6 +533,8 @@ def _matches(case: OperationalCase, clauses: tuple[CaseJQLClause, ...]) -> bool:
 def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
     if clause.field == "source_connector":
         return _matches_source_connector(case, clause)
+    if clause.field == "freshness_state":
+        return _matches_freshness_state(case, clause)
 
     actual = _case_field_value(case, clause.field)
     if clause.operator == "IN":
@@ -556,6 +561,10 @@ def _case_source_connectors(case: OperationalCase) -> tuple[str, ...]:
     return tuple(source_connectors(case))
 
 
+def _case_freshness_states(case: OperationalCase) -> tuple[str, ...]:
+    return tuple(evidence_freshness_states(case))
+
+
 def _matches_source_connector(case: OperationalCase, clause: CaseJQLClause) -> bool:
     sources = _case_source_connectors(case)
     if clause.operator == "IN":
@@ -565,6 +574,18 @@ def _matches_source_connector(case: OperationalCase, clause: CaseJQLClause) -> b
         return expected in sources
     if clause.operator == "!=":
         return expected not in sources
+    raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
+
+
+def _matches_freshness_state(case: OperationalCase, clause: CaseJQLClause) -> bool:
+    states = _case_freshness_states(case)
+    if clause.operator == "IN":
+        return any(state in clause.values for state in states)
+    expected = clause.values[0]
+    if clause.operator == "=":
+        return expected in states
+    if clause.operator == "!=":
+        return expected not in states
     raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
 
 
