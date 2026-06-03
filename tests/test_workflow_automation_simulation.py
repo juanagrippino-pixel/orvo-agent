@@ -348,6 +348,36 @@ def test_simulate_case_workflow_returns_no_actions_when_conditions_do_not_match(
     assert result["side_effects_executed"] == 0
 
 
+def test_simulate_case_workflow_returns_no_actions_when_event_trigger_does_not_match_rule_trigger():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="opened-only-ack",
+        business_id="artemea",
+        trigger="case_opened",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[WorkflowAction(action_key="acknowledge_case", params={})],
+    )
+
+    result = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(12, 30),
+        action_ledger=ledger,
+        actor_ref="operator:ana",
+        event_trigger="case_updated",
+    )
+
+    assert result["matched"] is False
+    assert result["trigger_match"] == {"expected": "case_opened", "actual": "case_updated", "matched": False}
+    assert result["conditions"] == [{"field": "status", "expected": "open", "actual": "open", "matched": True}]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+    assert ledger.list_approval_requests(business_id="artemea") == []
+
+
 def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapshots():
     _, case = seed_case(degraded=True)
     rule = WorkflowRule(
