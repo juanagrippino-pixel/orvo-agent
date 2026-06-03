@@ -28,6 +28,7 @@ from app.brain.work_items import (
     case_project_key,
     case_status_category,
     case_type_release_state,
+    case_work_item_id,
     work_item_query_field_spec,
 )
 
@@ -537,6 +538,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_issue_type(case)
     if field == "release_state":
         return case_type_release_state(case.case_type)
+    if field == "work_item_id":
+        return case_work_item_id(case)
     if field == "status_category":
         return case_status_category(case)
     if field == "priority_bracket":
