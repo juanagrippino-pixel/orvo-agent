@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
+from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.operator_api import OperatorAPIError
 from app.brain.operator_views import parse_case_jql
+from app.brain.storage import init_schema
 from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
 
 
@@ -75,6 +79,23 @@ def test_parse_case_jql_supports_degraded_boolean_filter():
     assert sql_shape.value.code == "invalid_jql"
 
 
+def test_parse_case_jql_supports_work_item_projection_fields():
+    assert parse_case_jql("project = ARTEMEA AND issue_type = stockout_risk AND status_category = to_do").normalized == (
+        "project = ARTEMEA AND issue_type = stockout_risk AND status_category = to_do "
+        "ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("assignee_ref = operator:juan").normalized == (
+        "assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("status_category IN (to_do, done)").normalized == (
+        "status_category IN (to_do, done) ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_category:
+        parse_case_jql("status_category = waiting")
+    assert unsupported_category.value.code == "unsupported_jql_value"
+
+
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
@@ -134,6 +155,81 @@ def test_internal_case_queue_filters_degraded_cases_and_keeps_business_scope(mon
     assert body["data"]["normalized_jql"] == "degraded = true ORDER BY priority_score DESC, opened_at ASC"
     assert [case["case_id"] for case in body["data"]["cases"]] == [degraded_case.case_id]
     assert body["data"]["cases"][0]["degraded"] is True
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-open", priority=95))
+    assigned = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-assigned",
+            dedupe_suffix="stockout_risk/sku/ASSIGNED/commerce.inventory/daily",
+            priority=90,
+        ),
+    )
+    resolved = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-resolved",
+            dedupe_suffix="stockout_risk/sku/RESOLVED/commerce.inventory/daily",
+            priority=100,
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other", priority=99))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.assign_case(
+        assigned.case_id,
+        actor_type="operator",
+        actor_ref="operator:juan",
+        assignee_ref="operator:juan",
+    )
+    store.transition_case(
+        assigned.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="fixture complete",
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql="
+        "project%20%3D%20ARTEMEA%20AND%20issue_type%20%3D%20stockout_risk%20AND%20"
+        "status_category%20%3D%20in_progress%20AND%20assignee_ref%20%3D%20operator:juan",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        "project = ARTEMEA AND issue_type = stockout_risk AND status_category = in_progress "
+        "AND assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [assigned.case_id]
+    case = body["data"]["cases"][0]
+    assert case["project_key"] == "ARTEMEA"
+    assert case["issue_type"] == "stockout_risk"
+    assert case["status_category"] == "in_progress"
+    assert case["work_item"]["case_id"] == assigned.case_id
+    assert case["work_item"]["work_item_id"] == f"ARTEMEA:{assigned.case_id}"
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 

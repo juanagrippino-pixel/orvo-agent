@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .common import *  # noqa: F401,F403
+from .common import _ALLOWED_CASE_ACTIONS, _REGISTERED_CASE_ACTIONS
 from .projections import *  # noqa: F401,F403
 from .cases import get_scoped_case
 
@@ -19,8 +20,14 @@ def apply_case_action(
     assignee_ref: Any = None,
     owner_ref: Any = None,
 ) -> dict[str, Any]:
-    if action_key not in _ALLOWED_CASE_ACTIONS:
+    if action_key not in _REGISTERED_CASE_ACTIONS:
         raise OperatorAPIError("unknown_action_key", f"unknown action_key: {action_key}", status_code=400)
+    if action_key not in _ALLOWED_CASE_ACTIONS:
+        raise OperatorAPIError(
+            "case_action_api_disabled",
+            f"action_key is registered but disabled for this API boundary: {action_key}",
+            status_code=400,
+        )
     effective_actor_ref = normalize_operator_actor(actor_ref, actor)
 
     case = get_scoped_case(store, business_id=business_id, case_id=case_id)

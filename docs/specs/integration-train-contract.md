@@ -25,52 +25,52 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ## Current next recommendations train
 
-### 2026-05-31 status checkpoint
+### 2026-06-02 status checkpoint
 
-The 2026-05-31 integration cycle merged the two architecture-review branches that were marked merge-ready:
+The 2026-06-02 integration cycle absorbed two Architecture Review Board recommendations into the canonical branch:
 
-- `codex/work-management` landed richer OperationalCase workflow/status/action behavior, including `in_progress`, assignment, source-connector-aware case projections, and queue/workflow summary endpoints.
-- `codex/connector-platform` landed registry-driven daily-report factory metadata and the registry path used by `run_enabled_connectors_daily_report_pipeline`.
-- Follow-on runtime/semantics and case-workflow commits added money/currency metric diagnostics and source/priority split operator summaries.
-
-The same review explicitly did **not** clear `codex/trust-admin-security` as Trust/Admin/Security-complete. Treat its gaps as the next integration train's first blocking item, not as a completed platform capability.
+- `8267bd2` landed the preferred canonical WorkItem/status-category direction from `codex/eng-factory-work-item-status-category-20260602`: `app/brain/work_items.py` exposes read-only project, issue-type, workflow/status-definition, work item ID, and `to_do`/`in_progress`/`done` status-category semantics over `OperationalCase`.
+- `f09aa7f` landed the connector-platform metadata branch: connector health/rate-limit/lifecycle metadata, registry-driven enabled daily connector discovery, runtime connector refs, and run-ledger redaction of raw `secret_refs` values.
+- `5181dd7` committed the ARB branch review that marked `codex/status-category-jql-20260602` as a consolidation risk (`todo` vs `to_do`) and `codex/service-management` as blocked until service/customer statuses are namespaced away from canonical WorkItem `status_category`.
 
 Evidence checked for this checkpoint:
 
-- Git history on `feat/orvo-brain-control-plane`: `4d979c9` merged `codex/connector-platform`; `9ad3c8b` and `f3576c9` merged `codex/work-management`; later `claude/runtime-semantics` and `claude/case-workflow` merges landed through `4456d0e`; head was `4ffcc02` during this docs sync.
-- `app/brain/operational_cases.py` defines `open`, `acknowledged`, `in_progress`, `resolved`, `dismissed`, deterministic transition rules, `case_assigned`, and actionable statuses.
-- `app/brain/operator_api.py` exposes whitelisted case action keys including `assign_owner` and `mark_in_progress`, plus source connector projections derived from evidence snapshots.
-- `app/brain/connector_registry.py` defines allowlisted `ConnectorFactoryParam` / `ConnectorExecutorMetadata`; `app/brain/pipeline.py` routes multi-connector daily report execution through `_build_daily_report_for_connector_type`.
+- `app/brain/work_items.py` defines `project_projection()`, `case_work_item_projection()`, issue-type/status definitions, workflow definition, and allowed status categories.
+- `app/brain/operator_views.py` resolves JQL-lite fields `project`, `issue_type`, `status_category`, and `assignee_ref` through the WorkItem/OperationalCase helpers, not duplicated status literals.
+- `app/brain/runtime.py` emits connector runtime metadata, and `app/brain/run_ledger.py` redacts persisted `secret_refs` values while preserving parameter names.
+- Tests present for the shipped slices include `tests/test_work_items.py`, `tests/test_operator_case_views.py`, `tests/test_brain_connector_registry.py`, `tests/test_brain_runtime.py`, `tests/test_brain_run_ledger.py`, and `tests/invariants/test_secret_redaction.py`.
 
 Recommended order:
 
 1. **Trust/Admin/Security audit and authorization closure**
-   - Convert the 2026-05-31 architecture-review blockers into implementation packets before claiming Trust/Admin/Security readiness.
-   - Audit failed/denied case actions and auth failures, not only successful mutations.
-   - Add a minimal action-scope/RBAC boundary or explicitly document the branch as audit-foundation-only.
-   - Gate: internal operator API tests for rejected action keys, invalid transitions, scope failures, and auth failures proving redacted audit events are written where an actor/business can be derived.
+   - Convert remaining ARB blockers into implementation packets before claiming Trust/Admin/Security readiness.
+   - Merge/test retention-bounded audit export (`codex/trust-admin-security`) and URL userinfo redaction (`qa/redaction-url-userinfo-20260602131915`) only after focused security/invariant tests are green.
+   - Gate: internal operator API/security tests for rejected action keys, invalid transitions, scope failures, auth failures, export retention limits, and redacted audit/error payloads.
 
-2. **Work-management contract cleanup after merge**
-   - Reconcile the merged workflow with the written Operational Case contract: manual `resolve_case` must require a reason, and the removal of direct `open -> resolved` needs an explicit release/contract note.
-   - Keep Jira-like follow-ups tracked but scoped: project abstraction, issue-type registry/versioning, and status categories should be separate packets rather than opportunistic central-model edits.
-   - Gate: lifecycle/action tests around resolve reasons and transition-table contract assertions.
+2. **WorkItem semantic consolidation**
+   - Mark `codex/status-category-jql-20260602` as superseded unless it is rebased onto canonical `to_do`/`in_progress`/`done` helpers.
+   - Keep all new queue/export/dashboard predicates deriving from `app/brain/work_items.py` / `operational_case_status_category()`.
+   - Gate: `tests/test_work_items.py`, `tests/test_operator_case_views.py`, and any internal API projection tests proving no `todo`/`waiting` category drift leaks into canonical `status_category`.
 
-3. **Connector registry runtime hardening**
+3. **Operator surfaces and search analytics on top of WorkItem fields**
+   - Integrate `codex/operator-surfaces` and `codex/search-analytics` as read-only projections after confirming they consume canonical WorkItem fields and do not persist duplicate state.
+   - Gate: recently-in-progress derives from `status_changed` timeline events; recently-dismissed derives from `dismissed_at`; built-in view totals/export run through the same JQL-lite parser and remain redacted/business-scoped.
+
+4. **Service-management/SLA namespace fix**
+   - Rebase `codex/service-management` after WorkItem consolidation and rename customer/service categories to `owner_status_category` or `service_status_category`; reserve `status_category` for canonical WorkItem values.
+   - Gate: service/SLA tests prove `waiting_owner` / `waiting_external` never become canonical WorkItem status categories.
+
+5. **Connector registry runtime hardening**
+   - Keep registry execution on the platform path: registry -> compiled runtime -> run ledger -> semantic validation -> cases.
    - Move from transitional inline secret params toward runtime secret-ref resolution for Tiendanube/MercadoLibre/Meta Ads before promoting registry execution as compiled-runtime complete.
-   - Keep registry executor metadata allowlisted and avoid tenant-controlled import paths.
-   - Gate: connector registry tests proving required secret refs resolve at runtime, runtime hashes do not include secret values, and redacted failures open/update `data_stale` rather than leaking credentials.
+   - Gate: connector registry/runtime tests proving required secret refs resolve at runtime, runtime hashes do not include secret values, persisted/operator metadata redacts secret-ref URI values, and redacted failures open/update `data_stale` rather than leaking credentials.
 
-4. **Semantic registry / connector family alignment**
-   - Replace typo-prone string drift in connector `emitted_metric_families` with shared semantic registry family identifiers or equivalent contract tests.
-   - Keep `channel_mix_shift` deferred/internal until channel-scoped metrics, stale-source suppression, and dedupe/entity-scope tests are green.
-   - Gate: tests fail when a connector declares a family absent from the semantic registry or emits a report/case metric outside its declared families.
-
-5. **Pilot-readiness runbook refresh**
-   - Update the Tiendanube/WhatsApp-first pilot checklist to reflect the real merged runtime, ledger, case, evidence, operator-action, and source-split summary surfaces.
+6. **Pilot-readiness runbook refresh**
+   - Update the Tiendanube/WhatsApp-first pilot checklist to reflect the real merged runtime, ledger, case, evidence, WorkItem, operator-action, and connector-metadata surfaces.
    - Keep WhatsApp as a projection/delivery surface, not the source of truth.
    - Gate: docs link validation, secret scan, and one dry-run operator report artifact.
 
-Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, and evidence and until Trust/Admin/Security blockers are either fixed or explicitly scoped out of live use.
+Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, evidence, and WorkItem projections and until Trust/Admin/Security blockers are either fixed or explicitly scoped out of live use.
 
 ## Branch rules
 

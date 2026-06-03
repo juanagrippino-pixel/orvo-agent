@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from app.brain.operational_cases import (
     OperationalCaseDetection,
@@ -12,6 +13,7 @@ from app.brain.operational_cases import (
     OperationalCaseType,
     SQLiteOperationalCaseStore,
 )
+from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, RunStatus, SQLiteRunLedger
 from app.brain.storage import init_schema
 
@@ -251,6 +253,84 @@ def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, 
     assert len(reloaded.timeline) == len(case.timeline)
 
 
+def test_internal_case_action_rejects_registered_external_action_at_operator_api_boundary_without_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    external_action_calls = []
+
+    import app.brain.external_actions as external_actions
+
+    def _forbidden_external_action_call(*args, **kwargs):
+        external_action_calls.append((args, kwargs))
+        raise AssertionError("operator API must not call the external action provider boundary")
+
+    monkeypatch.setattr(external_actions, "execute_external_action", _forbidden_external_action_call)
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Request-ID": "req-external-boundary"},
+        json={
+            "action_key": "request_external_action",
+            "reason": "Create CRM ticket access_token=raw_external_boundary_secret",
+            "metadata": {
+                "provider": "pipedream",
+                "toolkit": "hubspot",
+                "external_action_key": "hubspot.create_ticket",
+                "api_key": "raw_external_boundary_secret",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_external_boundary_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "case_action_api_disabled"
+    assert body["redaction_applied"] is True
+    assert external_action_calls == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    events = _audit_events(db_path)
+    matching_events = [event for event in events if event["request_id"] == "req-external-boundary"]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["data"]["action_key"] == "request_external_action"
+    assert event["data"]["error_code"] == "case_action_api_disabled"
+    assert event["data"]["payload"]["metadata"]["api_key"] == "[REDACTED]"
+    assert "raw_external_boundary_secret" not in json.dumps(event, sort_keys=True)
+
+
+def test_internal_operator_api_does_not_import_external_action_execution_boundary():
+    repo_root = Path(__file__).resolve().parents[1]
+    checked_paths = [
+        *sorted((repo_root / "app" / "brain" / "operator_api").glob("*.py")),
+        *sorted((repo_root / "app" / "http" / "internal_brain").glob("*.py")),
+    ]
+    forbidden_imports = {}
+    for path in checked_paths:
+        source = path.read_text(encoding="utf-8")
+        forbidden_tokens = [
+            token
+            for token in ("app.brain.external_actions", "execute_external_action")
+            if token in source
+        ]
+        if forbidden_tokens:
+            forbidden_imports[str(path.relative_to(repo_root))] = forbidden_tokens
+
+    assert forbidden_imports == {}
+
+
 def test_internal_case_action_actor_identity_comes_from_authenticated_header(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
@@ -483,6 +563,54 @@ def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["case"]["case_id"] == case.case_id
+
+
+def test_internal_read_allows_matching_operator_business_grant(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}",
+        headers={**AUTH, "X-Orvo-Businesses": "other, artemea"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["case"]["case_id"] == case.case_id
+
+
+def test_internal_read_denies_mismatched_operator_business_grant_and_audits(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "other, demo-secret access_token=raw_grant_secret",
+            "X-Request-ID": "req-business-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_grant_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "operator:juan"
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-business-denied"
+    assert event["data"]["reason"] == "business_scope_denied"
+    assert event["data"]["permission"] == "business:access"
+    assert event["data"]["allowed_businesses"] == ["other", "[REDACTED]"]
+    assert "raw_grant_secret" not in json.dumps(event, sort_keys=True)
 
 
 def test_internal_case_action_rejects_viewer_role_without_mutation(monkeypatch, tmp_path):
@@ -1006,6 +1134,215 @@ def test_internal_workflow_throughput_by_severity_returns_scoped_envelope(monkey
     }
     assert data["time_to_resolve_seconds_by_severity"] == {
         "critical": {"min": 10800, "max": 10800, "avg": 10800, "median": 10800}
+    }
+
+
+def test_internal_case_acknowledgment_latency_histogram_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    fast = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-fast-ack",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-fast-ack/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        fast.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(minutes=30),
+    )
+    slow = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-slow-ack",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        slow.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=8),
+    )
+    unacknowledged = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-unacknowledged",
+            dedupe_suffix="stockout_risk/product/sku-unacknowledged/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-slow-ack",
+            dedupe_suffix="stockout_risk/product/sku-other-ack/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/acknowledgment-latency",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["acknowledged_total"] == 2
+    assert data["by_acknowledgment_bucket"] == {
+        "under_1h": 1,
+        "under_6h": 0,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_acknowledgment_bucket_severity"]["under_1h"] == {"critical": 1}
+    assert data["by_acknowledgment_bucket_severity"]["under_24h"] == {"warning": 1}
+    assert data["fastest_acknowledged"]["case_id"] == fast.case_id
+    assert data["fastest_acknowledged"]["time_to_acknowledge_seconds"] == 1800
+    assert data["slowest_acknowledged"]["case_id"] == slow.case_id
+    assert data["slowest_acknowledged"]["time_to_acknowledge_seconds"] == 28800
+    assert unacknowledged.case_id not in {
+        data["fastest_acknowledged"]["case_id"],
+        data["slowest_acknowledged"]["case_id"],
+    }
+
+
+def test_internal_case_resolution_latency_histogram_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    fast = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-fast-resolved",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-fast-resolved/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        fast.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        fast.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    slow = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-slow-resolved",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        slow.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        slow.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=10),
+    )
+    unresolved = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-unresolved",
+            dedupe_suffix="stockout_risk/product/sku-unresolved/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-resolved",
+            dedupe_suffix="stockout_risk/product/sku-other-resolved/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        other.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/resolution-latency",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["resolved_total"] == 2
+    assert data["by_resolution_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_resolution_bucket_severity"]["under_6h"] == {"critical": 1}
+    assert data["by_resolution_bucket_severity"]["under_24h"] == {"warning": 1}
+    assert data["fastest_resolved"]["case_id"] == fast.case_id
+    assert data["fastest_resolved"]["time_to_resolve_seconds"] == 10800
+    assert data["slowest_resolved"]["case_id"] == slow.case_id
+    assert data["slowest_resolved"]["time_to_resolve_seconds"] == 36000
+    assert unresolved.case_id not in {
+        data["fastest_resolved"]["case_id"],
+        data["slowest_resolved"]["case_id"],
     }
 
 
@@ -1610,3 +1947,137 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     assert event["request_id"] == "req-audit-source"
     assert event["data"]["error_code"] == "unknown_action_key"
     assert event["data"]["payload"]["metadata"]["access_token"] == "[REDACTED]"
+
+
+def test_internal_operator_audit_export_orders_by_occurred_at_not_insert_order(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    newer_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:newer",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={},
+        created_at=datetime(2026, 5, 24, 12, tzinfo=timezone.utc),
+    )
+    older_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:older",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={},
+        created_at=datetime(2026, 5, 24, 9, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert [event["event_id"] for event in body["data"]["events"]] == [newer_id, older_id]
+
+
+def test_internal_operator_audit_export_rejects_invalid_and_non_positive_limits(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    invalid = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=not-an-int",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+    zero = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=0",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_limit"
+    assert zero.status_code == 400
+    assert zero.get_json()["error"]["code"] == "invalid_limit"
+
+
+def test_internal_operator_audit_export_caps_limit_at_200(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    now = datetime.now(timezone.utc)
+    for index in range(205):
+        store.append_event(
+            business_id="artemea",
+            actor_ref=f"operator:{index}",
+            event_type="operator.case_action.failed",
+            target_type="operational_case",
+            data={},
+            created_at=now - timedelta(seconds=index),
+        )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=500",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"]["limit"] == 200
+    assert body["data"]["count"] == 200
+    assert len(body["data"]["events"]) == 200
+
+
+def test_internal_operator_audit_export_enforces_retention_window(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    now = datetime.now(timezone.utc)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    old_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:old",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={"access_token": "old_raw_audit_secret"},
+        created_at=now - timedelta(days=91),
+    )
+    recent_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:recent",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={"access_token": "recent_raw_audit_secret"},
+        created_at=now - timedelta(days=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "old_raw_audit_secret" not in raw_body
+    assert "recent_raw_audit_secret" not in raw_body
+    body = response.get_json()
+    assert body["data"]["retention_days"] == 90
+    assert [event["event_id"] for event in body["data"]["events"]] == [recent_id]
+    assert old_id not in raw_body
+
+
+def test_internal_operator_audit_export_rejects_retention_abuse(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?retention_days=3650",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_retention_days"
+    assert body["redaction_applied"] is True

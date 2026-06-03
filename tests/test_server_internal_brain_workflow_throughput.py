@@ -33,8 +33,13 @@ def _detection(
     severity: str = "critical",
     priority: int = 100,
     run_id: str = "run-1",
+    source: str | None = None,
 ) -> OperationalCaseDetection:
-    evidence_ref = f"evidence://{business_id}/{run_id}/{case_type}"
+    evidence_ref = (
+        f"evidence://{source}/{business_id}/{run_id}/{case_type}"
+        if source is not None
+        else f"evidence://{business_id}/{run_id}/{case_type}"
+    )
     return OperationalCaseDetection(
         business_id=business_id,
         case_type=case_type,
@@ -60,6 +65,7 @@ def _seed_case_with_lifecycle(
     priority: int = 100,
     run_id: str = "run-1",
     dedupe_suffix: str = "stockout_risk/business/monitored/commerce.inventory/daily",
+    source: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     opened_at = now - timedelta(hours=opened_hours_ago)
@@ -72,6 +78,7 @@ def _seed_case_with_lifecycle(
             priority=priority,
             run_id=run_id,
             dedupe_suffix=dedupe_suffix,
+            source=source,
         ),
         detected_at=opened_at,
     )
@@ -249,6 +256,48 @@ def test_workflow_throughput_by_case_type_exposes_split_projection(_isolate_db):
     assert data["acknowledged_by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
     assert data["resolved_by_case_type"] == {"stockout_risk": 1}
     assert data["time_to_acknowledge_seconds_by_case_type"]["sales_drop"] == {
+        "min": 3600,
+        "max": 3600,
+        "avg": 3600,
+        "median": 3600,
+    }
+
+
+def test_workflow_throughput_by_source_connector_exposes_split_projection(_isolate_db):
+    from server import app
+
+    _seed_case_with_lifecycle(
+        _isolate_db,
+        source="tiendanube",
+        ack_minutes_after_open=30,
+        resolve_hours_after_open=4,
+        dedupe_suffix="case-tiendanube-resolved",
+    )
+    _seed_case_with_lifecycle(
+        _isolate_db,
+        source="google_sheets",
+        ack_minutes_after_open=60,
+        resolve_hours_after_open=None,
+        dedupe_suffix="case-google-sheets-acked",
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/workflow/throughput/by-source-connector",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["total"] == 2
+    assert data["totals_by_source_connector"] == {"tiendanube": 1, "google_sheets": 1}
+    assert data["acknowledged_by_source_connector"] == {"tiendanube": 1, "google_sheets": 1}
+    assert data["resolved_by_source_connector"] == {"tiendanube": 1}
+    assert data["time_to_acknowledge_seconds_by_source_connector"]["google_sheets"] == {
         "min": 3600,
         "max": 3600,
         "avg": 3600,
