@@ -76,4 +76,15 @@ def export_builtin_case_view(
     return export_builtin_case_view_rows(store, business_id=business_id, view_id=view_id, limit=limit)
 
 
+def summarize_case_view(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    view_id: str,
+) -> dict[str, Any]:
+    from app.brain.operator_views import summarize_builtin_case_view
+
+    return summarize_builtin_case_view(store, business_id=business_id, view_id=view_id)
+
+
 __all__ = [name for name in globals() if not name.startswith("__")]
