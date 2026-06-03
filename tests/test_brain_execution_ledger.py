@@ -55,6 +55,7 @@ def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_stat
     [outcome] = reloaded.connector_outcomes
     assert outcome.status == "failed"
     assert outcome.health_state == "unauthorized"
+    assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
     assert outcome.metadata["health_policy"]["allowed_states"] == [
         "ok",
         "degraded",
