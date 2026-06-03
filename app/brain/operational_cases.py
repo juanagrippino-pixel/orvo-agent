@@ -390,10 +390,33 @@ class OperationalCase(BaseModel):
         return self
 
 
+def _has_owner_facing_policy(case: OperationalCase) -> bool:
+    """Return whether case-level policy allows owner-facing projection.
+
+    This keeps hidden/internal case policy on the canonical OperationalCase rather
+    than in WhatsApp/report text. Existing degraded-data briefs remain allowed so
+    owner surfaces can show explicit data-health caveats when the case family is
+    otherwise eligible.
+    """
+
+    metadata = case.metadata or {}
+    if metadata.get("owner_facing_ready") is False:
+        return False
+    if metadata.get("hidden_from_owner") is True:
+        return False
+    if metadata.get("owner_visibility") in {"hidden", "internal", "internal_only", "internal_deferred"}:
+        return False
+    return True
+
+
 def is_owner_facing_operational_case(case: OperationalCase) -> bool:
     """Return whether a case is eligible for owner-facing projections."""
 
-    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES and bool(case.evidence_snapshots)
+    return (
+        case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES
+        and bool(case.evidence_snapshots)
+        and _has_owner_facing_policy(case)
+    )
 
 
 def owner_facing_actionable_cases(cases: Iterable[OperationalCase]) -> list[OperationalCase]:
