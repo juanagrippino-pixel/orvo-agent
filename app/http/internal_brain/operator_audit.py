@@ -25,7 +25,11 @@ def register_operator_audit_routes(app):
         auth_error = _authorize_internal_operator(business_id)
         if auth_error is not None:
             return auth_error
-        permission_error = _require_internal_header_permission(business_id, OPERATOR_AUDIT_READ_PERMISSION)
+        permission_error = _require_internal_header_permission(
+            business_id,
+            OPERATOR_AUDIT_READ_PERMISSION,
+            audit_denial=True,
+        )
         if permission_error is not None:
             return permission_error
         try:

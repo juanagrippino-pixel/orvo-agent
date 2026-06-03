@@ -1901,6 +1901,45 @@ def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypat
     conn.close()
 
 
+def test_internal_operator_audit_export_denial_writes_redacted_audit_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "operator",
+            "X-Orvo-Operator": "operator:juan access_token=raw_denial_actor_secret",
+            "X-Orvo-Businesses": "artemea, demo-secret access_token=raw_denial_grant_secret",
+            "X-Request-ID": "req-audit-export-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_denial_actor_secret" not in raw_body
+    assert "raw_denial_grant_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-audit-export-denied"
+    assert event["data"]["reason"] == "missing_permission"
+    assert event["data"]["permission"] == "operator_audit:read"
+    assert event["data"]["role"] == "operator"
+    serialized = json.dumps(event, sort_keys=True)
+    assert "raw_denial_actor_secret" not in serialized
+    assert "raw_denial_grant_secret" not in serialized
+
+
 def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
@@ -1917,7 +1956,7 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
 
     operator = client.get(
         "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
-        headers={**AUTH, "X-Orvo-Role": "operator"},
+        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-audit-export-denied"},
     )
     admin = client.get(
         "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
@@ -1934,16 +1973,19 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     assert body["ok"] is True
     assert body["redaction_applied"] is True
     assert body["data"]["limit"] == 10
-    assert body["data"]["count"] == 1
-    event = body["data"]["events"][0]
+    assert body["data"]["count"] == 2
+    events_by_request = {event["request_id"]: event for event in body["data"]["events"]}
+    event = events_by_request["req-audit-source"]
     assert event["business_id"] == "artemea"
     assert event["actor_ref"] == "operator:juan"
     assert event["event_type"] == "operator.case_action.failed"
     assert event["target_type"] == "operational_case"
     assert event["target_id"] == case.case_id
-    assert event["request_id"] == "req-audit-source"
     assert event["data"]["error_code"] == "unknown_action_key"
     assert event["data"]["payload"]["metadata"]["access_token"] == "[REDACTED]"
+    denial = events_by_request["req-audit-export-denied"]
+    assert denial["event_type"] == "operator.authorization.denied"
+    assert denial["data"]["permission"] == "operator_audit:read"
 
 
 def test_internal_operator_audit_export_orders_by_occurred_at_not_insert_order(monkeypatch, tmp_path):

@@ -72,6 +72,15 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _redact_audit_identifier(value: str | None) -> str | None:
+    """Redact top-level audit identifiers without keeping secret-adjacent tails."""
+
+    if value is None:
+        return None
+    redacted = redact_text(value) or "[REDACTED]"
+    return redacted if redacted == value else "[REDACTED]"
+
+
 class SQLiteOperatorAuditStore:
     """SQLite-backed append-only audit store for internal operator actions."""
 
@@ -107,11 +116,11 @@ class SQLiteOperatorAuditStore:
             (
                 event_id,
                 redact_text(business_id) or "[REDACTED]",
-                redact_text(actor_ref) or "[REDACTED]",
+                _redact_audit_identifier(actor_ref) or "[REDACTED]",
                 redact_text(event_type) or "operator_event",
                 redact_text(target_type) or "unknown",
-                redact_text(target_id) if target_id is not None else None,
-                redact_text(request_id) if request_id is not None else None,
+                _redact_audit_identifier(target_id),
+                _redact_audit_identifier(request_id),
                 captured_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
                 json.dumps(safe_data, sort_keys=True, separators=(",", ":")),
             ),
