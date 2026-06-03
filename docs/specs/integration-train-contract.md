@@ -25,52 +25,56 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ## Current next recommendations train
 
-### 2026-06-02 status checkpoint
+### 2026-06-03 status checkpoint
 
-The 2026-06-02 integration cycle absorbed two Architecture Review Board recommendations into the canonical branch:
+The 2026-06-03 integration cycle absorbed the highest-priority Architecture Review Board recommendations from `docs/architecture-reviews/2026-06-03-review.md` into the canonical branch:
 
-- `8267bd2` landed the preferred canonical WorkItem/status-category direction from `codex/eng-factory-work-item-status-category-20260602`: `app/brain/work_items.py` exposes read-only project, issue-type, workflow/status-definition, work item ID, and `to_do`/`in_progress`/`done` status-category semantics over `OperationalCase`.
-- `f09aa7f` landed the connector-platform metadata branch: connector health/rate-limit/lifecycle metadata, registry-driven enabled daily connector discovery, runtime connector refs, and run-ledger redaction of raw `secret_refs` values.
-- `5181dd7` committed the ARB branch review that marked `codex/status-category-jql-20260602` as a consolidation risk (`todo` vs `to_do`) and `codex/service-management` as blocked until service/customer statuses are namespaced away from canonical WorkItem `status_category`.
+- `b1ab601` landed WorkItem project-key hashing: `app/brain/work_items.py` now keeps project keys capped at 32 characters and appends an 8-character deterministic SHA-1 suffix for long normalized `business_id` values, closing the project-key collision risk without adding a WorkItem store.
+- `ab486b6` landed the run operator projection hardening: run-ledger/operator metadata remains a projection boundary and must continue redacting raw secret-ref URI values.
+- `71d334f` landed connector health taxonomy: `connector_registry.py` exposes connector health policy metadata and `run_ledger.py` records/defaults connector `health_state` through the shared connector-health taxonomy.
+- `b97a10a` plus `67bf08b` landed and hardened the workflow approval queue projection: workflow approval and execution queues remain read-only, declare execution disabled, and report `side_effects_executed = 0`.
 
 Evidence checked for this checkpoint:
 
-- `app/brain/work_items.py` defines `project_projection()`, `case_work_item_projection()`, issue-type/status definitions, workflow definition, and allowed status categories.
-- `app/brain/operator_views.py` resolves JQL-lite fields `project`, `issue_type`, `status_category`, and `assignee_ref` through the WorkItem/OperationalCase helpers, not duplicated status literals.
-- `app/brain/runtime.py` emits connector runtime metadata, and `app/brain/run_ledger.py` redacts persisted `secret_refs` values while preserving parameter names.
-- Tests present for the shipped slices include `tests/test_work_items.py`, `tests/test_operator_case_views.py`, `tests/test_brain_connector_registry.py`, `tests/test_brain_runtime.py`, `tests/test_brain_run_ledger.py`, and `tests/invariants/test_secret_redaction.py`.
+- `app/brain/work_items.py` defines `project_key_for_business()`, `project_projection()`, `case_work_item_projection()`, issue-type/status definitions, workflow definition, and canonical status categories via `OperationalCaseStatusCategory`.
+- `app/brain/operator_views.py` resolves JQL-lite fields `project`, `issue_type`, `status_category`, and `assignee_ref` through WorkItem/OperationalCase helpers, not duplicated status literals.
+- `app/brain/connector_registry.py` defines `ConnectorHealthMetadata.health_policy_metadata()`, and `app/brain/run_ledger.py` stores connector `health_state` while recursively redacting `secret_refs` values.
+- `app/brain/workflow_approval_queue.py` and `app/brain/workflow_execution_queue.py` expose queue projections with execution disabled and zero side effects.
+- Tests present for the shipped slices include `tests/test_work_items.py`, `tests/test_operator_case_views.py`, `tests/test_brain_connector_registry.py`, `tests/test_brain_run_ledger.py`, and `tests/test_workflow_automation_simulation.py`.
 
 Recommended order:
 
-1. **Trust/Admin/Security audit and authorization closure**
-   - Convert remaining ARB blockers into implementation packets before claiming Trust/Admin/Security readiness.
-   - Merge/test retention-bounded audit export (`codex/trust-admin-security`) and URL userinfo redaction (`qa/redaction-url-userinfo-20260602131915`) only after focused security/invariant tests are green.
-   - Gate: internal operator API/security tests for rejected action keys, invalid transitions, scope failures, auth failures, export retention limits, and redacted audit/error payloads.
+1. **Operator surfaces and search analytics on top of canonical WorkItem fields**
+   - Integrate or rebase `codex/operator-surfaces` and `codex/search-analytics` only as read-only projections over `OperationalCase`, WorkItem helpers, and JQL-lite.
+   - Gate: recently-in-progress derives from `status_changed` timeline events; recently-dismissed derives from terminal/dismissal timestamps; built-in view totals/export run through the same allowlisted parser and remain redacted/business-scoped.
 
-2. **WorkItem semantic consolidation**
-   - Mark `codex/status-category-jql-20260602` as superseded unless it is rebased onto canonical `to_do`/`in_progress`/`done` helpers.
-   - Keep all new queue/export/dashboard predicates deriving from `app/brain/work_items.py` / `operational_case_status_category()`.
-   - Gate: `tests/test_work_items.py`, `tests/test_operator_case_views.py`, and any internal API projection tests proving no `todo`/`waiting` category drift leaks into canonical `status_category`.
+2. **Service-management/SLA projection slice**
+   - Integrate `codex/service-management` only if owner/service statuses remain nested projection fields such as `owner_status_category` or `service_status_category`.
+   - Gate: service/SLA tests prove `waiting_owner` / `waiting_external` never become canonical WorkItem `status_category` values; canonical categories remain only `to_do`, `in_progress`, and `done`.
 
-3. **Operator surfaces and search analytics on top of WorkItem fields**
-   - Integrate `codex/operator-surfaces` and `codex/search-analytics` as read-only projections after confirming they consume canonical WorkItem fields and do not persist duplicate state.
-   - Gate: recently-in-progress derives from `status_changed` timeline events; recently-dismissed derives from `dismissed_at`; built-in view totals/export run through the same JQL-lite parser and remain redacted/business-scoped.
+3. **Work-management lifecycle/metadata salvage**
+   - Re-evaluate `codex/work-management` for unique lifecycle/audit/issue-type metadata improvements after the project-key hash and approval-queue merges.
+   - Gate: no duplicate WorkItem persistence table, no alternate status-category vocabulary, no owner-facing copy changes, and tests prove mutation timestamps, first acknowledgement preservation, and metric-backed issue-type metadata without bypassing `OperationalCase`.
 
-4. **Service-management/SLA namespace fix**
-   - Rebase `codex/service-management` after WorkItem consolidation and rename customer/service categories to `owner_status_category` or `service_status_category`; reserve `status_category` for canonical WorkItem values.
-   - Gate: service/SLA tests prove `waiting_owner` / `waiting_external` never become canonical WorkItem status categories.
+4. **Edge/developer platform as manifest first**
+   - Reframe `codex/edge-developer-platform` as gateway policy/service-catalog contract metadata unless and until it is wired into actual route enforcement, rate limiting, and audit.
+   - Gate: docs and API responses must not imply production gateway enforcement when the code is still manifest-only.
 
-5. **Connector registry runtime hardening**
+5. **Connector registry runtime secret-ref hardening**
    - Keep registry execution on the platform path: registry -> compiled runtime -> run ledger -> semantic validation -> cases.
    - Move from transitional inline secret params toward runtime secret-ref resolution for Tiendanube/MercadoLibre/Meta Ads before promoting registry execution as compiled-runtime complete.
    - Gate: connector registry/runtime tests proving required secret refs resolve at runtime, runtime hashes do not include secret values, persisted/operator metadata redacts secret-ref URI values, and redacted failures open/update `data_stale` rather than leaking credentials.
 
-6. **Pilot-readiness runbook refresh**
-   - Update the Tiendanube/WhatsApp-first pilot checklist to reflect the real merged runtime, ledger, case, evidence, WorkItem, operator-action, and connector-metadata surfaces.
+6. **Governed workflow executor preconditions, not execution yet**
+   - Do not turn approved workflow actions into side effects until executor actor identity, provider idempotency, execution-attempt ledger, RBAC, retry/failure semantics, and redacted audit linkage exist.
+   - Gate: approval queues may remain visible, but execution projections must keep `execution_enabled = False` and `side_effects_executed = 0` until a separate executor contract and tests land.
+
+7. **Pilot-readiness runbook refresh**
+   - Update the Tiendanube/WhatsApp-first pilot checklist to reflect the real merged runtime, ledger, case, evidence, WorkItem, operator-action, connector-health, and workflow-approval surfaces.
    - Keep WhatsApp as a projection/delivery surface, not the source of truth.
    - Gate: docs link validation, secret scan, and one dry-run operator report artifact.
 
-Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, evidence, and WorkItem projections and until Trust/Admin/Security blockers are either fixed or explicitly scoped out of live use.
+Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, evidence, and WorkItem projections and until workflow execution and gateway enforcement are explicitly implemented rather than manifest/projection-only.
 
 ## Branch rules
 

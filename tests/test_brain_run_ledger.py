@@ -185,6 +185,43 @@ def test_secret_redaction_covers_common_metadata_keys_error_text_and_reference_u
     assert "safe=ok" in (artifact.uri or "")
 
 
+def test_connector_run_outcome_defaults_registry_health_state_from_status():
+    succeeded = ConnectorRunOutcome(
+        connector_id="tn-main",
+        connector_type="tiendanube",
+        status="succeeded",
+        started_at=utc_dt(8),
+        finished_at=utc_dt(8, 1),
+    )
+    failed = ConnectorRunOutcome(
+        connector_id="tn-main",
+        connector_type="tiendanube",
+        status="failed",
+        started_at=utc_dt(8),
+        finished_at=utc_dt(8, 1),
+    )
+    skipped = ConnectorRunOutcome(
+        connector_id="sample-main",
+        connector_type="sample",
+        status="skipped",
+        started_at=utc_dt(8),
+    )
+    explicit = ConnectorRunOutcome(
+        connector_id="tn-main",
+        connector_type="tiendanube",
+        status="failed",
+        health_state="unauthorized",
+        started_at=utc_dt(8),
+        finished_at=utc_dt(8, 1),
+    )
+
+    assert succeeded.health_state == "ok"
+    assert failed.health_state == "failed"
+    assert skipped.health_state == "degraded"
+    assert explicit.health_state == "unauthorized"
+    assert explicit.model_dump()["health_state"] == "unauthorized"
+
+
 def test_sqlite_run_ledger_persists_records_and_lists_newest_first(conn):
     first = SQLiteRunLedger(conn).create_run(
         run_id="run-old",

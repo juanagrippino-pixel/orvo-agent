@@ -8,6 +8,7 @@ creating a parallel task store.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import timezone
 from typing import Any, get_args
@@ -41,7 +42,12 @@ def project_key_for_business(business_id: str) -> str:
         normalized = "PROJECT"
     if normalized[0].isdigit():
         normalized = f"B_{normalized}"
-    return normalized[:_PROJECT_KEY_MAX_LENGTH]
+    if len(normalized) <= _PROJECT_KEY_MAX_LENGTH:
+        return normalized
+
+    suffix = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:8].upper()
+    prefix_length = _PROJECT_KEY_MAX_LENGTH - len(suffix)
+    return f"{normalized[:prefix_length]}{suffix}"
 
 
 def project_projection(business_id: str) -> dict[str, str]:

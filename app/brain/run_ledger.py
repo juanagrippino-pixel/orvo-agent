@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.brain.connector_health import ConnectorHealthState, default_connector_health_state
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
 
 RunTriggerType = Literal["scheduled", "forced", "manual", "preview", "backfill"]
@@ -111,6 +112,7 @@ class ConnectorRunOutcome(BaseModel):
     connector_id: str = Field(..., min_length=1)
     connector_type: str = Field(..., min_length=1)
     status: ConnectorRunStatus
+    health_state: ConnectorHealthState | None = None
     started_at: datetime
     finished_at: datetime | None = None
     metrics_count: int | None = Field(default=None, ge=0)
@@ -132,6 +134,12 @@ class ConnectorRunOutcome(BaseModel):
     @classmethod
     def redact_metadata_values(cls, value: Any) -> dict[str, Any]:
         return redact_metadata(value or {})
+
+    @model_validator(mode="after")
+    def default_health_state_from_status(self) -> "ConnectorRunOutcome":
+        if self.health_state is None:
+            self.health_state = default_connector_health_state(self.status)
+        return self
 
     @model_validator(mode="after")
     def validate_time_order(self) -> "ConnectorRunOutcome":

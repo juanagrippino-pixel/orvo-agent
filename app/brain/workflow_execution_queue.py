@@ -33,11 +33,16 @@ def _is_pending_execution(record: WorkflowActionLedgerRecord) -> bool:
 
 
 def _queue_action_projection(record: WorkflowActionLedgerRecord) -> dict[str, Any]:
+    definition = ACTION_CATALOG[record.action_key]
     payload = {
         "ledger_id": record.ledger_id,
         "business_id": record.business_id,
         "case_id": record.case_id,
         "action_key": record.action_key,
+        "label": definition.label,
+        "mode": definition.mode,
+        "side_effect": definition.side_effect,
+        "requires_approval": definition.requires_approval,
         "source": record.source,
         "rule_id": record.rule_id,
         "approval_request_id": record.approval_request_id,
