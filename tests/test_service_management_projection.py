@@ -439,3 +439,54 @@ def test_service_management_projection_summarizes_next_sla_status_and_counts():
         "on_track": 1,
         "paused": 1,
     }
+
+
+def test_list_service_management_cases_filters_by_sla_status_before_limit():
+    store = InMemoryOperationalCaseStore()
+    breached = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="filter-breached/business/monitored/inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-filter-breached",
+        ),
+        detected_at=NOW - timedelta(minutes=90),
+    )
+    store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="filter-on-track/channel/all/revenue/daily",
+            severity="warning",
+            priority=70,
+            run_id="run-filter-on-track",
+        ),
+        detected_at=NOW - timedelta(hours=2),
+    )
+
+    result = list_service_management_cases(
+        store,
+        business_id="artemea",
+        now=NOW,
+        limit=1,
+        sla_status="breached",
+    )
+
+    assert result["filters"] == {"sla_status": "breached"}
+    assert result["total"] == 1
+    assert result["unfiltered_total"] == 2
+    assert result["count"] == 1
+    assert [item["case_id"] for item in result["service_cases"]] == [breached.case_id]
+    assert result["by_sla_status"] == {"breached": 1, "on_track": 1}
+
+
+def test_list_service_management_cases_rejects_unknown_sla_status_filter():
+    store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(ValueError, match="unsupported sla_status"):
+        list_service_management_cases(
+            store,
+            business_id="artemea",
+            now=NOW,
+            sla_status="waiting_external",
+        )
