@@ -175,6 +175,20 @@ def _condition_projection(case: OperationalCase, condition: CaseWorkflowConditio
     )
 
 
+def _trigger_match_projection(rule_trigger: WorkflowTrigger, event_trigger: WorkflowTrigger | None) -> dict[str, Any]:
+    actual_trigger = event_trigger or rule_trigger
+    if actual_trigger not in WORKFLOW_TRIGGER_VALUES:
+        raise WorkflowAutomationError(
+            "unsupported_workflow_event_trigger",
+            f"unsupported workflow event trigger: {actual_trigger}",
+        )
+    return {
+        "expected": rule_trigger,
+        "actual": actual_trigger,
+        "matched": actual_trigger == rule_trigger,
+    }
+
+
 def _validate_rule(rule: WorkflowRule, case: OperationalCase) -> None:
     if rule.business_id != case.business_id:
         raise WorkflowAutomationError("business_scope_mismatch", "workflow rule business_id does not match case business_id")
@@ -369,19 +383,23 @@ def simulate_case_workflow(
     now: datetime | None = None,
     action_ledger: WorkflowActionLedgerStore | None = None,
     actor_ref: str | None = None,
+    event_trigger: WorkflowTrigger | None = None,
 ) -> dict[str, Any]:
     """Dry-run a workflow rule against one canonical Operational Case.
 
     The function validates action keys before evaluating conditions so invented
     LLM/copy-layer actions fail closed even when the rule would not match. The
     returned projection is redacted and contains deterministic idempotency/audit
-    handles, but ``side_effects_executed`` is always zero.
+    handles, but ``side_effects_executed`` is always zero. When ``event_trigger``
+    is provided, trigger mismatches are projected as non-matches and do not write
+    planned actions to the ledger.
     """
 
     _validate_rule(rule, case)
     generated_at = _now_utc() if now is None else now.astimezone(timezone.utc)
+    trigger_match = _trigger_match_projection(rule.trigger, event_trigger)
     condition_results = [_condition_projection(case, condition) for condition in rule.conditions]
-    matched = all(result["matched"] for result in condition_results)
+    matched = bool(trigger_match["matched"]) and all(result["matched"] for result in condition_results)
     actions: list[dict[str, Any]] = []
     skipped_actions: list[dict[str, Any]] = []
     if matched:
@@ -397,6 +415,7 @@ def simulate_case_workflow(
             "rule_id": rule.rule_id,
             "business_id": rule.business_id,
             "trigger": rule.trigger,
+            "trigger_match": trigger_match,
             "case": {
                 "case_id": case.case_id,
                 "case_type": case.case_type,
