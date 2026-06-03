@@ -12,6 +12,7 @@ def test_default_connector_specs_expose_control_plane_runtime_modes_and_metric_f
         assert spec.executor.supported_runtime_modes == expected_modes
         assert "runtime.freshness" in spec.emitted_metric_families
         assert "runtime.data_quality" in spec.emitted_metric_families
+        assert spec.emitted_event_families == ("connector.execution", "connector.health")
 
     tiendanube = get_connector_spec(CONNECTOR_TYPE_TIENDANUBE)
     assert "commerce.orders" in tiendanube.emitted_metric_families
