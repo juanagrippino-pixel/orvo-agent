@@ -15,6 +15,7 @@ from importlib import import_module
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
+from app.brain.connector_health import CONNECTOR_HEALTH_STATES, ConnectorHealthState
 from app.brain.semantics.metric_registry import (
     MetricRegistry,
     MetricValidationIssue,
@@ -153,14 +154,7 @@ class ConnectorHealthMetadata:
     readiness_check: str = "metadata_only"
     supports_health_check: bool = False
     degraded_state: str = "degraded"
-    allowed_states: tuple[str, ...] = (
-        "ok",
-        "degraded",
-        "stale",
-        "unauthorized",
-        "rate_limited",
-        "failed",
-    )
+    allowed_states: tuple[ConnectorHealthState, ...] = CONNECTOR_HEALTH_STATES
 
 
 @dataclass(frozen=True, slots=True)
