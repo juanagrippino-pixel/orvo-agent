@@ -1946,6 +1946,86 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     assert event["data"]["payload"]["metadata"]["access_token"] == "[REDACTED]"
 
 
+def test_internal_operator_audit_export_orders_by_occurred_at_not_insert_order(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    newer_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:newer",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={},
+        created_at=datetime(2026, 5, 24, 12, tzinfo=timezone.utc),
+    )
+    older_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:older",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={},
+        created_at=datetime(2026, 5, 24, 9, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert [event["event_id"] for event in body["data"]["events"]] == [newer_id, older_id]
+
+
+def test_internal_operator_audit_export_rejects_invalid_and_non_positive_limits(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    invalid = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=not-an-int",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+    zero = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=0",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_limit"
+    assert zero.status_code == 400
+    assert zero.get_json()["error"]["code"] == "invalid_limit"
+
+
+def test_internal_operator_audit_export_caps_limit_at_200(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    now = datetime.now(timezone.utc)
+    for index in range(205):
+        store.append_event(
+            business_id="artemea",
+            actor_ref=f"operator:{index}",
+            event_type="operator.case_action.failed",
+            target_type="operational_case",
+            data={},
+            created_at=now - timedelta(seconds=index),
+        )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=500",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"]["limit"] == 200
+    assert body["data"]["count"] == 200
+    assert len(body["data"]["events"]) == 200
+
+
 def test_internal_operator_audit_export_enforces_retention_window(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     now = datetime.now(timezone.utc)

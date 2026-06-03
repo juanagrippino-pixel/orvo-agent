@@ -29,7 +29,7 @@ def register_operator_audit_routes(app):
         if permission_error is not None:
             return permission_error
         try:
-            limit = parse_limit(request.args.get("limit"), default=50)
+            limit = parse_limit(request.args.get("limit"), default=50, max_limit=200)
             retention_days = parse_audit_retention_days(request.args.get("retention_days"))
         except OperatorAPIError as exc:
             return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
