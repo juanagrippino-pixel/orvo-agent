@@ -106,10 +106,17 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("status_category IN (to_do, done)").normalized == (
         "status_category IN (to_do, done) ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("work_item_id = ARTEMEA:case-123").normalized == (
+        "work_item_id = ARTEMEA:case-123 ORDER BY priority_score DESC, opened_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
     assert unsupported_category.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as unsupported_work_item_operator:
+        parse_case_jql("work_item_id > ARTEMEA:case-123")
+    assert unsupported_work_item_operator.value.code == "unsupported_jql_operator"
 
 
 def test_parse_case_jql_supports_assigned_boolean_filter():
@@ -325,6 +332,28 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert case["work_item"]["case_id"] == assigned.case_id
     assert case["work_item"]["work_item_id"] == f"ARTEMEA:{assigned.case_id}"
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+    work_item_response = client.get(
+        f"/internal/brain/businesses/artemea/cases?jql=work_item_id%20%3D%20ARTEMEA:{assigned.case_id}",
+        headers=AUTH,
+    )
+
+    assert work_item_response.status_code == 200
+    work_item_body = work_item_response.get_json()
+    assert work_item_body["data"]["normalized_jql"] == (
+        f"work_item_id = ARTEMEA:{assigned.case_id} ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert [case["case_id"] for case in work_item_body["data"]["cases"]] == [assigned.case_id]
+
+    cross_project_response = client.get(
+        f"/internal/brain/businesses/artemea/cases?jql=work_item_id%20%3D%20OTHER:{assigned.case_id}",
+        headers=AUTH,
+    )
+
+    assert cross_project_response.status_code == 200
+    cross_project_body = cross_project_response.get_json()
+    assert cross_project_body["data"]["cases"] == []
+    assert cross_project_body["data"]["total"] == 0
 
 
 def test_internal_case_queue_filters_unassigned_actionable_cases_and_keeps_business_scope(monkeypatch, tmp_path):
