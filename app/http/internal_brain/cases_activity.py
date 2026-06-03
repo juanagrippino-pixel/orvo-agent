@@ -117,6 +117,20 @@ def register_case_activity_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/handling-latency/by-case-type")
+    def internal_brain_cases_handling_latency_by_case_type(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_handling_latency_histogram_by_case_type(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/handling-latency/by-priority-bracket")
     def internal_brain_cases_handling_latency_by_priority_bracket(business_id: str):
         return _with_internal_stores(
