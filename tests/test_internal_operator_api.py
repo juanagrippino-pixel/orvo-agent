@@ -644,6 +644,33 @@ def test_internal_read_rejects_unknown_role(monkeypatch, tmp_path):
     assert body["error"]["code"] == "forbidden"
 
 
+def test_internal_read_unknown_role_audit_redacts_malformed_role_header(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "superuser access_token=raw_role_secret",
+            "X-Orvo-Operator": "operator:juan",
+            "X-Request-ID": "req-unknown-role",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_role_secret" not in raw_body
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["request_id"] == "req-unknown-role"
+    assert event["data"]["reason"] == "unknown_operator_role"
+    assert event["data"]["role"] == "[REDACTED]"
+    assert "raw_role_secret" not in json.dumps(event, sort_keys=True)
+
+
 def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_run(db_path, business_id="artemea", run_id="run-artemea")

@@ -140,6 +140,17 @@ def permissions_for_role(role: str) -> list[str]:
     return sorted(_ROLE_PERMISSIONS.get(role, frozenset()))
 
 
+def audit_safe_operator_role(role: str) -> str:
+    """Return a safe role label for durable authorization-denial audit payloads.
+
+    Known roles are product semantics and useful for investigations. Unknown role
+    headers are caller-controlled input and may carry pasted credentials, so the
+    audit log should not retain even partially redacted tails for them.
+    """
+
+    return role if role in _ROLE_PERMISSIONS else "[REDACTED]"
+
+
 def project_internal_operator_session(principal: InternalOperatorPrincipal) -> dict[str, dict[str, object]]:
     """Project a safe operator session for internal UIs and control surfaces."""
 

@@ -14,6 +14,7 @@ from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
+    audit_safe_operator_role,
     build_internal_operator_principal,
     permissions_for_role,
     require_internal_business_scope,
@@ -173,7 +174,7 @@ def _authorization_denial_data(exc: InternalOperatorAuthorizationError) -> dict:
         "reason": exc.code,
         "status_code": exc.status_code,
         "method": request.method,
-        "role": exc.role,
+        "role": audit_safe_operator_role(exc.role),
         "permission": exc.permission,
     }
     safe_allowed_businesses = _safe_audit_values(exc.allowed_businesses)
