@@ -30,6 +30,7 @@ from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerError,
     WorkflowApprovalRequest,
 )
+from app.brain.workflow_action_audit import list_workflow_action_audit_events
 from app.brain.workflow_approval_queue import list_workflow_approval_queue
 from app.brain.workflow_execution_queue import list_workflow_execution_queue
 
@@ -915,3 +916,108 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert "case-unknown" not in str(queue)
     assert "invented_llm_action" not in str(queue)
     assert "raw_queue" not in str(queue)
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_action_audit_events_project_planning_approval_and_decision_without_side_effects(
+    tmp_path, store_factory
+):
+    ledger = store_factory(tmp_path)
+    ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-dry-run",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/audit/case-dry-run/acknowledge_case/dry-run",
+        execution_state="dry_run",
+        approval_required=False,
+        source="workflow",
+        actor_ref="operator token=raw_audit_actor_secret",
+        params={"reason": "Ack token=raw_audit_dry_param_secret"},
+        rule_id="audit-rule",
+        now=utc(21),
+    )
+    approval_write = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approval",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/audit/case-approval/request_external_action/approval",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator",
+        params={
+            "target": "supplier-a",
+            "reason": "Restock Authorization: Basic raw_audit_plan_secret",
+        },
+        rule_id="audit-rule",
+        now=utc(21, 5),
+    )
+    ledger.record_planned_action(
+        business_id="other-business",
+        case_id="case-other",
+        action_key="request_external_action",
+        idempotency_key="workflow/other-business/audit/case-other/request_external_action/other",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-x", "reason": "Other business"},
+        rule_id="audit-rule",
+        now=utc(21, 10),
+    )
+    assert approval_write.approval_request is not None
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_write.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager token=raw_audit_decision_actor_secret",
+        reason="Approved Authorization: Basic raw_audit_decision_reason_secret",
+        now=utc(21, 30),
+    )
+
+    audit = list_workflow_action_audit_events(ledger, business_id="artemea", limit=3)
+
+    assert audit["business_id"] == "artemea"
+    assert audit["audit_projection_enabled"] is True
+    assert audit["side_effects_executed"] == 0
+    assert audit["total"] == 4
+    assert audit["returned"] == 3
+    assert [event["event_type"] for event in audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_action_planned",
+        "workflow_approval_requested",
+    ]
+    assert audit["events"][0]["actor_ref"] == "operator token=[REDACTED]"
+    assert audit["events"][0]["approval_state"] == "not_required"
+    assert audit["events"][0]["execution_state"] == "dry_run"
+    assert audit["events"][1]["approval_request_id"] == approval_write.approval_request.approval_request_id
+    assert audit["events"][1]["params"]["reason"] == "Restock Authorization: [REDACTED]"
+    assert audit["events"][2]["status"] == "pending"
+    assert audit["events"][2]["current_status"] == "approved"
+    assert audit["events"][2]["decision_state"] == "approval_requested"
+    assert audit["events"][2]["approval_state"] == "pending"
+    assert audit["events"][2]["current_approval_state"] == "approved"
+    assert audit["events"][2]["execution_state"] == "blocked_approval_required"
+    assert audit["events"][2]["current_execution_state"] == "pending_execution"
+
+    full_audit = list_workflow_action_audit_events(ledger, business_id="artemea")
+    assert [event["event_type"] for event in full_audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_action_planned",
+        "workflow_approval_requested",
+        "workflow_approval_decided",
+    ]
+    decision_event = full_audit["events"][-1]
+    assert decision_event["decision"] == "approved"
+    assert decision_event["decision_actor_ref"] == "manager token=[REDACTED]"
+    assert decision_event["decision_reason"] == "Approved Authorization: [REDACTED]"
+    assert decision_event["approval_state"] == "approved"
+    assert decision_event["execution_state"] == "pending_execution"
+    assert "case-other" not in str(full_audit)
+    assert "other-business" not in str(full_audit)
+    assert "raw_audit" not in str(audit)
+    assert "raw_audit" not in str(full_audit)
