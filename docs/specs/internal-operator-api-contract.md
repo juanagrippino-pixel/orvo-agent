@@ -70,12 +70,16 @@ GET /internal/brain/businesses/{business_id}/runs/{run_id}
 
 Returns run status, connector outcomes, artifacts, dispatch status, cases opened/updated.
 
-### Cases
+### Cases and built-in case views
 
 ```http
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
+GET /internal/brain/businesses/{business_id}/case-views
+GET /internal/brain/businesses/{business_id}/case-views/{view_id}/cases
+GET /internal/brain/businesses/{business_id}/case-views/{view_id}/export
+GET /internal/brain/businesses/{business_id}/case-views/{view_id}/summary
 ```
 
 Actions must use registered action keys and append timeline events. Manual case-action
@@ -84,6 +88,11 @@ mutation with a stable error envelope and redacted audit event. Valid keys are
 reserved in the durable workflow action ledger before the case mutation, duplicate
 completed requests replay the current case with `data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope.
+Built-in case views are read-only projections over the canonical Operational Case
+store; view execution, exports, and summaries must remain route-scoped by
+`business_id`, use allowlisted JQL-lite definitions, and return redacted
+enveloped responses. View summaries return aggregate facets only, not raw case
+rows.
 
 ### Operator audit events
 
