@@ -49,6 +49,7 @@ def _resolve(
     *,
     acknowledged_at: datetime,
     resolved_at: datetime,
+    reason: str = "Resolved in test fixture",
 ) -> None:
     store.transition_case(
         case_id,
@@ -62,7 +63,7 @@ def _resolve(
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
-        reason="Resolved in test fixture",
+        reason=reason,
         transitioned_at=resolved_at,
     )
 
@@ -125,6 +126,29 @@ def test_list_recently_resolved_cases_orders_most_recent_first():
     assert first["case_type"] == "unanswered_conversations"
     assert first["resolved_at"].startswith("2026-05-26T10:00:00")
     assert first["resolution_seconds"] == int(timedelta(hours=12).total_seconds())
+    assert first["terminal_reason"] == "Resolved in test fixture"
+
+
+def test_list_recently_resolved_cases_projects_redacted_terminal_reason():
+    store = InMemoryOperationalCaseStore()
+    case = store.upsert_detection(
+        _detection(run_id="run-secret-reason"),
+        detected_at=NOW - timedelta(days=1),
+    )
+    _resolve(
+        store,
+        case.case_id,
+        acknowledged_at=NOW - timedelta(hours=20),
+        resolved_at=NOW - timedelta(hours=1),
+        reason="Resolved after checking access_token=raw_terminal_secret",
+    )
+
+    result = list_recently_resolved_cases(store, business_id="artemea")
+
+    assert result["cases"][0]["case_id"] == case.case_id
+    assert "terminal_reason" in result["cases"][0]
+    assert "raw_terminal_secret" not in str(result)
+    assert "[REDACTED]" in result["cases"][0]["terminal_reason"]
 
 
 def test_list_recently_resolved_cases_respects_limit():

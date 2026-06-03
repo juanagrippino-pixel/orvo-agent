@@ -4,6 +4,18 @@ from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 
 
+def _case_terminal_reason(case: OperationalCase, terminal_status: str) -> str | None:
+    """Return the redacted reason summary for a terminal status transition."""
+
+    for event in reversed(case.timeline):
+        if event.event_type != "status_changed":
+            continue
+        if event.metadata.get("to_status") != terminal_status:
+            continue
+        return redact_text(event.summary)
+    return None
+
+
 def list_recently_resolved_cases(
     store: OperationalCaseStore,
     *,
@@ -42,6 +54,7 @@ def list_recently_resolved_cases(
             "opened_at": case.opened_at.isoformat(),
             "resolved_at": case.resolved_at.isoformat(),
             "resolution_seconds": int((case.resolved_at - case.opened_at).total_seconds()),
+            "terminal_reason": _case_terminal_reason(case, "resolved"),
         }
         for _resolved_at, _case_id, case in limited
     ]
@@ -361,6 +374,7 @@ def list_recently_dismissed_cases(
             "opened_at": case.opened_at.isoformat(),
             "dismissed_at": dismissed_at.isoformat(),
             "dismissal_seconds": int((dismissed_at - case.opened_at).total_seconds()),
+            "terminal_reason": _case_terminal_reason(case, "dismissed"),
         }
         for dismissed_at, _case_id, case in limited
     ]

@@ -42,13 +42,14 @@ def _dismiss(
     case_id: str,
     *,
     dismissed_at: datetime,
+    reason: str = "No longer actionable after manual review.",
 ) -> None:
     store.transition_case(
         case_id,
         status="dismissed",
         actor_type="operator",
         actor_ref="operator@example.com",
-        reason="No longer actionable after manual review.",
+        reason=reason,
         transitioned_at=dismissed_at,
     )
 
@@ -98,7 +99,29 @@ def test_orders_most_recently_dismissed_first_and_redacts_payload():
     assert first["case_type"] == "sales_drop"
     assert first["dismissed_at"].startswith("2026-05-26T09:00:00")
     assert first["dismissal_seconds"] == int(timedelta(hours=5).total_seconds())
+    assert first["terminal_reason"] == "No longer actionable after manual review."
     assert "raw_secret_title" not in str(result)
+
+
+def test_projects_redacted_terminal_reason():
+    store = InMemoryOperationalCaseStore()
+    case = store.upsert_detection(
+        _detection(run_id="run-secret-dismissal"),
+        detected_at=NOW - timedelta(days=1),
+    )
+    _dismiss(
+        store,
+        case.case_id,
+        dismissed_at=NOW - timedelta(hours=1),
+        reason="Dismissed after checking api_key=raw_terminal_secret",
+    )
+
+    result = list_recently_dismissed_cases(store, business_id="artemea")
+
+    assert result["cases"][0]["case_id"] == case.case_id
+    assert "terminal_reason" in result["cases"][0]
+    assert "raw_terminal_secret" not in str(result)
+    assert "[REDACTED]" in result["cases"][0]["terminal_reason"]
 
 
 def test_respects_limit_and_scopes_per_business():
