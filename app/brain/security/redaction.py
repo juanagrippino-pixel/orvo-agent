@@ -109,6 +109,14 @@ def _redact_bare_oauth_code_values(value: str) -> str:
     return _UNQUOTED_BARE_OAUTH_CODE_RE.sub(redact_unquoted, quoted_redacted)
 
 
+def _redact_url_userinfo(netloc: str) -> str:
+    """Redact userinfo credentials while preserving the routable host/port."""
+
+    if "@" not in netloc:
+        return netloc
+    return f"[REDACTED]@{netloc.rsplit('@', 1)[1]}"
+
+
 def redact_uri(value: str | None) -> str | None:
     """Redact secret-shaped query params from URL/reference strings."""
 
@@ -119,8 +127,11 @@ def redact_uri(value: str | None) -> str | None:
         parts = urlsplit(redacted)
     except ValueError:
         return redacted
+    safe_netloc = _redact_url_userinfo(parts.netloc)
     if not parts.query:
-        return redacted
+        if safe_netloc == parts.netloc:
+            return redacted
+        return urlunsplit((parts.scheme, safe_netloc, parts.path, parts.query, parts.fragment))
 
     safe_query = urlencode(
         [
@@ -129,7 +140,7 @@ def redact_uri(value: str | None) -> str | None:
         ],
         doseq=True,
     )
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, safe_query, parts.fragment))
+    return urlunsplit((parts.scheme, safe_netloc, parts.path, safe_query, parts.fragment))
 
 
 def _sanitize_secret_ref(value: str) -> str:

@@ -91,6 +91,21 @@ def test_redact_text_removes_multi_token_basic_authorization_headers():
     assert redacted == "connector failed with Authorization: [REDACTED] while syncing"
 
 
+def test_redact_uri_removes_url_userinfo_credentials_without_dropping_safe_context():
+    from app.brain.security.redaction import redact_uri
+
+    uri = "https://raw_user:raw_userinfo_password@api.example.test/orders?access_token=raw-query-token&store=artemea"
+
+    redacted = redact_uri(uri)
+
+    assert redacted == "https://[REDACTED]@api.example.test/orders?access_token=%5BREDACTED%5D&store=artemea"
+    assert "raw_user" not in (redacted or "")
+    assert "raw_userinfo_password" not in (redacted or "")
+    assert "raw-query-token" not in (redacted or "")
+    assert "api.example.test/orders" in (redacted or "")
+    assert "store=artemea" in (redacted or "")
+
+
 def test_redact_text_redacts_bare_oauth_code_key_values_without_dropping_context():
     from app.brain.security.redaction import redact_text
 
