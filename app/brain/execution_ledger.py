@@ -112,14 +112,17 @@ def _connector_contract_metadata(
         spec = default_connector_registry().get(connector_type)
     except UnknownConnectorError:
         return metadata
+    assert spec.executor is not None  # populated by ConnectorSpec.__post_init__
     metadata.update(
         {
             "executor_factory_path": spec.factory_path,
+            "supported_runtime_modes": list(spec.executor.supported_runtime_modes),
             "capabilities": list(spec.capabilities),
             "emitted_metric_families": list(spec.emitted_metric_families),
             "required_scopes": list(spec.scopes.required),
             "health_policy": spec.health_policy_metadata(),
             "rate_limit_policy": spec.rate_limit_policy_metadata(),
+            "lifecycle": spec.lifecycle_metadata(),
         }
     )
     return metadata
