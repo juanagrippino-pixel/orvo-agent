@@ -183,6 +183,35 @@ def _sla_projection(case: OperationalCase, *, owner_status: dict[str, str], refe
     }
 
 
+def _sla_status(sla: dict[str, Any]) -> dict[str, Any]:
+    """Summarize active SLA clocks into one owner/operator queue state."""
+
+    clocks = [sla["first_response"], sla["resolution"]]
+    active_clocks = [clock for clock in clocks if not clock["completed"] and not clock.get("paused")]
+    breached_clocks = [clock for clock in active_clocks if clock["breached"]]
+    paused_clocks = [clock for clock in clocks if not clock["completed"] and clock.get("paused")]
+
+    def _clock_payload(*, code: str, label_es: str, clock: dict[str, Any] | None) -> dict[str, Any]:
+        return {
+            "code": code,
+            "label_es": label_es,
+            "active_policy_key": clock["policy_key"] if clock is not None else None,
+            "due_at": clock["due_at"] if clock is not None else None,
+            "remaining_seconds": clock["remaining_seconds"] if clock is not None else None,
+        }
+
+    if breached_clocks:
+        breached = min(breached_clocks, key=lambda clock: clock["due_at"])
+        return _clock_payload(code="breached", label_es="SLA vencido", clock=breached)
+    if active_clocks:
+        next_clock = min(active_clocks, key=lambda clock: clock["due_at"])
+        return _clock_payload(code="on_track", label_es="SLA en curso", clock=next_clock)
+    if paused_clocks:
+        paused = min(paused_clocks, key=lambda clock: clock["due_at"])
+        return _clock_payload(code="paused", label_es="SLA pausado", clock=paused)
+    return _clock_payload(code="completed", label_es="SLA completado", clock=None)
+
+
 def _escalation_reasons(
     case: OperationalCase,
     *,
@@ -251,6 +280,7 @@ def service_management_case_item(case: OperationalCase, *, now: datetime | None 
     reference = _normalize_reference_time(now)
     owner_status = _owner_status(case)
     sla = _sla_projection(case, owner_status=owner_status, reference=reference)
+    sla_status = _sla_status(sla)
     escalation_reasons = _escalation_reasons(case, owner_status=owner_status, sla=sla)
     return redact_secrets(
         {
@@ -270,6 +300,7 @@ def service_management_case_item(case: OperationalCase, *, now: datetime | None 
             "dismissed_at": _iso(case.dismissed_at),
             "latest_run_id": case.latest_run_id,
             "sla": sla,
+            "sla_status": sla_status,
             "needs_escalation": bool(escalation_reasons),
             "escalation_reasons": escalation_reasons,
         }
@@ -291,11 +322,14 @@ def list_service_management_cases(
     rows = [service_management_case_item(case, now=reference) for case in limited_cases]
     by_record_type: dict[str, int] = {}
     by_owner_status: dict[str, int] = {}
+    by_sla_status: dict[str, int] = {}
     for case in all_cases:
         record_type = _service_record_type(case)["code"]
         status = _owner_status(case)["code"]
+        sla_status = service_management_case_item(case, now=reference)["sla_status"]["code"]
         by_record_type[record_type] = by_record_type.get(record_type, 0) + 1
         by_owner_status[status] = by_owner_status.get(status, 0) + 1
+        by_sla_status[sla_status] = by_sla_status.get(sla_status, 0) + 1
     return redact_secrets(
         {
             "business_id": business_id,
@@ -305,6 +339,7 @@ def list_service_management_cases(
             "total": len(all_cases),
             "by_service_record_type": by_record_type,
             "by_owner_status": by_owner_status,
+            "by_sla_status": by_sla_status,
             "service_cases": rows,
         }
     )
