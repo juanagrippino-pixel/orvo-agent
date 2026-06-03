@@ -457,11 +457,17 @@ Acceptance:
 
 ## Packet S — WorkItem envelope and status-category projection
 
-Goal: add the first Jira-like work-management projection layer without rewriting `OperationalCase` or making manually-created work the source of truth for deterministic cases.
+Status: satisfied in the current baseline; dispatch only as a narrow regression/fixer packet if WorkItem projection invariants drift. Do **not** revive older status-category/JQL branches that use `todo` or add a second work-item lifecycle store.
+
+Goal: keep the shipped Jira-like work-management projection layer aligned without rewriting `OperationalCase` or making manually-created work the source of truth for deterministic cases.
 
 Dependency: dispatch after current case-action, built-in view, and JQL-lite tests are green, and after Packet P is confirmed satisfied or explicitly unnecessary. This packet is a thin registry/projection/schema slice; it must not change case detection, case storage semantics, lifecycle transitions, or owner-facing WhatsApp/report copy.
 
-Source-of-truth check: the 2026-06-02 Architecture Review Board found that current code has `OperationalCaseStatus` values, deterministic case types, read-only JQL-lite views, and hardcoded transition rules, but no `Project`/`WorkItem` envelope, project key, issue-type registry, workflow scheme, status definition registry, or explicit status-category map. Add these as additive helpers/projections; do not revive stale monolithic `app/brain/operator_api.py` branch shapes.
+Current source-of-truth check:
+
+- `app/brain/work_items.py` now exposes project/work-item projections, deterministic project keys with a hash suffix for long names, issue-type definitions, workflow/status definitions, and canonical status categories.
+- `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `status_category`, and `assignee_ref` through the WorkItem/OperationalCase helpers.
+- `OperationalCase` remains the durable state owner; there is no separate WorkItem persistence table or owner-facing copy change from this slice.
 
 Read:
 
@@ -481,9 +487,9 @@ Likely files:
 
 Acceptance:
 
-- projects are represented as a projection/envelope over `business_id` with stable project keys and no tenant-crossing leakage;
+- projects remain represented as a projection/envelope over `business_id` with stable, collision-resistant project keys and no tenant-crossing leakage;
 - issue/work-item projection includes `work_item_id`, `project_key`, `issue_type`, `status`, `status_category`, priority, assignee/owner, created/updated timestamps, and canonical `case_id` for detected Operational Cases;
-- status categories are deterministic (`to_do`, `in_progress`, `done` or explicitly documented alternatives) and terminal flags match existing `resolved`/`dismissed` behavior;
+- status categories are deterministic (`to_do`, `in_progress`, `done`) and terminal flags match existing `resolved`/`dismissed` behavior;
 - workflow/status definition helpers expose the current transition table for projection/validation without enabling tenant-custom workflows yet;
 - JQL-lite grows `project`, `status_category`, `assignee_ref`, and `issue_type` fields only after they derive from the canonical projection helpers;
 - API/projection callers can read WorkItem-shaped output without bypassing the Operational Case store;
@@ -522,11 +528,18 @@ Acceptance:
 
 ## Packet U — Workflow action ledger and approval object foundation
 
-Goal: introduce durable workflow/action bookkeeping before any workflow automation can mutate cases or call external systems.
+Status: foundation mostly satisfied in the current baseline; dispatch the next slice only for approval/execution hardening that preserves zero side effects.
+
+Goal: harden durable workflow/action bookkeeping and approval projections before any workflow automation can mutate cases or call external systems.
 
 Dependency: dispatch after Packet O Trust/Admin/Security audit closure and current workflow dry-run tests are green. This packet must keep workflow automation projection-only unless the durable ledger gate is fully implemented and tested.
 
-Source-of-truth check: current `workflow_automation.py` creates redacted planned-action projections with deterministic idempotency keys and audit-shaped payloads, but there is no durable approval object, workflow action ledger, or manual case-action idempotency enforcement.
+Current source-of-truth check:
+
+- `app/brain/workflow_action_ledger.py` records durable workflow action ledger rows, enforces idempotency keys, redacts params, and creates approval-request objects for approval-required actions.
+- `app/brain/workflow_automation.py` can write planned workflow actions to the ledger while preserving projection-only behavior.
+- `app/brain/workflow_approval_queue.py` and `app/brain/workflow_execution_queue.py` expose read-only queue projections with execution disabled and `side_effects_executed = 0`.
+- Manual case-action idempotency and a governed executor are still out of scope unless a separate packet adds actor identity, provider idempotency, execution-attempt ledgering, RBAC, retry/failure semantics, and audit linkage.
 
 Read:
 
@@ -539,16 +552,18 @@ Read:
 Likely files:
 
 - `app/brain/workflow_automation.py`
-- `app/brain/operator_api.py`
-- `app/brain/storage.py`
-- `tests/test_workflow_automation.py`
-- `tests/test_operator_case_actions.py`
+- `app/brain/workflow_action_ledger.py`
+- `app/brain/workflow_approval_queue.py`
+- `app/brain/workflow_execution_queue.py`
+- `tests/test_workflow_automation_simulation.py`
+- focused operator API/case-action tests only if manual action idempotency is intentionally added.
 
 Acceptance:
 
-- workflow action ledger records action key, case/work item ref, actor/source, idempotency key, approval state, execution state, timestamps, and redacted params;
-- duplicate idempotency keys are enforced against durable storage, not only within one dry-run projection;
-- approval-required actions produce durable approval requests with deterministic lifecycle states and cannot execute as side effects;
+- workflow action ledger continues to record action key, case/work item ref, actor/source, idempotency key, approval state, execution state, timestamps, and redacted params;
+- duplicate idempotency keys continue to be enforced against durable storage, not only within one dry-run projection;
+- approval-required actions continue to produce durable approval requests with deterministic lifecycle states and cannot execute as side effects;
+- approval/execution queue projections remain read-only, redacted, business-scoped, and explicit that execution is disabled;
 - manual case mutations either accept/enforce idempotency keys or are explicitly documented as non-automated operator actions with audit coverage from Packet O;
 - no external side effects are executed and existing dry-run projections remain backward-compatible.
 
