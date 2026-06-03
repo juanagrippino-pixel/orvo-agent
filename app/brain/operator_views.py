@@ -27,6 +27,7 @@ from app.brain.work_items import (
     case_issue_type,
     case_project_key,
     case_status_category,
+    case_work_item_id,
 )
 
 _MAX_JQL_LENGTH = 512
@@ -82,6 +83,7 @@ _FIELD_SPECS: dict[str, FieldSpec] = {
     "status_category": FieldSpec("enum", _ALLOWED_STATUS_CATEGORIES),
     "project": FieldSpec("string"),
     "issue_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
+    "work_item_id": FieldSpec("string"),
     "assignee_ref": FieldSpec("string"),
     "case_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
     "severity": FieldSpec("enum", _ALLOWED_SEVERITY),
@@ -506,6 +508,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_project_key(case)
     if field == "issue_type":
         return case_issue_type(case)
+    if field == "work_item_id":
+        return case_work_item_id(case)
     if field == "status_category":
         return case_status_category(case)
     if field == "assigned":
