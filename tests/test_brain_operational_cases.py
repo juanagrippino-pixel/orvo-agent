@@ -161,6 +161,72 @@ def test_owner_facing_actionable_cases_excludes_legacy_cases_without_evidence_sn
     assert [case.case_id for case in owner_cases] == [with_evidence.case_id]
 
 
+@pytest.mark.parametrize(
+    "hidden_metadata",
+    [
+        {"owner_facing_ready": False, "suppression_reason": "truth_gate_pending"},
+        {"hidden_from_owner": True, "suppression_reason": "operator_only"},
+        {"owner_visibility": "internal_only", "suppression_reason": "internal_triage"},
+    ],
+)
+def test_owner_facing_actionable_cases_suppresses_hidden_policy_cases_but_keeps_data_health_caveat(hidden_metadata):
+    from app.brain.operational_cases import make_data_stale_detection
+
+    store = InMemoryOperationalCaseStore()
+    hidden_stockout = store.upsert_detection(
+        make_stockout_detection(run_id="run-hidden", snapshots=[make_stock_snapshot(run_id="run-hidden")]).model_copy(
+            update={"metadata": hidden_metadata},
+            deep=True,
+        ),
+        detected_at=utc_dt(8),
+    )
+    visible_stockout = store.upsert_detection(
+        make_stockout_detection(
+            run_id="run-visible",
+            evidence_ref="evidence://tn/stock/2026-05-25",
+            snapshots=[make_stock_snapshot(run_id="run-visible", snapshot_key="run-visible/evidence://tn/stock/fresh")],
+        ).model_copy(
+            update={
+                "dedupe_key": "artemea/stockout_risk/business/visible/commerce.inventory/daily",
+                "entity_scope": {"kind": "business", "id": "visible", "label": "Productos visibles"},
+            },
+            deep=True,
+        ),
+        detected_at=utc_dt(9),
+    )
+    data_health_caveat = store.upsert_detection(
+        make_data_stale_detection(
+            business_id="artemea",
+            connector_type="tiendanube",
+            run_id="run-data-stale",
+            error_summary="tiendanube data is stale",
+        ).model_copy(
+            update={
+                "evidence_snapshots": [
+                    OperationalCaseEvidenceSnapshot(
+                        snapshot_key="run-data-stale/evidence://tiendanube/data_stale",
+                        captured_at=utc_dt(10),
+                        run_id="run-data-stale",
+                        evidence_ref="evidence://tiendanube/2026-05-24/data_stale",
+                        source="tiendanube",
+                        source_label="Tiendanube",
+                        case_type="data_stale",
+                        entity_scope={"kind": "connector", "id": "tiendanube"},
+                        summary="Tiendanube data is stale; downstream advice suppressed.",
+                        freshness_state="stale",
+                    )
+                ]
+            },
+            deep=True,
+        ),
+        detected_at=utc_dt(10),
+    )
+
+    owner_cases = owner_facing_actionable_cases([hidden_stockout, visible_stockout, data_health_caveat])
+
+    assert [case.case_id for case in owner_cases] == [visible_stockout.case_id, data_health_caveat.case_id]
+
+
 def test_detect_cases_from_report_synthesizes_minimal_evidence_snapshots():
     source = Evidence(source="tiendanube", label="Tiendanube")
     report = DailyReport(
