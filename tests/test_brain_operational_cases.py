@@ -264,6 +264,23 @@ def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():
     assert updated.timeline[0].event_type == "case_opened"
     assert updated.timeline[-1].event_type == "case_updated"
 
+    priority_downgrade = make_stockout_detection(
+        run_id="run-3",
+        evidence_ref="evidence://tn/stock/2026-05-26",
+    ).model_copy(update={"severity": "warning", "priority_score": 70, "title": "Stock warning"})
+    reprioritized = store.upsert_detection(priority_downgrade, detected_at=utc_dt(9, 30))
+
+    assert reprioritized.timeline[-1].event_type == "case_updated"
+    assert reprioritized.timeline[-1].metadata == {
+        "dedupe_key": "artemea/stockout_risk/business/monitored/commerce.inventory/daily",
+        "from_status": "open",
+        "to_status": "open",
+        "from_severity": "critical",
+        "to_severity": "warning",
+        "from_priority_score": 100,
+        "to_priority_score": 70,
+    }
+
     acknowledged = store.transition_case(
         opened.case_id,
         status="acknowledged",
