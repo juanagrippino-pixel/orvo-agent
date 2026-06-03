@@ -151,6 +151,15 @@ Capabilities:
 
 Cross-source cases must suppress claims when commerce or ads source is stale.
 
+## Event family taxonomy
+
+Default connector specs expose these event families in compiled runtime and connector outcome metadata:
+
+- `connector.execution` — connector run started/finished/failed outcome envelope recorded by the run ledger;
+- `connector.health` — typed connector health/degraded state envelope (`ok`, `degraded`, `stale`, `unauthorized`, `rate_limited`, `failed`).
+
+Adapters must not claim additional event families until runtime/ledger code actually records them.
+
 ## Health state taxonomy
 
 | State | Meaning | Owner-facing behavior |
