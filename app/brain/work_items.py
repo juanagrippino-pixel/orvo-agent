@@ -83,6 +83,7 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
         facetable=True,
     ),
     WorkItemQueryFieldDefinition("project", "string", facetable=True),
+    WorkItemQueryFieldDefinition("work_item_id", "string", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("issue_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
     WorkItemQueryFieldDefinition(
         "release_state",
