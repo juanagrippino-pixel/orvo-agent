@@ -186,6 +186,29 @@ def test_family_envelope_helper_returns_empty_when_all_metrics_inside_envelope()
     )
 
 
+def test_family_envelope_helper_honors_declared_transitional_compatibility_families():
+    from app.brain.semantics.metric_registry import find_family_envelope_violations
+
+    # The sample/manual connector declares the transitional manual.payload
+    # envelope rather than every canonical commerce/support/ads family it can
+    # carry through explicit aliases. The helper must expand that declared
+    # compatibility envelope before flagging undeclared-family drift.
+    assert (
+        find_family_envelope_violations(
+            (
+                "orders_today",
+                "revenue_today",
+                "stock_units",
+                "unanswered_conversations",
+                "ad_spend_today",
+            ),
+            connector_type="sample",
+            declared_families=("manual.payload", "runtime.freshness", "runtime.data_quality"),
+        )
+        == []
+    )
+
+
 def test_family_envelope_helper_skips_unknown_keys_so_diagnostics_compose():
     from app.brain.semantics.metric_registry import find_family_envelope_violations
 
