@@ -55,6 +55,10 @@ _WAITING_OWNER_STATUSES: dict[str, dict[str, str]] = {
         "status_category": "in_progress",
     },
 }
+ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES = frozenset(
+    {payload["code"] for payload in _OWNER_STATUS_BY_CASE_STATUS.values()}
+    | {payload["code"] for payload in _WAITING_OWNER_STATUSES.values()}
+)
 
 _FIRST_RESPONSE_TARGET_SECONDS: dict[str, int] = {
     "critical": 60 * 60,
@@ -103,6 +107,14 @@ def _normalize_service_record_type_filter(service_record_type: str | None) -> st
     if service_record_type not in ALLOWED_SERVICE_MANAGEMENT_RECORD_TYPES:
         raise ValueError(f"unsupported service_record_type: {service_record_type}")
     return str(service_record_type)
+
+
+def _normalize_owner_status_filter(owner_status: str | None) -> str | None:
+    if owner_status in (None, ""):
+        return None
+    if owner_status not in ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES:
+        raise ValueError(f"unsupported owner_status: {owner_status}")
+    return str(owner_status)
 
 
 def _service_record_type(case: OperationalCase) -> dict[str, str]:
@@ -334,12 +346,14 @@ def list_service_management_cases(
     now: datetime | None = None,
     sla_status: str | None = None,
     service_record_type: str | None = None,
+    owner_status: str | None = None,
 ) -> dict[str, Any]:
     """List service-management projections for cases in one business scope."""
 
     reference = _normalize_reference_time(now)
     parsed_sla_status = _normalize_sla_status_filter(sla_status)
     parsed_service_record_type = _normalize_service_record_type_filter(service_record_type)
+    parsed_owner_status = _normalize_owner_status_filter(owner_status)
     all_cases = store.list_cases(business_id=business_id, limit=None)
     all_rows = [service_management_case_item(case, now=reference) for case in all_cases]
     filtered_rows = all_rows
@@ -349,6 +363,8 @@ def list_service_management_cases(
         filtered_rows = [
             row for row in filtered_rows if row["service_record_type"]["code"] == parsed_service_record_type
         ]
+    if parsed_owner_status is not None:
+        filtered_rows = [row for row in filtered_rows if row["owner_status"]["code"] == parsed_owner_status]
     rows = filtered_rows[:limit] if limit is not None else filtered_rows
     by_record_type: dict[str, int] = {}
     by_owner_status: dict[str, int] = {}
@@ -365,6 +381,8 @@ def list_service_management_cases(
         filters["sla_status"] = parsed_sla_status
     if parsed_service_record_type is not None:
         filters["service_record_type"] = parsed_service_record_type
+    if parsed_owner_status is not None:
+        filters["owner_status"] = parsed_owner_status
     return redact_secrets(
         {
             "business_id": business_id,

@@ -530,6 +530,53 @@ def test_list_service_management_cases_filters_by_service_record_type_before_lim
     assert result["by_service_record_type"] == {"incident": 1, "problem": 1, "service_request": 1}
 
 
+def test_list_service_management_cases_filters_by_owner_status_before_limit():
+    store = InMemoryOperationalCaseStore()
+    waiting_external = store.upsert_detection(
+        _detection(
+            case_type="data_stale",
+            dedupe_suffix="filter-owner-waiting/connector/tiendanube/freshness/daily",
+            severity="warning",
+            priority=80,
+            run_id="run-filter-owner-waiting",
+            metadata={"waiting_on": "external"},
+        ),
+        detected_at=NOW - timedelta(hours=10),
+    )
+    store.transition_case(
+        waiting_external.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=6),
+    )
+    store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="filter-owner-new/business/monitored/inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-filter-owner-new",
+        ),
+        detected_at=NOW - timedelta(minutes=30),
+    )
+
+    result = list_service_management_cases(
+        store,
+        business_id="artemea",
+        now=NOW,
+        limit=1,
+        owner_status="waiting_external",
+    )
+
+    assert result["filters"] == {"owner_status": "waiting_external"}
+    assert result["total"] == 1
+    assert result["unfiltered_total"] == 2
+    assert result["count"] == 1
+    assert [item["case_id"] for item in result["service_cases"]] == [waiting_external.case_id]
+    assert result["by_owner_status"] == {"new": 1, "waiting_external": 1}
+
+
 def test_list_service_management_cases_rejects_unknown_sla_status_filter():
     store = InMemoryOperationalCaseStore()
 
@@ -551,4 +598,16 @@ def test_list_service_management_cases_rejects_unknown_service_record_type_filte
             business_id="artemea",
             now=NOW,
             service_record_type="task",
+        )
+
+
+def test_list_service_management_cases_rejects_unknown_owner_status_filter():
+    store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(ValueError, match="unsupported owner_status"):
+        list_service_management_cases(
+            store,
+            business_id="artemea",
+            now=NOW,
+            owner_status="blocked",
         )
