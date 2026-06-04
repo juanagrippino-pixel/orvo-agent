@@ -5,6 +5,7 @@ import sqlite3
 from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.storage import init_schema
 from app.brain.work_items import (
+    allowed_status_categories,
     case_project_key,
     case_status_category,
     case_work_item_projection,
@@ -93,7 +94,15 @@ def test_status_and_workflow_definitions_expose_current_transition_table(tmp_pat
 
     status_by_key = {definition["status"]: definition for definition in operational_case_status_definitions()}
     workflow = operational_case_workflow_definition()
+    canonical_categories = {"to_do", "in_progress", "done"}
 
+    assert allowed_status_categories() == canonical_categories
+    assert set(status_by_key) == {"open", "acknowledged", "in_progress", "resolved", "dismissed"}
+    assert {definition["status_category"] for definition in status_by_key.values()} <= canonical_categories
+    assert "waiting_owner" not in allowed_status_categories()
+    assert "waiting_external" not in allowed_status_categories()
+    assert "waiting_owner" not in status_by_key
+    assert "waiting_external" not in status_by_key
     assert case_status_category(acknowledged) == "in_progress"
     assert case_status_category(in_progress) == "in_progress"
     assert case_status_category(resolved) == "done"
