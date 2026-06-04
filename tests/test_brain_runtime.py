@@ -88,6 +88,7 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
 
 
 def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_params_or_raw_secrets():
+    from app.brain.connector_registry import get_connector_spec
     from app.brain.runtime import compile_business_runtime, runtime_run_metadata
 
     runtime = compile_business_runtime(make_business(), run_mode="forced")
@@ -115,6 +116,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
             "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+            "executor_metadata": get_connector_spec("google_sheets").executor_policy_metadata(),
             "health_policy": {
                 "readiness_check": "metadata_only",
                 "supports_health_check": False,
@@ -161,6 +163,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
             "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube",
+            "executor_metadata": get_connector_spec("tiendanube").executor_policy_metadata(),
             "health_policy": {
                 "readiness_check": "metadata_only",
                 "supports_health_check": False,

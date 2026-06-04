@@ -83,6 +83,34 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
         assert isinstance(spec.scopes.required, tuple)
 
 
+def test_connector_executor_metadata_exposes_serializable_factory_bindings_without_values():
+    from app.brain.connector_registry import get_connector_spec
+
+    metadata = get_connector_spec("tiendanube").executor_policy_metadata()
+
+    assert metadata["factory_path"] == (
+        "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube"
+    )
+    assert metadata["adapter_module"] == "app.brain.adapters.tiendanube"
+    assert metadata["report_factory"] == "build_daily_report_from_tiendanube"
+    assert metadata["supported_runtime_modes"] == [
+        "preview",
+        "forced",
+        "scheduled",
+        "operator_triggered",
+    ]
+    assert {binding["argument"]: binding for binding in metadata["factory_params"]}[
+        "access_token"
+    ] == {
+        "argument": "access_token",
+        "source": "connector_param",
+        "key": "access_token",
+        "required": True,
+        "has_fallback": False,
+    }
+    assert "tn_test_token" not in repr(metadata)
+
+
 def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import get_connector_spec

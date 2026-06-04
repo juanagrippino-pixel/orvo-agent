@@ -33,8 +33,9 @@ def _daily_schedule() -> ReportSchedule:
 def test_compiled_runtime_serializes_secret_refs_not_legacy_raw_secret_values():
     from app.brain.runtime import compile_business_runtime
 
+    raw_token = "tn_super_" + "secret_live_token"
     runtime = compile_business_runtime(
-        _business_with_tiendanube_token("tn_super_secret_live_token"),
+        _business_with_tiendanube_token(raw_token),
         schedules=[_daily_schedule()],
         run_mode="forced",
     )
@@ -45,12 +46,40 @@ def test_compiled_runtime_serializes_secret_refs_not_legacy_raw_secret_values():
     assert runtime.run_mode == "forced"
     assert runtime.runtime_id.startswith("runtime:artemea:")
     assert runtime.compiled_from_hash.startswith("sha256:")
-    assert "tn_super_secret_live_token" not in serialized
+    assert raw_token not in serialized
     assert "access_token" not in connector.params
     assert connector.secret_refs == {
         "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
     }
     assert connector.legacy_secret_param_names == ["access_token"]
+
+
+def test_compiled_runtime_carries_registry_executor_binding_metadata_without_raw_values():
+    from app.brain.runtime import compile_business_runtime, runtime_run_metadata
+
+    raw_token = "tn_super_" + "secret_live_token"
+    runtime = compile_business_runtime(
+        _business_with_tiendanube_token(raw_token),
+        schedules=[_daily_schedule()],
+        run_mode="forced",
+    )
+
+    connector = runtime.connectors[0]
+    access_token_binding = {
+        binding["argument"]: binding for binding in connector.executor_metadata["factory_params"]
+    }["access_token"]
+    assert access_token_binding == {
+        "argument": "access_token",
+        "source": "connector_param",
+        "key": "access_token",
+        "required": True,
+        "has_fallback": False,
+    }
+    assert connector.executor_metadata["factory_path"] == connector.executor_factory_path
+    metadata = runtime_run_metadata(runtime)
+    assert metadata["connector_refs"][0]["executor_metadata"] == connector.executor_metadata
+    assert raw_token not in repr(connector.executor_metadata)
+    assert raw_token not in repr(metadata)
 
 
 def test_compiled_runtime_hash_is_stable_when_only_raw_legacy_secret_value_changes():
