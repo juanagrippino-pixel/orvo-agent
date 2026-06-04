@@ -6,6 +6,7 @@ from flask import request
 
 from app.brain.operator_api.common import OperatorAPIError, parse_limit
 from app.brain.service_management import (
+    ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES,
     ALLOWED_SERVICE_MANAGEMENT_RECORD_TYPES,
     ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES,
     list_service_management_cases,
@@ -34,6 +35,18 @@ def _parse_service_record_type(value: str | None) -> str | None:
     return str(value)
 
 
+def _parse_owner_status(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    if value not in ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES:
+        raise OperatorAPIError(
+            "invalid_owner_status",
+            f"unsupported owner_status: {value}",
+            status_code=400,
+        )
+    return str(value)
+
+
 def register_service_management_routes(app):
     @app.get("/internal/brain/businesses/<business_id>/service-management/cases")
     def internal_brain_service_management_cases(business_id: str):
@@ -48,6 +61,7 @@ def register_service_management_routes(app):
                     now=datetime.now(timezone.utc),
                     sla_status=_parse_sla_status(request.args.get("sla_status")),
                     service_record_type=_parse_service_record_type(request.args.get("service_record_type")),
+                    owner_status=_parse_owner_status(request.args.get("owner_status")),
                 ),
             ),
         )

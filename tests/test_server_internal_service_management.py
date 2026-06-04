@@ -162,6 +162,45 @@ def test_internal_service_management_cases_endpoint_filters_by_service_record_ty
     assert data["by_service_record_type"] == {"incident": 1, "problem": 1}
 
 
+def test_internal_service_management_cases_endpoint_filters_by_owner_status(_isolate_db):
+    from server import app
+
+    with closing(sqlite3.connect(str(_isolate_db))) as conn:
+        store = SQLiteOperationalCaseStore(conn)
+        waiting = store.upsert_detection(
+            _detection(metadata={"waiting_on": "external"}, run_id="run-owner-waiting"),
+            detected_at=_utc(8),
+        )
+        store.transition_case(
+            waiting.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator@example.com",
+            transitioned_at=_utc(9),
+        )
+        store.upsert_detection(
+            _detection(case_type="stockout_risk", run_id="run-owner-new"),
+            detected_at=_utc(7),
+        )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"owner_status": "waiting_external"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    data = body["data"]
+    assert data["filters"] == {"owner_status": "waiting_external"}
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["unfiltered_total"] == 2
+    assert [row["case_id"] for row in data["service_cases"]] == [waiting.case_id]
+    assert data["by_owner_status"] == {"new": 1, "waiting_external": 1}
+
+
 def test_internal_service_management_cases_endpoint_rejects_invalid_sla_status(_isolate_db):
     from server import app
 
@@ -192,3 +231,19 @@ def test_internal_service_management_cases_endpoint_rejects_invalid_service_reco
     body = response.get_json()
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_service_record_type"
+
+
+def test_internal_service_management_cases_endpoint_rejects_invalid_owner_status(_isolate_db):
+    from server import app
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"owner_status": "blocked"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_owner_status"
