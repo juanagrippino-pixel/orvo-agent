@@ -1,6 +1,7 @@
 """Internal Orvo Brain HTTP routes."""
 
 from .cases_activity import register_case_activity_routes
+from .cases_recent import register_case_recent_routes
 from .cases_summary import register_case_summary_routes
 from .dashboard_views import register_dashboard_view_routes
 from .operator_audit import register_operator_audit_routes
@@ -12,6 +13,7 @@ def register_internal_brain_routes(app):
     register_session_routes(app)
     register_case_summary_routes(app)
     register_case_activity_routes(app)
+    register_case_recent_routes(app)
     register_dashboard_view_routes(app)
     register_operator_audit_routes(app)
     register_run_delivery_routes(app)

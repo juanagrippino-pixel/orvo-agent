@@ -83,6 +83,7 @@ def register_dashboard_view_routes(app):
                     case_id=case_id,
                     event_type=request.args.get("event_type"),
                     actor_type=request.args.get("actor_type"),
+                    actor_ref=request.args.get("actor_ref"),
                     limit=request.args.get("limit"),
                 ),
             ),

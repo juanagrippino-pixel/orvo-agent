@@ -40,10 +40,12 @@ def list_case_timeline(
     case_id: str,
     event_type: str | None = None,
     actor_type: str | None = None,
+    actor_ref: str | None = None,
     limit: str | None = None,
 ) -> dict[str, Any]:
     parsed_event_type = parse_timeline_event_type(event_type)
     parsed_actor_type = parse_timeline_actor_type(actor_type)
+    parsed_actor_ref = parse_timeline_actor_ref(actor_ref)
     parsed_limit = parse_limit(limit)
     case = get_scoped_case(store, business_id=business_id, case_id=case_id)
     events = list(case.timeline)
@@ -51,6 +53,8 @@ def list_case_timeline(
         events = [event for event in events if event.event_type == parsed_event_type]
     if parsed_actor_type is not None:
         events = [event for event in events if event.actor_type == parsed_actor_type]
+    if parsed_actor_ref is not None:
+        events = [event for event in events if event.actor_ref == parsed_actor_ref]
     total = len(events)
     limited = events[-parsed_limit:] if total > parsed_limit else events
     return redact_secrets(
@@ -60,6 +64,7 @@ def list_case_timeline(
             "filters": {
                 "event_type": parsed_event_type,
                 "actor_type": parsed_actor_type,
+                "actor_ref": parsed_actor_ref,
             },
             "events": [timeline_event_projection(case, event) for event in limited],
             "limit": parsed_limit,

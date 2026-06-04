@@ -71,7 +71,7 @@ def test_list_case_timeline_returns_full_chronological_timeline_with_metadata():
 
     assert result["case_id"] == case_id
     assert result["case_status"] == "resolved"
-    assert result["filters"] == {"event_type": None, "actor_type": None}
+    assert result["filters"] == {"event_type": None, "actor_type": None, "actor_ref": None}
     assert result["total"] == 5
     assert result["count"] == 5
     event_types = [event["event_type"] for event in result["events"]]
@@ -115,6 +115,30 @@ def test_list_case_timeline_filters_by_actor_type_and_excludes_system_events():
     assert result["count"] == 3
     assert {event["event_type"] for event in result["events"]} == {"operator_comment", "status_changed"}
     assert all(event["actor_type"] == "operator" for event in result["events"])
+
+
+def test_list_case_timeline_filters_by_actor_ref():
+    store, case_id = _seed_full_lifecycle()
+    store.add_comment(
+        case_id,
+        actor_type="operator",
+        actor_ref="other-operator@example.com",
+        comment="Second operator note",
+        commented_at=_utc(13),
+    )
+
+    result = list_case_timeline(
+        store,
+        business_id="artemea",
+        case_id=case_id,
+        actor_ref="other-operator@example.com",
+    )
+
+    assert result["filters"]["actor_ref"] == "other-operator@example.com"
+    assert result["count"] == 1
+    assert result["total"] == 1
+    assert result["events"][0]["actor_ref"] == "other-operator@example.com"
+    assert result["events"][0]["summary"] == "Second operator note"
 
 
 def test_list_case_timeline_limits_to_most_recent_events_in_chronological_order():
@@ -177,3 +201,28 @@ def test_list_case_timeline_redacts_secrets_in_actor_and_summary():
     comment_event = result["events"][-1]
     assert comment_event["actor_ref"] == "operator access_token=[REDACTED]"
     assert "[REDACTED]" in comment_event["summary"]
+
+
+def test_list_case_timeline_actor_ref_filter_redacts_query_value_before_matching():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(_detection(), detected_at=_utc(8))
+    store.add_comment(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="operator access_token=raw_timeline_secret",
+        comment="Looked at api_key=raw_timeline_secret",
+        commented_at=_utc(9),
+    )
+
+    result: dict[str, Any] = list_case_timeline(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        actor_ref="operator access_token=raw_timeline_secret",
+    )
+
+    serialized = str(result)
+    assert "raw_timeline_secret" not in serialized
+    assert result["filters"]["actor_ref"] == "operator access_token=[REDACTED]"
+    assert result["count"] == 1
+    assert result["events"][0]["actor_ref"] == "operator access_token=[REDACTED]"

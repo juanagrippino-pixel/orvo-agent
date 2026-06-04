@@ -94,6 +94,24 @@ def parse_timeline_actor_type(value: str | None) -> ActorType | None:
         )
     return value  # type: ignore[return-value]
 
+
+def parse_timeline_actor_ref(value: str | None) -> str | None:
+    """Normalize and redact an optional timeline actor_ref filter.
+
+    Timeline actor refs are already redacted when stored on case events, but
+    endpoint query values may still contain raw secret-shaped tokens. Redact the
+    filter before echoing it in the response and before matching, so callers can
+    filter a redacted stored actor without leaking the supplied credential tail.
+    """
+
+    if value in (None, ""):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return redact_text(normalized) or "[REDACTED]"
+
+
 def parse_run_status(value: str | None) -> RunStatus | None:
     if value in (None, ""):
         return None

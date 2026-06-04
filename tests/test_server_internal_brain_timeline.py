@@ -148,6 +148,46 @@ def test_case_timeline_filters_by_actor_type(_isolate_db):
     assert {e["event_type"] for e in data["events"]} == {"operator_comment", "status_changed"}
 
 
+def test_case_timeline_filters_by_actor_ref_and_redacts_filter_value(_isolate_db):
+    from server import app
+
+    conn = sqlite3.connect(str(_isolate_db))
+    store = SQLiteOperationalCaseStore(conn)
+    opened = store.upsert_detection(_detection(run_id="run-secret-actor"), detected_at=_utc(8))
+    store.add_comment(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="operator access_token=raw_timeline_secret",
+        comment="Looked at api_key=raw_timeline_secret",
+        commented_at=_utc(9),
+    )
+    store.add_comment(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="plain-operator@example.com",
+        comment="Plain note",
+        commented_at=_utc(10),
+    )
+
+    client = app.test_client()
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{opened.case_id}/timeline",
+        headers=AUTH,
+        query_string={"actor_ref": "operator access_token=raw_timeline_secret"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["redaction_applied"] is True
+    serialized = str(body)
+    assert "raw_timeline_secret" not in serialized
+    data = body["data"]
+    assert data["filters"]["actor_ref"] == "operator access_token=[REDACTED]"
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["events"][0]["actor_ref"] == "operator access_token=[REDACTED]"
+
+
 def test_case_timeline_applies_limit(_isolate_db):
     from server import app
 
