@@ -144,7 +144,7 @@ def _make_git_repo_with_manifest(tmp_path: Path, omitted_file: str | None = None
     if omitted_file is not None:
         changed_files.remove(omitted_file)
     files_changed_block = "\n".join(f"  - {path}" for path in changed_files)
-    manifest_path = repo / "worker.md"
+    manifest_path = tmp_path / "worker.md"
     manifest_path.write_text(
         VALID_MANIFEST.replace("/root/orvo-agent-worktrees/sample-task", str(repo))
         .replace("codex/sample-task", "codex/sample-guard")
@@ -194,3 +194,34 @@ def test_verify_manifest_git_claims_allows_uncommitted_head_when_worktree_exists
 
     assert result.passed is True
     assert result.problems == ()
+
+
+def test_verify_manifest_git_claims_rejects_review_ready_manifest_when_worktree_is_dirty(
+    tmp_path: Path,
+) -> None:
+    repo, manifest_path = _make_git_repo_with_manifest(tmp_path)
+    (repo / "scratch.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    result = verify_manifest_git_claims(parse_manifest(manifest_path), repo_root=repo)
+
+    assert result.passed is False
+    assert result.problems == (
+        "status 'review-ready' claims a clean handoff but worktree has uncommitted changes",
+    )
+
+
+def test_verify_manifest_git_claims_rejects_dirty_blocked_manifest_when_worktree_is_clean(
+    tmp_path: Path,
+) -> None:
+    repo, manifest_path = _make_git_repo_with_manifest(tmp_path)
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8").replace("- status: review-ready", "- status: dirty-blocked"),
+        encoding="utf-8",
+    )
+
+    result = verify_manifest_git_claims(parse_manifest(manifest_path), repo_root=repo)
+
+    assert result.passed is False
+    assert result.problems == (
+        "status 'dirty-blocked' claims uncommitted work but worktree is clean",
+    )

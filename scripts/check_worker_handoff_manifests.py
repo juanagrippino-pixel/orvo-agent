@@ -201,6 +201,13 @@ def _git_branch_exists(repo_root: Path, branch: str) -> bool:
     return remote.returncode == 0
 
 
+def _git_status_short(worktree_path: Path) -> tuple[bool, str]:
+    result = _git(worktree_path, "status", "--short")
+    if result.returncode != 0:
+        return False, result.stderr.strip() or result.stdout.strip()
+    return True, result.stdout.strip()
+
+
 def _changed_files_between(repo_root: Path, base_sha: str, head_sha: str) -> tuple[str, ...] | None:
     result = _git(repo_root, "diff", "--name-only", f"{base_sha}...{head_sha}")
     if result.returncode != 0:
@@ -226,11 +233,24 @@ def verify_manifest_git_claims(
     repo_root = repo_root.resolve()
     worktree_path = manifest.fields.get("worktree_path", "")
     branch = manifest.fields.get("branch", "")
-    if worktree_path and not Path(worktree_path).exists() and not _git_branch_exists(repo_root, branch):
+    worktree = Path(worktree_path) if worktree_path else None
+    if worktree is not None and not worktree.exists() and not _git_branch_exists(repo_root, branch):
         problems.append(
             "worktree_path does not exist and branch cannot be found locally or under origin: "
             f"{worktree_path} / {branch}"
         )
+
+    status = manifest.fields.get("status", "")
+    if worktree is not None and worktree.exists() and status:
+        status_read, status_output = _git_status_short(worktree)
+        if not status_read:
+            problems.append(f"could not read worktree git status: {status_output}")
+        elif status in {"clean", "review-ready", "merged"} and status_output:
+            problems.append(
+                f"status {status!r} claims a clean handoff but worktree has uncommitted changes"
+            )
+        elif status == "dirty-blocked" and not status_output:
+            problems.append("status 'dirty-blocked' claims uncommitted work but worktree is clean")
 
     base_sha = manifest.fields.get("base_sha", "")
     head_sha = manifest.fields.get("head_sha", "")
