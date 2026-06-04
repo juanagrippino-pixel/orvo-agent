@@ -276,6 +276,39 @@ def test_internal_case_action_cannot_cross_business_scope_or_mutate_foreign_case
     assert all(event.actor_ref != "operator:juan" for event in reloaded.timeline)
 
 
+def test_internal_case_action_rejects_non_object_payload_without_mutation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Request-ID": "req-non-object-payload"},
+        json=["acknowledge_case", {"api_key": "raw_payload_secret"}],
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_payload_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_case_action_payload"
+    assert body["redaction_applied"] is True
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    events = _audit_events(db_path)
+    matching_events = [event for event in events if event["request_id"] == "req-non-object-payload"]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["data"]["error_code"] == "invalid_case_action_payload"
+    assert "raw_payload_secret" not in json.dumps(event, sort_keys=True)
+
 def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
