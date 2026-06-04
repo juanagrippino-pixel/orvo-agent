@@ -114,6 +114,40 @@ def test_case_work_item_projection_summarizes_comments_without_copying_bodies(tm
     assert "Private owner context" not in str(projection)
 
 
+def test_case_work_item_projection_exposes_acknowledgment_sla_clock(tmp_path):
+    db_path = tmp_path / "work-item-sla-clock.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-sla", priority=87))
+
+    on_time_projection = case_work_item_projection(case, as_of=datetime(2026, 5, 24, 8, 30, tzinfo=timezone.utc))
+    overdue_projection = case_work_item_projection(case, as_of=datetime(2026, 5, 24, 9, 1, tzinfo=timezone.utc))
+
+    assert on_time_projection["acknowledgment_sla_minutes"] == 60
+    assert on_time_projection["acknowledgment_due_at"] == "2026-05-24T09:00:00Z"
+    assert on_time_projection["acknowledged_at"] is None
+    assert on_time_projection["acknowledgment_sla_breached"] is False
+    assert overdue_projection["acknowledgment_sla_breached"] is True
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    acknowledged = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=datetime(2026, 5, 24, 9, 15, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    acknowledged_projection = case_work_item_projection(
+        acknowledged,
+        as_of=datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+    )
+
+    assert acknowledged_projection["acknowledged_at"] == "2026-05-24T09:15:00Z"
+    assert acknowledged_projection["acknowledgment_sla_breached"] is True
+
+
 def test_issue_type_definitions_expose_owner_visibility_and_metric_gates():
     definitions = {definition["issue_type"]: definition for definition in operational_case_issue_type_definitions()}
 
