@@ -20,6 +20,7 @@ from app.brain.run_ledger import (
     DispatchOutcomeRef,
     DispatchRunStatus,
     RunStatus,
+    RunTriggerType,
     SQLiteRunLedger,
 )
 from app.brain.storage import init_schema
@@ -105,13 +106,14 @@ def _seed_run(
     run_id: str,
     status: RunStatus = "succeeded",
     dispatch_status: DispatchRunStatus | None = "sent",
+    trigger_type: RunTriggerType = "forced",
 ):
     conn = sqlite3.connect(db_path)
     init_schema(conn)
     ledger = SQLiteRunLedger(conn)
     run = ledger.create_run(
         business_id=business_id,
-        trigger_type="forced",
+        trigger_type=trigger_type,
         run_id=run_id,
         started_at=_utc(7),
         config_ref="config://runtime?access_token=raw_run_secret",
@@ -1248,6 +1250,47 @@ def test_internal_run_history_rejects_invalid_dispatch_status(monkeypatch, tmp_p
     raw_body = response.get_data(as_text=True)
     assert "raw_dispatch_secret" not in raw_body
     assert response.get_json()["error"]["code"] == "invalid_dispatch_status"
+
+
+def test_internal_run_history_filters_by_trigger_type_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-forced", trigger_type="forced")
+    scheduled = _seed_run(db_path, business_id="artemea", run_id="run-scheduled", trigger_type="scheduled")
+    _seed_run(db_path, business_id="other", run_id="run-other-scheduled", trigger_type="scheduled")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs?trigger_type=scheduled&limit=10",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["limit"] == 10
+    assert [run["run_id"] for run in body["data"]["runs"]] == [scheduled.run_id]
+    assert all(run["business_id"] == "artemea" for run in body["data"]["runs"])
+    assert all(run["trigger_type"] == "scheduled" for run in body["data"]["runs"])
+    rendered = response.get_data(as_text=True)
+    assert "run-forced" not in rendered
+    assert "run-other-scheduled" not in rendered
+    assert "raw_run_secret" not in rendered
+
+
+def test_internal_run_history_rejects_invalid_trigger_type_without_echoing_secret(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs?trigger_type=scheduled%3Baccess_token%3Draw_trigger_secret",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_run_trigger_type"
+    assert "raw_trigger_secret" not in response.get_data(as_text=True)
 
 
 def _seed_failed_connector_run(db_path, *, business_id: str, run_id: str):
