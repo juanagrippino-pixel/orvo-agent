@@ -93,9 +93,10 @@ def _decision_event(
 ) -> dict[str, Any] | None:
     if record is None or request.decided_at is None:
         return None
+    event_type = "workflow_approval_cancelled" if request.status == "cancelled" else "workflow_approval_decided"
     return _redacted_event(
         {
-            "event_type": "workflow_approval_decided",
+            "event_type": event_type,
             "business_id": request.business_id,
             "approval_request_id": request.approval_request_id,
             "ledger_id": request.ledger_id,
