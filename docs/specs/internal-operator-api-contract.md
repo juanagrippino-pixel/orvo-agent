@@ -95,6 +95,10 @@ unbounded historical export.
 
 ## Response envelope
 
+`request_id` mirrors `X-Request-ID` only when it is a safe operational
+identifier; secret-shaped request IDs are collapsed to `[REDACTED]` in responses
+and durable audit events.
+
 ```json
 {
   "ok": true,
@@ -140,6 +144,7 @@ Before exposing beyond local/dev:
 - compile preview does not execute connectors;
 - readiness endpoint redacts secret refs;
 - invalid internal bearer-token attempts create redacted operator audit events without persisting raw `Authorization` headers;
+- internal envelopes and durable audit events redact secret-shaped `X-Request-ID` values;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
