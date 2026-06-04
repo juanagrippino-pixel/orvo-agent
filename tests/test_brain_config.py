@@ -192,6 +192,56 @@ class TestConnectorConfigModel:
         )
         assert conn.connector_type == "shopify"
 
+    def test_connector_validation_uses_registry_requirements_instead_of_private_type_maps(
+        self, monkeypatch
+    ):
+        """Config validation should follow the connector registry source of truth.
+
+        This pins the control-plane boundary: a newly registered/monkeypatched
+        connector spec with required public params and secret refs must be
+        validated by ConnectorConfig without adding another connector-type branch
+        inside the config model.
+        """
+
+        from types import SimpleNamespace
+
+        from pydantic import ValidationError
+
+        import app.brain.connector_registry as connector_registry
+        from app.brain.config import ConnectorConfig
+
+        def fake_get_connector_spec(connector_type: str):
+            if connector_type == "custom_shop":
+                return SimpleNamespace(
+                    connector_type="custom_shop",
+                    required_config_fields=("shop_domain",),
+                    required_secret_refs=(SimpleNamespace(name="admin_token"),),
+                )
+            raise connector_registry.UnknownConnectorError(connector_type)
+
+        monkeypatch.setattr(connector_registry, "get_connector_spec", fake_get_connector_spec)
+
+        with pytest.raises(ValidationError) as exc_info:
+            ConnectorConfig(
+                connector_id="custom-main",
+                connector_type="custom_shop",
+                label="Custom Shop",
+                params={"shop_domain": "orvo-test.myshopify.com"},
+            )
+
+        message = str(exc_info.value)
+        assert "custom_shop connector config must include admin_token" in message
+        assert "docs/specs/connector-registry-contract.md" in message
+
+        conn = ConnectorConfig(
+            connector_id="custom-main",
+            connector_type="custom_shop",
+            label="Custom Shop",
+            params={"shop_domain": "orvo-test.myshopify.com"},
+            secret_refs={"admin_token": "secret://businesses/demo/connectors/custom/admin_token"},
+        )
+        assert conn.connector_type == "custom_shop"
+
 
 # ---------------------------------------------------------------------------
 # BusinessConfig with connectors
