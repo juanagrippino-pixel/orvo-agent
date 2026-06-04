@@ -765,6 +765,89 @@ def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_d
         lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
     ],
 )
+def test_workflow_approval_cancellation_closes_pending_gate_without_side_effects(tmp_path, store_factory):
+    _, case = seed_case()
+    ledger = store_factory(tmp_path)
+    rule = WorkflowRule(
+        rule_id="cancel-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier",
+                    "reason": "Request supplier restock",
+                    "Authorization": "Basic raw_cancel_planning_secret",
+                },
+            )
+        ],
+    )
+    planned = simulate_case_workflow(rule, case, now=utc(18, 30), action_ledger=ledger, actor_ref="operator:ana")
+    approval_request_id = planned["actions"][0]["approval_request_id"]
+
+    cancellation = ledger.cancel_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_request_id,
+        actor_ref="manager token=raw_cancel_actor_secret",
+        reason="Cancelled stale request Authorization: Basic raw_cancel_reason_secret",
+        now=utc(18, 45),
+    )
+
+    assert cancellation.record.approval_state == "cancelled"
+    assert cancellation.record.execution_state == "failed"
+    assert cancellation.approval_request.status == "cancelled"
+    assert cancellation.approval_request.decided_at == utc(18, 45)
+    assert cancellation.approval_request.decision_actor_ref == "manager token=[REDACTED]"
+    assert cancellation.approval_request.decision_reason == "Cancelled stale request Authorization: [REDACTED]"
+    assert cancellation.side_effects_executed == 0
+    assert cancellation.audit_event == {
+        "event_type": "workflow_approval_cancelled",
+        "business_id": "artemea",
+        "approval_request_id": approval_request_id,
+        "ledger_id": cancellation.record.ledger_id,
+        "case_id": case.case_id,
+        "action_key": "request_external_action",
+        "decision": "cancelled",
+        "approval_state": "cancelled",
+        "execution_state": "failed",
+        "actor_ref": "manager token=[REDACTED]",
+        "reason": "Cancelled stale request Authorization: [REDACTED]",
+        "created_at": "2026-05-31T18:45:00Z",
+    }
+    assert list_workflow_approval_queue(ledger, business_id="artemea")["approval_requests"] == []
+    assert list_workflow_execution_queue(ledger, business_id="artemea")["actions"] == []
+    audit = list_workflow_action_audit_events(ledger, business_id="artemea")
+    assert [event["event_type"] for event in audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_approval_requested",
+        "workflow_approval_cancelled",
+    ]
+    assert audit["events"][-1]["decision"] == "cancelled"
+    assert audit["events"][-1]["decision_reason"] == "Cancelled stale request Authorization: [REDACTED]"
+    assert "raw_cancel" not in str(cancellation)
+    assert "raw_cancel" not in str(audit)
+
+    with pytest.raises(WorkflowActionLedgerError) as second_cancel:
+        ledger.cancel_approval_request(
+            business_id="artemea",
+            approval_request_id=approval_request_id,
+            actor_ref="manager",
+            reason="Cannot cancel twice token=raw_cancel_second_secret",
+            now=utc(18, 50),
+        )
+    assert second_cancel.value.code == "approval_request_already_decided"
+    assert "raw_cancel_second_secret" not in second_cancel.value.message
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
 def test_workflow_approval_queue_projects_only_pending_requests_without_side_effects(tmp_path, store_factory):
     ledger = store_factory(tmp_path)
     later = ledger.record_planned_action(
