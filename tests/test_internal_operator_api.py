@@ -2615,6 +2615,66 @@ def test_internal_top_degraded_actionable_cases_endpoint_is_scoped_and_ordered(m
     assert all(case["source_connectors"] == ["tiendanube"] for case in data["cases"])
 
 
+def test_internal_owner_brief_endpoint_returns_compact_mvp_action_queue(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    high = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-artemea-high",
+            priority=100,
+            freshness_state="missing",
+            title="Stock crítico access_token=raw_title_secret",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-artemea-low",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            case_type="sales_drop",
+            priority=70,
+            severity="warning",
+            freshness_state="stale",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-brief?limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_title_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["status"] == "needs_attention"
+    assert data["headline"] == "2 actionable cases; 2 with degraded evidence"
+    assert data["next_actions"] == [
+        {
+            "case_id": high.case_id,
+            "case_type": "stockout_risk",
+            "severity": "critical",
+            "priority_score": 100,
+            "reason": "highest_priority_actionable_case",
+        }
+    ]
+    assert data["evidence_actions"] == [
+        {
+            "case_id": high.case_id,
+            "case_type": "stockout_risk",
+            "freshness_state": "missing",
+            "source_connectors": ["tiendanube"],
+            "reason": "refresh_degraded_evidence",
+        }
+    ]
+
+
 def test_internal_dashboard_endpoint_rejects_non_integer_limit_with_safe_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())
