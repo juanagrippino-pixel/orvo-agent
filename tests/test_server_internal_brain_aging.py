@@ -33,6 +33,8 @@ def _detection(
     severity: str = "critical",
     priority: int = 100,
     run_id: str = "run-1",
+    entity_kind: str = "business",
+    entity_id: str = "monitored",
 ) -> OperationalCaseDetection:
     evidence_ref = f"evidence://{business_id}/{run_id}/{case_type}"
     return OperationalCaseDetection(
@@ -42,7 +44,7 @@ def _detection(
         title="Case under test",
         severity=severity,
         priority_score=priority,
-        entity_scope={"kind": "business", "id": "monitored"},
+        entity_scope={"kind": entity_kind, "id": entity_id},
         evidence_refs=[evidence_ref],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/daily-report"],
@@ -55,12 +57,21 @@ def _seed_open_case(
     business_id: str = "artemea",
     opened_hours_ago: int = 2,
     run_id: str = "run-1",
+    dedupe_suffix: str = "stockout_risk/business/monitored/commerce.inventory/daily",
+    entity_kind: str = "business",
+    entity_id: str = "monitored",
 ) -> str:
     now = datetime.now(timezone.utc)
     conn = sqlite3.connect(str(db_path))
     store = SQLiteOperationalCaseStore(conn)
     case = store.upsert_detection(
-        _detection(business_id=business_id, run_id=run_id),
+        _detection(
+            business_id=business_id,
+            run_id=run_id,
+            dedupe_suffix=dedupe_suffix,
+            entity_kind=entity_kind,
+            entity_id=entity_id,
+        ),
         detected_at=now - timedelta(hours=opened_hours_ago),
     )
     conn.close()
@@ -104,6 +115,46 @@ def test_case_aging_returns_age_buckets_for_open_cases(_isolate_db):
     assert data["by_age_bucket"]["under_6h"] == 1
     assert data["oldest_actionable"] is not None
     assert data["oldest_actionable"]["age_seconds"] >= 7200  # >= 2h
+
+
+def test_case_aging_by_entity_kind_returns_split_buckets(_isolate_db):
+    from server import app
+
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=2,
+        run_id="run-product",
+        dedupe_suffix="stockout_risk/product/sku-1/commerce.inventory/daily",
+        entity_kind="product",
+        entity_id="sku-1",
+    )
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=3,
+        run_id="run-channel",
+        dedupe_suffix="sales_drop/channel/whatsapp/commerce.revenue/daily",
+        entity_kind="channel",
+        entity_id="whatsapp",
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/aging/by-entity-kind",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_age_bucket"]["under_6h"] == 2
+    assert data["by_age_bucket_entity_kind"]["under_6h"] == {
+        "channel": 1,
+        "product": 1,
+    }
 
 
 def test_case_aging_scopes_to_business_id(_isolate_db):

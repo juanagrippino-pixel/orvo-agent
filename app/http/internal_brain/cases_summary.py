@@ -154,6 +154,21 @@ def register_case_summary_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/aging/by-entity-kind")
+    def internal_brain_cases_aging_by_entity_kind(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_queue_aging_by_entity_kind(
+                    case_store,
+                    business_id=business_id,
+                    now=datetime.now(timezone.utc),
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/aging/by-source-connector")
     def internal_brain_cases_aging_by_source_connector(business_id: str):
         return _with_internal_stores(
