@@ -345,7 +345,56 @@ def test_simulate_case_workflow_returns_no_actions_when_conditions_do_not_match(
     assert result["conditions"] == [
         {"field": "min_priority_score", "expected": 90, "actual": 40, "matched": False}
     ]
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "min_priority_score", "expected": 90, "actual": 40}
+    ]
     assert result["side_effects_executed"] == 0
+
+
+def test_simulate_case_workflow_projects_trigger_and_condition_non_match_reasons_without_ledger_writes():
+    _, case = seed_case(priority_score=40)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="manual-critical-only",
+        business_id="artemea",
+        trigger="manual",
+        conditions=[
+            CaseWorkflowCondition(field="status", value="open"),
+            CaseWorkflowCondition(field="min_priority_score", value=90),
+            CaseWorkflowCondition(field="severity", value="critical token=raw_non_match_condition_secret"),
+        ],
+        actions=[
+            WorkflowAction(
+                action_key="acknowledge_case",
+                params={"reason": "Do not leak token=raw_non_match_reason_secret"},
+            )
+        ],
+    )
+
+    result = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(12, 10),
+        action_ledger=ledger,
+        event_trigger="case_updated",
+    )
+
+    assert result["matched"] is False
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "trigger_mismatch", "expected": "manual", "actual": "case_updated"},
+        {"type": "condition_mismatch", "field": "min_priority_score", "expected": 90, "actual": 40},
+        {
+            "type": "condition_mismatch",
+            "field": "severity",
+            "expected": "critical token=[REDACTED]",
+            "actual": "critical",
+        },
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+    assert "raw_non_match" not in str(result)
 
 
 def test_simulate_case_workflow_returns_no_actions_when_event_trigger_does_not_match_rule_trigger():

@@ -197,6 +197,36 @@ def _trigger_match_projection(rule_trigger: WorkflowTrigger, event_trigger: Work
     }
 
 
+def _non_match_reasons(
+    trigger_match: dict[str, Any],
+    condition_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return redacted deterministic reasons why a dry-run did not match."""
+
+    reasons: list[dict[str, Any]] = []
+    if not trigger_match.get("matched"):
+        reasons.append(
+            {
+                "type": "trigger_mismatch",
+                "expected": trigger_match.get("expected"),
+                "actual": trigger_match.get("actual"),
+            }
+        )
+    for result in condition_results:
+        if result.get("matched"):
+            continue
+        reasons.append(
+            {
+                "type": "condition_mismatch",
+                "field": result.get("field"),
+                "expected": result.get("expected"),
+                "actual": result.get("actual"),
+            }
+        )
+    redacted = redact_secrets(reasons)
+    return redacted if isinstance(redacted, list) else reasons
+
+
 def _validate_rule(rule: WorkflowRule, case: OperationalCase) -> None:
     if rule.business_id != case.business_id:
         raise WorkflowAutomationError("business_scope_mismatch", "workflow rule business_id does not match case business_id")
@@ -408,6 +438,7 @@ def simulate_case_workflow(
     trigger_match = _trigger_match_projection(rule.trigger, event_trigger)
     condition_results = [_condition_projection(case, condition) for condition in rule.conditions]
     matched = bool(trigger_match["matched"]) and all(result["matched"] for result in condition_results)
+    non_match_reasons = [] if matched else _non_match_reasons(trigger_match, condition_results)
     actions: list[dict[str, Any]] = []
     skipped_actions: list[dict[str, Any]] = []
     if matched:
@@ -434,6 +465,7 @@ def simulate_case_workflow(
             },
             "matched": matched,
             "conditions": condition_results,
+            "non_match_reasons": non_match_reasons,
             "actions": actions,
             "skipped_actions": skipped_actions,
             "side_effects_executed": 0,
