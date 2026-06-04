@@ -264,6 +264,7 @@ class RunLedger(Protocol):
         *,
         business_id: str | None = None,
         status: RunStatus | None = None,
+        trigger_type: RunTriggerType | None = None,
         limit: int | None = 100,
     ) -> list[RunRecord]: ...
 
@@ -388,6 +389,7 @@ class InMemoryRunLedger(_RunLedgerMutations):
         *,
         business_id: str | None = None,
         status: RunStatus | None = None,
+        trigger_type: RunTriggerType | None = None,
         limit: int | None = 100,
     ) -> list[RunRecord]:
         records = list(self._runs.values())
@@ -395,6 +397,8 @@ class InMemoryRunLedger(_RunLedgerMutations):
             records = [record for record in records if record.business_id == business_id]
         if status is not None:
             records = [record for record in records if record.status == status]
+        if trigger_type is not None:
+            records = [record for record in records if record.trigger_type == trigger_type]
         records.sort(key=lambda record: (record.started_at, record.run_id), reverse=True)
         if limit is not None:
             records = records[:limit]
@@ -438,6 +442,7 @@ class SQLiteRunLedger(_RunLedgerMutations):
         *,
         business_id: str | None = None,
         status: RunStatus | None = None,
+        trigger_type: RunTriggerType | None = None,
         limit: int | None = 100,
     ) -> list[RunRecord]:
         clauses: list[str] = []
@@ -448,6 +453,9 @@ class SQLiteRunLedger(_RunLedgerMutations):
         if status is not None:
             clauses.append("status = ?")
             params.append(status)
+        if trigger_type is not None:
+            clauses.append("trigger_type = ?")
+            params.append(trigger_type)
 
         query = "SELECT data FROM run_ledger"
         if clauses:
