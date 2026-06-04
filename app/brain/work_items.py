@@ -135,9 +135,27 @@ def case_acknowledgment_due_at(case: OperationalCase) -> datetime:
     return case.opened_at + timedelta(minutes=acknowledgment_sla_minutes_for_priority_score(case.priority_score))
 
 
+def _acknowledgment_sla_comparison_time(case: OperationalCase, *, as_of: datetime) -> datetime:
+    """Return the timestamp that stops the first-ack SLA clock.
+
+    The canonical acknowledgment timestamp wins when present. For cases closed
+    directly from ``open`` (for example duplicate/false-positive dismissals), the
+    terminal timestamp stops the clock so old done cases do not become newly
+    overdue just because an operator dashboard is viewed later.
+    """
+
+    if case.acknowledged_at is not None:
+        return case.acknowledged_at
+    if case.resolved_at is not None:
+        return case.resolved_at
+    if case.dismissed_at is not None:
+        return case.dismissed_at
+    return _as_utc(as_of)
+
+
 def case_acknowledgment_sla_breached(case: OperationalCase, *, as_of: datetime) -> bool:
     due_at = case_acknowledgment_due_at(case)
-    comparison_time = case.acknowledged_at or _as_utc(as_of)
+    comparison_time = _acknowledgment_sla_comparison_time(case, as_of=as_of)
     return comparison_time > due_at
 
 
