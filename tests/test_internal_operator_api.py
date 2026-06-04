@@ -1387,6 +1387,98 @@ def test_internal_case_acknowledgment_latency_by_case_type_returns_scoped_envelo
     assert data["slowest_acknowledged"]["case_type"] == "sales_drop"
 
 
+def test_internal_case_acknowledgment_latency_by_entity_kind_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    product = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-product-ack-entity-kind",
+            case_type="stockout_risk",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-product-ack-entity-kind/commerce.inventory/daily",
+            entity_scope={"kind": "product", "id": "sku-product", "label": "SKU Product"},
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        product.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(minutes=30),
+    )
+    channel = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-channel-ack-entity-kind",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            entity_scope={"kind": "channel", "id": "all", "label": "Todos"},
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        channel.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=8),
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-ack-entity-kind",
+            dedupe_suffix="stockout_risk/product/sku-other-ack-entity-kind/commerce.inventory/daily",
+            entity_scope={"kind": "product", "id": "sku-other", "label": "SKU Other"},
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/acknowledgment-latency/by-entity-kind",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["acknowledged_total"] == 2
+    assert data["by_acknowledgment_bucket"] == {
+        "under_1h": 1,
+        "under_6h": 0,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_acknowledgment_bucket_entity_kind"] == {
+        "under_1h": {"product": 1},
+        "under_6h": {},
+        "under_24h": {"channel": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }
+    assert data["fastest_acknowledged"]["case_id"] == product.case_id
+    assert data["fastest_acknowledged"]["case_type"] == "stockout_risk"
+    assert data["slowest_acknowledged"]["case_id"] == channel.case_id
+    assert data["slowest_acknowledged"]["case_type"] == "sales_drop"
+
+
 def test_internal_case_acknowledgment_latency_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
@@ -1675,6 +1767,116 @@ def test_internal_case_resolution_latency_histogram_returns_scoped_envelope(monk
         data["fastest_resolved"]["case_id"],
         data["slowest_resolved"]["case_id"],
     }
+
+
+def test_internal_case_resolution_latency_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    stockout = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-fast-resolved-case-type",
+            case_type="stockout_risk",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-fast-resolved-case-type/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        stockout.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        stockout.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    sales = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-slow-resolved-case-type",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        sales.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        sales.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=10),
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-resolved-case-type",
+            dedupe_suffix="stockout_risk/product/sku-other-resolved-case-type/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        other.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/resolution-latency/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["resolved_total"] == 2
+    assert data["by_resolution_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_resolution_bucket_case_type"] == {
+        "under_1h": {},
+        "under_6h": {"stockout_risk": 1},
+        "under_24h": {"sales_drop": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }
+    assert data["fastest_resolved"]["case_id"] == stockout.case_id
+    assert data["fastest_resolved"]["case_type"] == "stockout_risk"
+    assert data["slowest_resolved"]["case_id"] == sales.case_id
+    assert data["slowest_resolved"]["case_type"] == "sales_drop"
 
 
 def test_internal_case_handling_latency_histogram_returns_scoped_envelope(monkeypatch, tmp_path):
@@ -2002,6 +2204,119 @@ def test_internal_handling_latency_by_case_type_returns_scoped_envelope(monkeypa
     assert data["by_handling_bucket_case_type"]["over_7d"] == {}
     assert data["fastest_handled"]["case_id"] == stock.case_id
     assert data["slowest_handled"]["case_id"] == sales.case_id
+
+
+def test_internal_handling_latency_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    tiendanube = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-tiendanube-handled-source",
+            source="tiendanube",
+            source_label="Tiendanube",
+            dedupe_suffix="stockout_risk/product/sku-tiendanube-handled-source/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        tiendanube.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        tiendanube.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    csv = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-csv-handled-source",
+            source="csv",
+            source_label="CSV import",
+            dedupe_suffix="sales_drop/channel/csv/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        csv.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        csv.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=10),
+    )
+    other_tenant = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-handled-source",
+            source="meta_ads",
+            source_label="Meta Ads",
+            dedupe_suffix="stockout_risk/product/sku-other-handled-source/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other_tenant.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        other_tenant.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/handling-latency/by-source-connector",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["handled_total"] == 2
+    assert data["by_handling_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_handling_bucket_source_connector"] == {
+        "under_1h": {},
+        "under_6h": {"tiendanube": 1},
+        "under_24h": {"csv": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }
+    assert data["fastest_handled"]["case_id"] == tiendanube.case_id
+    assert data["slowest_handled"]["case_id"] == csv.case_id
+    assert "meta_ads" not in str(data)
 
 
 def test_internal_top_actionable_by_age_returns_scoped_envelope(monkeypatch, tmp_path):
