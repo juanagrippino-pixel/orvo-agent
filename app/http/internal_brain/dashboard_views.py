@@ -18,6 +18,22 @@ from .common import (
 
 
 def register_dashboard_view_routes(app):
+    @app.get("/internal/brain/businesses/<business_id>/operator-brief")
+    def internal_brain_operator_brief(business_id: str):
+        limit = request.args.get("limit")
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                get_mvp_operator_brief(
+                    case_store,
+                    business_id=business_id,
+                    now=datetime.now(timezone.utc),
+                    limit=parse_limit(limit, default=3),
+                ),
+            ),
+        )
+
     @app.get("/internal/brain/businesses/<business_id>/dashboard")
     def internal_brain_dashboard(business_id: str):
         limit = request.args.get("limit")

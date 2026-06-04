@@ -79,6 +79,30 @@ def _mvp_operator_brief(
     )
 
 
+def get_mvp_operator_brief(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    now: datetime,
+    limit: int = 3,
+) -> dict[str, Any]:
+    """Return the compact owner/operator action queue for the MVP surface."""
+
+    case_queue_summary = summarize_case_queue(store, business_id=business_id)
+    top_actionable_cases = list_top_actionable_cases_by_priority(
+        store, business_id=business_id, now=now, limit=str(limit)
+    )
+    top_degraded_cases = list_top_actionable_degraded_cases(
+        store, business_id=business_id, now=now, limit=str(limit)
+    )
+    return _mvp_operator_brief(
+        business_id=business_id,
+        case_queue_summary=case_queue_summary,
+        top_actionable_cases=top_actionable_cases,
+        top_degraded_cases=top_degraded_cases,
+    )
+
+
 def get_operator_dashboard(
     store: OperationalCaseStore,
     ledger: RunLedger,
