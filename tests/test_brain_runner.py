@@ -222,6 +222,11 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
                 "requests_per_minute": None,
                 "retry_policy": "adapter_default",
             },
+            "lifecycle": {
+                "status": "active",
+                "owner": "orvo-brain",
+                "version": "phase-a",
+            },
         }
     ]
     assert "abc123" not in json.dumps(record.summary_metadata)
@@ -231,6 +236,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.connector_outcomes[0].metadata == {
         "label": "Sheet Artemea",
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
         "capabilities": ["daily_report", "sheet_import"],
         "emitted_metric_families": [
             "commerce.orders",
@@ -257,6 +263,11 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
             "default_timeout_seconds": 30,
             "requests_per_minute": None,
             "retry_policy": "adapter_default",
+        },
+        "lifecycle": {
+            "status": "active",
+            "owner": "orvo-brain",
+            "version": "phase-a",
         },
         "metric_certification": {
             "status": "warning",
@@ -325,6 +336,7 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
         "failure_stage": "pre_dispatch",
         "label": "Sheet Artemea",
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
         "capabilities": ["daily_report", "sheet_import"],
         "emitted_metric_families": [
             "commerce.orders",
@@ -351,6 +363,11 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
             "default_timeout_seconds": 30,
             "requests_per_minute": None,
             "retry_policy": "adapter_default",
+        },
+        "lifecycle": {
+            "status": "active",
+            "owner": "orvo-brain",
+            "version": "phase-a",
         },
     }
     assert run.artifacts == []
