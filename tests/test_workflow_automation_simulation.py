@@ -398,6 +398,60 @@ def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapsho
     assert result["actions"][0]["execution_status"] == "dry_run"
 
 
+def test_simulate_case_workflow_matches_source_connector_condition_from_evidence_snapshots():
+    _, case = seed_case(degraded=True)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="inventory-connector-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="source_connector", value="commerce.inventory")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check inventory connector"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 15), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {
+            "field": "source_connector",
+            "expected": "commerce.inventory",
+            "actual": ["commerce.inventory"],
+            "matched": True,
+        }
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actions_when_source_connector_does_not_match():
+    _, case = seed_case(degraded=True)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="sheets-only-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="source_connector", value="google_sheets")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check sheets connector"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 30), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {
+            "field": "source_connector",
+            "expected": "google_sheets",
+            "actual": ["commerce.inventory"],
+            "matched": False,
+        }
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert ledger.list_actions(business_id="artemea") == []
+
+
 def test_simulate_case_workflow_suppresses_duplicate_idempotency_key_plans_with_audit():
     _, case = seed_case()
     duplicate_params = {"reason": "token=raw_duplicate_secret"}
