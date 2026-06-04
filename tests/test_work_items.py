@@ -250,6 +250,85 @@ def test_acknowledgment_sla_stops_at_terminal_status_when_never_acknowledged(tmp
     assert late_projection["acknowledgment_sla_breached"] is True
 
 
+def test_case_work_item_projection_exposes_resolution_sla_clock(tmp_path):
+    db_path = tmp_path / "work-item-resolution-sla-clock.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-resolution-sla", priority=87))
+
+    on_time_projection = case_work_item_projection(case, as_of=datetime(2026, 5, 25, 7, 59, tzinfo=timezone.utc))
+    overdue_projection = case_work_item_projection(case, as_of=datetime(2026, 5, 25, 8, 1, tzinfo=timezone.utc))
+
+    assert on_time_projection["resolution_sla_minutes"] == 1440
+    assert on_time_projection["resolution_due_at"] == "2026-05-25T08:00:00Z"
+    assert on_time_projection["resolved_at"] is None
+    assert on_time_projection["resolution_sla_breached"] is False
+    assert overdue_projection["resolution_sla_breached"] is True
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    acknowledged = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=datetime(2026, 5, 24, 9, 0, tzinfo=timezone.utc),
+    )
+    resolved_on_time = store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Restocked before resolution SLA",
+        transitioned_at=datetime(2026, 5, 25, 7, 30, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    resolved_projection = case_work_item_projection(
+        resolved_on_time,
+        as_of=datetime(2026, 5, 26, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert resolved_projection["status"] == "resolved"
+    assert resolved_projection["resolved_at"] == "2026-05-25T07:30:00Z"
+    assert resolved_projection["resolution_due_at"] == "2026-05-25T08:00:00Z"
+    assert resolved_projection["resolution_sla_breached"] is False
+
+
+def test_resolution_sla_stops_at_terminal_status_when_closed_late(tmp_path):
+    db_path = tmp_path / "work-item-resolution-sla-terminal-clock.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-late-resolution-sla", priority=50))
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    acknowledged = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=datetime(2026, 5, 24, 9, 0, tzinfo=timezone.utc),
+    )
+    resolved_late = store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Fixed after target",
+        transitioned_at=datetime(2026, 5, 27, 9, 30, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    projection = case_work_item_projection(
+        resolved_late,
+        as_of=datetime(2026, 6, 1, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert projection["priority_bracket"] == "medium"
+    assert projection["resolution_sla_minutes"] == 4320
+    assert projection["resolution_due_at"] == "2026-05-27T08:00:00Z"
+    assert projection["resolved_at"] == "2026-05-27T09:30:00Z"
+    assert projection["resolution_sla_breached"] is True
+
+
 def test_issue_type_definitions_expose_owner_visibility_and_metric_gates():
     definitions = {definition["issue_type"]: definition for definition in operational_case_issue_type_definitions()}
 
