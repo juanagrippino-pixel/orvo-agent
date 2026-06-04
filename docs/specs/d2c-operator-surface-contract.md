@@ -146,7 +146,7 @@ Projection rules:
 - derive `waiting_owner` and `waiting_external` from case metadata only for active `acknowledged`/`in_progress` cases;
 - include first-response and resolution SLA clocks as deterministic UTC timers; terminal `resolved` and `dismissed` cases must stop open SLA clocks at their terminal timestamp;
 - expose `sla_status` as a read-only queue summary over those clocks (`breached`, `on_track`, `paused`, `completed`) plus `by_sla_status` counts across the full scoped result set;
-- support the read-only `sla_status` query filter on the service-management endpoint so operators can open deterministic SLA queues without changing case lifecycle state; `total` counts the filtered queue and `unfiltered_total` preserves the full scoped case count;
+- support the read-only `sla_status` and `service_record_type` query filters on the service-management endpoint so operators can open deterministic SLA, incident, request, problem, or change queues without changing case lifecycle state; `total` counts the filtered queue and `unfiltered_total` preserves the full scoped case count;
 - expose deterministic `escalation_reasons` for unacknowledged critical cases, active SLA breaches, and active waiting-on-owner/external blockers without changing priority or lifecycle state;
 - redact secret-shaped values at the projection boundary;
 - preserve explicit tenant scope and stable internal response envelopes.

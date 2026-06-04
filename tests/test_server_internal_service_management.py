@@ -130,6 +130,38 @@ def test_internal_service_management_cases_endpoint_rejects_invalid_limit(_isola
     assert body["error"]["code"] == "invalid_limit"
 
 
+def test_internal_service_management_cases_endpoint_filters_by_service_record_type(_isolate_db):
+    from server import app
+
+    with closing(sqlite3.connect(str(_isolate_db))) as conn:
+        store = SQLiteOperationalCaseStore(conn)
+        store.upsert_detection(
+            _detection(case_type="stockout_risk", run_id="run-incident"),
+            detected_at=_utc(7),
+        )
+        problem = store.upsert_detection(
+            _detection(case_type="sales_drop", run_id="run-problem"),
+            detected_at=_utc(8),
+        )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"service_record_type": "problem"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    data = body["data"]
+    assert data["filters"] == {"service_record_type": "problem"}
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["unfiltered_total"] == 2
+    assert [row["case_id"] for row in data["service_cases"]] == [problem.case_id]
+    assert data["by_service_record_type"] == {"incident": 1, "problem": 1}
+
+
 def test_internal_service_management_cases_endpoint_rejects_invalid_sla_status(_isolate_db):
     from server import app
 
@@ -144,3 +176,19 @@ def test_internal_service_management_cases_endpoint_rejects_invalid_sla_status(_
     body = response.get_json()
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_sla_status"
+
+
+def test_internal_service_management_cases_endpoint_rejects_invalid_service_record_type(_isolate_db):
+    from server import app
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"service_record_type": "task"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_service_record_type"
