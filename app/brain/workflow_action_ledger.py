@@ -84,6 +84,16 @@ class WorkflowApprovalDecisionRecord:
     side_effects_executed: int = 0
 
 
+@dataclass(frozen=True)
+class WorkflowApprovalCancellationRecord:
+    """Result of cancelling a pending approval gate without executing the action."""
+
+    record: WorkflowActionLedgerRecord
+    approval_request: WorkflowApprovalRequest
+    audit_event: dict[str, Any]
+    side_effects_executed: int = 0
+
+
 class WorkflowActionLedgerError(Exception):
     """Safe deterministic workflow action ledger error."""
 
@@ -124,6 +134,16 @@ class WorkflowActionLedgerStore(Protocol):
         reason: str,
         now: datetime | None = None,
     ) -> WorkflowApprovalDecisionRecord: ...
+
+    def cancel_approval_request(
+        self,
+        *,
+        business_id: str,
+        approval_request_id: str,
+        actor_ref: str,
+        reason: str,
+        now: datetime | None = None,
+    ) -> WorkflowApprovalCancellationRecord: ...
 
 
 def _now_utc() -> datetime:
@@ -208,6 +228,32 @@ def _decision_audit_event(
     return redacted if isinstance(redacted, dict) else event
 
 
+def _cancellation_audit_event(
+    *,
+    record: WorkflowActionLedgerRecord,
+    approval_request: WorkflowApprovalRequest,
+    actor_ref: str | None,
+    reason: str | None,
+    now: datetime,
+) -> dict[str, Any]:
+    event = {
+        "event_type": "workflow_approval_cancelled",
+        "business_id": record.business_id,
+        "approval_request_id": approval_request.approval_request_id,
+        "ledger_id": record.ledger_id,
+        "case_id": record.case_id,
+        "action_key": record.action_key,
+        "decision": "cancelled",
+        "approval_state": record.approval_state,
+        "execution_state": record.execution_state,
+        "actor_ref": actor_ref,
+        "reason": reason,
+        "created_at": _iso(now),
+    }
+    redacted = redact_secrets(event)
+    return redacted if isinstance(redacted, dict) else event
+
+
 def _build_approval_decision_record(
     *,
     record: WorkflowActionLedgerRecord,
@@ -224,6 +270,27 @@ def _build_approval_decision_record(
             record=record,
             approval_request=approval_request,
             decision=decision,
+            actor_ref=actor_ref,
+            reason=reason,
+            now=now,
+        ),
+    )
+
+
+def _build_approval_cancellation_record(
+    *,
+    record: WorkflowActionLedgerRecord,
+    approval_request: WorkflowApprovalRequest,
+    actor_ref: str | None,
+    reason: str | None,
+    now: datetime,
+) -> WorkflowApprovalCancellationRecord:
+    return WorkflowApprovalCancellationRecord(
+        record=record,
+        approval_request=approval_request,
+        audit_event=_cancellation_audit_event(
+            record=record,
+            approval_request=approval_request,
             actor_ref=actor_ref,
             reason=reason,
             now=now,
@@ -356,6 +423,59 @@ class InMemoryWorkflowActionLedgerStore:
             record=record,
             approval_request=decided_request,
             decision=approved_decision,
+            actor_ref=safe_actor_ref,
+            reason=safe_reason,
+            now=timestamp,
+        )
+
+    def cancel_approval_request(
+        self,
+        *,
+        business_id: str,
+        approval_request_id: str,
+        actor_ref: str,
+        reason: str,
+        now: datetime | None = None,
+    ) -> WorkflowApprovalCancellationRecord:
+        request = self._approvals.get(approval_request_id)
+        if request is None or request.business_id != business_id:
+            raise WorkflowActionLedgerError("approval_request_not_found", "approval request not found")
+        if request.status != "pending":
+            raise WorkflowActionLedgerError(
+                "approval_request_already_decided",
+                f"approval request already decided with status {request.status}",
+            )
+        record_key = next(
+            (
+                key
+                for key, action in self._actions.items()
+                if action.business_id == business_id and action.ledger_id == request.ledger_id
+            ),
+            None,
+        )
+        if record_key is None:
+            raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
+        timestamp = _coerce_utc(now)
+        safe_actor_ref = _safe_text(actor_ref)
+        safe_reason = _safe_text(reason)
+        record = replace(
+            self._actions[record_key],
+            approval_state="cancelled",
+            execution_state="failed",
+            updated_at=timestamp,
+        )
+        cancelled_request = replace(
+            request,
+            status="cancelled",
+            decided_at=timestamp,
+            decision_actor_ref=safe_actor_ref,
+            decision_reason=safe_reason,
+        )
+        self._actions[record_key] = record
+        self._approvals[approval_request_id] = cancelled_request
+        return _build_approval_cancellation_record(
+            record=record,
+            approval_request=cancelled_request,
             actor_ref=safe_actor_ref,
             reason=safe_reason,
             now=timestamp,
@@ -615,6 +735,80 @@ class SQLiteWorkflowActionLedgerStore:
             record=updated_record,
             approval_request=updated_request,
             decision=approved_decision,
+            actor_ref=safe_actor_ref,
+            reason=safe_reason,
+            now=timestamp,
+        )
+
+    def cancel_approval_request(
+        self,
+        *,
+        business_id: str,
+        approval_request_id: str,
+        actor_ref: str,
+        reason: str,
+        now: datetime | None = None,
+    ) -> WorkflowApprovalCancellationRecord:
+        timestamp = _coerce_utc(now)
+        safe_actor_ref = _safe_text(actor_ref)
+        safe_reason = _safe_text(reason)
+        with self._connect() as conn:
+            request_row = conn.execute(
+                "SELECT * FROM workflow_approval_requests WHERE business_id = ? AND approval_request_id = ?",
+                (business_id, approval_request_id),
+            ).fetchone()
+            if request_row is None:
+                raise WorkflowActionLedgerError("approval_request_not_found", "approval request not found")
+            request = _approval_from_row(request_row)
+            if request.status != "pending":
+                raise WorkflowActionLedgerError(
+                    "approval_request_already_decided",
+                    f"approval request already decided with status {request.status}",
+                )
+            record_row = conn.execute(
+                "SELECT * FROM workflow_action_ledger WHERE business_id = ? AND ledger_id = ?",
+                (business_id, request.ledger_id),
+            ).fetchone()
+            if record_row is None:
+                raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
+            conn.execute(
+                """
+                UPDATE workflow_approval_requests
+                SET status = ?, decided_at = ?, decision_actor_ref = ?, decision_reason = ?
+                WHERE business_id = ? AND approval_request_id = ?
+                """,
+                (
+                    "cancelled",
+                    _iso(timestamp),
+                    safe_actor_ref,
+                    safe_reason,
+                    business_id,
+                    approval_request_id,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE workflow_action_ledger
+                SET approval_state = ?, execution_state = ?, updated_at = ?
+                WHERE business_id = ? AND ledger_id = ?
+                """,
+                ("cancelled", "failed", _iso(timestamp), business_id, request.ledger_id),
+            )
+            updated_record = _record_from_row(
+                conn.execute(
+                    "SELECT * FROM workflow_action_ledger WHERE business_id = ? AND ledger_id = ?",
+                    (business_id, request.ledger_id),
+                ).fetchone()
+            )
+            updated_request = _approval_from_row(
+                conn.execute(
+                    "SELECT * FROM workflow_approval_requests WHERE business_id = ? AND approval_request_id = ?",
+                    (business_id, approval_request_id),
+                ).fetchone()
+            )
+        return _build_approval_cancellation_record(
+            record=updated_record,
+            approval_request=updated_request,
             actor_ref=safe_actor_ref,
             reason=safe_reason,
             now=timestamp,
