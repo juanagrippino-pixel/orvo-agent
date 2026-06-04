@@ -19,6 +19,7 @@ from app.brain.operator_case_projections import (
     latest_evidence_at as _latest_evidence_at,
     source_connectors as _source_connectors,
 )
+from app.brain.work_items import priority_bracket_for_score
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.work_items import priority_bracket_for_score
