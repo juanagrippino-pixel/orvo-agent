@@ -90,7 +90,14 @@ def summarize_run_dispatch_statuses(
     }
 
 
-def summarize_run_history(ledger: RunLedger, *, business_id: str, limit: str | None) -> dict[str, Any]:
+def summarize_run_history(
+    ledger: RunLedger,
+    *,
+    business_id: str,
+    status: str | None,
+    trigger_type: str | None,
+    limit: str | None,
+) -> dict[str, Any]:
     """Return bounded read-only analytics over business-scoped run ledger rows.
 
     This summary intentionally uses the ledger service API instead of SQL or user-
@@ -98,13 +105,21 @@ def summarize_run_history(ledger: RunLedger, *, business_id: str, limit: str | N
     query window, and the response contains aggregate counts only.
     """
 
+    parsed_status = parse_run_status(status)
+    parsed_trigger_type = parse_run_trigger_type(trigger_type)
     parsed_limit = parse_limit(limit)
-    runs = ledger.list_runs(business_id=business_id, status=None, limit=parsed_limit)
+    runs = ledger.list_runs(
+        business_id=business_id,
+        status=parsed_status,
+        trigger_type=parsed_trigger_type,
+        limit=parsed_limit,
+    )
     connector_outcomes = [outcome for run in runs for outcome in run.connector_outcomes]
     dispatch_outcomes = [outcome for run in runs for outcome in run.dispatch_outcomes]
     return redact_secrets(
         {
             "business_id": business_id,
+            "filters": {"status": parsed_status, "trigger_type": parsed_trigger_type},
             "limit": parsed_limit,
             "count": len(runs),
             "status_counts": _sorted_counts(run.status for run in runs),

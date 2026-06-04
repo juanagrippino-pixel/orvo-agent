@@ -107,6 +107,8 @@ def register_run_delivery_routes(app):
                 summarize_run_history(
                     run_ledger,
                     business_id=business_id,
+                    status=request.args.get("status"),
+                    trigger_type=request.args.get("trigger_type"),
                     limit=request.args.get("limit"),
                 ),
             ),
