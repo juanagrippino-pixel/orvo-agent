@@ -59,6 +59,7 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["status"] == "open"
     assert projection["status_category"] == "to_do"
     assert projection["priority_score"] == 87
+    assert projection["priority_bracket"] == "high"
     assert projection["assignee_ref"] is None
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
@@ -66,6 +67,18 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["last_commented_at"] is None
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
+
+
+def test_case_work_item_projection_exposes_canonical_priority_brackets(tmp_path):
+    db_path = tmp_path / "work-item-priority-brackets.sqlite3"
+
+    low = _seed_case(db_path, _case_detection(run_id="run-low", priority=49, dedupe_suffix="low"))
+    medium = _seed_case(db_path, _case_detection(run_id="run-medium", priority=50, dedupe_suffix="medium"))
+    high = _seed_case(db_path, _case_detection(run_id="run-high", priority=80, dedupe_suffix="high"))
+
+    assert case_work_item_projection(low)["priority_bracket"] == "low"
+    assert case_work_item_projection(medium)["priority_bracket"] == "medium"
+    assert case_work_item_projection(high)["priority_bracket"] == "high"
 
 
 def test_case_work_item_projection_summarizes_comments_without_copying_bodies(tmp_path):
