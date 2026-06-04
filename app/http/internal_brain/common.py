@@ -216,13 +216,26 @@ def _gateway_policy_or_error(*, route_key: str, business_id: str, principal: Int
     )
 
 
-def _with_internal_stores(business_id: str, handler):
+def _with_internal_stores(business_id: str, handler, *, gateway_route_key: str | None = None):
     auth_error = _authorize_internal_operator(business_id)
     if auth_error is not None:
         return auth_error
-    permission_error = _require_internal_header_permission(business_id, INTERNAL_READ_PERMISSION, audit_denial=True)
+    principal, permission_error = _internal_principal_or_error(
+        business_id,
+        INTERNAL_READ_PERMISSION,
+        audit_denial=True,
+    )
     if permission_error is not None:
         return permission_error
+    assert principal is not None
+    if gateway_route_key is not None:
+        _decision, gateway_error = _gateway_policy_or_error(
+            route_key=gateway_route_key,
+            business_id=business_id,
+            principal=principal,
+        )
+        if gateway_error is not None:
+            return gateway_error
     try:
         with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
             init_schema(conn)

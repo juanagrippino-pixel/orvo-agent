@@ -243,6 +243,7 @@ def default_gateway_policy_registry() -> GatewayPolicyRegistry:
                 rate_limit=GatewayRateLimitPolicy(bucket="operator_api_read", requests_per_minute=120, burst=30),
                 idempotency_required=False,
                 audit_event_type="operator_case_queue_requested",
+                enforcement_state="enforced",
             ),
             GatewayRoutePolicy(
                 route_key="operator_api.case_action.mutate",

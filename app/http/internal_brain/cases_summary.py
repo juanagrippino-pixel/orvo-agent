@@ -32,6 +32,7 @@ def register_case_summary_routes(app):
                     jql=request.args.get("jql"),
                 ),
             ),
+            gateway_route_key="operator_api.case_queue.read",
         )
 
 

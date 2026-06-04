@@ -30,7 +30,7 @@ def test_default_gateway_policy_registry_covers_current_internal_boundaries():
     assert case_action.idempotency_required is True
     assert case_action.audit_event_type == "operator_case_action_requested"
 
-    assert registry.get("operator_api.case_queue.read").enforcement_state == "contract_only"
+    assert registry.get("operator_api.case_queue.read").enforcement_state == "enforced"
     assert registry.get("operator_api.case_action.mutate").enforcement_state == "enforced"
     assert registry.get("runtime.force_run.mutate").enforcement_state == "contract_only"
 
@@ -63,7 +63,7 @@ def test_gateway_policy_manifest_is_stable_and_secret_safe():
         "runtime.force_run.mutate",
     ]
     assert {route["route_key"]: route["enforcement_state"] for route in manifest["routes"]} == {
-        "operator_api.case_queue.read": "contract_only",
+        "operator_api.case_queue.read": "enforced",
         "operator_api.case_action.mutate": "enforced",
         "runtime.force_run.mutate": "contract_only",
     }

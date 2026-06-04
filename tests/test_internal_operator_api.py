@@ -4,6 +4,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.brain.operational_cases import (
     OperationalCaseDetection,
@@ -171,6 +172,39 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["latest_evidence_at"] == "2026-05-24T08:00:00Z"
     assert body["data"]["cases"][0]["source_connectors"] == ["tiendanube"]
     assert body["data"]["cases"][0]["degraded"] is False
+
+
+def test_internal_case_queue_enforces_gateway_policy_before_store_access(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+    evaluated_contexts = []
+
+    class DenyingGatewayRegistry:
+        def evaluate(self, context):
+            evaluated_contexts.append(context)
+            return SimpleNamespace(
+                allowed=False,
+                code="gateway_test_denied",
+                reason="Gateway test denial.",
+                status_code=429,
+            )
+
+    import app.http.internal_brain.common as internal_common
+
+    monkeypatch.setattr(internal_common, "default_gateway_policy_registry", lambda: DenyingGatewayRegistry())
+
+    response = client.get("/internal/brain/businesses/artemea/cases?status=open", headers=AUTH)
+
+    assert response.status_code == 429
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "gateway_test_denied"
+    assert len(evaluated_contexts) == 1
+    context = evaluated_contexts[0]
+    assert context.route_key == "operator_api.case_queue.read"
+    assert context.method == "GET"
+    assert context.business_id == "artemea"
+    assert context.principal.actor_id == "operator:juan"
 
 
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
