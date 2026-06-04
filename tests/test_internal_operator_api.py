@@ -1030,6 +1030,62 @@ def test_internal_case_queue_aging_by_case_type_returns_scoped_envelope(monkeypa
     assert data["oldest_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
 
 
+def test_internal_case_queue_aging_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-tn-aging",
+            source="tiendanube",
+            source_label="Tiendanube access_token=raw_source_secret",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-sheets-aging",
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            source="google_sheets",
+            source_label="Google Sheets access_token=raw_source_secret",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-tn-aging",
+            source="tiendanube",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/aging/by-source-connector",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_source_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_age_bucket"]["under_6h"] == 2
+    assert data["by_age_bucket_source_connector"]["under_6h"] == {
+        "tiendanube": 1,
+        "google_sheets": 1,
+    }
+    assert data["oldest_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
+
+
 def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
@@ -1329,6 +1385,98 @@ def test_internal_case_acknowledgment_latency_by_case_type_returns_scoped_envelo
     assert data["fastest_acknowledged"]["case_type"] == "stockout_risk"
     assert data["slowest_acknowledged"]["case_id"] == sales.case_id
     assert data["slowest_acknowledged"]["case_type"] == "sales_drop"
+
+
+def test_internal_case_acknowledgment_latency_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    tiendanube = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-tiendanube-ack-source",
+            source="tiendanube",
+            source_label="Tiendanube",
+            dedupe_suffix="stockout_risk/product/sku-tiendanube-ack-source/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        tiendanube.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(minutes=30),
+    )
+    csv = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-csv-ack-source",
+            source="csv",
+            source_label="CSV import",
+            dedupe_suffix="sales_drop/channel/csv/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        csv.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=8),
+    )
+    other_tenant = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-ack-source",
+            source="meta_ads",
+            source_label="Meta Ads",
+            dedupe_suffix="stockout_risk/product/sku-other-ack-source/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other_tenant.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/acknowledgment-latency/by-source-connector",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["acknowledged_total"] == 2
+    assert data["by_acknowledgment_bucket"] == {
+        "under_1h": 1,
+        "under_6h": 0,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_acknowledgment_bucket_source_connector"] == {
+        "under_1h": {"tiendanube": 1},
+        "under_6h": {},
+        "under_24h": {"csv": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }
+    assert data["fastest_acknowledged"]["case_id"] == tiendanube.case_id
+    assert data["slowest_acknowledged"]["case_id"] == csv.case_id
+    assert "meta_ads" not in str(data)
 
 
 def test_internal_case_acknowledgment_latency_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
