@@ -242,8 +242,23 @@ def acknowledgment_sla_minutes_for_priority_score(priority_score: int) -> int:
     return 1440
 
 
+def resolution_sla_minutes_for_priority_score(priority_score: int) -> int:
+    """Return the deterministic time-to-resolution SLA target for a priority score."""
+
+    bracket = priority_bracket_for_score(priority_score)
+    if bracket == "high":
+        return 1440
+    if bracket == "medium":
+        return 4320
+    return 10080
+
+
 def case_acknowledgment_due_at(case: OperationalCase) -> datetime:
     return case.opened_at + timedelta(minutes=acknowledgment_sla_minutes_for_priority_score(case.priority_score))
+
+
+def case_resolution_due_at(case: OperationalCase) -> datetime:
+    return case.opened_at + timedelta(minutes=resolution_sla_minutes_for_priority_score(case.priority_score))
 
 
 def _acknowledgment_sla_comparison_time(case: OperationalCase, *, as_of: datetime) -> datetime:
@@ -264,9 +279,25 @@ def _acknowledgment_sla_comparison_time(case: OperationalCase, *, as_of: datetim
     return _as_utc(as_of)
 
 
+def _resolution_sla_comparison_time(case: OperationalCase, *, as_of: datetime) -> datetime:
+    """Return the timestamp that stops the time-to-resolution SLA clock."""
+
+    if case.resolved_at is not None:
+        return case.resolved_at
+    if case.dismissed_at is not None:
+        return case.dismissed_at
+    return _as_utc(as_of)
+
+
 def case_acknowledgment_sla_breached(case: OperationalCase, *, as_of: datetime) -> bool:
     due_at = case_acknowledgment_due_at(case)
     comparison_time = _acknowledgment_sla_comparison_time(case, as_of=as_of)
+    return comparison_time > due_at
+
+
+def case_resolution_sla_breached(case: OperationalCase, *, as_of: datetime) -> bool:
+    due_at = case_resolution_due_at(case)
+    comparison_time = _resolution_sla_comparison_time(case, as_of=as_of)
     return comparison_time > due_at
 
 
@@ -290,6 +321,10 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
         "acknowledgment_sla_minutes": acknowledgment_sla_minutes_for_priority_score(case.priority_score),
         "acknowledgment_due_at": _iso_utc(case_acknowledgment_due_at(case)),
         "acknowledgment_sla_breached": case_acknowledgment_sla_breached(case, as_of=effective_as_of),
+        "resolved_at": _iso_utc(case.resolved_at) if case.resolved_at is not None else None,
+        "resolution_sla_minutes": resolution_sla_minutes_for_priority_score(case.priority_score),
+        "resolution_due_at": _iso_utc(case_resolution_due_at(case)),
+        "resolution_sla_breached": case_resolution_sla_breached(case, as_of=effective_as_of),
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
         "case_id": case.case_id,
