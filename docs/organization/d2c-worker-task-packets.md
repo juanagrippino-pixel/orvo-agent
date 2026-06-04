@@ -498,7 +498,7 @@ Likely files:
 Acceptance:
 
 - projects remain represented as a projection/envelope over `business_id` with stable, collision-resistant project keys and no tenant-crossing leakage;
-- issue/work-item projection includes `work_item_id`, `project_key`, `issue_type`, `status`, `status_category`, priority, assignee/owner, created/updated timestamps, and canonical `case_id` for detected Operational Cases;
+- issue/work-item projection includes `work_item_id`, `project_key`, `issue_type`, `status`, `status_category`, priority score/bracket, assignee/owner, created/updated timestamps, and canonical `case_id` for detected Operational Cases;
 - status categories are deterministic (`to_do`, `in_progress`, `done`) and terminal flags match existing `resolved`/`dismissed` behavior;
 - workflow/status definition helpers expose the current transition table for projection/validation without enabling tenant-custom workflows yet;
 - JQL-lite grows `project`, `status_category`, `assignee_ref`, and `issue_type` fields only after they derive from the canonical projection helpers;
