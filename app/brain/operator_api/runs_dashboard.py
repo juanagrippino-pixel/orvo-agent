@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.brain.run_ledger import DispatchRunStatus, RunRecord
+from app.brain.run_ledger import TERMINAL_RUN_STATUSES, DispatchRunStatus, RunRecord
 
 from .common import *  # noqa: F401,F403
 from .common import _NO_DISPATCH_STATUS, RunDispatchStatusFilter
@@ -47,6 +47,52 @@ def list_run_history(
         runs = [run for run in runs if _matches_dispatch_status_filter(run, parsed_dispatch_status)]
         runs = runs[:parsed_limit]
     return {"runs": [run_history_item(run) for run in runs], "limit": parsed_limit}
+
+
+def summarize_run_history(ledger: RunLedger, *, business_id: str, limit: str | None) -> dict[str, Any]:
+    """Return bounded read-only analytics over business-scoped run ledger rows.
+
+    This summary intentionally uses the ledger service API instead of SQL or user-
+    supplied predicates. The route owns business scope, ``parse_limit`` caps the
+    query window, and the response contains aggregate counts only.
+    """
+
+    parsed_limit = parse_limit(limit)
+    runs = ledger.list_runs(business_id=business_id, status=None, limit=parsed_limit)
+    connector_outcomes = [outcome for run in runs for outcome in run.connector_outcomes]
+    dispatch_outcomes = [outcome for run in runs for outcome in run.dispatch_outcomes]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "limit": parsed_limit,
+            "count": len(runs),
+            "status_counts": _sorted_counts(run.status for run in runs),
+            "trigger_type_counts": _sorted_counts(run.trigger_type for run in runs),
+            "connector_status_counts": _sorted_counts(outcome.status for outcome in connector_outcomes),
+            "connector_type_counts": _sorted_counts(outcome.connector_type for outcome in connector_outcomes),
+            "dispatch_status_counts": _sorted_counts(outcome.status for outcome in dispatch_outcomes),
+            "terminal_total": sum(1 for run in runs if run.status in TERMINAL_RUN_STATUSES),
+            "running_total": sum(1 for run in runs if run.status == "running"),
+            "failed_connector_total": sum(1 for outcome in connector_outcomes if outcome.status == "failed"),
+            "failed_dispatch_total": sum(1 for outcome in dispatch_outcomes if outcome.status == "failed"),
+            "cases_opened_total": sum(_metadata_int(run.summary_metadata, "cases_opened") for run in runs),
+            "cases_updated_total": sum(_metadata_int(run.summary_metadata, "cases_updated") for run in runs),
+        }
+    )
+
+
+def _sorted_counts(values) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value)
+        counts[key] = counts.get(key, 0) + 1
+    return {key: counts[key] for key in sorted(counts)}
+
+
+def _metadata_int(metadata: dict[str, Any], key: str) -> int:
+    value = metadata.get(key, 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
 
 def get_scoped_run(ledger: RunLedger, *, business_id: str, run_id: str) -> RunRecord:
     run = ledger.get_run(run_id)

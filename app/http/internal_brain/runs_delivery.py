@@ -79,6 +79,21 @@ def register_run_delivery_routes(app):
         return _internal_success(business_id, {"events": redact_secrets(events)})
 
 
+    @app.get("/internal/brain/businesses/<business_id>/runs/summary")
+    def internal_brain_runs_summary(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_run_history(
+                    run_ledger,
+                    business_id=business_id,
+                    limit=request.args.get("limit"),
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/runs/<run_id>")
     def internal_brain_run_detail(business_id: str, run_id: str):
         return _with_internal_stores(
