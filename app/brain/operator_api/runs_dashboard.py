@@ -71,6 +71,21 @@ def _owner_ready_message(
     return "\n".join(lines)
 
 
+def _owner_dispatch_policy(*, actionable_total: int, degraded_total: int) -> dict[str, Any]:
+    reasons: list[str] = []
+    if actionable_total > 0:
+        reasons.append("actionable_cases_present")
+    if degraded_total > 0:
+        reasons.append("degraded_evidence_present")
+    review_required = bool(reasons)
+    return {
+        "channel": "whatsapp",
+        "auto_dispatch_allowed": not review_required,
+        "review_required": review_required,
+        "reasons": reasons,
+    }
+
+
 def _mvp_operator_brief(
     *,
     business_id: str,
@@ -127,6 +142,10 @@ def _mvp_operator_brief(
                 degraded_total=degraded_total,
                 next_actions=next_actions,
                 evidence_actions=evidence_actions,
+            ),
+            "dispatch_policy": _owner_dispatch_policy(
+                actionable_total=actionable_total,
+                degraded_total=degraded_total,
             ),
             "next_actions": next_actions,
             "evidence_actions": evidence_actions,
