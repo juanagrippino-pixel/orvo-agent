@@ -534,6 +534,23 @@ def test_owner_case_brief_renders_only_registry_allowed_case_metrics():
     assert "tn_test_token" not in text
 
 
+def test_owner_brief_redacts_secret_shaped_recommended_action_text():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-action-secret",
+        title="Stock crítico",
+        recommended_action="Revisar proveedor Authorization: Basic raw_action_brief_secret",
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Acción sugerida" in text
+    assert "raw_action_brief_secret" not in text
+    assert "Authorization: Basic" not in text
+    assert "[REDACTED" in text
+
+
 def test_compose_owner_case_brief_excludes_internal_case_families_from_owner_surface():
     from app.brain.reporting import compose_owner_case_brief
 
