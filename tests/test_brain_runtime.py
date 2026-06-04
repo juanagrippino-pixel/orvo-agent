@@ -195,15 +195,23 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
 def test_compile_business_runtime_rejects_missing_required_connector_params():
     from app.brain.runtime import RuntimeCompileError, compile_business_runtime
 
-    business = make_business(
+    business = BusinessConfig.model_construct(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
         connectors=[
-            ConnectorConfig(
+            ConnectorConfig.model_construct(
                 connector_id="sheet",
                 connector_type="google_sheets",
                 label="Sheet Artemea",
                 params={"spreadsheet_id": "abc123"},
+                secret_refs={},
+                enabled=True,
             )
-        ]
+        ],
+        insight_thresholds=InsightThresholds(stock_threshold=7, unanswered_threshold=3),
     )
 
     with pytest.raises(RuntimeCompileError) as excinfo:
