@@ -41,14 +41,17 @@ def list_run_history(
     business_id: str,
     status: str | None,
     limit: str | None,
+    trigger_type: str | None = None,
     dispatch_status: str | None = None,
 ) -> dict[str, Any]:
     parsed_status = parse_run_status(status)
+    parsed_trigger_type = parse_run_trigger_type(trigger_type)
     parsed_dispatch_status = parse_dispatch_status(dispatch_status)
     parsed_limit = parse_limit(limit)
     runs = ledger.list_runs(
         business_id=business_id,
         status=parsed_status,
+        trigger_type=parsed_trigger_type,
         limit=None if parsed_dispatch_status is not None else parsed_limit,
     )
     if parsed_dispatch_status is not None:
@@ -180,7 +183,7 @@ def get_operator_dashboard(
             store, business_id=business_id
         ),
         "run_history": list_run_history(
-            ledger, business_id=business_id, status=None, limit=str(limit)
+            ledger, business_id=business_id, status=None, trigger_type=None, limit=str(limit)
         ),
         "builtin_case_view_totals": _summarize_builtin_case_view_totals(
             store, business_id=business_id
