@@ -160,6 +160,7 @@ def test_run_due_daily_reports_dispatches_due_google_sheet_report():
 
 
 def test_run_due_daily_reports_records_scheduled_run_in_ledger():
+    from app.brain.connector_registry import get_connector_spec
     from app.brain.runner import run_due_daily_reports
 
     delivery = MagicMock()
@@ -204,6 +205,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
             "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+            "executor_metadata": get_connector_spec("google_sheets").executor_policy_metadata(),
             "health_policy": {
                 "readiness_check": "metadata_only",
                 "supports_health_check": False,
