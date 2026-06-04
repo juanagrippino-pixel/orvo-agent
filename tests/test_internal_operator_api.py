@@ -14,7 +14,7 @@ from app.brain.operational_cases import (
     SQLiteOperationalCaseStore,
 )
 from app.brain.operator_audit import SQLiteOperatorAuditStore
-from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, RunStatus, SQLiteRunLedger
+from app.brain.run_ledger import ArtifactRef, ConnectorRunOutcome, DispatchOutcomeRef, RunStatus, SQLiteRunLedger
 from app.brain.storage import init_schema
 
 
@@ -854,6 +854,87 @@ def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkey
     cross = client.get(f"/internal/brain/businesses/artemea/runs/{other.run_id}", headers=AUTH)
     assert cross.status_code == 404
     assert cross.get_json()["error"]["code"] == "run_not_found"
+
+
+def _seed_failed_connector_run(db_path, *, business_id: str, run_id: str):
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    ledger = SQLiteRunLedger(conn)
+    run = ledger.create_run(
+        business_id=business_id,
+        trigger_type="forced",
+        run_id=run_id,
+        started_at=_utc(9),
+        config_ref="config://runtime?access_token=raw_run_secret",
+        summary_metadata={"note": "Bearer raw_run_secret"},
+    )
+    ledger.append_connector_outcome(
+        run.run_id,
+        ConnectorRunOutcome(
+            connector_id="tn-main",
+            connector_type="tiendanube",
+            status="failed",
+            started_at=_utc(9),
+            finished_at=_utc(10),
+            error_summary="failed with api_key=raw_connector_secret",
+        ),
+    )
+    ledger.update_run(
+        run.run_id,
+        status="failed",
+        finished_at=_utc(10),
+        summary_metadata={"cases_opened": 0, "cases_updated": 1},
+        error_summary="run failed with token=raw_run_secret",
+    )
+    conn.close()
+    return run
+
+
+def test_internal_run_summary_is_business_scoped_redacted_and_counts_recent_runs(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-artemea-ok")
+    _seed_failed_connector_run(db_path, business_id="artemea", run_id="run-artemea-failed")
+    _seed_failed_connector_run(db_path, business_id="other", run_id="run-other-failed")
+
+    response = client.get("/internal/brain/businesses/artemea/runs/summary?limit=10", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["limit"] == 10
+    assert summary["count"] == 2
+    assert summary["status_counts"] == {"failed": 1, "succeeded": 1}
+    assert summary["trigger_type_counts"] == {"forced": 2}
+    assert summary["connector_status_counts"] == {"failed": 1}
+    assert summary["connector_type_counts"] == {"tiendanube": 1}
+    assert summary["dispatch_status_counts"] == {"sent": 1}
+    assert summary["terminal_total"] == 2
+    assert summary["running_total"] == 0
+    assert summary["failed_connector_total"] == 1
+    assert summary["failed_dispatch_total"] == 0
+    assert summary["cases_opened_total"] == 1
+    assert summary["cases_updated_total"] == 1
+    rendered = response.get_data(as_text=True)
+    assert "run-other-failed" not in rendered
+    assert "raw_run_secret" not in rendered
+    assert "raw_connector_secret" not in rendered
+
+
+def test_internal_run_summary_rejects_invalid_limit_with_safe_envelope(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/runs/summary?limit=not-an-int", headers=AUTH)
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_limit"
+    assert body["redaction_applied"] is True
 
 
 def test_internal_case_queue_summary_returns_status_severity_and_actionable_counts(monkeypatch, tmp_path):
