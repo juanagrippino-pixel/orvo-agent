@@ -1,0 +1,131 @@
+def test_redact_secrets_handles_bearer_headers_url_tokens_private_keys_and_nested_metadata():
+    from app.brain.security.redaction import redact_secrets
+
+    raw = {
+        "status": "failed",
+        "business_id": "artemea",
+        "auth_header": "Bearer live_token_123",
+        "callback": "https://api.example.test/orders?access_token=raw-token&safe=ok",
+        "oauth_callback": "https://oauth.example.test/callback?code=oauth_callback_secret&state=safe-state",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+        "nested": {
+            "message": "refresh_token=refresh_secret and safe id case-123",
+            "json_error": "request failed: {\"access_token\":\"secret_json_token\"}",
+            "colon_error": "token: plain_colon_token",
+            "oauth_error": "authorization_code=inline_oauth_secret",
+            "quoted_oauth_error": "oauth_code: \"multi word oauth secret\"",
+            "quoted_password": "request failed: {\"password\":\"two words secret\"}",
+            "quoted_colon_password": "password: \"phrase secret value\"",
+            "safe_status": "ok",
+        },
+    }
+
+    redacted = redact_secrets(raw)
+    rendered = str(redacted)
+
+    assert redacted["status"] == "failed"
+    assert redacted["business_id"] == "artemea"
+    assert redacted["nested"]["safe_status"] == "ok"
+    assert "live_token_123" not in rendered
+    assert "raw-token" not in rendered
+    assert "oauth_callback_secret" not in rendered
+    assert "inline_oauth_secret" not in rendered
+    assert "multi word oauth secret" not in rendered
+    assert "refresh_secret" not in rendered
+    assert "secret_json_token" not in rendered
+    assert "plain_colon_token" not in rendered
+    assert "two words secret" not in rendered
+    assert "phrase secret value" not in rendered
+    assert "abc" not in rendered
+    assert "safe=ok" in rendered
+    assert "state=safe-state" in rendered
+
+
+def test_redact_secrets_preserves_safe_connector_reference_metadata_without_raw_secret_values():
+    from app.brain.security.redaction import redact_secrets
+
+    raw = {
+        "connector_refs": [
+            {
+                "connector_id": "tn",
+                "secret_refs": {
+                    "access_token": "secret://businesses/artemea/connectors/tn/access_token",
+                    "refresh_token": "raw_inline_secret_ref",
+                    "api_key": "secret://businesses/artemea/connectors/tn/api_key?token=raw_ref_query",
+                },
+                "secret_param_names": ["access_token"],
+                "legacy_secret_param_names": ["access_token"],
+                "raw_token": "tn_live_raw_secret",
+            }
+        ],
+        "access_token": "top_level_raw_secret",
+    }
+
+    redacted = redact_secrets(raw)
+    rendered = str(redacted)
+
+    assert redacted["connector_refs"][0]["secret_refs"] == {
+        "access_token": "secret://businesses/artemea/connectors/tn/access_token",
+        "refresh_token": "[REDACTED]",
+        "api_key": "secret://businesses/artemea/connectors/tn/api_key?token=%5BREDACTED%5D",
+    }
+    assert redacted["connector_refs"][0]["secret_param_names"] == ["access_token"]
+    assert redacted["connector_refs"][0]["legacy_secret_param_names"] == ["access_token"]
+    assert redacted["connector_refs"][0]["raw_token"] == "[REDACTED]"
+    assert redacted["access_token"] == "[REDACTED]"
+    assert "tn_live_raw_secret" not in rendered
+    assert "top_level_raw_secret" not in rendered
+    assert "raw_inline_secret_ref" not in rendered
+    assert "raw_ref_query" not in rendered
+
+
+def test_redact_text_removes_multi_token_basic_authorization_headers():
+    from app.brain.security.redaction import redact_text
+
+    text = "connector failed with Authorization: Basic dXNlcjpzdXBlcl9zZWNyZXQ= while syncing"
+
+    redacted = redact_text(text)
+
+    assert "Basic dXNlcjpzdXBlcl9zZWNyZXQ=" not in (redacted or "")
+    assert "dXNlcjpzdXBlcl9zZWNyZXQ=" not in (redacted or "")
+    assert redacted == "connector failed with Authorization: [REDACTED] while syncing"
+
+
+def test_redact_text_removes_token_scheme_authorization_header_credentials():
+    from app.brain.security.redaction import redact_text
+
+    text = "connector failed with Authorization: Token raw_auth_header_secret while syncing"
+
+    redacted = redact_text(text)
+
+    assert "Token raw_auth_header_secret" not in (redacted or "")
+    assert "raw_auth_header_secret" not in (redacted or "")
+    assert redacted == "connector failed with Authorization: [REDACTED] while syncing"
+
+
+def test_redact_uri_removes_url_userinfo_credentials_without_dropping_safe_context():
+    from app.brain.security.redaction import redact_uri
+
+    uri = "https://raw_user:raw_userinfo_password@api.example.test/orders?access_token=raw-query-token&store=artemea"
+
+    redacted = redact_uri(uri)
+
+    assert redacted == "https://[REDACTED]@api.example.test/orders?access_token=%5BREDACTED%5D&store=artemea"
+    assert "raw_user" not in (redacted or "")
+    assert "raw_userinfo_password" not in (redacted or "")
+    assert "raw-query-token" not in (redacted or "")
+    assert "api.example.test/orders" in (redacted or "")
+    assert "store=artemea" in (redacted or "")
+
+
+def test_redact_text_redacts_bare_oauth_code_key_values_without_dropping_context():
+    from app.brain.security.redaction import redact_text
+
+    text = "oauth callback failed before code=raw_oauth_code after state=safe-state"
+
+    redacted = redact_text(text)
+
+    assert redacted == "oauth callback failed before code=[REDACTED] after state=safe-state"
+    assert "raw_oauth_code" not in (redacted or "")
+    assert "oauth callback failed before" in (redacted or "")
+    assert "after state=safe-state" in (redacted or "")

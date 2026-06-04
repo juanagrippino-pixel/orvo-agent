@@ -1,0 +1,71 @@
+# Worker handoff manifest — codex-work-management-fixture-reasons-20260531
+
+- task_id: codex-work-management-fixture-reasons-20260531
+- objective: Re-verify and package the updated Work Management Core branch after the prior integration train was blocked by terminal-action reason fixture fallout.
+- bounded_context: Work Management Core / Release blocker fix
+- worktree_path: /root/orvo-agent-worktrees/codex-work-management-fixture-reasons-20260531
+- branch: codex/work-management-fixture-reasons-20260531
+- base_sha: 1b82d34d85c93c366cd1c92c03a2b415b3442de4
+- head_sha: a96fbec8a9c2f14aad16bdfaf667cdedcef0141a (verified code merge before this manifest doc commit; final branch head is reported by the cron handoff)
+- status: review-ready
+- files_changed:
+  - app/brain/operational_cases.py
+  - app/brain/operator_api.py
+  - tests/test_brain_operational_cases.py
+  - tests/test_operator_case_actions.py
+  - tests/test_operator_case_acknowledgment_latency_histogram.py
+  - tests/test_operator_case_acknowledgment_latency_histogram_by_case_type.py
+  - tests/test_operator_case_acknowledgment_latency_histogram_by_entity_kind.py
+  - tests/test_operator_case_acknowledgment_latency_histogram_by_priority_bracket.py
+  - tests/test_operator_case_acknowledgment_latency_histogram_by_source_connector.py
+  - tests/test_operator_case_handling_latency_histogram.py
+  - tests/test_operator_case_handling_latency_histogram_by_case_type.py
+  - tests/test_operator_case_handling_latency_histogram_by_entity_kind.py
+  - tests/test_operator_case_handling_latency_histogram_by_priority_bracket.py
+  - tests/test_operator_case_handling_latency_histogram_by_source_connector.py
+  - tests/test_operator_case_queue_aging.py
+  - tests/test_operator_case_queue_aging_by_case_type.py
+  - tests/test_operator_case_queue_aging_by_entity_kind.py
+  - tests/test_operator_case_queue_aging_by_priority_bracket.py
+  - tests/test_operator_case_queue_aging_by_source_connector.py
+  - tests/test_operator_case_queue_stagnation.py
+  - tests/test_operator_case_queue_stagnation_by_case_type.py
+  - tests/test_operator_case_queue_stagnation_by_entity_kind.py
+  - tests/test_operator_case_queue_stagnation_by_priority_bracket.py
+  - tests/test_operator_case_queue_stagnation_by_source_connector.py
+  - tests/test_operator_case_queue_summary.py
+  - tests/test_operator_case_queue_summary_by_case_type.py
+  - tests/test_operator_case_queue_summary_by_entity_kind.py
+  - tests/test_operator_case_queue_summary_by_priority_bracket.py
+  - tests/test_operator_case_queue_summary_by_source_connector.py
+  - tests/test_operator_case_recently_acknowledged.py
+  - tests/test_operator_case_recently_opened.py
+  - tests/test_operator_case_recently_resolved.py
+  - tests/test_operator_case_resolution_latency_histogram.py
+  - tests/test_operator_case_resolution_latency_histogram_by_case_type.py
+  - tests/test_operator_case_resolution_latency_histogram_by_entity_kind.py
+  - tests/test_operator_case_resolution_latency_histogram_by_priority_bracket.py
+  - tests/test_operator_case_resolution_latency_histogram_by_source_connector.py
+  - tests/test_operator_case_top_actionable_by_age.py
+  - tests/test_operator_case_top_actionable_by_priority.py
+  - tests/test_operator_case_top_actionable_degraded.py
+  - tests/test_operator_case_top_stalled_actionable.py
+  - tests/test_operator_case_workflow_throughput.py
+  - tests/test_operator_case_workflow_throughput_by_case_type.py
+  - tests/test_operator_case_workflow_throughput_by_entity_kind.py
+  - tests/test_operator_case_workflow_throughput_by_priority_bracket.py
+  - tests/test_operator_case_workflow_throughput_by_severity.py
+  - tests/test_operator_case_workflow_throughput_by_source_connector.py
+  - tests/test_server_internal_brain_workflow_throughput.py
+  - docs/workers/codex-work-management-fixture-reasons-20260531.md
+- tests_run:
+  - `pytest tests/test_operator_case_queue_summary_by_case_type.py tests/test_operator_case_queue_summary_by_entity_kind.py tests/test_operator_case_queue_summary_by_priority_bracket.py tests/test_operator_case_queue_summary_by_source_connector.py -q` => pass, 19 passed
+  - `pytest -q` => pass, 1080 passed
+- docs_updated:
+  - docs/workers/codex-work-management-fixture-reasons-20260531.md
+- risks:
+  - This branch intentionally includes the full `codex/work-management` Work Management Core change set plus the already-updated operator fixture reasons; integrate as a single promotion candidate, not as an independent fixture-only patch.
+  - Terminal operator transitions now require non-empty reasons; downstream branches with old operator resolve/dismiss fixture calls may need the same explicit reasons before merge.
+- secrets_checked: yes — touched code/tests/docs only; no `.env` or credential-bearing config files changed; final diff should be checked before promotion.
+- integration_notes: Merge this branch before connector-platform/operator-surface branches that depend on terminal action semantics. Rollback is a normal git revert/reset of this merge candidate; no migrations or external side effects.
+- recommended_next_action: review then merge into `feat/orvo-brain-control-plane` if the integration controller re-runs the focused queue-summary suite and `pytest -q` green.

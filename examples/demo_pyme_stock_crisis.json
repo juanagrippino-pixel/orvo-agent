@@ -1,0 +1,12 @@
+{
+  "business_name": "Café de Barrio — Colegiales",
+  "report_date": "2026-05-20",
+  "source_label": "Tiendanube + Meta Ads",
+  "metrics": {
+    "revenue_today": 95000,
+    "revenue_baseline": 180000,
+    "stock_units": 3,
+    "unanswered_conversations": 12,
+    "ad_spend_today": 25000
+  }
+}

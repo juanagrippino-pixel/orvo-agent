@@ -13,9 +13,8 @@ from app.prompts import (
 
 def test_orvo_knowledge_tiene_precio_y_links():
     assert "99 USD" in ORVO_KNOWLEDGE
-    assert "#contacto" in ORVO_KNOWLEDGE.lower()
     assert "orvo.space" in ORVO_KNOWLEDGE
-    assert "demo-artemea.html" in ORVO_KNOWLEDGE
+    assert "orvo.space/demo" in ORVO_KNOWLEDGE
     assert "Oli" in ORVO_KNOWLEDGE
 
 
@@ -26,16 +25,16 @@ def test_classify_prompt_define_las_tres_rutas():
 
 
 def test_commerce_system_tiene_link_demo():
-    assert "demo-artemea.html" in COMMERCE_SYSTEM
+    assert "orvo.space/demo" in COMMERCE_SYSTEM
     assert "99 USD" in COMMERCE_SYSTEM
 
 
-def test_orvo_system_tiene_contacto():
-    assert "#contacto" in ORVO_SYSTEM.lower()
+def test_orvo_system_tiene_demo():
+    assert "orvo.space/demo" in ORVO_SYSTEM.lower()
 
 
 def test_human_handoff_system_tiene_contacto():
-    assert "#contacto" in HUMAN_HANDOFF_SYSTEM.lower()
+    assert "orvo.space/demo" in HUMAN_HANDOFF_SYSTEM.lower()
 
 
 def test_todos_los_prompts_tienen_contenido_sustancial():
@@ -75,7 +74,7 @@ def test_qualification_instructions_tiene_preguntas_clave():
 
 def test_objection_handling_cubre_objecion_precio():
     assert "caro" in OBJECTION_HANDLING.lower() or "presupuesto" in OBJECTION_HANDLING.lower()
-    assert "#contacto" in OBJECTION_HANDLING.lower() or "demo" in OBJECTION_HANDLING.lower()
+    assert "demo" in OBJECTION_HANDLING.lower()
     assert len(OBJECTION_HANDLING.strip()) > 100
 
 

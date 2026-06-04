@@ -65,7 +65,7 @@ def test_classify_node_actualiza_route_a_commerce():
 
     with patch("app.graph.get_llm", return_value=mock_llm):
         from app.graph import classify_node
-        state = make_state(messages=[HumanMessage(content="tengo una tienda online en Tiendanube")])
+        state = make_state(messages=[HumanMessage(content="tengo un ecommerce con muchas consultas por WhatsApp")])
         result = classify_node(state)
         assert result["route"] == "commerce"
 
@@ -175,38 +175,38 @@ def test_lead_intelligence_no_sobreescribe_nombre_existente():
         assert result["hot_reason"] == "preguntó por precio"
 
 
-def test_should_notify_operator_retorna_notify_cuando_hot_y_no_notificado():
-    from app.graph import should_notify_operator
+def test_should_notify_juan_retorna_notify_cuando_hot_y_no_notificado():
+    from app.graph import should_notify_juan
     state = make_state(hot_lead=True, juan_notified=False)
-    assert should_notify_operator(state) == "notify_operator"
+    assert should_notify_juan(state) == "notify_juan"
 
 
-def test_should_notify_operator_retorna_end_cuando_ya_notificado():
-    from app.graph import should_notify_operator
+def test_should_notify_juan_retorna_end_cuando_ya_notificado():
+    from app.graph import should_notify_juan
     state = make_state(hot_lead=True, juan_notified=True)
-    assert should_notify_operator(state) == END
+    assert should_notify_juan(state) == END
 
 
-def test_should_notify_operator_retorna_end_cuando_no_hot():
-    from app.graph import should_notify_operator
+def test_should_notify_juan_retorna_end_cuando_no_hot():
+    from app.graph import should_notify_juan
     state = make_state(hot_lead=False, juan_notified=False)
-    assert should_notify_operator(state) == END
+    assert should_notify_juan(state) == END
 
 
-def test_notify_operator_retorna_dict_vacio():
+def test_notify_juan_retorna_dict_vacio():
     with patch("app.graph.requests.post") as mock_post:
         mock_post.return_value.status_code = 200
-        from app.graph import notify_operator_node
+        from app.graph import notify_juan_node
         state = make_state(phone="+5491155551234", hot_reason="preguntó por precio")
-        result = notify_operator_node(state)
+        result = notify_juan_node(state)
         assert result == {}
 
 
-def test_notify_operator_no_llama_api_sin_credenciales():
+def test_notify_juan_no_llama_api_sin_credenciales():
     env_sin_credenciales = {"WHATSAPP_PHONE_ID": "", "WHATSAPP_TOKEN": "", "ORVO_OPERATOR_PHONE": "", "NUMERO_JUAN": ""}
     with patch("app.graph.requests.post") as mock_post, \
          patch.dict(os.environ, env_sin_credenciales):
-        from app.graph import notify_operator_node
+        from app.graph import notify_juan_node
         state = make_state()
-        notify_operator_node(state)
+        notify_juan_node(state)
         mock_post.assert_not_called()
