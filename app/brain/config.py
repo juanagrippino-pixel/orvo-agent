@@ -52,20 +52,6 @@ class ConnectorConfig(BaseModel):
         rejected later by the runtime dispatcher if unsupported.
         """
 
-        required_params_by_type: dict[str, tuple[str, ...]] = {
-            "google_sheets": ("spreadsheet_id", "range_name"),
-            "csv": ("csv_path",),
-            "tiendanube": ("store_id",),
-            "mercadolibre": ("seller_id",),
-            "meta_ads": ("ad_account_id",),
-            "woocommerce": ("store_url",),
-        }
-        required_secret_by_type: dict[str, tuple[str, ...]] = {
-            "tiendanube": ("access_token",),
-            "mercadolibre": ("access_token",),
-            "meta_ads": ("access_token",),
-            "woocommerce": ("consumer_key", "consumer_secret"),
-        }
         example_by_type: dict[str, str] = {
             "google_sheets": "examples/google_sheets_business_config.json",
             "csv": "docs/orvo-brain-runtime.md#configure-a-csv-connector",
@@ -77,10 +63,15 @@ class ConnectorConfig(BaseModel):
         if not self.enabled:
             return self
 
-        required_params = required_params_by_type.get(self.connector_type)
-        required_secrets = required_secret_by_type.get(self.connector_type, ())
-        if required_params is None:
+        from app.brain import connector_registry
+
+        try:
+            spec = connector_registry.get_connector_spec(self.connector_type)
+        except connector_registry.UnknownConnectorError:
             return self
+
+        required_params = tuple(spec.required_config_fields)
+        required_secrets = tuple(secret.name for secret in spec.required_secret_refs)
 
         def _has(mapping: dict, key: str) -> bool:
             value = mapping.get(key)
@@ -94,7 +85,9 @@ class ConnectorConfig(BaseModel):
             required = [*required_params, *required_secrets]
             missing_list = " and ".join(missing) if len(missing) == 2 else ", ".join(missing)
             required_list = " and ".join(required) if len(required) == 2 else ", ".join(required)
-            example = example_by_type[self.connector_type]
+            example = example_by_type.get(
+                self.connector_type, "docs/specs/connector-registry-contract.md"
+            )
             raise ValueError(
                 f"{self.connector_type} connector config must include {missing_list} "
                 f"(required: {required_list}). See {example}."
