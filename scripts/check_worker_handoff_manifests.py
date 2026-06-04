@@ -9,6 +9,7 @@ Markdown shape without depending on a heavy parser or adding dependencies.
 from __future__ import annotations
 
 import argparse
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -82,6 +83,21 @@ class WorkerHandoffManifestValidation:
         if not problems:
             return f"{self.path}: ok"
         return f"{self.path}: " + "; ".join(problems)
+
+
+@dataclass(frozen=True)
+class WorkerHandoffManifestGitValidation:
+    path: Path
+    problems: tuple[str, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return not self.problems
+
+    def describe(self) -> str:
+        if not self.problems:
+            return f"{self.path}: git claims ok"
+        return f"{self.path}: " + "; ".join(self.problems)
 
 
 def _split_manifest_field(line: str) -> tuple[str, str] | None:
@@ -158,6 +174,100 @@ def validate_manifest(manifest: WorkerHandoffManifest) -> WorkerHandoffManifestV
     )
 
 
+def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _git_commit_exists(repo_root: Path, revision: str) -> bool:
+    if not revision:
+        return False
+    return _git(repo_root, "cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+
+
+def _git_branch_exists(repo_root: Path, branch: str) -> bool:
+    if not branch:
+        return False
+    local = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+    if local.returncode == 0:
+        return True
+    remote = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    return remote.returncode == 0
+
+
+def _changed_files_between(repo_root: Path, base_sha: str, head_sha: str) -> tuple[str, ...] | None:
+    result = _git(repo_root, "diff", "--name-only", f"{base_sha}...{head_sha}")
+    if result.returncode != 0:
+        return None
+    return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+
+
+def verify_manifest_git_claims(
+    manifest: WorkerHandoffManifest,
+    *,
+    repo_root: Path = Path("."),
+) -> WorkerHandoffManifestGitValidation:
+    """Verify optional git-backed handoff claims for a parsed manifest.
+
+    This stricter check is intentionally opt-in for the CLI because old durable
+    manifests can contain human placeholders. It verifies claims that can be
+    proven from the local repository without trusting chat summaries: branch or
+    worktree presence, commit existence, and exact ``files_changed`` membership
+    for committed manifests.
+    """
+
+    problems: list[str] = []
+    repo_root = repo_root.resolve()
+    worktree_path = manifest.fields.get("worktree_path", "")
+    branch = manifest.fields.get("branch", "")
+    if worktree_path and not Path(worktree_path).exists() and not _git_branch_exists(repo_root, branch):
+        problems.append(
+            "worktree_path does not exist and branch cannot be found locally or under origin: "
+            f"{worktree_path} / {branch}"
+        )
+
+    base_sha = manifest.fields.get("base_sha", "")
+    head_sha = manifest.fields.get("head_sha", "")
+    base_exists = _git_commit_exists(repo_root, base_sha)
+    if not base_exists:
+        problems.append(f"base_sha does not resolve to a commit: {base_sha}")
+
+    if head_sha == "uncommitted":
+        return WorkerHandoffManifestGitValidation(path=manifest.path, problems=tuple(problems))
+
+    head_exists = _git_commit_exists(repo_root, head_sha)
+    if not head_exists:
+        problems.append(f"head_sha does not resolve to a commit: {head_sha}")
+
+    if base_exists and head_exists:
+        changed_files = _changed_files_between(repo_root, base_sha, head_sha)
+        if changed_files is None:
+            problems.append("could not compute git diff base_sha...head_sha")
+        else:
+            manifest_files = tuple(
+                item for item in manifest.lists.get("files_changed", []) if item and item != "none"
+            )
+            changed_set = set(changed_files)
+            manifest_set = set(manifest_files)
+            missing = tuple(sorted(changed_set - manifest_set))
+            extra = tuple(sorted(manifest_set - changed_set))
+            if missing or extra:
+                parts: list[str] = ["files_changed does not match git diff base_sha...head_sha"]
+                if missing:
+                    parts.append(f"missing from manifest: {', '.join(missing)}")
+                if extra:
+                    parts.append(f"not present in diff: {', '.join(extra)}")
+                problems.append("; ".join(parts))
+
+    return WorkerHandoffManifestGitValidation(path=manifest.path, problems=tuple(problems))
+
+
 def discover_manifest_paths(root: Path) -> list[Path]:
     """Return committed-style worker manifest paths in deterministic order."""
 
@@ -179,6 +289,21 @@ def validate_manifest_paths(paths: Iterable[Path]) -> list[WorkerHandoffManifest
     return failures
 
 
+def verify_manifest_git_claim_paths(
+    paths: Iterable[Path],
+    *,
+    repo_root: Path = Path("."),
+) -> list[WorkerHandoffManifestGitValidation]:
+    """Verify git-backed claims for all manifest paths and return failures."""
+
+    failures: list[WorkerHandoffManifestGitValidation] = []
+    for path in paths:
+        result = verify_manifest_git_claims(parse_manifest(path), repo_root=repo_root)
+        if not result.passed:
+            failures.append(result)
+    return failures
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Validate docs/workers handoff manifests against the autonomous worker contract.",
@@ -188,6 +313,17 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         type=Path,
         help="Manifest files or directories to validate; defaults to docs/workers.",
+    )
+    parser.add_argument(
+        "--verify-git",
+        action="store_true",
+        help="Also verify branch/worktree, commit, and files_changed claims against the local git repository.",
+    )
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path("."),
+        help="Repository root for --verify-git; defaults to the current directory.",
     )
     return parser
 
@@ -207,13 +343,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not manifest_paths:
         parser.error("no worker handoff manifests found")
 
-    failures = validate_manifest_paths(manifest_paths)
-    if failures:
-        for failure in failures:
+    shape_failures = validate_manifest_paths(manifest_paths)
+    git_failures = (
+        verify_manifest_git_claim_paths(manifest_paths, repo_root=args.repo_root) if args.verify_git else []
+    )
+    if shape_failures or git_failures:
+        for failure in [*shape_failures, *git_failures]:
             print(failure.describe())
         return 1
 
-    print(f"Worker handoff manifest guard passed: {len(manifest_paths)} manifest(s) checked")
+    suffix = " with git claims verified" if args.verify_git else ""
+    print(f"Worker handoff manifest guard passed: {len(manifest_paths)} manifest(s) checked{suffix}")
     return 0
 
 

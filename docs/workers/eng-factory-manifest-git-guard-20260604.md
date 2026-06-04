@@ -1,0 +1,29 @@
+# Worker handoff manifest — eng-factory-manifest-git-guard-20260604
+
+- task_id: eng-factory-manifest-git-guard-20260604
+- objective: Add an opt-in git-backed verification mode for worker handoff manifests so reviewers can check branch/worktree, commit, and files_changed claims from local source of truth.
+- bounded_context: Engineering Factory / Release Integration glue
+- worktree_path: /root/orvo-agent-worktrees/eng-factory-manifest-git-guard-20260604
+- branch: codex/eng-factory-manifest-git-guard-20260604
+- base_sha: 4de16590501c77412639322fa1211a12273fa5a7
+- head_sha: uncommitted
+- status: review-ready
+- files_changed:
+  - docs/specs/worker-handoff-manifest.md
+  - docs/workers/eng-factory-manifest-git-guard-20260604.md
+  - scripts/check_worker_handoff_manifests.py
+  - tests/test_worker_handoff_manifest_guard.py
+- tests_run:
+  - `pytest tests/test_worker_handoff_manifest_guard.py -q` => RED before implementation: ImportError for missing `verify_manifest_git_claims`; GREEN after implementation: 8 passed in 0.18s
+  - `python scripts/check_worker_handoff_manifests.py` => pass, 5 manifests checked
+  - `python scripts/check_worker_handoff_manifests.py --verify-git docs/workers/eng-factory-manifest-git-guard-20260604.md` => pass, 1 manifest checked with git claims verified while `head_sha` was `uncommitted`
+  - `pytest tests/test_worker_handoff_manifest_guard.py tests/test_test_collection_regression_guard.py -q` => pass, 16 passed in 0.13s
+  - `pytest -q` => pass, 1261 passed in 19.04s
+- docs_updated:
+  - docs/specs/worker-handoff-manifest.md
+  - docs/workers/eng-factory-manifest-git-guard-20260604.md
+- risks:
+  - `--verify-git` is intentionally opt-in because older manifests can contain placeholders or dirty handoff states; default structural validation remains backward-compatible.
+- secrets_checked: yes; touched docs/tests/script only and no secret-bearing config, tokens, or credential values were added.
+- integration_notes: Additive tooling/docs guard only; no migrations, runtime paths, connectors, operator surfaces, or external side effects. Rollback is a normal git revert.
+- recommended_next_action: review then merge after focused and full tests stay green
