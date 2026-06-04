@@ -6,6 +6,7 @@ from typing import Iterable
 from app.brain.models import DailyReport, Evidence, Metric
 from app.brain.operational_cases import OperationalCase, owner_facing_actionable_cases
 from app.brain.security.redaction import redact_text
+from app.brain.semantics.metric_registry import default_metric_registry
 
 
 def _format_value(metric: Metric) -> str:
@@ -126,11 +127,24 @@ def _case_sources(case: OperationalCase) -> list[str]:
     return labels
 
 
+def _case_metric_allowed_for_owner_brief(metric_key: str) -> bool:
+    """Return whether a case evidence metric is safe for owner-facing brief text."""
+
+    registry = default_metric_registry()
+    canonical_key = registry.try_resolve_key(metric_key)
+    if canonical_key is None:
+        return False
+    definition = registry.get(canonical_key)
+    return definition.case_allowed and definition.pii_class in {"none", "low"}
+
+
 def _case_metric_lines(case: OperationalCase, *, max_metrics: int = 2) -> list[str]:
     lines: list[str] = []
     seen: set[str] = set()
     for snapshot in case.evidence_snapshots:
         for metric in snapshot.metrics:
+            if not _case_metric_allowed_for_owner_brief(metric.metric_key):
+                continue
             label = metric.label or metric.metric_key
             if label in seen:
                 continue
