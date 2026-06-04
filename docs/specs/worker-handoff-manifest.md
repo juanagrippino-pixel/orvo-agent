@@ -89,3 +89,12 @@ A reviewer/integration controller must verify:
 5. Test commands either passed or have explicit block reasons.
 6. Secret check is credible for the files touched.
 7. For runtime/gateway/provisioning changes, expected degraded states, rollback/replay path, and any needed runbook/doc update are identified.
+
+Use the lightweight guard when adding or reviewing committed manifests:
+
+```bash
+python scripts/check_worker_handoff_manifests.py
+python scripts/check_worker_handoff_manifests.py docs/workers/<task-id>.md
+```
+
+The guard verifies that every committed Markdown manifest has the required fields, non-empty required list sections, and an allowed status value. It does not replace human review of branch existence, exact `head_sha`, diff/test claims, or secret-scan credibility.
