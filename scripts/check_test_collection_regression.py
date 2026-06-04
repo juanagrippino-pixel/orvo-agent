@@ -35,6 +35,13 @@ class CollectionRegression:
     min_current: int | None
     passed: bool
     message: str
+    missing_nodeids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PytestCollection:
+    count: int
+    nodeids: tuple[str, ...]
 
 
 def parse_collected_test_count(output: str) -> int:
@@ -47,12 +54,28 @@ def parse_collected_test_count(output: str) -> int:
     raise ValueError("Could not determine pytest collection count from pytest output")
 
 
+def parse_collected_test_nodeids(output: str) -> tuple[str, ...]:
+    """Extract collected pytest node IDs from quiet collect-only output."""
+
+    nodeids: list[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if "::" not in line:
+            continue
+        if line.startswith(("=", "_")) or line.lower().startswith(("warning", "error")):
+            continue
+        nodeids.append(line)
+    return tuple(dict.fromkeys(nodeids))
+
+
 def evaluate_collection_regression(
     *,
     base_count: int | None,
     current_count: int,
     max_drop: int = 0,
     min_current: int | None = None,
+    base_nodeids: Sequence[str] | None = None,
+    current_nodeids: Sequence[str] | None = None,
 ) -> CollectionRegression:
     """Evaluate whether the current collection count is acceptable."""
 
@@ -74,6 +97,22 @@ def evaluate_collection_regression(
             passed=False,
             message=f"Test collection below minimum: current={current_count} min_current={min_current}",
         )
+
+    if base_nodeids is not None and current_nodeids is not None:
+        missing_nodeids = tuple(sorted(set(base_nodeids) - set(current_nodeids)))
+        if missing_nodeids:
+            preview = ", ".join(missing_nodeids[:10])
+            if len(missing_nodeids) > 10:
+                preview = f"{preview}, ..."
+            return CollectionRegression(
+                base_count=base_count,
+                current_count=current_count,
+                max_drop=max_drop,
+                min_current=min_current,
+                passed=False,
+                message=f"Test collection is missing {len(missing_nodeids)} baseline nodeid(s): {preview}",
+                missing_nodeids=missing_nodeids,
+            )
 
     if base_count is not None:
         drop = base_count - current_count
@@ -139,6 +178,12 @@ def validate_git_ref_arg(ref: str) -> str:
 def collect_pytest_count(*, cwd: Path, pytest_args: Sequence[str]) -> int:
     """Run pytest collection in ``cwd`` and return the collected test count."""
 
+    return collect_pytest_collection(cwd=cwd, pytest_args=pytest_args).count
+
+
+def collect_pytest_collection(*, cwd: Path, pytest_args: Sequence[str]) -> PytestCollection:
+    """Run pytest collection in ``cwd`` and return count plus node IDs."""
+
     command = [sys.executable, "-m", "pytest", "--collect-only", "-q", *pytest_args]
     result = _run_command(command, cwd=cwd)
     if result.returncode != 0:
@@ -146,11 +191,22 @@ def collect_pytest_count(*, cwd: Path, pytest_args: Sequence[str]) -> int:
             "pytest collection failed with exit code "
             f"{result.returncode} in {cwd}:\n{result.stdout}"
         )
-    return parse_collected_test_count(result.stdout)
+    return PytestCollection(
+        count=parse_collected_test_count(result.stdout),
+        nodeids=parse_collected_test_nodeids(result.stdout),
+    )
 
 
 def collect_base_ref_count(*, repo_root: Path, base_ref: str, pytest_args: Sequence[str]) -> int:
     """Collect pytest count for a Git ref in a temporary detached worktree."""
+
+    return collect_base_ref_collection(repo_root=repo_root, base_ref=base_ref, pytest_args=pytest_args).count
+
+
+def collect_base_ref_collection(
+    *, repo_root: Path, base_ref: str, pytest_args: Sequence[str]
+) -> PytestCollection:
+    """Collect pytest count and node IDs for a Git ref in a temporary detached worktree."""
 
     safe_base_ref = validate_git_ref_arg(base_ref)
     with tempfile.TemporaryDirectory(prefix="orvo-test-collection-base-") as temp_dir:
@@ -164,7 +220,7 @@ def collect_base_ref_count(*, repo_root: Path, base_ref: str, pytest_args: Seque
                 raise RuntimeError(
                     f"Could not create temporary base worktree for {safe_base_ref}:\n{add_result.stdout}"
                 )
-            return collect_pytest_count(cwd=base_worktree, pytest_args=pytest_args)
+            return collect_pytest_collection(cwd=base_worktree, pytest_args=pytest_args)
         finally:
             _run_command(["git", "worktree", "remove", "--force", str(base_worktree)], cwd=repo_root)
 
@@ -196,6 +252,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional absolute minimum collected test count for the current tree.",
     )
     parser.add_argument(
+        "--check-nodeids",
+        action="store_true",
+        help="With --base-ref, fail if any collected baseline pytest node ID is missing even when counts match.",
+    )
+    parser.add_argument(
         "pytest_args",
         nargs=argparse.REMAINDER,
         help="Arguments passed after -- to pytest collection; defaults to tests.",
@@ -210,23 +271,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--max-drop must be non-negative")
     if args.min_current is not None and args.min_current < 0:
         parser.error("--min-current must be non-negative")
+    if args.check_nodeids and not args.base_ref:
+        parser.error("--check-nodeids requires --base-ref")
     pytest_args = _normalise_pytest_args(args.pytest_args)
     repo_root = Path.cwd()
 
     try:
-        current_count = collect_pytest_count(cwd=repo_root, pytest_args=pytest_args)
+        current_collection = collect_pytest_collection(cwd=repo_root, pytest_args=pytest_args)
         base_count = None
+        base_nodeids = None
+        current_nodeids = None
         if args.base_ref:
-            base_count = collect_base_ref_count(
+            base_collection = collect_base_ref_collection(
                 repo_root=repo_root,
                 base_ref=args.base_ref,
                 pytest_args=pytest_args,
             )
+            base_count = base_collection.count
+            if args.check_nodeids:
+                base_nodeids = base_collection.nodeids
+                current_nodeids = current_collection.nodeids
         result = evaluate_collection_regression(
             base_count=base_count,
-            current_count=current_count,
+            current_count=current_collection.count,
             max_drop=args.max_drop,
             min_current=args.min_current,
+            base_nodeids=base_nodeids,
+            current_nodeids=current_nodeids,
         )
     except Exception as exc:  # pragma: no cover - CLI boundary
         print(f"ERROR: {exc}", file=sys.stderr)

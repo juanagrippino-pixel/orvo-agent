@@ -4,6 +4,7 @@ from scripts.check_test_collection_regression import (
     CollectionRegression,
     evaluate_collection_regression,
     parse_collected_test_count,
+    parse_collected_test_nodeids,
     validate_git_ref_arg,
 )
 
@@ -22,6 +23,58 @@ def test_parse_collected_test_count_from_pytest_quiet_summary() -> None:
 def test_parse_collected_test_count_rejects_missing_summary() -> None:
     with pytest.raises(ValueError, match="Could not determine pytest collection count"):
         parse_collected_test_count("tests/test_example.py::test_one\n")
+
+
+def test_parse_collected_test_nodeids_preserves_first_seen_order_and_deduplicates() -> None:
+    output = """
+    tests/test_example.py::test_one
+    tests/test_example.py::test_two[param]
+    collected 2 items
+    tests/test_example.py::test_one
+    """
+
+    assert parse_collected_test_nodeids(output) == (
+        "tests/test_example.py::test_one",
+        "tests/test_example.py::test_two[param]",
+    )
+
+
+def test_evaluate_collection_regression_blocks_missing_baseline_nodeids_even_when_count_matches() -> None:
+    result = evaluate_collection_regression(
+        base_count=2,
+        current_count=2,
+        base_nodeids=(
+            "tests/test_original.py::test_kept",
+            "tests/test_original.py::test_deleted_or_renamed",
+        ),
+        current_nodeids=(
+            "tests/test_original.py::test_kept",
+            "tests/test_replacement.py::test_new_but_same_count",
+        ),
+    )
+
+    assert result.passed is False
+    assert result.missing_nodeids == ("tests/test_original.py::test_deleted_or_renamed",)
+    assert result.message == (
+        "Test collection is missing 1 baseline nodeid(s): "
+        "tests/test_original.py::test_deleted_or_renamed"
+    )
+
+
+def test_evaluate_collection_regression_allows_same_baseline_nodeids() -> None:
+    result = evaluate_collection_regression(
+        base_count=2,
+        current_count=3,
+        base_nodeids=("tests/test_original.py::test_kept",),
+        current_nodeids=(
+            "tests/test_original.py::test_kept",
+            "tests/test_replacement.py::test_new",
+            "tests/test_replacement.py::test_new_two",
+        ),
+    )
+
+    assert result.passed is True
+    assert result.message == "Test collection guard passed: base=2 current=3 max_drop=0"
 
 
 def test_evaluate_collection_regression_blocks_deleted_tests_by_default() -> None:
