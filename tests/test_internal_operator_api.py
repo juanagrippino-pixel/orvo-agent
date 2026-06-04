@@ -721,18 +721,46 @@ def test_internal_case_action_rejects_viewer_role_without_mutation(monkeypatch, 
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=VIEWER_AUTH,
-        json={"action_key": "acknowledge_case"},
+        headers={
+            **VIEWER_AUTH,
+            "X-Orvo-Operator": "viewer:ana access_token=raw_viewer_actor_secret",
+            "X-Request-ID": "req-viewer-action-denied",
+        },
+        json={
+            "action_key": "acknowledge_case",
+            "reason": "Intento viewer api_key=raw_viewer_payload_secret",
+        },
     )
 
     assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_viewer_actor_secret" not in raw_body
+    assert "raw_viewer_payload_secret" not in raw_body
     body = response.get_json()
     assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
     conn = sqlite3.connect(db_path)
     reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
     conn.close()
     assert reloaded is not None
     assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    events = _audit_events(db_path)
+    matching_events = [event for event in events if event["request_id"] == "req-viewer-action-denied"]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["event_type"] == "operator.case_action.denied"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["data"]["action_key"] == "acknowledge_case"
+    assert event["data"]["permission"] == "case:action"
+    assert event["data"]["status_code"] == 403
+    assert event["data"]["payload"]["reason"] == "Intento viewer api_key=[REDACTED]"
+    assert "raw_viewer_actor_secret" not in json.dumps(event, sort_keys=True)
+    assert "raw_viewer_payload_secret" not in json.dumps(event, sort_keys=True)
 
 
 def test_internal_read_rejects_unknown_role(monkeypatch, tmp_path):
