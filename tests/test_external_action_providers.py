@@ -326,6 +326,48 @@ def test_invalid_request_and_run_scope_fail_before_provider_side_effect():
     assert client.calls == []
 
 
+def test_external_action_toolkit_and_action_key_must_be_safe_control_plane_identifiers():
+    client = FakeExternalActionClient()
+    secret_tail = "raw-provider-secret"
+    provider = ComposioProvider(
+        client=client,
+        allowed_actions={
+            ("googlesheets?access_token=" + secret_tail, "googlesheets.read_values"),
+            ("googlesheets", "googlesheets.read_values/../../unsafe"),
+        },
+    )
+    ledger = _ledger()
+
+    bad_toolkit = ExternalActionRequest(
+        business_id="artemea",
+        run_id="run-ext-1",
+        toolkit="googlesheets?access_token=" + secret_tail,
+        action_key="googlesheets.read_values",
+        operation_type="read",
+        payload={},
+        idempotency_key="external/artemea/sheets/read/bad-toolkit",
+    )
+    with pytest.raises(ExternalActionError) as exc:
+        execute_external_action(provider, bad_toolkit, run_ledger=ledger, now=utc_dt(13, 3))
+    assert exc.value.code == "external_action_invalid_request"
+
+    bad_action_key = ExternalActionRequest(
+        business_id="artemea",
+        run_id="run-ext-1",
+        toolkit="googlesheets",
+        action_key="googlesheets.read_values/../../unsafe",
+        operation_type="read",
+        payload={},
+        idempotency_key="external/artemea/sheets/read/bad-action-key",
+    )
+    with pytest.raises(ExternalActionError) as exc:
+        execute_external_action(provider, bad_action_key, run_ledger=ledger, now=utc_dt(13, 4))
+    assert exc.value.code == "external_action_invalid_request"
+
+    assert client.calls == []
+    assert ledger.get_run("run-ext-1").connector_outcomes == []  # type: ignore[union-attr]
+
+
 def test_malformed_provider_response_has_pre_side_effect_audit_and_safe_failure_message():
     client = BadResponseClient()
     provider = ComposioProvider(client=client, allowed_actions={("googlesheets", "googlesheets.read_values")})
