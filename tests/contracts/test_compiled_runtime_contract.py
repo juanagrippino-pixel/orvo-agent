@@ -7,7 +7,7 @@ def _business_with_tiendanube_token(token: str) -> BusinessConfig:
     return BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[
@@ -126,7 +126,7 @@ def test_compiled_runtime_accepts_registered_secret_refs_without_legacy_inline_t
     business = BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[

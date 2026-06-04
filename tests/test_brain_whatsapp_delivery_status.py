@@ -38,7 +38,7 @@ def _meta_status_payload(
     message_id: str = "wamid.HBgL1234",
     status: str = "delivered",
     timestamp: str = "1748000000",
-    recipient_id: str = "5491150380097",
+    recipient_id: str = "5491100000001",
     extra: dict | None = None,
 ) -> dict:
     entry_value: dict = {
@@ -118,7 +118,7 @@ def test_store_persists_event_and_lists_it(store):
         message_id="wamid.HBgL1234",
         status="delivered",
         status_timestamp="1748000000",
-        recipient_id="5491150380097",
+        recipient_id="5491100000001",
         raw={"id": "wamid.HBgL1234", "status": "delivered"},
     )
     store.record_event(event)
@@ -126,7 +126,7 @@ def test_store_persists_event_and_lists_it(store):
     assert len(recent) == 1
     assert recent[0]["message_id"] == "wamid.HBgL1234"
     assert recent[0]["status"] == "delivered"
-    assert recent[0]["recipient_id"] == "5491150380097"
+    assert recent[0]["recipient_id"] == "5491100000001"
     assert recent[0]["provider"] == "meta_cloud"
     assert "created_at" in recent[0]
 
@@ -137,7 +137,7 @@ def test_store_deduplicates_repeat_event_key(store):
         message_id="wamid.dup",
         status="read",
         status_timestamp="1748000100",
-        recipient_id="5491150380097",
+        recipient_id="5491100000001",
         raw={"id": "wamid.dup", "status": "read"},
     )
     store.record_event(event)
@@ -152,7 +152,7 @@ def test_store_keeps_distinct_statuses_for_same_message(store):
         message_id="wamid.multi",
         status="sent",
         status_timestamp="1748000200",
-        recipient_id="5491150380097",
+        recipient_id="5491100000001",
         raw={},
     )
     delivered = WhatsAppDeliveryStatusEvent(
@@ -160,7 +160,7 @@ def test_store_keeps_distinct_statuses_for_same_message(store):
         message_id="wamid.multi",
         status="delivered",
         status_timestamp="1748000300",
-        recipient_id="5491150380097",
+        recipient_id="5491100000001",
         raw={},
     )
     store.record_event(sent)
@@ -176,7 +176,7 @@ def test_store_redacts_token_like_strings_in_failed_error_metadata(store):
         message_id="wamid.fail",
         status="failed",
         status_timestamp="1748000400",
-        recipient_id="5491150380097",
+        recipient_id="5491100000001",
         raw={
             "id": "wamid.fail",
             "status": "failed",
@@ -208,7 +208,7 @@ def test_store_list_recent_orders_newest_first_and_respects_limit(store):
                 message_id=f"wamid.m{i}",
                 status="delivered",
                 status_timestamp=str(1748000000 + i),
-                recipient_id="5491150380097",
+                recipient_id="5491100000001",
                 raw={},
             )
         )
@@ -233,7 +233,7 @@ def test_parse_meta_status_payload_extracts_single_status():
     assert event.provider == "meta_cloud"
     assert event.message_id == "wamid.HBgL1234"
     assert event.status == "delivered"
-    assert event.recipient_id == "5491150380097"
+    assert event.recipient_id == "5491100000001"
 
 
 def test_parse_meta_status_payload_returns_empty_for_messages_only_payload():
@@ -248,7 +248,7 @@ def test_parse_meta_status_payload_returns_empty_for_messages_only_payload():
                         "value": {
                             "messaging_product": "whatsapp",
                             "messages": [
-                                {"from": "5491150380097", "type": "text", "text": {"body": "hi"}}
+                                {"from": "5491100000001", "type": "text", "text": {"body": "hi"}}
                             ],
                         },
                     }
@@ -282,7 +282,7 @@ def test_parse_meta_status_payload_skips_status_entries_missing_id_or_status():
                                     "id": "wamid.Y",
                                     "status": "read",
                                     "timestamp": "1748000500",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 },
                             ]
                         },
@@ -317,19 +317,19 @@ def test_parse_meta_status_payload_extracts_all_statuses_from_batched_payload():
                                     "id": "wamid.A",
                                     "status": "sent",
                                     "timestamp": "1748000000",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 },
                                 {
                                     "id": "wamid.A",
                                     "status": "delivered",
                                     "timestamp": "1748000005",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 },
                                 {
                                     "id": "wamid.A",
                                     "status": "read",
                                     "timestamp": "1748000010",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 },
                             ],
                         },
@@ -343,7 +343,7 @@ def test_parse_meta_status_payload_extracts_all_statuses_from_batched_payload():
                                     "id": "wamid.B",
                                     "status": "delivered",
                                     "timestamp": "1748000020",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 }
                             ],
                         },
@@ -362,7 +362,7 @@ def test_parse_meta_status_payload_extracts_all_statuses_from_batched_payload():
                                     "id": "wamid.C",
                                     "status": "failed",
                                     "timestamp": "1748000030",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 }
                             ],
                         },
@@ -412,7 +412,7 @@ def test_parse_meta_status_payload_ignores_non_message_fields_in_changes():
                                     "id": "wamid.OK",
                                     "status": "delivered",
                                     "timestamp": "1748000100",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 }
                             ],
                         },

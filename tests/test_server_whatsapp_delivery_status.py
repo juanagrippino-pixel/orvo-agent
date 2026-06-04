@@ -39,7 +39,7 @@ def _status_payload(*, message_id="wamid.STATUS1", status="delivered", timestamp
                                     "id": message_id,
                                     "status": status,
                                     "timestamp": timestamp,
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 }
                             ],
                         },
@@ -125,7 +125,7 @@ def test_webhook_persists_status_only_payload(monkeypatch, tmp_path):
     message_id, status, recipient_id, provider = rows[0]
     assert message_id == "wamid.STATUS1"
     assert status == "delivered"
-    assert recipient_id == "5491150380097"
+    assert recipient_id == "5491100000001"
     assert provider == "meta_cloud"
 
 
@@ -236,7 +236,7 @@ def test_internal_delivery_statuses_redacts_failed_error_metadata(monkeypatch, t
                                     "id": "wamid.FAIL",
                                     "status": "failed",
                                     "timestamp": "1748003000",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                     "errors": [
                                         {
                                             "code": 131000,
@@ -286,9 +286,9 @@ def test_webhook_persists_all_events_from_batched_multi_entry_payload(monkeypatc
                         "value": {
                             "messaging_product": "whatsapp",
                             "statuses": [
-                                {"id": "wamid.A", "status": "sent", "timestamp": "1748100000", "recipient_id": "5491150380097"},
-                                {"id": "wamid.A", "status": "delivered", "timestamp": "1748100005", "recipient_id": "5491150380097"},
-                                {"id": "wamid.A", "status": "read", "timestamp": "1748100010", "recipient_id": "5491150380097"},
+                                {"id": "wamid.A", "status": "sent", "timestamp": "1748100000", "recipient_id": "5491100000001"},
+                                {"id": "wamid.A", "status": "delivered", "timestamp": "1748100005", "recipient_id": "5491100000001"},
+                                {"id": "wamid.A", "status": "read", "timestamp": "1748100010", "recipient_id": "5491100000001"},
                             ],
                         },
                     },
@@ -297,7 +297,7 @@ def test_webhook_persists_all_events_from_batched_multi_entry_payload(monkeypatc
                         "value": {
                             "messaging_product": "whatsapp",
                             "statuses": [
-                                {"id": "wamid.B", "status": "delivered", "timestamp": "1748100020", "recipient_id": "5491150380097"},
+                                {"id": "wamid.B", "status": "delivered", "timestamp": "1748100020", "recipient_id": "5491100000001"},
                             ],
                         },
                     },
@@ -311,7 +311,7 @@ def test_webhook_persists_all_events_from_batched_multi_entry_payload(monkeypatc
                         "value": {
                             "messaging_product": "whatsapp",
                             "statuses": [
-                                {"id": "wamid.C", "status": "failed", "timestamp": "1748100030", "recipient_id": "5491150380097"},
+                                {"id": "wamid.C", "status": "failed", "timestamp": "1748100030", "recipient_id": "5491100000001"},
                             ],
                         },
                     }
@@ -361,7 +361,7 @@ def test_webhook_persists_status_when_template_update_precedes_messages_change(m
                                     "id": "wamid.MIX",
                                     "status": "delivered",
                                     "timestamp": "1748100100",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 }
                             ],
                         },
@@ -377,7 +377,7 @@ def test_webhook_persists_status_when_template_update_precedes_messages_change(m
     message_id, status, recipient_id, provider = rows[0]
     assert message_id == "wamid.MIX"
     assert status == "delivered"
-    assert recipient_id == "5491150380097"
+    assert recipient_id == "5491100000001"
     assert provider == "meta_cloud"
 
 
@@ -423,7 +423,7 @@ def test_webhook_buffers_inbound_text_when_status_change_precedes_messages_chang
                                     "id": "wamid.OUTBOUND",
                                     "status": "delivered",
                                     "timestamp": "1748200000",
-                                    "recipient_id": "5491150380097",
+                                    "recipient_id": "5491100000001",
                                 }
                             ],
                         },
@@ -434,7 +434,7 @@ def test_webhook_buffers_inbound_text_when_status_change_precedes_messages_chang
                             "messaging_product": "whatsapp",
                             "messages": [
                                 {
-                                    "from": "5491150380097",
+                                    "from": "5491100000001",
                                     "id": "wamid.INBOUND",
                                     "type": "text",
                                     "text": {"body": "hola, quiero info"},
@@ -451,11 +451,11 @@ def test_webhook_buffers_inbound_text_when_status_change_precedes_messages_chang
     assert response.status_code == 200
     assert len(scheduled) == 1, "expected exactly one buffered-process timer for the inbound reply"
     _interval, _function, args = scheduled[0]
-    assert args == ("5491150380097",)
-    assert server._buffers.get("5491150380097") == ["hola, quiero info"]
+    assert args == ("5491100000001",)
+    assert server._buffers.get("5491100000001") == ["hola, quiero info"]
     # Cleanup module-global state so we don't leak into other tests.
-    server._buffers.pop("5491150380097", None)
-    server._timers.pop("5491150380097", None)
+    server._buffers.pop("5491100000001", None)
+    server._timers.pop("5491100000001", None)
 
 
 def test_webhook_buffers_inbound_text_when_inbound_lives_in_second_entry(monkeypatch, tmp_path):

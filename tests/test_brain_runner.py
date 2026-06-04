@@ -18,7 +18,7 @@ def make_store():
         BusinessConfig(
             business_id="artemea",
             business_name="Artemea",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -101,7 +101,7 @@ def test_enabled_daily_connector_types_are_discovered_from_registry_metadata(mon
     business = BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[
@@ -388,7 +388,7 @@ def test_run_due_daily_reports_records_exact_failed_connector_for_multi_connecto
         BusinessConfig(
             business_id="artemea-multi-source",
             business_name="Artemea Multi Source",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -513,7 +513,7 @@ def test_run_due_daily_reports_sends_owner_case_brief_after_cases_are_persisted(
     assert delivery.send_text.call_count == 2
     _daily_phone, daily_text = delivery.send_text.call_args_list[0].args
     brief_phone, brief_text = delivery.send_text.call_args_list[1].args
-    assert brief_phone == "+5491149724933"
+    assert brief_phone == "+5491100000000"
     assert "Brief operativo" in brief_text
     assert "Caso:" in brief_text
     assert "Orvo Brain" in daily_text
@@ -705,7 +705,7 @@ def make_tiendanube_store():
         BusinessConfig(
             business_id="artemea",
             business_name="Artemea",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -769,7 +769,7 @@ def make_mercadolibre_store():
         BusinessConfig(
             business_id="artemea-ml",
             business_name="Artemea ML",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -832,7 +832,7 @@ def make_tiendanube_mercadolibre_store():
         BusinessConfig(
             business_id="artemea-multi",
             business_name="Artemea Multi",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -896,7 +896,7 @@ def make_meta_ads_store():
         BusinessConfig(
             business_id="artemea-meta",
             business_name="Artemea Meta",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -965,7 +965,7 @@ def make_artemea_22h00_meta_store():
         BusinessConfig(
             business_id="artemea-late",
             business_name="Artemea Late",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -1031,7 +1031,7 @@ def make_artemea_08h00_store():
         BusinessConfig(
             business_id="artemea",
             business_name="Artemea",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[
@@ -1105,7 +1105,7 @@ def make_no_connector_store():
         BusinessConfig(
             business_id="artemea-empty",
             business_name="Artemea Empty",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[],

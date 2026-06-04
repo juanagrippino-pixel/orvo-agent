@@ -259,7 +259,7 @@ def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():
         status="resolved",
         actor_type="operator",
         actor_ref="juan",
-        reason="Stock repuesto",
+        reason="Stock producto",
         transitioned_at=utc_dt(11),
     )
     assert resolved.status == "resolved"
@@ -526,7 +526,7 @@ def test_recurrence_clears_ack_state_preserves_full_audit_timeline_and_supports_
             status="resolved",
             actor_type="operator",
             actor_ref="juan",
-            reason="Stock repuesto",
+            reason="Stock producto",
             transitioned_at=utc_dt(10),
         )
         assert resolved.acknowledged_at == utc_dt(9), f"{label}: pre-recurrence acknowledged_at must be set"
@@ -583,7 +583,7 @@ def test_recurrence_clears_ack_state_preserves_full_audit_timeline_and_supports_
             status="resolved",
             actor_type="operator",
             actor_ref="juan",
-            reason="Stock repuesto otra vez",
+            reason="Stock producto otra vez",
             transitioned_at=utc_dt(13),
         )
         assert re_resolved.status == "resolved", f"{label}: recurred case must be re-resolvable"

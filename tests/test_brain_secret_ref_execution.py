@@ -40,7 +40,7 @@ def _tiendanube_business_with_secret_ref() -> BusinessConfig:
     return BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[
@@ -96,7 +96,7 @@ def test_unresolved_secret_ref_records_redacted_data_stale_case_and_failed_run()
         BusinessConfig(
             business_id="ml-shop",
             business_name="ML Shop",
-            owner_phone="+5491149724933",
+            owner_phone="+5491100000000",
             timezone="America/Argentina/Buenos_Aires",
             currency="ARS",
             connectors=[

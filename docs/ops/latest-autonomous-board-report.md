@@ -108,6 +108,6 @@ Diferir/reencuadrar: `codex/edge-developer-platform` hasta aclarar enforcement s
 - **Engineering Factory:** dejar de abrir breadth si hay backlog; usar capacidad para glue/integration gaps o fixer branches sobre blockers concretos.
 - **COO/GTM:** preparar el Pilot Closure Sprint: prueba Tiendanube + runtime/ledger + cases/evidence + owner brief + operator view.
 
-## Decisión pedida a Juan
+## Decisión pedida a operator
 
 Autorizar una ventana corta de **Pilot Closure Sprint**: congelar nuevas features amplias por un ciclo, integrar sólo Trust/Security + test guards críticos, y producir un artefacto demoable Tiendanube→ledger→cases→WhatsApp/operator view.

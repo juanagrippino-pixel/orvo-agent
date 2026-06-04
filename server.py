@@ -179,7 +179,7 @@ def _process(phone: str) -> None:
         }
         result = orvo_app.invoke(state)
         ai_msgs = [m for m in result["messages"] if isinstance(m, AIMessage)]
-        response_text = ai_msgs[-1].content if ai_msgs else "Tuve un problema técnico. Escribile directamente a Juan: +54 9 11 5038 0097"
+        response_text = ai_msgs[-1].content if ai_msgs else "Tuve un problema técnico. Pedí ayuda en https://orvo.space/demo"
         profile_update = dict(result.get("lead_profile") or {})
         if result.get("hot_lead"):
             profile_update["is_hot"] = True
@@ -195,7 +195,7 @@ def _process(phone: str) -> None:
             _phone_hash(phone),
             extra=_log_extra("conversation_process_failed", phone_hash=_phone_hash(phone)),
         )
-        _send(phone, "Tuve un problema técnico. Escribile directamente a Juan: +54 9 11 5038 0097")
+        _send(phone, "Tuve un problema técnico. Pedí ayuda en https://orvo.space/demo")
 
 
 def _send(phone: str, text: str) -> None:

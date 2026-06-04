@@ -8,7 +8,7 @@ def make_business(*, connectors=None, timezone="America/Argentina/Buenos_Aires")
     return BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone=timezone,
         currency="ARS",
         connectors=connectors if connectors is not None else [
@@ -52,7 +52,7 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
     assert runtime.business_name == "Artemea"
     assert runtime.timezone == "America/Argentina/Buenos_Aires"
     assert runtime.currency == "ARS"
-    assert runtime.delivery.owner_phone == "+5491149724933"
+    assert runtime.delivery.owner_phone == "+5491100000000"
     assert runtime.report_settings.insight_thresholds.stock_threshold == 7
     assert runtime.report_schedules[0].schedule_id == "daily-08"
     assert runtime.report_schedules[0].timezone == "America/Argentina/Buenos_Aires"

@@ -144,7 +144,7 @@ python scripts/bootstrap_orvo_brain.py
 
 # Custom path + values
 ORVO_BRAIN_DB_PATH=/data/orvo_brain.sqlite3 \
-ORVO_BRAIN_OWNER_PHONE=+5491149724933 \
+ORVO_BRAIN_OWNER_PHONE=+5491100000000 \
 python scripts/bootstrap_orvo_brain.py \
     --spreadsheet-id 1OO5fEVKraXKkiofZ0EtHpEOUPgHMxym-Y82VPwtRtG0 \
     --range-name 'Daily!A1:G1000'
@@ -186,7 +186,7 @@ Minimal shape:
 {
   "business_id": "artemea",
   "business_name": "Artemea",
-  "owner_phone": "+5491149724933",
+  "owner_phone": "+5491100000000",
   "timezone": "America/Argentina/Buenos_Aires",
   "currency": "ARS",
   "connectors": [
@@ -246,7 +246,7 @@ Example: [`examples/tiendanube_business_config.json`](../examples/tiendanube_bus
 {
   "business_id": "demo-shop",
   "business_name": "Demo Shop",
-  "owner_phone": "+5491150380097",
+  "owner_phone": "+5491100000001",
   "timezone": "America/Argentina/Buenos_Aires",
   "currency": "ARS",
   "connectors": [
@@ -317,7 +317,7 @@ Use placeholders in docs and examples; never commit a real ad account token.
 {
   "business_id": "demo-meta",
   "business_name": "Demo Meta",
-  "owner_phone": "+5491150380097",
+  "owner_phone": "+5491100000001",
   "timezone": "America/Argentina/Buenos_Aires",
   "currency": "ARS",
   "connectors": [

@@ -49,7 +49,7 @@ The pilot is a validation loop, not a downgrade in ambition.
 
 ### 4–8 weeks: private proof loop
 
-Goal: make one Tiendanube/WhatsApp merchant workflow useful enough that Juan would not feel embarrassed showing it.
+Goal: make one Tiendanube/WhatsApp merchant workflow useful enough that operator would not feel embarrassed showing it.
 
 Must prove:
 
@@ -72,7 +72,7 @@ Must show:
 - internal operator/API surface,
 - platform architecture that can expand beyond Tiendanube.
 
-This is the point where Juan can start investor conversations if the demo is solid.
+This is the point where operator can start investor conversations if the demo is solid.
 
 ### 6–12+ months: scalable platform foundation
 

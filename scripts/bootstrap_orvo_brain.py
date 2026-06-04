@@ -10,7 +10,7 @@ from app.brain.bootstrap import open_brain_sqlite_store, upsert_artemea_google_s
 
 DEFAULT_SHEET_ID = "1OO5fEVKraXKkiofZ0EtHpEOUPgHMxym-Y82VPwtRtG0"
 DEFAULT_RANGE = "Daily!A1:G1000"
-DEFAULT_OWNER_PHONE = "+5491149724933"
+DEFAULT_OWNER_PHONE = "+5491100000000"
 
 
 def main() -> None:
