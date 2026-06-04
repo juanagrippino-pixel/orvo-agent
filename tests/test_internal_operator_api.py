@@ -517,7 +517,12 @@ def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor
             "can_read_internal": True,
             "can_mutate_cases": False,
             "can_read_operator_audit": False,
-        }
+        },
+        "business_scope": {
+            "legacy_token_scoped": True,
+            "all_businesses": False,
+            "allowed_businesses": None,
+        },
     }
     assert "raw_operator_secret" not in response.get_data(as_text=True)
 
@@ -550,6 +555,29 @@ def test_internal_operator_session_projects_admin_audit_permission(monkeypatch, 
     assert operator["can_read_internal"] is True
     assert operator["can_mutate_cases"] is True
     assert operator["can_read_operator_audit"] is True
+
+
+def test_internal_operator_session_projects_redacted_business_grants(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-session",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "artemea, other access_token=raw_scope_secret",
+        },
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_scope_secret" not in raw_body
+    body = response.get_json()
+    assert body["data"]["business_scope"] == {
+        "legacy_token_scoped": False,
+        "all_businesses": False,
+        "allowed_businesses": ["artemea", "[REDACTED]"],
+    }
+    assert body["redaction_applied"] is True
 
 
 def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):

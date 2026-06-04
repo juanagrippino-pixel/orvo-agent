@@ -18,6 +18,17 @@ The internal operator API is the controlled surface for inspecting runtimes, con
 
 ## Initial endpoints
 
+### Operator session
+
+```http
+GET /internal/brain/businesses/{business_id}/operator-session
+```
+
+Returns the authenticated operator's redacted actor ref, normalized role,
+permission flags, and redacted business-grant projection. Legacy callers without
+`X-Orvo-Businesses` are marked `legacy_token_scoped=true`; explicit grants return
+only safe business labels or `[REDACTED]`, never raw pasted header material.
+
 ### Compile preview
 
 ```http

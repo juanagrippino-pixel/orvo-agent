@@ -151,6 +151,18 @@ def audit_safe_operator_role(role: str) -> str:
     return role if role in _ROLE_PERMISSIONS else "[REDACTED]"
 
 
+def audit_safe_business_values(values: tuple[str, ...] | None) -> list[str] | None:
+    """Return grant labels safe for operator projections and durable audits."""
+
+    if values is None:
+        return None
+    safe_values: list[str] = []
+    for value in values:
+        redacted = redact_text(value) or "[REDACTED]"
+        safe_values.append(redacted if redacted == value else "[REDACTED]")
+    return safe_values
+
+
 def project_internal_operator_session(principal: InternalOperatorPrincipal) -> dict[str, dict[str, object]]:
     """Project a safe operator session for internal UIs and control surfaces."""
 
@@ -158,6 +170,7 @@ def project_internal_operator_session(principal: InternalOperatorPrincipal) -> d
     if redacted_actor_ref != principal.actor_ref:
         redacted_actor_ref = "[REDACTED]"
     permissions = permissions_for_role(principal.role)
+    safe_allowed_businesses = audit_safe_business_values(principal.allowed_businesses)
     return {
         "operator": {
             "actor_ref": redacted_actor_ref,
@@ -166,5 +179,10 @@ def project_internal_operator_session(principal: InternalOperatorPrincipal) -> d
             "can_read_internal": INTERNAL_READ_PERMISSION in permissions,
             "can_mutate_cases": CASE_ACTION_PERMISSION in permissions,
             "can_read_operator_audit": OPERATOR_AUDIT_READ_PERMISSION in permissions,
-        }
+        },
+        "business_scope": {
+            "legacy_token_scoped": principal.allowed_businesses is None,
+            "all_businesses": bool(principal.allowed_businesses and "*" in principal.allowed_businesses),
+            "allowed_businesses": safe_allowed_businesses,
+        },
     }

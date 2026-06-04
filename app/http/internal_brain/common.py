@@ -14,9 +14,9 @@ from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
+    audit_safe_business_values,
     audit_safe_operator_role,
     build_internal_operator_principal,
-    permissions_for_role,
     require_internal_business_scope,
     require_internal_permission,
 )
@@ -158,16 +158,6 @@ def _internal_operator_businesses_header() -> str | None:
     return request.headers.get("X-Orvo-Businesses", "")
 
 
-def _safe_audit_values(values: tuple[str, ...] | None) -> list[str] | None:
-    if values is None:
-        return None
-    safe_values: list[str] = []
-    for value in values:
-        redacted = redact_text(value) or "[REDACTED]"
-        safe_values.append(redacted if redacted == value else "[REDACTED]")
-    return safe_values
-
-
 def _authorization_denial_data(exc: InternalOperatorAuthorizationError) -> dict:
     data = {
         "status": "denied",
@@ -177,7 +167,7 @@ def _authorization_denial_data(exc: InternalOperatorAuthorizationError) -> dict:
         "role": audit_safe_operator_role(exc.role),
         "permission": exc.permission,
     }
-    safe_allowed_businesses = _safe_audit_values(exc.allowed_businesses)
+    safe_allowed_businesses = audit_safe_business_values(exc.allowed_businesses)
     if safe_allowed_businesses is not None:
         data["allowed_businesses"] = safe_allowed_businesses
     return data
