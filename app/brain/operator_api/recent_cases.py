@@ -156,4 +156,70 @@ def list_recently_acknowledged_cases(
         }
     )
 
+
+def _latest_in_progress_at(case: OperationalCase) -> datetime | None:
+    """Return the latest canonical status-change timestamp for in-progress work."""
+
+    latest: datetime | None = None
+    for event in case.timeline:
+        if event.event_type != "status_changed":
+            continue
+        if event.metadata.get("to_status") != "in_progress":
+            continue
+        created_at = event.created_at.astimezone(timezone.utc)
+        if latest is None or created_at > latest:
+            latest = created_at
+    return latest
+
+
+def list_recently_in_progress_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-started in-progress cases for a business.
+
+    This projection fills the operator handoff gap between recently acknowledged
+    and recently resolved work. It includes only cases whose current status is
+    ``in_progress`` and derives the start timestamp from canonical
+    ``status_changed`` timeline events rather than ad-hoc surface state. Ordered
+    by latest in-progress transition DESC with ``case_id`` ASC as a
+    deterministic tie-breaker.
+    """
+
+    parsed_limit = parse_limit(limit)
+    in_progress: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="in_progress", limit=None):
+        in_progress_at = _latest_in_progress_at(case)
+        if in_progress_at is None:
+            continue
+        in_progress.append((in_progress_at, case.case_id, case))
+
+    in_progress.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = in_progress[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "in_progress_at": in_progress_at.isoformat(),
+            "handling_seconds": int((in_progress_at - case.opened_at).total_seconds()),
+        }
+        for in_progress_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "in_progress_total": len(in_progress),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 __all__ = [name for name in globals() if not name.startswith("__")]
