@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
@@ -560,27 +561,21 @@ def test_force_report_uses_csv_pipeline_without_loading_sheets():
 
 
 def test_force_report_csv_requires_csv_path():
-    business = BusinessConfig(
-        business_id="bad-csv",
-        business_name="Bad CSV",
-        owner_phone="+5491100000000",
-        timezone="America/Argentina/Buenos_Aires",
-        currency="ARS",
-        connectors=[
-            ConnectorConfig(
-                connector_id="bad-csv-conn",
-                connector_type="csv",
-                label="Bad CSV",
-                params={},
-            )
-        ],
-    )
-
-    with pytest.raises(ValueError, match="csv_path"):
-        reports_script.run_forced_report(
-            business=business,
-            report_date=date(2026, 5, 19),
-            delivery_client=MagicMock(),
-            idempotency_store=InMemoryIdempotencyStore(),
-            sheets_service_factory=MagicMock(),
+    with pytest.raises(ValidationError, match="csv_path"):
+        BusinessConfig(
+            business_id="bad-csv",
+            business_name="Bad CSV",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig.model_construct(
+                    connector_id="bad-csv-conn",
+                    connector_type="csv",
+                    label="Bad CSV",
+                    params={},
+                    secret_refs={},
+                    enabled=True,
+                )
+            ],
         )

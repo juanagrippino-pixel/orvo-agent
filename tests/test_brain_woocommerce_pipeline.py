@@ -101,9 +101,23 @@ def test_woocommerce_pipeline_resolves_secret_refs_builds_and_dispatches_report(
 def test_woocommerce_pipeline_missing_secrets_reports_redacted_required_keys():
     from app.brain.pipeline import run_woocommerce_daily_report_pipeline
 
+    bad_business = make_woocommerce_business().model_copy(
+        update={
+            "connectors": [
+                ConnectorConfig.model_construct(
+                    connector_id="demo-woo-conn",
+                    connector_type="woocommerce",
+                    label="WooCommerce Demo",
+                    params={"store_url": "https://demo.example.com"},
+                    secret_refs={},
+                    enabled=True,
+                )
+            ]
+        }
+    )
     with pytest.raises(SecretResolutionError) as exc_info:
         run_woocommerce_daily_report_pipeline(
-            business=make_woocommerce_business(params={"store_url": "https://demo.example.com"}),
+            business=bad_business,
             report_date=date(2026, 6, 2),
             delivery_client=MagicMock(),
             idempotency_store=InMemoryIdempotencyStore(),
