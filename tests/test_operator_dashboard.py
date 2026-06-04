@@ -100,6 +100,18 @@ def test_dashboard_returns_aggregated_views() -> None:
     assert "resolution_latency_histogram" in result
     assert "acknowledgment_latency_histogram" in result
     assert "run_history" in result
+    assert "mvp_operator_brief" in result
+
+    brief = result["mvp_operator_brief"]
+    assert brief["status"] == "needs_attention"
+    assert brief["headline"] == "3 actionable cases; 3 with degraded evidence"
+    assert brief["next_actions"][0] == {
+        "case_id": result["top_actionable_cases"]["cases"][0]["case_id"],
+        "case_type": "stockout_risk",
+        "severity": "critical",
+        "priority_score": 100,
+        "reason": "highest_priority_actionable_case",
+    }
 
     # Verify case_queue_summary has counts
     summary = result["case_queue_summary"]

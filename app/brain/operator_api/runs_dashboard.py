@@ -26,6 +26,59 @@ def get_scoped_run(ledger: RunLedger, *, business_id: str, run_id: str) -> RunRe
 def get_run_projection(ledger: RunLedger, *, business_id: str, run_id: str) -> dict[str, Any]:
     return {"run": run_detail(get_scoped_run(ledger, business_id=business_id, run_id=run_id))}
 
+def _mvp_operator_brief(
+    *,
+    business_id: str,
+    case_queue_summary: dict[str, Any],
+    top_actionable_cases: dict[str, Any],
+    top_degraded_cases: dict[str, Any],
+) -> dict[str, Any]:
+    """Compact owner/operator brief for the MVP dashboard.
+
+    This is intentionally derived from existing projections so it stays a thin,
+    redacted product surface: one headline plus the first few actions an operator
+    can take today.
+    """
+
+    actionable_total = int(case_queue_summary.get("actionable_total", 0) or 0)
+    degraded_total = int(case_queue_summary.get("actionable_degraded", 0) or 0)
+    status = "clear" if actionable_total == 0 else "needs_attention"
+    headline = (
+        "No actionable cases"
+        if actionable_total == 0
+        else f"{actionable_total} actionable cases; {degraded_total} with degraded evidence"
+    )
+    next_actions = [
+        {
+            "case_id": case.get("case_id"),
+            "case_type": case.get("case_type"),
+            "severity": case.get("severity"),
+            "priority_score": case.get("priority_score"),
+            "reason": "highest_priority_actionable_case",
+        }
+        for case in top_actionable_cases.get("cases", [])[:3]
+    ]
+    evidence_actions = [
+        {
+            "case_id": case.get("case_id"),
+            "case_type": case.get("case_type"),
+            "freshness_state": case.get("freshness_state"),
+            "source_connectors": case.get("source_connectors", []),
+            "reason": "refresh_degraded_evidence",
+        }
+        for case in top_degraded_cases.get("cases", [])[:3]
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "status": status,
+            "headline": headline,
+            "next_actions": next_actions,
+            "evidence_actions": evidence_actions,
+        }
+    )
+
+
 def get_operator_dashboard(
     store: OperationalCaseStore,
     ledger: RunLedger,
@@ -34,39 +87,36 @@ def get_operator_dashboard(
     now: datetime,
     limit: int = 10,
 ) -> dict[str, Any]:
-    """Aggregate all key operator views for a business in one call.
-    
-    Returns a dashboard with:
-    - case_queue_summary: counts by status, case_type, etc.
-    - top_actionable_cases: highest priority cases needing attention
-    - top_degraded_cases: cases with degraded freshness
-    - workflow_throughput: acknowledgment/resolution rates
-    - resolution_latency_histogram: time-to-resolve distribution
-    - acknowledgment_latency_histogram: time-to-acknowledge distribution
-    - run_history: recent run executions
-    """
+    """Aggregate all key operator views for a business in one call."""
+
+    case_queue_summary = summarize_case_queue(store, business_id=business_id)
+    top_actionable_cases = list_top_actionable_cases_by_priority(
+        store, business_id=business_id, now=now, limit=str(limit)
+    )
+    top_degraded_cases = list_top_actionable_degraded_cases(
+        store, business_id=business_id, now=now, limit=str(limit)
+    )
+    run_history = list_run_history(ledger, business_id=business_id, status=None, limit=str(limit))
     return {
         "business_id": business_id,
         "now": _iso(now),
-        "case_queue_summary": summarize_case_queue(store, business_id=business_id),
-        "top_actionable_cases": list_top_actionable_cases_by_priority(
-            store, business_id=business_id, now=now, limit=str(limit)
+        "mvp_operator_brief": _mvp_operator_brief(
+            business_id=business_id,
+            case_queue_summary=case_queue_summary,
+            top_actionable_cases=top_actionable_cases,
+            top_degraded_cases=top_degraded_cases,
         ),
-        "top_degraded_cases": list_top_actionable_degraded_cases(
-            store, business_id=business_id, now=now, limit=str(limit)
-        ),
-        "workflow_throughput": summarize_case_workflow_throughput(
-            store, business_id=business_id
-        ),
+        "case_queue_summary": case_queue_summary,
+        "top_actionable_cases": top_actionable_cases,
+        "top_degraded_cases": top_degraded_cases,
+        "workflow_throughput": summarize_case_workflow_throughput(store, business_id=business_id),
         "resolution_latency_histogram": summarize_case_resolution_latency_histogram(
             store, business_id=business_id
         ),
         "acknowledgment_latency_histogram": summarize_case_acknowledgment_latency_histogram(
             store, business_id=business_id
         ),
-        "run_history": list_run_history(
-            ledger, business_id=business_id, status=None, limit=str(limit)
-        ),
+        "run_history": run_history,
     }
 
 __all__ = [name for name in globals() if not name.startswith("__")]
