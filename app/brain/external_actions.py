@@ -10,6 +10,7 @@ boundaries.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
@@ -30,6 +31,8 @@ RESERVED_CORE_TOOLKITS: set[str] = {
     "meta_whatsapp",
     "meta_cloud_api",
 }
+_SAFE_TOOLKIT_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_SAFE_ACTION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 
 
 class ExternalActionClient(Protocol):
@@ -135,6 +138,16 @@ def _validate_request(request: ExternalActionRequest) -> None:
     }
     if any(not isinstance(value, str) or not value.strip() for value in required.values()):
         raise ExternalActionError("external_action_invalid_request", "external action request requires non-empty ids")
+    if not _SAFE_TOOLKIT_RE.fullmatch(request.toolkit):
+        raise ExternalActionError(
+            "external_action_invalid_request",
+            "external action toolkit must be a lowercase safe control-plane identifier",
+        )
+    if not _SAFE_ACTION_KEY_RE.fullmatch(request.action_key):
+        raise ExternalActionError(
+            "external_action_invalid_request",
+            "external action key must be a lowercase safe control-plane identifier",
+        )
     if request.operation_type not in {"read", "write"}:
         raise ExternalActionError("external_action_invalid_request", "external action operation_type must be read or write")
     if not isinstance(request.payload, dict):
