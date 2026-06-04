@@ -100,7 +100,7 @@ def _process(phone: str) -> None:
         }
         result = orvo_app.invoke(state)
         ai_msgs = [m for m in result["messages"] if isinstance(m, AIMessage)]
-        response_text = ai_msgs[-1].content if ai_msgs else "Tuve un problema técnico. Escribile directamente a Juan: +54 9 11 5038 0097"
+        response_text = ai_msgs[-1].content if ai_msgs else "Tuve un problema técnico. Dejá tus datos en https://orvo.space/#contacto y te respondemos."
         profile_update = dict(result.get("lead_profile") or {})
         if result.get("hot_lead"):
             profile_update["is_hot"] = True
@@ -112,7 +112,7 @@ def _process(phone: str) -> None:
         _send(phone, response_text)
     except Exception as e:
         print(f"[_process] Error for {phone}: {e}")
-        _send(phone, "Tuve un problema técnico. Escribile directamente a Juan: +54 9 11 5038 0097")
+        _send(phone, "Tuve un problema técnico. Dejá tus datos en https://orvo.space/#contacto y te respondemos.")
 
 
 def _send(phone: str, text: str) -> None:

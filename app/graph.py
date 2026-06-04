@@ -10,7 +10,7 @@ from langgraph.graph.message import add_messages
 from app.models import get_llm
 from app.prompts import (
     CLASSIFY_PROMPT,
-    REPUESTOS_SYSTEM,
+    COMMERCE_SYSTEM,
     ORVO_SYSTEM,
     HUMAN_HANDOFF_SYSTEM,
     LEAD_INTELLIGENCE_PROMPT,
@@ -48,13 +48,13 @@ def classify_node(state: OrvoState) -> dict:
     decision = classifier.invoke(
         [SystemMessage(content=CLASSIFY_PROMPT)] + state["messages"]
     )
-    route = decision.route if decision.route in ("repuestos", "orvo", "human") else "orvo"
+    route = decision.route if decision.route in ("commerce", "orvo", "human") else "orvo"
     return {"route": route}
 
 
-def repuestos_bot(state: OrvoState) -> dict:
+def commerce_bot(state: OrvoState) -> dict:
     llm = get_llm()
-    system = build_system_prompt(REPUESTOS_SYSTEM, state.get("lead_profile") or {})
+    system = build_system_prompt(COMMERCE_SYSTEM, state.get("lead_profile") or {})
     response = llm.invoke([SystemMessage(content=system)] + state["messages"])
     return {"messages": [response]}
 
@@ -95,7 +95,7 @@ def lead_intelligence_node(state: OrvoState) -> dict:
     }
 
 
-def notify_juan_node(state: OrvoState) -> dict:
+def notify_operator_node(state: OrvoState) -> dict:
     phone = state.get("phone", "desconocido")
     profile = state.get("lead_profile") or {}
     last_msg = ""
@@ -104,7 +104,7 @@ def notify_juan_node(state: OrvoState) -> dict:
             last_msg = msg.content[:200]
             break
     text = (
-        f"🔥 Lead caliente — Orvo IA\n\n"
+        f"🔥 Lead caliente — Orvo\n\n"
         f"👤 Nombre: {profile.get('name') or 'No capturado'}\n"
         f"🏢 Negocio: {profile.get('business_type') or 'No capturado'}\n"
         f"👥 Tamaño: {profile.get('size') or 'No capturado'}\n"
@@ -112,58 +112,58 @@ def notify_juan_node(state: OrvoState) -> dict:
         f"📱 WhatsApp: {phone}\n\n"
         f"Razón: {state.get('hot_reason') or ''}\n\n"
         f"Último: \"{last_msg}\"\n\n"
-        f"Agendar: https://calendly.com/juanagrippino/website-services"
+        f"Agendar: https://orvo.space/#contacto"
     )
     phone_id = os.environ.get("WHATSAPP_PHONE_ID", "")
     token = os.environ.get("WHATSAPP_TOKEN", "")
-    numero_juan = os.environ.get("NUMERO_JUAN", "")
-    if phone_id and token and numero_juan:
+    operator_phone = os.environ.get("ORVO_OPERATOR_PHONE") or os.environ.get("NUMERO_JUAN", "")
+    if phone_id and token and operator_phone:
         url = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
             "messaging_product": "whatsapp",
-            "to": numero_juan,
+            "to": operator_phone,
             "type": "text",
             "text": {"body": text},
         }
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=10)
             if resp.status_code != 200:
-                print(f"[notify_juan] Error {resp.status_code}: {resp.text}")
+                print(f"[notify_operator] Error {resp.status_code}: {resp.text}")
         except Exception as e:
-            print(f"[notify_juan] Exception: {e}")
+            print(f"[notify_operator] Exception: {e}")
     return {}
 
 
-def should_notify_juan(state: OrvoState) -> str:
+def should_notify_operator(state: OrvoState) -> str:
     if state.get("hot_lead") and not state.get("juan_notified"):
-        return "notify_juan"
+        return "notify_operator"
     return END
 
 
 def _build_graph():
     graph = StateGraph(OrvoState)
     graph.add_node("classify", classify_node)
-    graph.add_node("repuestos_bot", repuestos_bot)
+    graph.add_node("commerce_bot", commerce_bot)
     graph.add_node("orvo_bot", orvo_bot)
     graph.add_node("human_handoff", human_handoff)
     graph.add_node("lead_intelligence", lead_intelligence_node)
-    graph.add_node("notify_juan", notify_juan_node)
+    graph.add_node("notify_operator", notify_operator_node)
     graph.add_edge(START, "classify")
     graph.add_conditional_edges(
         "classify",
         route_decision,
-        {"repuestos": "repuestos_bot", "orvo": "orvo_bot", "human": "human_handoff"},
+        {"commerce": "commerce_bot", "orvo": "orvo_bot", "human": "human_handoff"},
     )
-    graph.add_edge("repuestos_bot", "lead_intelligence")
+    graph.add_edge("commerce_bot", "lead_intelligence")
     graph.add_edge("orvo_bot", "lead_intelligence")
     graph.add_edge("human_handoff", "lead_intelligence")
     graph.add_conditional_edges(
         "lead_intelligence",
-        should_notify_juan,
-        {"notify_juan": "notify_juan", END: END},
+        should_notify_operator,
+        {"notify_operator": "notify_operator", END: END},
     )
-    graph.add_edge("notify_juan", END)
+    graph.add_edge("notify_operator", END)
     return graph.compile()
 
 
