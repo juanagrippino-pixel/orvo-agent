@@ -559,10 +559,13 @@ def find_family_envelope_violations(
 
     The caller passes ``declared_families`` (typically a connector spec's
     ``emitted_metric_families``) so this helper stays independent of the
-    connector registry. Unknown (unresolved) keys are intentionally skipped so
-    this diagnostic composes cleanly with :func:`validate_metrics` (unknown
-    keys) and :func:`find_source_envelope_violations` (disallowed sources).
-    Result order matches input order and is deterministic.
+    connector registry. Declared transitional envelopes from
+    :data:`CONNECTOR_FAMILY_COMPATIBILITY` expand to their canonical compatible
+    metric families before validation. Unknown (unresolved) keys are
+    intentionally skipped so this diagnostic composes cleanly with
+    :func:`validate_metrics` (unknown keys) and
+    :func:`find_source_envelope_violations` (disallowed sources). Result order
+    matches input order and is deterministic.
     """
 
     if not connector_type:
@@ -574,6 +577,8 @@ def find_family_envelope_violations(
             "find_family_envelope_violations requires non-empty declared_families"
         )
     declared_set = set(declared)
+    for family in declared:
+        declared_set.update(CONNECTOR_FAMILY_COMPATIBILITY.get(family, ()))
 
     active_registry = registry or default_metric_registry()
     issues: list[MetricValidationIssue] = []
