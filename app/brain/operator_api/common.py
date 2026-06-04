@@ -19,6 +19,7 @@ from app.brain.operator_case_projections import (
     latest_evidence_at as _latest_evidence_at,
     source_connectors as _source_connectors,
 )
+from app.brain.work_items import priority_bracket_for_score
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 
@@ -155,11 +156,7 @@ def _classify_age_bucket(age_seconds: int) -> str:
     return _AGE_BUCKETS[-1][0]
 
 def _classify_priority_bracket(priority_score: int) -> str:
-    if priority_score < 50:
-        return "low"
-    if priority_score < 80:
-        return "medium"
-    return "high"
+    return priority_bracket_for_score(priority_score)
 
 _FRESHNESS_RANK: dict[str, int] = {
     "fresh": 0,
