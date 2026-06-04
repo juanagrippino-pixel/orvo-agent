@@ -1361,6 +1361,58 @@ def test_internal_run_summary_is_business_scoped_redacted_and_counts_recent_runs
     assert "raw_connector_secret" not in rendered
 
 
+def test_internal_run_summary_filters_by_status_and_trigger_type_with_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-forced-ok", status="succeeded", trigger_type="forced")
+    scheduled_ok = _seed_run(
+        db_path,
+        business_id="artemea",
+        run_id="run-scheduled-ok",
+        status="succeeded",
+        trigger_type="scheduled",
+    )
+    _seed_failed_connector_run(db_path, business_id="artemea", run_id="run-scheduled-failed")
+    _seed_run(db_path, business_id="other", run_id="run-other-scheduled-ok", status="succeeded", trigger_type="scheduled")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/summary?status=succeeded&trigger_type=scheduled&limit=10",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    summary = body["data"]
+    assert summary["filters"] == {"status": "succeeded", "trigger_type": "scheduled"}
+    assert summary["count"] == 1
+    assert summary["status_counts"] == {"succeeded": 1}
+    assert summary["trigger_type_counts"] == {"scheduled": 1}
+    assert summary["terminal_total"] == 1
+    rendered = response.get_data(as_text=True)
+    assert scheduled_ok.run_id not in rendered
+    assert "run-forced-ok" not in rendered
+    assert "run-scheduled-failed" not in rendered
+    assert "run-other-scheduled-ok" not in rendered
+
+
+def test_internal_run_summary_rejects_invalid_trigger_type_without_echoing_secret(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/summary?trigger_type=scheduled%3Baccess_token%3Draw_summary_secret",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_run_trigger_type"
+    rendered = response.get_data(as_text=True)
+    assert "raw_summary_secret" not in rendered
+    assert "access_token" not in rendered
+
+
 def test_internal_run_summary_rejects_invalid_limit_with_safe_envelope(monkeypatch, tmp_path):
     client, _ = _client(monkeypatch, tmp_path)
 
