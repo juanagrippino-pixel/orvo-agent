@@ -497,6 +497,25 @@ def test_compose_owner_case_brief_prioritizes_open_cases_with_evidence_and_actio
     assert "raw_case_brief_secret" not in text
 
 
+def test_owner_case_brief_renders_only_registry_allowed_case_metrics():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(case_id="case-secret-metric", title="Stock crítico", metric_value=4)
+    case.evidence_snapshots[0].metrics.append(
+        OperationalCaseEvidenceMetric(
+            metric_key="connector.secret_token",
+            label="Connector token",
+            value="tn_test_token",
+        )
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Stock disponible: 4 units" in text
+    assert "Connector token" not in text
+    assert "tn_test_token" not in text
+
+
 def test_compose_owner_case_brief_excludes_internal_case_families_from_owner_surface():
     from app.brain.reporting import compose_owner_case_brief
 
