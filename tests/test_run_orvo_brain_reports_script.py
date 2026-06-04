@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
-from app.brain.config import BusinessConfig, ConnectorConfig
+from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
 from app.brain.run_ledger import InMemoryRunLedger
@@ -73,6 +73,124 @@ def make_tiendanube_business():
     )
 
 
+def make_tiendanube_and_meta_ads_business():
+    return BusinessConfig(
+        business_id="artemea",
+        business_name="ARTEMEA",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="artemea-tiendanube",
+                connector_type="tiendanube",
+                label="Tiendanube ARTEMEA",
+                params={"store_id": "123", "access_token": "tn_test_token", "include_stock": False},
+            ),
+            ConnectorConfig(
+                connector_id="artemea-meta-ads",
+                connector_type="meta_ads",
+                label="Meta Ads ARTEMEA",
+                params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
+            ),
+        ],
+    )
+
+
+def test_scheduled_mode_does_not_require_google_sheets_for_due_tiendanube_only_report():
+    store = InMemoryConfigStore()
+    business = make_tiendanube_business()
+    store.save_business_config(business)
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="demo-shop-daily",
+            business_id=business.business_id,
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+
+    assert (
+        reports_script.due_daily_reports_need_google_sheets(
+            store,
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),  # 09:00 Argentina
+        )
+        is False
+    )
+
+
+def test_scheduled_mode_requires_google_sheets_only_when_due_daily_google_sheets_report_exists():
+    store = InMemoryConfigStore()
+    business = BusinessConfig(
+        business_id="demo-sheets",
+        business_name="Demo Sheets",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-sheets-conn",
+                connector_type="google_sheets",
+                label="Sheets Demo",
+                params={"spreadsheet_id": "sheet", "range_name": "Daily!A1:G1000"},
+            )
+        ],
+    )
+    store.save_business_config(business)
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="demo-sheets-daily",
+            business_id=business.business_id,
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+
+    assert (
+        reports_script.due_daily_reports_need_google_sheets(
+            store,
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),  # 09:00 Argentina
+        )
+        is True
+    )
+
+
+def test_scheduled_mode_ignores_not_due_google_sheets_report_for_credential_loading():
+    store = InMemoryConfigStore()
+    business = BusinessConfig(
+        business_id="demo-sheets",
+        business_name="Demo Sheets",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="demo-sheets-conn",
+                connector_type="google_sheets",
+                label="Sheets Demo",
+                params={"spreadsheet_id": "sheet", "range_name": "Daily!A1:G1000"},
+            )
+        ],
+    )
+    store.save_business_config(business)
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="demo-sheets-daily",
+            business_id=business.business_id,
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+
+    assert (
+        reports_script.due_daily_reports_need_google_sheets(
+            store,
+            now=datetime(2026, 5, 19, 13, 0, tzinfo=timezone.utc),  # 10:00 Argentina
+        )
+        is False
+    )
+
+
 def test_force_report_uses_tiendanube_pipeline_without_loading_sheets():
     delivery = MagicMock()
     delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
@@ -130,41 +248,40 @@ def test_force_report_records_successful_run_in_ledger_without_raw_secrets():
     assert "tn_test_token" not in record.model_dump_json()
 
 
-def test_force_report_ledger_only_records_connector_that_forced_path_executed():
-    business = make_tiendanube_business().model_copy(
-        update={
-            "connectors": [
-                *make_tiendanube_business().connectors,
-                ConnectorConfig(
-                    connector_id="demo-meta",
-                    connector_type="meta_ads",
-                    label="Meta Ads Demo",
-                    params={"ad_account_id": "act_123", "access_token": "meta_test_token"},
-                ),
-            ]
-        }
-    )
+def test_force_report_runs_all_enabled_daily_connectors_and_records_ledger():
     delivery = MagicMock()
     delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run", error=None)
     ledger = InMemoryRunLedger()
+    sheets_service_factory = MagicMock(side_effect=AssertionError("google sheets should not be loaded"))
 
-    reports_script.run_forced_report(
-        business=business,
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_and_meta_ads_business(),
         report_date=date(2026, 5, 19),
         delivery_client=delivery,
         idempotency_store=InMemoryIdempotencyStore(),
-        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        sheets_service_factory=sheets_service_factory,
         tiendanube_http_client=FakeTiendanubeHTTPClient(),
-        meta_ads_http_client=MagicMock(side_effect=AssertionError("forced path should not call second connector")),
+        meta_ads_http_client=FakeMetaAdsHTTPClient(),
         run_ledger=ledger,
     )
 
-    [record] = ledger.list_runs(business_id="demo-shop")
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    evidence_sources = {ev.source for metric in result.report.metrics for ev in metric.evidence}
+    assert result.report.business_name == "ARTEMEA"
+    assert metrics["revenue_today"] == 1000.0
+    assert metrics["ad_spend_today"] == pytest.approx(725.25)
+    assert {"tiendanube", "meta_ads"}.issubset(evidence_sources)
+    assert result.dispatch.status == "sent"
+    assert result.runtime_metadata["connector_types"] == ["tiendanube", "meta_ads"]
+    delivery.send_text.assert_called_once()
+    sheets_service_factory.assert_not_called()
+
+    [record] = ledger.list_runs(business_id="artemea")
     assert [(out.connector_id, out.connector_type) for out in record.connector_outcomes] == [
-        ("demo-tiendanube", "tiendanube")
+        ("artemea-tiendanube", "tiendanube"),
+        ("artemea-meta-ads", "meta_ads"),
     ]
-    assert record.artifacts[0].evidence_refs == ["evidence://demo-tiendanube/2026-05-19"]
-    assert record.summary_metadata["connector_types"] == ["tiendanube"]
+    assert record.summary_metadata["connector_types"] == ["tiendanube", "meta_ads"]
 
 
 def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():

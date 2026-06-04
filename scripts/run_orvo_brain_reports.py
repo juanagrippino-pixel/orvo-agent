@@ -19,6 +19,7 @@ from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failu
 from app.brain.operational_cases import OperationalCaseStore
 from app.brain.pipeline import (
     run_csv_daily_report_pipeline,
+    run_enabled_connectors_daily_report_pipeline,
     run_google_sheets_daily_report_pipeline,
     run_mercadolibre_daily_report_pipeline,
     run_meta_ads_daily_report_pipeline,
@@ -28,6 +29,7 @@ from app.brain.pipeline import (
 from app.brain.runner import run_due_daily_reports
 from app.brain.run_ledger import RunLedger
 from app.brain.runtime import RuntimeCompileError, compile_business_runtime, runtime_run_metadata
+from app.brain.scheduler import due_schedules
 from app.brain.storage import (
     SQLiteConfigStore,
     SQLiteIdempotencyStore,
@@ -63,6 +65,32 @@ def _with_runtime_metadata(result, metadata: dict):
     return result.model_copy(update={"runtime_metadata": metadata}, deep=True)
 
 
+def _all_schedules(config_store, businesses) -> list:
+    schedules = []
+    for business in businesses:
+        schedules.extend(config_store.list_schedules(business.business_id))
+    return schedules
+
+
+def due_daily_reports_need_google_sheets(config_store, *, now: datetime) -> bool:
+    """Return True only when a due daily run needs Google Sheets.
+
+    Scheduled Tiendanube/Meta/MercadoLibre/CSV runs should not fail before the
+    pipeline starts just because local Google credentials are absent.
+    """
+
+    businesses = config_store.list_business_configs()
+    business_by_id = {business.business_id: business for business in businesses}
+    schedules = _all_schedules(config_store, businesses)
+    for run in due_schedules(schedules, now, business_by_id):
+        if run.report_type != "daily":
+            continue
+        business = business_by_id[run.business_id]
+        if any(connector.enabled and connector.connector_type == "google_sheets" for connector in business.connectors):
+            return True
+    return False
+
+
 def run_forced_report(
     *,
     business,
@@ -84,8 +112,8 @@ def run_forced_report(
             raise ValueError(f"Business {business.business_id} has no supported enabled connector") from exc
         raise
 
-    connector_type = runtime.execution_plan.daily_connector_types[0] if runtime.execution_plan.daily_connector_types else None
-    executed_connector_types = [connector_type] if connector_type else []
+    executed_connector_types = list(runtime.execution_plan.daily_connector_types)
+    connector_type = executed_connector_types[0] if executed_connector_types else None
     runtime_metadata = runtime_run_metadata(runtime)
     runtime_metadata = {**runtime_metadata, "connector_types": executed_connector_types}
     runtime_metadata = begin_pipeline_run(
@@ -98,7 +126,20 @@ def run_forced_report(
     run_id = runtime_metadata.get("run_id")
 
     try:
-        if connector_type == "google_sheets":
+        if len(executed_connector_types) > 1:
+            result = run_enabled_connectors_daily_report_pipeline(
+                business=business,
+                report_date=report_date,
+                connector_types=executed_connector_types,
+                delivery_client=delivery_client,
+                idempotency_store=idempotency_store,
+                sheets_service=sheets_service_factory() if "google_sheets" in executed_connector_types else None,
+                tiendanube_http_client=tiendanube_http_client,
+                mercadolibre_http_client=mercadolibre_http_client,
+                meta_ads_http_client=meta_ads_http_client,
+                woocommerce_http_client=woocommerce_http_client,
+            )
+        elif connector_type == "google_sheets":
             result = run_google_sheets_daily_report_pipeline(
                 business=business,
                 report_date=report_date,
@@ -216,12 +257,14 @@ def main() -> None:
                 }
             ]
         else:
+            now = datetime.now(tz=timezone.utc)
+            sheets_service = get_sheets_service() if due_daily_reports_need_google_sheets(config_store, now=now) else None
             results = run_due_daily_reports(
                 config_store=config_store,
                 idempotency_store=runtime_idempotency_store,
                 delivery_client=delivery_client,
-                sheets_service=get_sheets_service(),
-                now=datetime.now(tz=timezone.utc),
+                sheets_service=sheets_service,
+                now=now,
                 run_ledger=run_ledger,
                 case_store=case_store,
             )
