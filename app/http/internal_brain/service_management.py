@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 from flask import request
 
 from app.brain.operator_api.common import OperatorAPIError, parse_limit
-from app.brain.service_management import ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES, list_service_management_cases
+from app.brain.service_management import (
+    ALLOWED_SERVICE_MANAGEMENT_RECORD_TYPES,
+    ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES,
+    list_service_management_cases,
+)
 
 from .common import _internal_success, _with_internal_stores
 
@@ -15,6 +19,18 @@ def _parse_sla_status(value: str | None) -> str | None:
         return None
     if value not in ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES:
         raise OperatorAPIError("invalid_sla_status", f"unsupported sla_status: {value}", status_code=400)
+    return str(value)
+
+
+def _parse_service_record_type(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    if value not in ALLOWED_SERVICE_MANAGEMENT_RECORD_TYPES:
+        raise OperatorAPIError(
+            "invalid_service_record_type",
+            f"unsupported service_record_type: {value}",
+            status_code=400,
+        )
     return str(value)
 
 
@@ -31,6 +47,7 @@ def register_service_management_routes(app):
                     limit=parse_limit(request.args.get("limit")),
                     now=datetime.now(timezone.utc),
                     sla_status=_parse_sla_status(request.args.get("sla_status")),
+                    service_record_type=_parse_service_record_type(request.args.get("service_record_type")),
                 ),
             ),
         )
