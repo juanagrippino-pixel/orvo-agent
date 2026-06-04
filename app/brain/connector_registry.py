@@ -150,6 +150,22 @@ class ConnectorFactoryParam:
     required: bool = True
     fallback: Any = None
 
+    def metadata(self) -> dict[str, Any]:
+        """Return a serializable binding descriptor without runtime values.
+
+        The descriptor exposes only allowlisted source/key metadata. It never
+        reads connector config or service bindings, so raw legacy secret values
+        cannot leak through registry/run metadata.
+        """
+
+        return {
+            "argument": self.argument,
+            "source": self.source,
+            "key": self.key,
+            "required": self.required,
+            "has_fallback": self.fallback is not None,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class ConnectorExecutorMetadata:
@@ -168,6 +184,17 @@ class ConnectorExecutorMetadata:
     @property
     def factory_path(self) -> str:
         return f"{self.adapter_module}.{self.report_factory}"
+
+    def policy_metadata(self) -> dict[str, Any]:
+        """Return serializable registry executor metadata for compiled runtimes."""
+
+        return {
+            "adapter_module": self.adapter_module,
+            "report_factory": self.report_factory,
+            "factory_path": self.factory_path,
+            "supported_runtime_modes": list(self.supported_runtime_modes),
+            "factory_params": [binding.metadata() for binding in self.factory_params],
+        }
 
     def load_factory(self):
         """Import and return the configured report factory callable."""
@@ -290,6 +317,12 @@ class ConnectorSpec:
             "owner": self.lifecycle.owner,
             "version": self.lifecycle.version,
         }
+
+    def executor_policy_metadata(self) -> dict[str, Any]:
+        """Return serializable executor policy metadata for this connector."""
+
+        assert self.executor is not None  # set in __post_init__
+        return self.executor.policy_metadata()
 
     def load_report_factory(self):
         """Import the configured report-builder callable from executor metadata."""
