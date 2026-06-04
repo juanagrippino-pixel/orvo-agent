@@ -2665,6 +2665,12 @@ def test_internal_owner_brief_endpoint_returns_compact_mvp_action_queue(monkeypa
         "Datos: revalidar tiendanube por evidencia missing antes de decidir.",
     ]
     assert "highest_priority_actionable_case" not in data["owner_message"]
+    assert data["dispatch_policy"] == {
+        "channel": "whatsapp",
+        "auto_dispatch_allowed": False,
+        "review_required": True,
+        "reasons": ["actionable_cases_present", "degraded_evidence_present"],
+    }
     assert data["next_actions"] == [
         {
             "case_id": high.case_id,

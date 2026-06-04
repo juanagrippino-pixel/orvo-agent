@@ -163,6 +163,12 @@ def test_dashboard_handles_empty_stores() -> None:
     assert result["top_actionable_cases"]["count"] == 0
     assert result["top_degraded_cases"]["count"] == 0
     assert len(result["run_history"]["runs"]) == 0
+    assert result["mvp_operator_brief"]["dispatch_policy"] == {
+        "channel": "whatsapp",
+        "auto_dispatch_allowed": True,
+        "review_required": False,
+        "reasons": [],
+    }
 
 
 def test_dashboard_scopes_to_business_id() -> None:
