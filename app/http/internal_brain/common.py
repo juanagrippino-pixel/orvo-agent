@@ -83,9 +83,11 @@ def _record_internal_authentication_denial(*, business_id: str, actor_ref: str, 
 
     The raw Authorization header is intentionally not persisted; only safe shape
     metadata is kept so operators can investigate auth abuse without leaking
-    bearer-token tails into the durable audit log.
+    bearer-token tails into the durable audit log. Missing-header probes are
+    audited too because they still exercise the internal auth boundary.
     """
 
+    header_present = bool(supplied_authorization)
     try:
         _append_operator_audit_event(
             business_id=business_id,
@@ -95,9 +97,9 @@ def _record_internal_authentication_denial(*, business_id: str, actor_ref: str, 
             target_id=business_id,
             data={
                 "status": "denied",
-                "reason": "invalid_internal_token",
+                "reason": "invalid_internal_token" if header_present else "missing_internal_token",
                 "method": request.method,
-                "header_present": bool(supplied_authorization),
+                "header_present": header_present,
                 "scheme": _authorization_scheme(supplied_authorization),
             },
         )
@@ -118,12 +120,11 @@ def _authorize_internal_operator(business_id: str):
         )
     supplied = request.headers.get("Authorization", "")
     if not hmac.compare_digest(supplied, f"Bearer {expected}"):
-        if supplied:
-            _record_internal_authentication_denial(
-                business_id=business_id,
-                actor_ref=request.headers.get("X-Orvo-Operator", ""),
-                supplied_authorization=supplied,
-            )
+        _record_internal_authentication_denial(
+            business_id=business_id,
+            actor_ref=request.headers.get("X-Orvo-Operator", ""),
+            supplied_authorization=supplied,
+        )
         return _internal_error(business_id, "unauthorized", "Unauthorized", status_code=401)
     return None
 

@@ -2655,8 +2655,21 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
     assert "raw_bad_actor_secret" not in wrong.get_data(as_text=True)
 
     events = _audit_events(db_path)
-    assert len(events) == 1
-    event = events[0]
+    assert len(events) == 2
+    missing_event = events[0]
+    assert missing_event["business_id"] == "artemea"
+    assert missing_event["actor_ref"] == "anonymous"
+    assert missing_event["event_type"] == "operator.authentication.denied"
+    assert missing_event["target_type"] == "internal_operator_api"
+    assert missing_event["target_id"] == "artemea"
+    assert missing_event["data"] == {
+        "status": "denied",
+        "reason": "missing_internal_token",
+        "method": "GET",
+        "header_present": False,
+        "scheme": None,
+    }
+    event = events[1]
     assert event["business_id"] == "artemea"
     assert event["actor_ref"] == "[REDACTED]"
     assert event["event_type"] == "operator.authentication.denied"
@@ -2670,9 +2683,35 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
         "header_present": True,
         "scheme": "Bearer",
     }
-    serialized = json.dumps(event, sort_keys=True)
+    serialized = json.dumps(events, sort_keys=True)
     assert "raw_bad_bearer_secret" not in serialized
     assert "raw_bad_actor_secret" not in serialized
+
+
+def test_internal_endpoints_audit_missing_bearer_token_attempt(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={"X-Orvo-Operator": "operator:missing-token", "X-Request-ID": "req-missing-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "unauthorized"
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authentication.denied"
+    assert event["actor_ref"] == "operator:missing-token"
+    assert event["request_id"] == "req-missing-token"
+    assert event["data"] == {
+        "status": "denied",
+        "reason": "missing_internal_token",
+        "method": "GET",
+        "header_present": False,
+        "scheme": None,
+    }
 
 
 def _audit_events(db_path) -> list[dict]:
