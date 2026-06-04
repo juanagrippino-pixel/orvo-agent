@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.brain.audit_scope import audit_business_display_id, audit_business_scope_key
 from app.brain.security.redaction import redact_secrets, redact_text
 
 
@@ -109,13 +110,14 @@ class SQLiteOperatorAuditStore:
         self._conn.execute(
             """
             INSERT INTO operator_audit_events (
-                event_id, business_id, actor_ref, event_type, target_type,
-                target_id, request_id, created_at, data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                event_id, business_id, business_scope_key, actor_ref, event_type,
+                target_type, target_id, request_id, created_at, data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
-                redact_text(business_id) or "[REDACTED]",
+                audit_business_display_id(business_id),
+                audit_business_scope_key(business_id),
                 _redact_audit_identifier(actor_ref) or "[REDACTED]",
                 redact_text(event_type) or "operator_event",
                 redact_text(target_type) or "unknown",
@@ -144,11 +146,11 @@ class SQLiteOperatorAuditStore:
             SELECT event_id, business_id, actor_ref, event_type, target_type,
                    target_id, request_id, created_at, data
             FROM operator_audit_events
-            WHERE business_id = ? AND created_at >= ?
+            WHERE business_scope_key = ? AND created_at >= ?
             ORDER BY created_at DESC, event_id DESC
             LIMIT ?
             """,
-            (business_id, cutoff, limit),
+            (audit_business_scope_key(business_id), cutoff, limit),
         ).fetchall()
         events: list[dict[str, Any]] = []
         for (
