@@ -526,6 +526,87 @@ def test_apply_case_action_rejects_unknown_action_key_before_actor_and_case_look
     assert len(reloaded_other.timeline) == len(other.timeline)
 
 
+def test_apply_case_action_only_executes_api_enabled_catalog_keys_with_safe_errors():
+    """Catalog drift must not make suggestions/approval actions API-executable.
+
+    The action catalog is shared by owner copy, workflow dry-runs, and internal
+    operator surfaces. This invariant keeps the mutating case API limited to the
+    explicit API-enabled subset and proves newly registered non-API actions fail
+    as safe OperatorAPIErrors without mutating canonical case state.
+    """
+
+    from app.brain.action_catalog import ACTION_CATALOG, API_ENABLED_CASE_ACTION_KEYS
+
+    expected_statuses = {
+        "acknowledge_case": "acknowledged",
+        "add_comment": "open",
+        "assign_owner": "open",
+        "dismiss_case": "dismissed",
+        "mark_in_progress": "in_progress",
+        "resolve_case": "resolved",
+    }
+    assert set(API_ENABLED_CASE_ACTION_KEYS) == set(expected_statuses)
+    assert {
+        action_key for action_key, definition in ACTION_CATALOG.items() if definition.api_enabled
+    } == set(expected_statuses)
+
+    for action_key, expected_status in expected_statuses.items():
+        store = InMemoryOperationalCaseStore()
+        opened = store.upsert_detection(case_detection(run_id=f"run-enabled-{action_key}"), detected_at=utc(8))
+        kwargs: dict[str, Any] = {}
+        if action_key == "add_comment":
+            kwargs["comment"] = "Investigating supplier"
+        if action_key == "assign_owner":
+            kwargs["assignee_ref"] = "owner@example.com"
+        if action_key in {"dismiss_case", "resolve_case"}:
+            kwargs["reason"] = "Operator completed the governed case workflow"
+        if action_key == "resolve_case":
+            apply_case_action(
+                store,
+                business_id="artemea",
+                case_id=opened.case_id,
+                action_key="acknowledge_case",
+                actor_ref="operator@example.com",
+            )
+
+        result = apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key=action_key,
+            actor_ref="operator@example.com",
+            **kwargs,
+        )
+
+        assert result["case"]["status"] == expected_status
+
+    disabled_action_keys = [
+        action_key for action_key, definition in ACTION_CATALOG.items() if not definition.api_enabled
+    ]
+    assert disabled_action_keys
+    for action_key in disabled_action_keys:
+        store = InMemoryOperationalCaseStore()
+        opened = store.upsert_detection(case_detection(run_id=f"run-disabled-{action_key}"), detected_at=utc(8))
+        before = opened.model_dump_json()
+
+        with pytest.raises(OperatorAPIError) as exc:
+            apply_case_action(
+                store,
+                business_id="artemea",
+                case_id=opened.case_id,
+                action_key=action_key,
+                actor_ref="operator@example.com",
+                comment="Should not be accepted",
+                reason="Should not be accepted",
+                assignee_ref="owner@example.com",
+            )
+
+        assert exc.value.code == "case_action_api_disabled"
+        reloaded = store.get_case(opened.case_id)
+        assert reloaded is not None
+        assert reloaded.model_dump_json() == before
+
+
 def test_apply_case_action_add_comment_rejects_missing_actor_and_preserves_cross_business_scope():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))
