@@ -194,6 +194,62 @@ def test_case_work_item_projection_exposes_acknowledgment_sla_clock(tmp_path):
     assert acknowledged_projection["acknowledgment_sla_breached"] is True
 
 
+def test_acknowledgment_sla_stops_at_terminal_status_when_never_acknowledged(tmp_path):
+    """A done case should not become artificially overdue after closure.
+
+    Open -> dismissed is a valid operator transition. If the case is dismissed
+    before the first-ack SLA due time, WorkItem projections must evaluate the
+    SLA at dismissed_at rather than at the later dashboard request time.
+    """
+
+    db_path = tmp_path / "work-item-sla-terminal-clock.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-terminal-sla", priority=87))
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    dismissed_on_time = store.transition_case(
+        case.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Duplicate alert",
+        transitioned_at=datetime(2026, 5, 24, 8, 30, tzinfo=timezone.utc),
+    )
+    late_case = store.upsert_detection(
+        _case_detection(
+            run_id="run-work-item-terminal-sla-late",
+            priority=87,
+            dedupe_suffix="stockout_risk/business/late-terminal/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "late-terminal", "label": "Late terminal"},
+        ),
+        detected_at=datetime(2026, 5, 24, 8, 0, tzinfo=timezone.utc),
+    )
+    dismissed_late = store.transition_case(
+        late_case.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Closed after SLA",
+        transitioned_at=datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    on_time_projection = case_work_item_projection(
+        dismissed_on_time,
+        as_of=datetime(2026, 5, 24, 12, 0, tzinfo=timezone.utc),
+    )
+    late_projection = case_work_item_projection(
+        dismissed_late,
+        as_of=datetime(2026, 5, 24, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert on_time_projection["status"] == "dismissed"
+    assert on_time_projection["acknowledged_at"] is None
+    assert on_time_projection["acknowledgment_due_at"] == "2026-05-24T09:00:00Z"
+    assert on_time_projection["acknowledgment_sla_breached"] is False
+    assert late_projection["acknowledgment_sla_breached"] is True
+
+
 def test_issue_type_definitions_expose_owner_visibility_and_metric_gates():
     definitions = {definition["issue_type"]: definition for definition in operational_case_issue_type_definitions()}
 
