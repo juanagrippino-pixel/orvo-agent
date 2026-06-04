@@ -35,6 +35,7 @@ def register_run_delivery_routes(app):
                     run_ledger,
                     business_id=business_id,
                     status=request.args.get("status"),
+                    trigger_type=request.args.get("trigger_type"),
                     limit=request.args.get("limit"),
                     dispatch_status=request.args.get("dispatch_status"),
                 ),
