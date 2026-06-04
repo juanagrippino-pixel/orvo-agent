@@ -13,10 +13,23 @@ from .histograms_ack import *  # noqa: F401,F403
 from .histograms_handling import *  # noqa: F401,F403
 
 
-def list_run_history(ledger: RunLedger, *, business_id: str, status: str | None, limit: str | None) -> dict[str, Any]:
+def list_run_history(
+    ledger: RunLedger,
+    *,
+    business_id: str,
+    status: str | None,
+    trigger_type: str | None,
+    limit: str | None,
+) -> dict[str, Any]:
     parsed_status = parse_run_status(status)
+    parsed_trigger_type = parse_run_trigger_type(trigger_type)
     parsed_limit = parse_limit(limit)
-    runs = ledger.list_runs(business_id=business_id, status=parsed_status, limit=parsed_limit)
+    runs = ledger.list_runs(
+        business_id=business_id,
+        status=parsed_status,
+        trigger_type=parsed_trigger_type,
+        limit=parsed_limit,
+    )
     return {"runs": [run_history_item(run) for run in runs], "limit": parsed_limit}
 
 
@@ -113,7 +126,7 @@ def get_operator_dashboard(
             store, business_id=business_id
         ),
         "run_history": list_run_history(
-            ledger, business_id=business_id, status=None, limit=str(limit)
+            ledger, business_id=business_id, status=None, trigger_type=None, limit=str(limit)
         ),
         "builtin_case_view_totals": _summarize_builtin_case_view_totals(
             store, business_id=business_id
