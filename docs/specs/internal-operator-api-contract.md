@@ -54,10 +54,15 @@ Allowed only after idempotency and approval rules are explicit. For early implem
 
 ```http
 GET /internal/brain/businesses/{business_id}/runs
+GET /internal/brain/businesses/{business_id}/runs/summary
 GET /internal/brain/businesses/{business_id}/runs/{run_id}
 ```
 
 Returns run status, connector outcomes, artifacts, dispatch status, cases opened/updated.
+The summary endpoint is a bounded read-only analytics projection over the
+business-scoped run ledger; it accepts the standard capped `limit` parameter and
+returns aggregate counts only (status, trigger type, connector/dispatch status,
+and case-opened/updated totals), not raw artifacts or connector payloads.
 
 ### Cases and built-in case views
 
