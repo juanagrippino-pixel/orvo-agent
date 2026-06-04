@@ -79,6 +79,20 @@ def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory
     return operational_case_status_category(case.status)
 
 
+def priority_bracket_for_score(priority_score: int) -> str:
+    """Return the canonical WorkItem priority bracket for a deterministic score."""
+
+    if priority_score < 50:
+        return "low"
+    if priority_score < 80:
+        return "medium"
+    return "high"
+
+
+def case_priority_bracket(case: OperationalCase) -> str:
+    return priority_bracket_for_score(case.priority_score)
+
+
 def case_work_item_id(case: OperationalCase) -> str:
     return f"{case_project_key(case)}:{case.case_id}"
 
@@ -110,6 +124,7 @@ def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
         "status": case.status,
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,
+        "priority_bracket": case_priority_bracket(case),
         "assignee_ref": case.assignee_ref,
         "comment_count": case_comment_count(case),
         "last_commented_at": case_last_commented_at(case),
