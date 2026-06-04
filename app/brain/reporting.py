@@ -185,6 +185,13 @@ def _case_status_line(case: OperationalCase, report_date: date | None) -> str | 
     return "   Estado: " + " · ".join(parts)
 
 
+def order_owner_case_brief_cases(cases: Iterable[OperationalCase]) -> list[OperationalCase]:
+    """Return owner-brief eligible cases in WhatsApp projection order."""
+
+    actionable = owner_facing_actionable_cases(cases)
+    return sorted(actionable, key=_case_order)
+
+
 def compose_owner_case_brief(
     business_name: str,
     cases: Iterable[OperationalCase],
@@ -198,8 +205,7 @@ def compose_owner_case_brief(
     store. The text is intentionally short and fully redacted before returning.
     """
 
-    actionable = owner_facing_actionable_cases(cases)
-    actionable = sorted(actionable, key=_case_order)
+    actionable = order_owner_case_brief_cases(cases)
     visible_cases = actionable[:max_cases]
     date_suffix = f" · {report_date.isoformat()}" if report_date else ""
     lines = [f"🧠 Orvo — {business_name}", f"Brief operativo{date_suffix}", ""]

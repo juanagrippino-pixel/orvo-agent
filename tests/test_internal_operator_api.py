@@ -168,6 +168,100 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["degraded"] is False
 
 
+def test_internal_owner_case_brief_preview_is_read_only_scoped_and_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    warning_case = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron access_token=raw_owner_secret",
+            run_id="run-artemea-warn",
+        ),
+    )
+    critical_case = _seed_case(db_path, _case_detection(run_id="run-artemea-critical"))
+    resolved_case = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="fulfillment_backlog",
+            dedupe_suffix="fulfillment_backlog/channel/all/commerce.fulfillment/daily",
+            priority=95,
+            severity="critical",
+            title="Resuelto no debe aparecer",
+            run_id="run-artemea-resolved",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+    conn = sqlite3.connect(db_path)
+    store = SQLiteOperationalCaseStore(conn)
+    store.transition_case(
+        resolved_case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=_utc(9),
+    )
+    store.transition_case(
+        resolved_case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="Fixed access_token=raw_owner_secret",
+        transitioned_at=_utc(10),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview"
+        "?business_name=Artemea&report_date=2026-05-24&max_cases=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_owner_secret" not in raw_body
+    assert "raw_snapshot_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["business_name"] == "Artemea"
+    assert data["projection_type"] == "owner_case_brief"
+    assert data["channel"] == "whatsapp"
+    assert data["report_date"] == "2026-05-24"
+    assert data["total_actionable_cases"] == 2
+    assert data["displayed_case_count"] == 1
+    assert data["truncated"] is True
+    assert data["case_ids"] == [critical_case.case_id]
+    assert warning_case.case_id not in data["case_ids"]
+    assert resolved_case.case_id not in data["case_ids"]
+    assert "Hay 2 temas operativos abiertos" in data["text"]
+    assert critical_case.case_id in data["text"]
+    assert warning_case.case_id not in data["text"]
+    assert resolved_case.case_id not in data["text"]
+
+
+def test_internal_owner_case_brief_preview_requires_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview?business_name=Artemea",
+        headers={**AUTH, "X-Orvo-Businesses": "other"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())

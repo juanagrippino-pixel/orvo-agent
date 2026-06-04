@@ -19,5 +19,6 @@ from .histograms_resolution import *  # noqa: F401,F403
 from .histograms_ack import *  # noqa: F401,F403
 from .histograms_handling import *  # noqa: F401,F403
 from .views import *  # noqa: F401,F403
+from .owner_brief import *  # noqa: F401,F403
 from .actions import *  # noqa: F401,F403
 from .runs_dashboard import *  # noqa: F401,F403

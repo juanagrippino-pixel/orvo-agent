@@ -73,6 +73,7 @@ GET /internal/brain/businesses/{business_id}/cases/recently-dismissed
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/case-actions
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
+GET /internal/brain/businesses/{business_id}/owner-case-brief/preview
 ```
 
 Actions must use registered action keys and append timeline events. The
@@ -84,7 +85,11 @@ case action keys; it must mark which catalog actions are actually enabled by the
 current internal API (including `assign_owner` once the scoped assignment path is
 wired) so clients do not infer executable capabilities from docs or owner-facing
 copy. Enabled assignment entries must advertise required input fields without
-exposing unredacted assignee values.
+exposing unredacted assignee values. The owner-case-brief preview endpoint is a
+read-only WhatsApp projection over canonical actionable cases; it returns the
+composed, redacted text plus projection metadata (`total_actionable_cases`,
+`displayed_case_count`, `truncated`, and displayed `case_ids`) and must not
+dispatch, mutate cases, or treat brief text as state.
 
 ### Operator audit events
 
@@ -149,4 +154,5 @@ Before exposing beyond local/dev:
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
 - case action rejects unknown action keys;
 - case action catalog is authenticated, tenant-scoped, redacted, and marks disabled catalog actions as not executable;
+- owner-case-brief preview is authenticated, tenant-scoped, read-only, excludes resolved/dismissed cases, redacts composed text and metadata, and reports truthful truncation counts;
 - responses include `redaction_applied=true`.
