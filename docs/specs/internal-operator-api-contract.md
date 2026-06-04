@@ -18,6 +18,14 @@ The internal operator API is the controlled surface for inspecting runtimes, con
 
 ## Initial endpoints
 
+### Owner/operator brief
+
+```http
+GET /internal/brain/businesses/{business_id}/operator-brief?limit=3
+```
+
+Returns the compact MVP action queue plus an `owner_message` formatted for WhatsApp in direct Spanish (`message_locale=es-AR`, `message_channel=whatsapp`). The message is derived only from redacted case projections and registered action keys; it must not introduce new metrics, root-cause claims, or raw evidence text.
+
 ### Operator session
 
 ```http

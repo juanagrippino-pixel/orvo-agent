@@ -111,6 +111,7 @@ def test_dashboard_returns_aggregated_views() -> None:
         "severity": "critical",
         "priority_score": 100,
         "reason": "highest_priority_actionable_case",
+        "suggested_action_key": "acknowledge_case",
     }
 
     # Verify case_queue_summary has counts

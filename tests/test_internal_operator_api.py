@@ -2655,6 +2655,16 @@ def test_internal_owner_brief_endpoint_returns_compact_mvp_action_queue(monkeypa
     assert data["business_id"] == "artemea"
     assert data["status"] == "needs_attention"
     assert data["headline"] == "2 actionable cases; 2 with degraded evidence"
+    assert data["message_channel"] == "whatsapp"
+    assert data["message_locale"] == "es-AR"
+    assert data["owner_message"].splitlines() == [
+        "Orvo — resumen operativo",
+        "Tenés 2 casos accionables; 2 necesitan revalidar datos.",
+        "Prioridad: stockout_risk crítico, prioridad 100.",
+        "Acción sugerida: acknowledge_case para tomar el caso y definir próximo paso.",
+        "Datos: revalidar tiendanube por evidencia missing antes de decidir.",
+    ]
+    assert "highest_priority_actionable_case" not in data["owner_message"]
     assert data["next_actions"] == [
         {
             "case_id": high.case_id,
@@ -2662,6 +2672,7 @@ def test_internal_owner_brief_endpoint_returns_compact_mvp_action_queue(monkeypa
             "severity": "critical",
             "priority_score": 100,
             "reason": "highest_priority_actionable_case",
+            "suggested_action_key": "acknowledge_case",
         }
     ]
     assert data["evidence_actions"] == [
@@ -2671,6 +2682,7 @@ def test_internal_owner_brief_endpoint_returns_compact_mvp_action_queue(monkeypa
             "freshness_state": "missing",
             "source_connectors": ["tiendanube"],
             "reason": "refresh_degraded_evidence",
+            "suggested_action_key": "request_follow_up",
         }
     ]
 
