@@ -54,6 +54,7 @@ class CompiledConnectorRuntime(BaseModel):
     emitted_event_families: list[str] = Field(default_factory=list)
     supported_runtime_modes: list[str] = Field(default_factory=list)
     executor_factory_path: str
+    executor_metadata: dict[str, Any] = Field(default_factory=dict)
     health_policy: dict[str, Any] = Field(default_factory=dict)
     required_scopes: list[str] = Field(default_factory=list)
     rate_limit_policy: dict[str, Any] = Field(default_factory=dict)
@@ -166,6 +167,7 @@ def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, An
         "emitted_event_families": list(connector.emitted_event_families),
         "supported_runtime_modes": list(connector.supported_runtime_modes),
         "executor_factory_path": connector.executor_factory_path,
+        "executor_metadata": dict(connector.executor_metadata),
         "health_policy": dict(connector.health_policy),
         "required_scopes": list(connector.required_scopes),
         "rate_limit_policy": dict(connector.rate_limit_policy),
@@ -299,6 +301,7 @@ def _compile_connectors(
                 emitted_event_families=list(spec.emitted_event_families),
                 supported_runtime_modes=supported_runtime_modes,
                 executor_factory_path=spec.factory_path,
+                executor_metadata=spec.executor_policy_metadata(),
                 health_policy=spec.health_policy_metadata(),
                 required_scopes=list(spec.scopes.required),
                 rate_limit_policy=spec.rate_limit_policy_metadata(),
