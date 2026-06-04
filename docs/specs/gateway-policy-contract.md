@@ -28,6 +28,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 6. Rate-limit keys are deterministic and safe to log after boundary redaction: `<bucket>:<business_id>:<redacted_actor_id>`.
 7. Audit events record decision codes, redacted request/trace provenance identifiers, and whether an idempotency key was present, but not the idempotency key value itself. Actor identifiers are passed through the shared redaction helper before projection.
 8. Idempotency keys for mutating routes must be scoped to the target business, must not contain whitespace, must fit within the documented key-size budget, and must not contain secret-shaped material.
+9. Gateway telemetry is a deterministic, redacted provenance envelope emitted alongside policy decisions. It may include route metadata, decision code, rate-limit bucket/key, request/trace IDs after redaction, and a stable `provenance_ref`; it must not include raw idempotency-key values or credential-bearing identifiers.
 
 ## Current schema
 
@@ -45,7 +46,16 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 | `audit_event_type` | Stable audit/provenance event name emitted by policy decisions. |
 | `enforcement_state` | Honest wiring state: `contract_only` means the policy is documented/tested but not yet the route's middleware gate; `enforced` means the current Python route evaluates the policy before side effects or data access. |
 
-`GatewayRequestContext` carries only request facts needed for evaluation: route key, method, business ID, optional authenticated principal, optional idempotency key, and optional request/trace provenance identifiers. Mutating-route idempotency keys are accepted only when they are 1-200 characters, whitespace-free, secret-safe after shared redaction inspection, and contain the target `business_id` as a colon-delimited segment. `GatewayPolicyDecision` returns a safe decision envelope with status code, decision code, rate-limit key, idempotency requirement, and audit event metadata. Audit events include redacted `request_id` and `trace_id` fields when supplied, but never include the idempotency key value.
+`GatewayRequestContext` carries only request facts needed for evaluation: route key, method, business ID, optional authenticated principal, optional idempotency key, and optional request/trace provenance identifiers. Mutating-route idempotency keys are accepted only when they are 1-200 characters, whitespace-free, secret-safe after shared redaction inspection, and contain the target `business_id` as a colon-delimited segment. `GatewayPolicyDecision` returns a safe decision envelope with status code, decision code, rate-limit key, idempotency requirement, audit event metadata, and a telemetry/provenance event. Audit and telemetry events include redacted `request_id` and `trace_id` fields when supplied, but never include the idempotency key value.
+
+`GatewayPolicyDecision.telemetry_event` is schema-versioned as `2026-06-04.gateway-telemetry.v1` and includes:
+
+- `event_type=gateway.policy.decision` and `source_component=gateway_policy`;
+- the gateway policy schema version that produced it;
+- route key, route enforcement state, surface, method, and business ID;
+- redacted actor, request, trace, and rate-limit provenance fields;
+- decision code, HTTP status code, allowed/denied state, idempotency-required/present booleans;
+- `provenance_ref`, a deterministic short reference derived from the redacted telemetry payload for ledger/log correlation.
 
 ## Initial route policies
 
@@ -79,6 +89,7 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 - policy evaluation rejects missing auth, cross-business access, missing permissions, missing idempotency keys, and invalid/cross-business/secret-shaped idempotency keys;
 - the internal case queue HTTP route enforces `operator_api.case_queue.read` before store access, and the internal case-action HTTP route enforces `operator_api.case_action.mutate` before mutation and records redacted denied gateway decisions in operator audit;
 - allowed decisions emit stable audit metadata, redacted request/trace provenance identifiers, and redacted rate-limit keys;
+- decisions emit schema-versioned gateway telemetry events with deterministic `provenance_ref` values and no raw idempotency-key values;
 - actor/request identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;
 - idempotency key values never appear in decision envelopes or audit events;
 - role-derived permissions allow operator case mutation while reserving runtime force-run permission for admin principals;

@@ -26,6 +26,8 @@ def test_default_service_catalog_covers_core_control_plane_components():
     assert "rate_limit_key_redacted" in catalog.get("gateway_policy").observability_signals
     assert "request_id_redacted" in catalog.get("gateway_policy").observability_signals
     assert "trace_id_redacted" in catalog.get("gateway_policy").observability_signals
+    assert "gateway_telemetry_schema" in catalog.get("gateway_policy").observability_signals
+    assert "provenance_ref" in catalog.get("gateway_policy").observability_signals
     assert "docs/specs/compiled-runtime-contract.md" in catalog.get("compiled_runtime").docs
 
 

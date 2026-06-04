@@ -234,6 +234,8 @@ def default_service_catalog() -> ServiceCatalog:
                     "idempotency_key_present",
                     "request_id_redacted",
                     "trace_id_redacted",
+                    "gateway_telemetry_schema",
+                    "provenance_ref",
                 ),
             ),
             ServiceComponent(

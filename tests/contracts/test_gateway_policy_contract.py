@@ -258,8 +258,57 @@ def test_gateway_policy_projects_safe_request_provenance_without_idempotency_val
     assert decision.allowed is True
     assert decision.audit_event["request_id"] == "[REDACTED]"
     assert decision.audit_event["trace_id"] == "trace-20260602-0001"
+    assert decision.telemetry_event["schema_version"] == "2026-06-04.gateway-telemetry.v1"
+    assert decision.telemetry_event["event_type"] == "gateway.policy.decision"
+    assert decision.telemetry_event["policy_schema_version"] == "2026-05-31.gateway-policy.v1"
+    assert decision.telemetry_event["source_component"] == "gateway_policy"
+    assert decision.telemetry_event["route_key"] == "runtime.force_run.mutate"
+    assert decision.telemetry_event["surface"] == "runtime"
+    assert decision.telemetry_event["business_id"] == "artemea"
+    assert decision.telemetry_event["decision_code"] == "allowed"
+    assert decision.telemetry_event["allowed"] is True
+    assert decision.telemetry_event["status_code"] == 200
+    assert decision.telemetry_event["rate_limit_bucket"] == "runtime_force_run"
+    assert decision.telemetry_event["idempotency_required"] is True
+    assert decision.telemetry_event["idempotency_key_present"] is True
+    assert decision.telemetry_event["request_id"] == "[REDACTED]"
+    assert decision.telemetry_event["trace_id"] == "trace-20260602-0001"
+    assert len(decision.telemetry_event["provenance_ref"]) == len("gwprov_" + "0" * 16)
     assert "force-run:artemea" not in repr(decision.model_dump())
     assert "raw_gateway_secret" not in repr(decision.model_dump())
+
+
+def test_gateway_policy_telemetry_provenance_is_deterministic_and_secret_safe():
+    from app.brain.gateway_policy import (
+        GatewayPrincipal,
+        GatewayRequestContext,
+        default_gateway_policy_registry,
+    )
+
+    registry = default_gateway_policy_registry()
+    context = GatewayRequestContext(
+        route_key="operator_api.case_queue.read",
+        method="GET",
+        business_id="artemea",
+        principal=GatewayPrincipal(
+            actor_id="operator access_token=raw_gateway_secret",
+            business_ids=("artemea",),
+            permissions=(INTERNAL_READ_PERMISSION,),
+        ),
+        request_id="req-20260604-0001",
+        trace_id="trace_token=raw_gateway_secret",
+    )
+
+    first = registry.evaluate(context)
+    second = registry.evaluate(context)
+
+    assert first.telemetry_event == second.telemetry_event
+    assert first.telemetry_event["actor_id"] == "operator access_token=[REDACTED]"
+    assert first.telemetry_event["trace_id"] == "[REDACTED]"
+    assert first.telemetry_event["route_enforcement_state"] == "enforced"
+    serialized = repr(first.model_dump())
+    assert "raw_gateway_secret" not in serialized
+    assert "access_token=raw_gateway_secret" not in serialized
 
 
 def test_gateway_policy_runtime_execute_permission_is_granted_only_to_admin_role():

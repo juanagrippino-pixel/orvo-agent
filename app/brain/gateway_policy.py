@@ -9,6 +9,8 @@ infrastructure.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +27,7 @@ GatewaySurface = Literal["operator_api", "runtime"]
 GatewayEnforcementState = Literal["contract_only", "enforced"]
 
 GATEWAY_POLICY_SCHEMA_VERSION = "2026-05-31.gateway-policy.v1"
+GATEWAY_TELEMETRY_SCHEMA_VERSION = "2026-06-04.gateway-telemetry.v1"
 
 
 class GatewayRateLimitPolicy(BaseModel):
@@ -116,6 +119,7 @@ class GatewayPolicyDecision(BaseModel):
     rate_limit_key: str
     idempotency_required: bool
     audit_event: dict[str, Any]
+    telemetry_event: dict[str, Any]
 
 
 class GatewayPolicyRegistry:
@@ -322,6 +326,32 @@ def _decision(
     rate_limit_key: str,
 ) -> GatewayPolicyDecision:
     actor_id = _safe_actor_id(context)
+    request_id = _safe_optional_identifier(context.request_id)
+    trace_id = _safe_optional_identifier(context.trace_id)
+    idempotency_key_present = bool(context.idempotency_key)
+    audit_event = {
+        "event_type": policy.audit_event_type,
+        "route_key": policy.route_key,
+        "business_id": context.business_id,
+        "actor_id": actor_id,
+        "decision_code": code,
+        "idempotency_key_present": idempotency_key_present,
+        "rate_limit_key": rate_limit_key,
+        "request_id": request_id,
+        "trace_id": trace_id,
+    }
+    telemetry_event = _telemetry_event(
+        policy,
+        context,
+        actor_id=actor_id,
+        allowed=allowed,
+        code=code,
+        status_code=status_code,
+        rate_limit_key=rate_limit_key,
+        idempotency_key_present=idempotency_key_present,
+        request_id=request_id,
+        trace_id=trace_id,
+    )
     return GatewayPolicyDecision(
         allowed=allowed,
         code=code,
@@ -329,15 +359,57 @@ def _decision(
         reason=reason,
         rate_limit_key=rate_limit_key,
         idempotency_required=policy.idempotency_required,
-        audit_event={
-            "event_type": policy.audit_event_type,
-            "route_key": policy.route_key,
-            "business_id": context.business_id,
-            "actor_id": actor_id,
-            "decision_code": code,
-            "idempotency_key_present": bool(context.idempotency_key),
-            "rate_limit_key": rate_limit_key,
-            "request_id": _safe_optional_identifier(context.request_id),
-            "trace_id": _safe_optional_identifier(context.trace_id),
-        },
+        audit_event=audit_event,
+        telemetry_event=telemetry_event,
     )
+
+
+def _telemetry_event(
+    policy: GatewayRoutePolicy,
+    context: GatewayRequestContext,
+    *,
+    actor_id: str,
+    allowed: bool,
+    code: str,
+    status_code: int,
+    rate_limit_key: str,
+    idempotency_key_present: bool,
+    request_id: str | None,
+    trace_id: str | None,
+) -> dict[str, Any]:
+    """Return deterministic gateway telemetry without raw idempotency values."""
+
+    event = {
+        "schema_version": GATEWAY_TELEMETRY_SCHEMA_VERSION,
+        "event_type": "gateway.policy.decision",
+        "policy_schema_version": GATEWAY_POLICY_SCHEMA_VERSION,
+        "source_component": "gateway_policy",
+        "route_key": policy.route_key,
+        "route_enforcement_state": policy.enforcement_state,
+        "surface": policy.surface,
+        "method": context.method,
+        "business_id": context.business_id,
+        "actor_id": actor_id,
+        "decision_code": code,
+        "allowed": allowed,
+        "status_code": status_code,
+        "rate_limit_bucket": policy.rate_limit.bucket,
+        "rate_limit_key": rate_limit_key,
+        "idempotency_required": policy.idempotency_required,
+        "idempotency_key_present": idempotency_key_present,
+        "request_id": request_id,
+        "trace_id": trace_id,
+    }
+    event["provenance_ref"] = _gateway_provenance_ref(event)
+    return event
+
+
+def _gateway_provenance_ref(event: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in event.items()
+        if key not in {"provenance_ref", "rate_limit_key"}
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+    return f"gwprov_{digest}"
