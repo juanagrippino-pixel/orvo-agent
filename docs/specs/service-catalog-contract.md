@@ -70,11 +70,13 @@ Required tests live in `tests/contracts/test_service_catalog_contract.py` and pr
 - owner and runtime-surface queries are deterministic;
 - public manifest content is safe for projection and does not include credential material.
 
+The read-only internal HTTP projection lives at `GET /internal/brain/businesses/{business_id}/service-catalog` and is covered by `tests/test_internal_operator_api.py`. The route must keep the standard internal envelope, require internal authentication plus `internal:read`, enforce `operator_api.service_catalog.read` in the gateway policy registry before projecting the manifest, and return only the deterministic public manifest from `app.brain.service_catalog`.
+
 ## Next extensions
 
 Future slices can build on this contract without adding heavy infrastructure:
 
-- expose a read-only internal operator endpoint for the service catalog behind existing internal auth/envelope conventions;
+- add component-detail filtering once the read-only service catalog endpoint needs focused developer views;
 - attach SLO/runbook links once SRE conventions land;
 - add connector certification records under the same component/dependency model;
 - join run-ledger events to catalog component IDs for provenance reports.

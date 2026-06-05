@@ -62,10 +62,11 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 The first registry covers high-value internal boundaries without broad routing rewrites:
 
 1. `operator_api.case_queue.read` — read-only case queue access; requires `internal:read`; no idempotency key.
-2. `operator_api.case_action.mutate` — case lifecycle/comment/assignment actions; requires `case:action`; idempotency key required.
-3. `runtime.force_run.mutate` — operator-triggered runtime execution; requires `runtime:execute`; idempotency key required.
+2. `operator_api.service_catalog.read` — read-only developer-platform service catalog projection; requires `internal:read`; no idempotency key.
+3. `operator_api.case_action.mutate` — case lifecycle/comment/assignment actions; requires `case:action`; idempotency key required.
+4. `runtime.force_run.mutate` — operator-triggered runtime execution; requires `runtime:execute`; idempotency key required.
 
-These policies started as conventions and contract tests. Public manifests include `enforcement_state` so the registry does not overstate current gateway coverage. The current Python runtime now marks and enforces `operator_api.case_queue.read` before opening stores for the internal case queue route, and marks/enforces `operator_api.case_action.mutate` before mutation, including the business-scoped idempotency-key requirement and denied-decision audit projection. `runtime.force_run.mutate` remains `contract_only` until its route middleware wiring lands and must preserve the public response envelope when promoted.
+These policies started as conventions and contract tests. Public manifests include `enforcement_state` so the registry does not overstate current gateway coverage. The current Python runtime now marks and enforces `operator_api.case_queue.read` before opening stores for the internal case queue route, marks/enforces `operator_api.service_catalog.read` before projecting the service catalog manifest, and marks/enforces `operator_api.case_action.mutate` before mutation, including the business-scoped idempotency-key requirement and denied-decision audit projection. `runtime.force_run.mutate` remains `contract_only` until its route middleware wiring lands and must preserve the public response envelope when promoted.
 
 ## Decision codes
 
@@ -87,7 +88,7 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 - public manifests are deterministic and secret-safe;
 - public manifests distinguish `contract_only` route policies from routes currently `enforced` by Python middleware;
 - policy evaluation rejects missing auth, cross-business access, missing permissions, missing idempotency keys, and invalid/cross-business/secret-shaped idempotency keys;
-- the internal case queue HTTP route enforces `operator_api.case_queue.read` before store access, and the internal case-action HTTP route enforces `operator_api.case_action.mutate` before mutation and records redacted denied gateway decisions in operator audit;
+- the internal case queue HTTP route enforces `operator_api.case_queue.read` before store access, the internal service-catalog route enforces `operator_api.service_catalog.read` before projection, and the internal case-action HTTP route enforces `operator_api.case_action.mutate` before mutation and records redacted denied gateway decisions in operator audit;
 - allowed decisions emit stable audit metadata, redacted request/trace provenance identifiers, and redacted rate-limit keys;
 - decisions emit schema-versioned gateway telemetry events with deterministic `provenance_ref` values and no raw idempotency-key values;
 - actor/request identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;

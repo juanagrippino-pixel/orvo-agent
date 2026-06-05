@@ -14,10 +14,12 @@ def test_default_gateway_policy_registry_covers_current_internal_boundaries():
 
     assert registry.route_keys() == [
         "operator_api.case_queue.read",
+        "operator_api.service_catalog.read",
         "operator_api.case_action.mutate",
         "runtime.force_run.mutate",
     ]
     case_queue = registry.get("operator_api.case_queue.read")
+    service_catalog = registry.get("operator_api.service_catalog.read")
     case_action = registry.get("operator_api.case_action.mutate")
 
     assert case_queue.method == "GET"
@@ -25,12 +27,18 @@ def test_default_gateway_policy_registry_covers_current_internal_boundaries():
     assert case_queue.idempotency_required is False
     assert case_queue.rate_limit.bucket == "operator_api_read"
 
+    assert service_catalog.method == "GET"
+    assert service_catalog.required_permissions == (INTERNAL_READ_PERMISSION,)
+    assert service_catalog.idempotency_required is False
+    assert service_catalog.rate_limit.bucket == "developer_platform_read"
+
     assert case_action.method == "POST"
     assert case_action.required_permissions == (CASE_ACTION_PERMISSION,)
     assert case_action.idempotency_required is True
     assert case_action.audit_event_type == "operator_case_action_requested"
 
     assert registry.get("operator_api.case_queue.read").enforcement_state == "enforced"
+    assert registry.get("operator_api.service_catalog.read").enforcement_state == "enforced"
     assert registry.get("operator_api.case_action.mutate").enforcement_state == "enforced"
     assert registry.get("runtime.force_run.mutate").enforcement_state == "contract_only"
 
@@ -41,6 +49,9 @@ def test_gateway_policy_permissions_reuse_internal_operator_auth_contract():
     registry = default_gateway_policy_registry()
 
     assert registry.get("operator_api.case_queue.read").required_permissions == (
+        INTERNAL_READ_PERMISSION,
+    )
+    assert registry.get("operator_api.service_catalog.read").required_permissions == (
         INTERNAL_READ_PERMISSION,
     )
     assert registry.get("operator_api.case_action.mutate").required_permissions == (
@@ -59,11 +70,13 @@ def test_gateway_policy_manifest_is_stable_and_secret_safe():
     assert manifest["schema_version"] == "2026-05-31.gateway-policy.v1"
     assert [route["route_key"] for route in manifest["routes"]] == [
         "operator_api.case_queue.read",
+        "operator_api.service_catalog.read",
         "operator_api.case_action.mutate",
         "runtime.force_run.mutate",
     ]
     assert {route["route_key"]: route["enforcement_state"] for route in manifest["routes"]} == {
         "operator_api.case_queue.read": "enforced",
+        "operator_api.service_catalog.read": "enforced",
         "operator_api.case_action.mutate": "enforced",
         "runtime.force_run.mutate": "contract_only",
     }

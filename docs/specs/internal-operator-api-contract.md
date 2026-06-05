@@ -29,6 +29,18 @@ permission flags, and redacted business-grant projection. Legacy callers without
 `X-Orvo-Businesses` are marked `legacy_token_scoped=true`; explicit grants return
 only safe business labels or `[REDACTED]`, never raw pasted header material.
 
+### Service catalog
+
+```http
+GET /internal/brain/businesses/{business_id}/service-catalog
+```
+
+Returns the deterministic public service-catalog manifest for developer/operator
+inspection. The route is read-only, uses the standard internal envelope, requires
+internal authentication plus `internal:read`, and enforces
+`operator_api.service_catalog.read` in `GatewayPolicyRegistry` before projecting
+the manifest.
+
 ### Compile preview
 
 ```http
@@ -157,6 +169,7 @@ Before exposing beyond local/dev:
 - readiness endpoint redacts secret refs;
 - invalid internal bearer-token attempts create redacted operator audit events without persisting raw `Authorization` headers;
 - internal envelopes and durable audit events redact secret-shaped `X-Request-ID` values;
+- service catalog projection is auth/business/gateway scoped and does not expose credential-shaped catalog material;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;

@@ -141,6 +141,61 @@ def _client(monkeypatch, tmp_path):
     return app.test_client(), db_path
 
 
+def test_internal_service_catalog_returns_gateway_scoped_manifest(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-catalog",
+        headers={**VIEWER_AUTH, "X-Orvo-Businesses": "artemea"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True).lower()
+    assert "access_token" not in raw_body
+    assert "secret://" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    assert body["data"]["schema_version"] == "2026-05-31.service-catalog.v1"
+    component_ids = [component["component_id"] for component in body["data"]["components"]]
+    assert "edge_developer_platform" in component_ids
+    assert "gateway_policy" in component_ids
+
+
+def test_internal_service_catalog_enforces_gateway_policy_before_projection(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+    evaluated_contexts = []
+
+    class DenyingGatewayRegistry:
+        def evaluate(self, context):
+            evaluated_contexts.append(context)
+            return SimpleNamespace(
+                allowed=False,
+                code="gateway_catalog_denied",
+                reason="Gateway catalog test denial.",
+                status_code=429,
+            )
+
+    import app.http.internal_brain.common as internal_common
+    import app.http.internal_brain.service_catalog as service_catalog_routes
+
+    monkeypatch.setattr(internal_common, "default_gateway_policy_registry", lambda: DenyingGatewayRegistry())
+    monkeypatch.setattr(
+        service_catalog_routes,
+        "service_catalog_manifest",
+        lambda: (_ for _ in ()).throw(AssertionError("manifest should not be projected after gateway denial")),
+    )
+
+    response = client.get("/internal/brain/businesses/artemea/service-catalog", headers=AUTH)
+
+    assert response.status_code == 429
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "gateway_catalog_denied"
+    assert [context.route_key for context in evaluated_contexts] == ["operator_api.service_catalog.read"]
+
+
 def test_internal_success_envelope_redacts_secret_shaped_request_id(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())

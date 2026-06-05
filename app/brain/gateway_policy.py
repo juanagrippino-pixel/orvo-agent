@@ -250,6 +250,17 @@ def default_gateway_policy_registry() -> GatewayPolicyRegistry:
                 enforcement_state="enforced",
             ),
             GatewayRoutePolicy(
+                route_key="operator_api.service_catalog.read",
+                method="GET",
+                path_template="/internal/brain/businesses/{business_id}/service-catalog",
+                surface="operator_api",
+                required_permissions=(INTERNAL_READ_PERMISSION,),
+                rate_limit=GatewayRateLimitPolicy(bucket="developer_platform_read", requests_per_minute=60, burst=15),
+                idempotency_required=False,
+                audit_event_type="operator_service_catalog_requested",
+                enforcement_state="enforced",
+            ),
+            GatewayRoutePolicy(
                 route_key="operator_api.case_action.mutate",
                 method="POST",
                 path_template="/internal/brain/businesses/{business_id}/cases/{case_id}/actions",
