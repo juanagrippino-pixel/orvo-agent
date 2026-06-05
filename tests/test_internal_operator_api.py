@@ -624,6 +624,50 @@ def test_internal_case_action_failed_validation_does_not_consume_idempotency_key
     assert retry_body["data"]["action"]["idempotency_key"] == "case-action-retry-after-validation"
 
 
+def test_internal_case_action_secret_shaped_idempotency_key_is_rejected_without_ledger_or_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    secret_idempotency_key = "case-action/access_token:raw_idempotency_secret"
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Idempotency-Key": secret_idempotency_key,
+            "X-Request-ID": "req-secret-idempotency-key",
+        },
+        json={"action_key": "acknowledge_case", "reason": "valid mutation must not run"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_idempotency_secret" not in raw_body
+    body = response.get_json()
+    assert body["error"]["code"] == "invalid_idempotency_key"
+    assert body["redaction_applied"] is True
+    assert SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea") == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    matching_events = [
+        event for event in _audit_events(db_path) if event["request_id"] == "req-secret-idempotency-key"
+    ]
+    assert len(matching_events) == 1
+    event_json = json.dumps(matching_events[0], sort_keys=True)
+    assert "raw_idempotency_secret" not in event_json
+    assert secret_idempotency_key not in event_json
+
+
 def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
