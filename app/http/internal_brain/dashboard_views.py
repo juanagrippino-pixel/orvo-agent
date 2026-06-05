@@ -11,6 +11,7 @@ from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
 from .common import (
     _append_operator_audit_event,
     _gateway_policy_or_error,
+    _idempotency_key_from_headers,
     _internal_brain_db_path,
     _internal_success,
     _internal_principal_or_error,
@@ -161,7 +162,7 @@ def register_dashboard_view_routes(app):
                     business_id=business_id,
                     case_id=case_id,
                     action_key=str(payload.get("action_key", "")),
-                    idempotency_key=request.headers.get("X-Idempotency-Key"),
+                    idempotency_key=_idempotency_key_from_headers(),
                     actor_ref=actor_ref,
                     reason=payload.get("reason"),
                     comment=payload.get("comment"),

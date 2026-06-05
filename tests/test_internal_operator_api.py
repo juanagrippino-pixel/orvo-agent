@@ -440,6 +440,41 @@ def test_internal_case_action_requires_gateway_idempotency_key_before_mutation(m
     assert "raw_idempotency_secret" not in json.dumps(event, sort_keys=True)
 
 
+def test_internal_case_action_accepts_standard_idempotency_key_header(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {key: value for key, value in AUTH.items() if key != "X-Idempotency-Key"}
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **headers,
+            "Idempotency-Key": "case-action:artemea:standard-header",
+            "X-Request-ID": "req-standard-idempotency-key",
+        },
+        json={"action_key": "acknowledge_case", "reason": "Using the standard header"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"]["case"]["status"] == "acknowledged"
+    assert body["data"]["action"]["idempotency_key"] == "case-action:artemea:standard-header"
+    assert body["data"]["action"]["status"] == "executed"
+
+    replay = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **headers,
+            "Idempotency-Key": "case-action:artemea:standard-header",
+            "X-Request-ID": "req-standard-idempotency-key-replay",
+        },
+        json={"action_key": "acknowledge_case", "reason": "Using the standard header"},
+    )
+
+    assert replay.status_code == 200
+    assert replay.get_json()["data"]["action"]["status"] == "skipped_duplicate"
+
+
 def test_internal_case_action_rejects_non_object_payload_without_mutation(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
@@ -618,7 +653,7 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
 
     resolved = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action:artemea:resolve"},
         json={"action_key": "resolve_case", "reason": "Fixed access_token=raw_action_secret"},
     )
 
@@ -643,7 +678,7 @@ def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(m
 
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
-    headers = {**AUTH, "X-Idempotency-Key": "case-action-ack-1"}
+    headers = {**AUTH, "X-Idempotency-Key": "case-action:artemea:ack-1"}
 
     first = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
@@ -655,7 +690,7 @@ def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(m
     first_body = first.get_json()
     assert first_body["data"]["case"]["status"] == "acknowledged"
     assert first_body["data"]["action"]["status"] == "executed"
-    assert first_body["data"]["action"]["idempotency_key"] == "case-action-ack-1"
+    assert first_body["data"]["action"]["idempotency_key"] == "case-action:artemea:ack-1"
     assert first_body["data"]["action"]["execution_state"] == "executed"
     timeline_count_after_first = len(first_body["data"]["case"]["timeline"])
 
@@ -669,7 +704,7 @@ def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(m
     duplicate_body = duplicate.get_json()
     assert duplicate_body["data"]["case"]["status"] == "acknowledged"
     assert duplicate_body["data"]["action"]["status"] == "skipped_duplicate"
-    assert duplicate_body["data"]["action"]["idempotency_key"] == "case-action-ack-1"
+    assert duplicate_body["data"]["action"]["idempotency_key"] == "case-action:artemea:ack-1"
     assert duplicate_body["data"]["action"]["execution_state"] == "executed"
     assert len(duplicate_body["data"]["case"]["timeline"]) == timeline_count_after_first
 
@@ -686,7 +721,7 @@ def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(m
     assert record.source == "manual_operator"
     assert record.action_key == "acknowledge_case"
     assert record.case_id == case.case_id
-    assert record.idempotency_key == "case-action-ack-1"
+    assert record.idempotency_key == "case-action:artemea:ack-1"
     assert record.execution_state == "executed"
     assert record.approval_state == "not_required"
     assert record.params["reason"] == "Estoy encima"
@@ -705,7 +740,7 @@ def test_internal_case_action_existing_pending_idempotency_key_blocks_duplicate_
         business_id="artemea",
         case_id=case.case_id,
         action_key="acknowledge_case",
-        idempotency_key="case-action-pending-1",
+        idempotency_key="case-action:artemea:pending-1",
         execution_state="pending_execution",
         approval_required=False,
         source="manual_operator",
@@ -715,7 +750,7 @@ def test_internal_case_action_existing_pending_idempotency_key_blocks_duplicate_
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers={**AUTH, "X-Idempotency-Key": "case-action-pending-1"},
+        headers={**AUTH, "X-Idempotency-Key": "case-action:artemea:pending-1"},
         json={"action_key": "acknowledge_case", "reason": "retry while first attempt is pending"},
     )
 
@@ -735,7 +770,7 @@ def test_internal_case_action_failed_validation_does_not_consume_idempotency_key
 
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
-    headers = {**AUTH, "X-Idempotency-Key": "case-action-retry-after-validation"}
+    headers = {**AUTH, "X-Idempotency-Key": "case-action:artemea:retry-after-validation"}
 
     invalid = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
@@ -757,7 +792,7 @@ def test_internal_case_action_failed_validation_does_not_consume_idempotency_key
     retry_body = retry.get_json()
     assert retry_body["data"]["case"]["status"] == "acknowledged"
     assert retry_body["data"]["action"]["status"] == "executed"
-    assert retry_body["data"]["action"]["idempotency_key"] == "case-action-retry-after-validation"
+    assert retry_body["data"]["action"]["idempotency_key"] == "case-action:artemea:retry-after-validation"
 
 
 def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
@@ -3503,7 +3538,12 @@ def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypat
     )
     admin = client.post(
         f"/internal/brain/businesses/artemea/cases/{admin_case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "admin",
+            "X-Orvo-Operator": "admin:sol",
+            "X-Idempotency-Key": "case-action:artemea:admin",
+        },
         json={"action_key": "acknowledge_case"},
     )
 
