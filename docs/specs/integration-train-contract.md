@@ -27,26 +27,27 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ### 2026-06-05 status checkpoint
 
-The current repository `HEAD` is `06d7c2d` (`docs: refresh autonomous board report`). The latest code checkpoint called out by the board report is `8f69b94` (`codex: expose resolution latency priority endpoint`), with subsequent `HEAD` movement docs-only. This supersedes the 2026-06-03 train ordering and folds in `docs/architecture-reviews/2026-06-04-arb-cron-update.md` plus `docs/ops/latest-autonomous-board-report.md`.
+The current repository `HEAD` before this reconciliation is `289b29b` (`gtm: add first paid pilot lead packet`). The latest code checkpoint is `64c2b1e` (`merge: integrate internal auth audit hardening`), with `289b29b` adding a GTM execution asset only. This supersedes the earlier 2026-06-05 checkpoint that still treated the audit-scope and failed-auth security branches as pending.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
 - WorkItem remains a projection: `app/brain/work_items.py` still derives project keys, issue types, workflow/status definitions, and work item IDs without a separate WorkItem store.
-- Internal operator surfaces have expanded through thin route/service projections: `app/http/internal_brain/cases_activity.py` now includes `resolution-latency/by-priority-bracket` and `top-by-priority`; histogram/priority logic lives under `app/brain/operator_api/`, not the route body.
-- Wrong-token internal-route auth is guarded by `tests/invariants/test_internal_operator_route_auth.py`; business grants remain enforced through `app/brain/operator_auth.py` before route logic.
-- Connector failure health now classifies rate limits through `app/brain/connector_health.py` and records typed health state from `app/brain/execution_ledger.py`.
+- Trust/Security guard branches are now integrated: `app/brain/audit_scope.py`, `app/brain/operator_audit.py`, and `app/brain/storage.py` persist a redacted operator-audit `business_id` plus deterministic `business_scope_key`; audit lookup no longer depends on raw or redacted-display tenant IDs.
+- Internal auth hardening is now baseline: `app/http/internal_brain/common.py` audits missing/invalid bearer-token attempts without storing raw `Authorization` values, fails closed even if the audit sink is unavailable, and bounds/secret-redacts `X-Request-ID` echoes.
+- Internal operator analytics continue to use thin route wrappers: `app/http/internal_brain/cases_resolution_latency.py` delegates resolution-latency histograms by case type, entity kind, and priority bracket into `app.brain.operator_api` service helpers.
+- Connector failure health still classifies rate limits through `app/brain/connector_health.py` and records typed health state from `app/brain/execution_ledger.py`.
 - Workflow planning/approval/execution queues remain projection-only: `app/brain/workflow_automation.py`, `workflow_approval_queue.py`, and `workflow_execution_queue.py` continue reporting `side_effects_executed = 0` / execution disabled for queue views.
 - `channel_mix_shift` is still present in type/projection mappings but absent from `CASE_FAMILY_METRICS`; `DETECTABLE_OPERATIONAL_CASE_TYPES` and `OWNER_FACING_OPERATIONAL_CASE_TYPES` continue deriving from `CASE_FAMILY_METRICS`, so the family remains deferred/internal until Packet N promotes it.
+- GTM now has a first-10-paid-pilot lead-build packet at `docs/gtm/2026-06-05-first-10-paid-pilot-lead-build-packet.md`; it is a commercial execution asset and does not change runtime/case truth gates.
 
 Recommended order:
 
-1. **Small Trust/Security guard merges first**
-   - Integrate `codex/operator-audit-business-scope-redaction-20260604` before broader product surfaces.
-   - Then take the remaining narrow trust/admin/security follow-up if it is still a one-slice diff.
-   - Gate: audit lookup still works after redaction, secret-shaped tenant IDs cannot leak/collide, wrong-token and business-scope denial tests stay green, and public response envelopes remain unchanged.
+1. **Manual operator mutation idempotency before more case-action expansion**
+   - Rework the manual case-action idempotency branch so the idempotency reservation/unique insert happens before `transition_case`, `add_comment`, or `assign_case`, or move mutation plus ledger insert into one store transaction.
+   - Gate: duplicate or racing requests cannot apply the same side effect twice; denied/failed attempts remain redacted and audited; existing case action envelopes stay backward-compatible.
 
-2. **Work-management core, from the verified rebased branch/worktree**
-   - Integrate the green local `codex/work-management` slice only after resolving the stale remote/rebase ownership issue described in the board report.
+2. **Work-management projection hardening, only if still narrow**
+   - Integrate `codex/work-management` only as a projection/lifecycle regression slice after its remote/local ownership issue is resolved.
    - Gate: no duplicate WorkItem persistence table, no alternate status-category vocabulary, no manual operator reopen shortcut, and tests prove system recurrence, mutation timestamps, first acknowledgment preservation, owner-facing evidence gates, and metric-backed issue-type metadata without bypassing `OperationalCase`.
 
 3. **Connector-platform hardening on the platform path**
@@ -70,8 +71,9 @@ Recommended order:
    - Reframe `codex/edge-developer-platform` as gateway policy/service-catalog metadata unless it lands durable idempotency, rate-limit, audit, and route-coverage enforcement.
    - Gate: docs and API payloads must not imply production gateway enforcement when code only checks idempotency-key presence or declares rate-limit buckets.
 
-8. **Pilot-readiness runbook refresh after the core merge train**
-   - Update the Tiendanube/WhatsApp-first pilot checklist after trust/security, work-management, connector health, and operator-surface deltas are integrated.
+8. **Pilot lead execution and pilot-readiness docs after core gates**
+   - Use the new first-10 lead-build packet for outbound learning, but keep the sellable promise constrained to Tiendanube-backed cases/evidence already covered by the PRD and pilot checklist.
+   - Update the Tiendanube/WhatsApp-first pilot checklist only after manual idempotency, WorkItem projection hardening, connector-platform deltas, and operator-surface deltas are integrated.
    - Gate: docs link validation, secret scan, and one dry-run/operator-report artifact; keep WhatsApp as projection/delivery, not source of truth.
 
 Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, evidence, and WorkItem projections and until workflow execution and gateway enforcement are explicitly implemented rather than manifest/projection-only.

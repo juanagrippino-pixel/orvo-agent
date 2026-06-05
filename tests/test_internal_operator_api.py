@@ -179,6 +179,34 @@ def test_internal_error_envelope_and_audit_redact_secret_shaped_request_id(monke
     assert "raw_denied_request_id_secret" not in json.dumps(event, sort_keys=True)
 
 
+def test_internal_error_envelope_and_audit_reject_oversized_request_id(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+    oversized_request_id = "req-" + "a" * 256
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "viewer",
+            "X-Orvo-Businesses": "other",
+            "X-Request-ID": oversized_request_id,
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert oversized_request_id not in raw_body
+    body = response.get_json()
+    assert body["request_id"] == "[REDACTED]"
+    assert body["redaction_applied"] is True
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["request_id"] == "[REDACTED]"
+    assert oversized_request_id not in json.dumps(event, sort_keys=True)
+
+
 def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     warning = _case_detection(
@@ -2574,6 +2602,116 @@ def test_internal_handling_latency_by_case_type_returns_scoped_envelope(monkeypa
     assert data["slowest_handled"]["case_id"] == sales.case_id
 
 
+def test_internal_handling_latency_by_entity_kind_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    product = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-product-handled-entity-kind",
+            entity_scope={"kind": "product", "id": "sku-1", "label": "SKU 1"},
+            dedupe_suffix="stockout_risk/product/sku-1/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        product.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        product.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    channel = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-channel-handled-entity-kind",
+            entity_scope={"kind": "channel", "id": "online", "label": "Online"},
+            dedupe_suffix="sales_drop/channel/online/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        channel.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        channel.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=10),
+    )
+    other_tenant = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-handled-entity-kind",
+            entity_scope={"kind": "conversation", "id": "wa-1", "label": "Chat"},
+            dedupe_suffix="stockout_risk/conversation/wa-1/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other_tenant.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        other_tenant.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/handling-latency/by-entity-kind",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["handled_total"] == 2
+    assert data["by_handling_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_handling_bucket_entity_kind"] == {
+        "under_1h": {},
+        "under_6h": {"product": 1},
+        "under_24h": {"channel": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }
+    assert data["fastest_handled"]["case_id"] == product.case_id
+    assert data["slowest_handled"]["case_id"] == channel.case_id
+    assert "conversation" not in str(data)
+
+
 def test_internal_handling_latency_by_source_connector_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
@@ -2905,8 +3043,21 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
     assert "raw_bad_actor_secret" not in wrong.get_data(as_text=True)
 
     events = _audit_events(db_path)
-    assert len(events) == 1
-    event = events[0]
+    assert len(events) == 2
+    missing_event = events[0]
+    assert missing_event["business_id"] == "artemea"
+    assert missing_event["actor_ref"] == "anonymous"
+    assert missing_event["event_type"] == "operator.authentication.denied"
+    assert missing_event["target_type"] == "internal_operator_api"
+    assert missing_event["target_id"] == "artemea"
+    assert missing_event["data"] == {
+        "status": "denied",
+        "reason": "missing_internal_token",
+        "method": "GET",
+        "header_present": False,
+        "scheme": None,
+    }
+    event = events[1]
     assert event["business_id"] == "artemea"
     assert event["actor_ref"] == "[REDACTED]"
     assert event["event_type"] == "operator.authentication.denied"
@@ -2920,9 +3071,35 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
         "header_present": True,
         "scheme": "Bearer",
     }
-    serialized = json.dumps(event, sort_keys=True)
+    serialized = json.dumps(events, sort_keys=True)
     assert "raw_bad_bearer_secret" not in serialized
     assert "raw_bad_actor_secret" not in serialized
+
+
+def test_internal_endpoints_audit_missing_bearer_token_attempt(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={"X-Orvo-Operator": "operator:missing-token", "X-Request-ID": "req-missing-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "unauthorized"
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authentication.denied"
+    assert event["actor_ref"] == "operator:missing-token"
+    assert event["request_id"] == "req-missing-token"
+    assert event["data"] == {
+        "status": "denied",
+        "reason": "missing_internal_token",
+        "method": "GET",
+        "header_present": False,
+        "scheme": None,
+    }
 
 
 def _audit_events(db_path) -> list[dict]:
