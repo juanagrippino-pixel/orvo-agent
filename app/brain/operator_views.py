@@ -91,6 +91,7 @@ _FIELD_SPECS: dict[str, FieldSpec] = {
     "case_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
     "severity": FieldSpec("enum", _ALLOWED_SEVERITY),
     "priority_score": FieldSpec("int", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
+    "evidence_count": FieldSpec("int", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
     "entity.kind": FieldSpec("string"),
     "entity.id": FieldSpec("string"),
     "entity.label": FieldSpec("string", None, frozenset({"=", "!="})),
@@ -586,6 +587,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_work_item_id(case)
     if field == "status_category":
         return case_status_category(case)
+    if field == "evidence_count":
+        return len(case.evidence_refs)
     if field == "assigned":
         return case.assignee_ref is not None
     if field == "actionable":
