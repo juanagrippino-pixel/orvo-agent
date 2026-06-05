@@ -13,6 +13,14 @@ from app.brain.storage import SQLiteOperationalCaseStore, init_schema
 
 
 AUTH = {"Authorization": "Bearer test-internal-token"}
+AUTH_WITH_SCOPE = {
+    "Authorization": "Bearer test-internal-token",
+    "X-Orvo-Businesses": "artemea",
+}
+AUTH_WRONG_SCOPE = {
+    "Authorization": "Bearer test-internal-token",
+    "X-Orvo-Businesses": "other-biz",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -33,14 +41,15 @@ def _detection(
     severity: str = "critical",
     priority: int = 100,
     run_id: str = "run-1",
+    source: str = "tiendanube",
 ) -> OperationalCaseDetection:
-    evidence_ref = f"evidence://{business_id}/{run_id}/{case_type}"
+    evidence_ref = f"evidence://{source}/{business_id}/{run_id}/{case_type}"
     return OperationalCaseDetection(
         business_id=business_id,
-        case_type=case_type,
+        case_type=case_type,  # type: ignore[arg-type]
         dedupe_key=f"{business_id}/{dedupe_suffix}",
         title="Case under test",
-        severity=severity,
+        severity=severity,  # type: ignore[arg-type]
         priority_score=priority,
         entity_scope={"kind": "business", "id": "monitored"},
         evidence_refs=[evidence_ref],
@@ -55,12 +64,23 @@ def _seed_open_case(
     business_id: str = "artemea",
     opened_hours_ago: int = 2,
     run_id: str = "run-1",
+    source: str = "tiendanube",
+    severity: str = "critical",
+    priority: int = 100,
+    dedupe_suffix: str = "stockout_risk/business/monitored/commerce.inventory/daily",
 ) -> str:
     now = datetime.now(timezone.utc)
     conn = sqlite3.connect(str(db_path))
     store = SQLiteOperationalCaseStore(conn)
     case = store.upsert_detection(
-        _detection(business_id=business_id, run_id=run_id),
+        _detection(
+            business_id=business_id,
+            run_id=run_id,
+            source=source,
+            severity=severity,
+            priority=priority,
+            dedupe_suffix=dedupe_suffix,
+        ),
         detected_at=now - timedelta(hours=opened_hours_ago),
     )
     conn.close()
@@ -149,3 +169,70 @@ def test_case_stagnation_returns_503_when_auth_not_configured(_isolate_db, monke
     assert response.status_code == 503
     body = response.get_json()
     assert body["error"]["code"] == "internal_auth_not_configured"
+
+
+def test_case_stagnation_by_source_connector_returns_scoped_split(_isolate_db):
+    from server import app
+
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=3,
+        run_id="run-tn-source",
+        source="tiendanube",
+        dedupe_suffix="stockout_risk/business/tn-source/commerce.inventory/daily",
+    )
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=20,
+        run_id="run-csv-source",
+        source="csv",
+        severity="warning",
+        priority=70,
+        dedupe_suffix="stockout_risk/business/csv-source/commerce.inventory/daily",
+    )
+    _seed_open_case(
+        _isolate_db,
+        business_id="other-biz",
+        opened_hours_ago=10,
+        run_id="run-meta-other-source",
+        source="meta_ads",
+        dedupe_suffix="stockout_risk/business/meta-other-source/commerce.inventory/daily",
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-source-connector",
+        headers=AUTH_WITH_SCOPE,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 1
+    assert data["by_idle_bucket"]["under_24h"] == 1
+    assert data["by_idle_bucket_source_connector"]["under_6h"] == {"tiendanube": 1}
+    assert data["by_idle_bucket_source_connector"]["under_24h"] == {"csv": 1}
+    assert data["most_stalled_actionable"] is not None
+    assert "meta_ads" not in str(body)
+
+
+def test_case_stagnation_by_source_connector_enforces_explicit_business_scope(_isolate_db):
+    from server import app
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-source-connector",
+        headers=AUTH_WRONG_SCOPE,
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
