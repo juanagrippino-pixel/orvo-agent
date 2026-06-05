@@ -298,6 +298,7 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
         "assignee_ref": case.assignee_ref,
+        "assigned_at": _iso_utc(case.assigned_at) if case.assigned_at is not None else None,
         "comment_count": case_comment_count(case),
         "last_commented_at": case_last_commented_at(case),
         "acknowledged_at": _iso_utc(case.acknowledged_at) if case.acknowledged_at is not None else None,
