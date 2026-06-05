@@ -50,9 +50,30 @@ def classify_connector_failure_health_state(error_summary: str) -> ConnectorHeal
     normalized = error_summary.lower()
     if any(marker in normalized for marker in ("401", "403", "unauthorized", "forbidden")):
         return "unauthorized"
-    if any(marker in normalized for marker in ("expired token", "invalid token", "token expired")):
+    if any(
+        marker in normalized
+        for marker in (
+            "expired token",
+            "invalid token",
+            "token expired",
+            "credentials revoked",
+            "invalid credentials",
+            "credential revoked",
+        )
+    ):
         return "unauthorized"
-    if any(marker in normalized for marker in ("429", "rate limit", "rate_limited", "throttle")):
+    if any(
+        marker in normalized
+        for marker in (
+            "429",
+            "rate limit",
+            "rate_limited",
+            "throttle",
+            "too many requests",
+            "retry after",
+            "quota exceeded",
+        )
+    ):
         return "rate_limited"
     if any(marker in normalized for marker in ("stale", "too old", "outdated")):
         return "stale"
