@@ -111,6 +111,25 @@ def test_connector_executor_metadata_exposes_serializable_factory_bindings_witho
     assert "tn_test_token" not in repr(metadata)
 
 
+def test_secret_requirement_metadata_exposes_provisioning_contract_without_values():
+    from app.brain.connector_registry import get_connector_spec
+
+    metadata = get_connector_spec("tiendanube").secret_requirements_metadata()
+
+    assert metadata == [
+        {
+            "name": "access_token",
+            "provider": "tiendanube_oauth",
+            "description": "Tiendanube API access token reference.",
+            "scopes": ["orders.read", "products.read"],
+            "legacy_config_field": "access_token",
+        }
+    ]
+    serialized = repr(metadata)
+    assert "tn_test_token" not in serialized
+    assert "secret://" not in serialized
+
+
 def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import get_connector_spec
