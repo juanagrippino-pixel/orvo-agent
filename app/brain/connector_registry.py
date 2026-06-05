@@ -93,6 +93,22 @@ class SecretRequirement:
     scopes: tuple[str, ...] = ()
     legacy_config_field: str | None = None
 
+    def metadata(self) -> dict[str, Any]:
+        """Return a serializable provisioning contract without secret values.
+
+        This intentionally describes only the secret reference shape required by
+        the control plane. It never includes configured secret refs, secret URI
+        handles, or raw legacy adapter params.
+        """
+
+        return {
+            "name": self.name,
+            "provider": self.provider,
+            "description": self.description,
+            "scopes": list(self.scopes),
+            "legacy_config_field": self.legacy_config_field,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class ConnectorValidationIssue:
@@ -292,6 +308,16 @@ class ConnectorSpec:
 
         assert self.executor is not None  # set in __post_init__
         return self.executor.policy_metadata()
+
+    def secret_requirements_metadata(self) -> list[dict[str, Any]]:
+        """Return serializable secret provisioning requirements.
+
+        Requirements are registry metadata only; callers must not infer that any
+        tenant has provisioned a specific secret value or reference from this
+        contract.
+        """
+
+        return [secret.metadata() for secret in self.required_secret_refs]
 
     def load_report_factory(self):
         """Import the configured report-builder callable from executor metadata."""
@@ -967,7 +993,7 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         required_secret_refs=(
             _access_token_requirement(
                 provider="tiendanube_oauth",
-                description="Tiendanube API bearer token reference.",
+                description="Tiendanube API access token reference.",
                 scopes=("orders.read", "products.read"),
             ),
         ),
