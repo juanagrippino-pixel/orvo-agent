@@ -17,6 +17,7 @@ from app.brain.security.redaction import redact_secrets
 from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerRecord,
     WorkflowActionLedgerStore,
+    WorkflowApprovalRequest,
 )
 
 
@@ -24,11 +25,37 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _is_pending_execution(record: WorkflowActionLedgerRecord) -> bool:
+def _approval_requests_by_id(
+    requests: list[WorkflowApprovalRequest],
+) -> dict[str, WorkflowApprovalRequest]:
+    return {request.approval_request_id: request for request in requests}
+
+
+def _has_matching_approved_request(
+    record: WorkflowActionLedgerRecord,
+    request: WorkflowApprovalRequest | None,
+) -> bool:
+    return (
+        request is not None
+        and record.approval_request_id == request.approval_request_id
+        and record.ledger_id == request.ledger_id
+        and record.business_id == request.business_id
+        and record.case_id == request.case_id
+        and record.action_key == request.action_key
+        and request.status == "approved"
+        and request.decided_at is not None
+    )
+
+
+def _is_pending_execution(
+    record: WorkflowActionLedgerRecord,
+    request: WorkflowApprovalRequest | None,
+) -> bool:
     return (
         is_workflow_approval_required_action(record.action_key)
         and record.approval_state == "approved"
         and record.execution_state == "pending_execution"
+        and _has_matching_approved_request(record, request)
     )
 
 
@@ -69,17 +96,18 @@ def list_workflow_execution_queue(
     """Project approved actions waiting for a future executor.
 
     Only records scoped to ``business_id`` with a catalog-defined
-    approval-required action key, ``approval_state=approved``, and
-    ``execution_state=pending_execution`` are returned. The projection is ordered
-    deterministically by approval/update time and ledger id, redacted at the
-    service boundary, and explicitly declares that execution is disabled with
-    zero side effects.
+    approval-required action key, ``approval_state=approved``,
+    ``execution_state=pending_execution``, and a matching approved approval
+    request are returned. The projection is ordered deterministically by
+    approval/update time and ledger id, redacted at the service boundary, and
+    explicitly declares that execution is disabled with zero side effects.
     """
 
+    approval_requests = _approval_requests_by_id(ledger.list_approval_requests(business_id=business_id))
     records = [
         record
         for record in ledger.list_actions(business_id=business_id)
-        if _is_pending_execution(record)
+        if _is_pending_execution(record, approval_requests.get(record.approval_request_id or ""))
     ]
     records.sort(key=lambda record: (record.updated_at, record.ledger_id))
     selected = records if limit is None else records[: max(limit, 0)]
