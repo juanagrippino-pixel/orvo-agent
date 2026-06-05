@@ -1450,6 +1450,54 @@ def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envel
     assert data["most_stalled_actionable"]["case_type"] == "stockout_risk"
 
 
+def test_internal_case_queue_stagnation_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(run_id="run-artemea-critical", severity="critical"),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas en baja",
+            run_id="run-artemea-warning",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical",
+            severity="critical",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 2
+    assert data["by_idle_bucket_severity"]["under_6h"] == {"critical": 1, "warning": 1}
+    assert data["most_stalled_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
+
+
 def test_internal_workflow_throughput_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
