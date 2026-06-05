@@ -689,6 +689,37 @@ def test_internal_case_action_catalog_returns_canonical_action_contract(monkeypa
     assert "raw_" not in response.get_data(as_text=True)
 
 
+def test_internal_success_envelope_redacts_secret_shaped_business_id(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea%20access_token=raw_business_secret/operator-session",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_business_secret" not in raw_body
+    body = response.get_json()
+    assert body["business_id"] == "[REDACTED]"
+    assert body["redaction_applied"] is True
+
+
+def test_internal_error_envelope_redacts_secret_shaped_business_id_before_auth(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea%20access_token=raw_business_secret/operator-session",
+    )
+
+    assert response.status_code == 401
+    raw_body = response.get_data(as_text=True)
+    assert "raw_business_secret" not in raw_body
+    body = response.get_json()
+    assert body["business_id"] == "[REDACTED]"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_case_action_catalog_marks_viewer_actions_not_executable(monkeypatch, tmp_path):
     client, _ = _client(monkeypatch, tmp_path)
 
