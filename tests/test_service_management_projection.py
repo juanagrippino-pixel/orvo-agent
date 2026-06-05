@@ -630,6 +630,61 @@ def test_list_service_management_cases_filters_by_escalation_reason_before_limit
     }
 
 
+def test_list_service_management_cases_filters_by_needs_escalation_before_limit():
+    store = InMemoryOperationalCaseStore()
+    breached = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="filter-needs-escalation/business/monitored/inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-filter-needs-escalation",
+        ),
+        detected_at=NOW - timedelta(hours=5),
+    )
+    calm = store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="filter-no-escalation/channel/all/revenue/daily",
+            severity="warning",
+            priority=70,
+            run_id="run-filter-no-escalation",
+        ),
+        detected_at=NOW - timedelta(minutes=30),
+    )
+
+    escalated = list_service_management_cases(
+        store,
+        business_id="artemea",
+        now=NOW,
+        limit=1,
+        needs_escalation=True,
+    )
+    not_escalated = list_service_management_cases(
+        store,
+        business_id="artemea",
+        now=NOW,
+        limit=1,
+        needs_escalation=False,
+    )
+
+    assert escalated["filters"] == {"needs_escalation": True}
+    assert escalated["total"] == 1
+    assert escalated["unfiltered_total"] == 2
+    assert escalated["count"] == 1
+    assert [item["case_id"] for item in escalated["service_cases"]] == [breached.case_id]
+    assert not_escalated["filters"] == {"needs_escalation": False}
+    assert not_escalated["total"] == 1
+    assert not_escalated["unfiltered_total"] == 2
+    assert not_escalated["count"] == 1
+    assert [item["case_id"] for item in not_escalated["service_cases"]] == [calm.case_id]
+    assert escalated["by_escalation_reason"] == {
+        "critical_case_unacknowledged": 1,
+        "first_response_sla_breached": 1,
+        "resolution_sla_breached": 1,
+    }
+
+
 def test_list_service_management_cases_rejects_unknown_sla_status_filter():
     store = InMemoryOperationalCaseStore()
 

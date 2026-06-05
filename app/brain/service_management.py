@@ -366,6 +366,7 @@ def list_service_management_cases(
     service_record_type: str | None = None,
     owner_status: str | None = None,
     escalation_reason: str | None = None,
+    needs_escalation: bool | None = None,
 ) -> dict[str, Any]:
     """List service-management projections for cases in one business scope."""
 
@@ -391,6 +392,8 @@ def list_service_management_cases(
             for row in filtered_rows
             if any(reason["code"] == parsed_escalation_reason for reason in row["escalation_reasons"])
         ]
+    if needs_escalation is not None:
+        filtered_rows = [row for row in filtered_rows if row["needs_escalation"] is needs_escalation]
     rows = filtered_rows[:limit] if limit is not None else filtered_rows
     by_record_type: dict[str, int] = {}
     by_owner_status: dict[str, int] = {}
@@ -415,6 +418,8 @@ def list_service_management_cases(
         filters["owner_status"] = parsed_owner_status
     if parsed_escalation_reason is not None:
         filters["escalation_reason"] = parsed_escalation_reason
+    if needs_escalation is not None:
+        filters["needs_escalation"] = needs_escalation
     return redact_secrets(
         {
             "business_id": business_id,

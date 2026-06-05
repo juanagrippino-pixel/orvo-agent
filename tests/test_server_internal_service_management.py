@@ -244,6 +244,53 @@ def test_internal_service_management_cases_endpoint_filters_by_escalation_reason
     }
 
 
+def test_internal_service_management_cases_endpoint_filters_by_needs_escalation(_isolate_db):
+    from server import app
+
+    with closing(sqlite3.connect(str(_isolate_db))) as conn:
+        store = SQLiteOperationalCaseStore(conn)
+        escalated = store.upsert_detection(
+            _detection(case_type="stockout_risk", run_id="run-needs-escalation"),
+            detected_at=_utc(7),
+        )
+        calm = store.upsert_detection(
+            _detection(case_type="sales_drop", run_id="run-no-escalation"),
+            detected_at=_utc(11),
+        )
+        store.transition_case(
+            calm.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator@example.com",
+            transitioned_at=_utc(11, 15),
+        )
+        store.transition_case(
+            calm.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="operator@example.com",
+            reason="Owner confirmed the sales review was handled.",
+            transitioned_at=_utc(11, 30),
+        )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"needs_escalation": "true"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    data = body["data"]
+    assert data["filters"] == {"needs_escalation": True}
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["unfiltered_total"] == 2
+    assert [row["case_id"] for row in data["service_cases"]] == [escalated.case_id]
+    assert data["service_cases"][0]["needs_escalation"] is True
+
+
 def test_internal_service_management_cases_endpoint_rejects_invalid_sla_status(_isolate_db):
     from server import app
 
@@ -306,3 +353,19 @@ def test_internal_service_management_cases_endpoint_rejects_invalid_escalation_r
     body = response.get_json()
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_escalation_reason"
+
+
+def test_internal_service_management_cases_endpoint_rejects_invalid_needs_escalation(_isolate_db):
+    from server import app
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"needs_escalation": "sometimes"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_needs_escalation"

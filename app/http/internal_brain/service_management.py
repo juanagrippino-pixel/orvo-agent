@@ -60,6 +60,21 @@ def _parse_escalation_reason(value: str | None) -> str | None:
     return str(value)
 
 
+def _parse_needs_escalation(value: str | None) -> bool | None:
+    if value in (None, ""):
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    raise OperatorAPIError(
+        "invalid_needs_escalation",
+        f"unsupported needs_escalation: {value}",
+        status_code=400,
+    )
+
+
 def register_service_management_routes(app):
     @app.get("/internal/brain/businesses/<business_id>/service-management/cases")
     def internal_brain_service_management_cases(business_id: str):
@@ -76,6 +91,7 @@ def register_service_management_routes(app):
                     service_record_type=_parse_service_record_type(request.args.get("service_record_type")),
                     owner_status=_parse_owner_status(request.args.get("owner_status")),
                     escalation_reason=_parse_escalation_reason(request.args.get("escalation_reason")),
+                    needs_escalation=_parse_needs_escalation(request.args.get("needs_escalation")),
                 ),
             ),
         )
