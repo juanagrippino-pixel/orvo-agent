@@ -509,8 +509,11 @@ def test_add_comment_requires_non_empty_comment_without_mutation(conn, bad_comme
 
 
 @pytest.mark.parametrize("terminal_status", ["resolved", "dismissed"])
+@pytest.mark.parametrize("actor_type", ["operator", "owner", "worker"])
 @pytest.mark.parametrize("bad_reason", [None, "", "   "])
-def test_operator_terminal_transition_requires_non_empty_reason_without_mutation(terminal_status, bad_reason):
+def test_non_system_terminal_transition_requires_non_empty_reason_without_mutation(
+    terminal_status, actor_type, bad_reason
+):
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
     if terminal_status == "resolved":
@@ -530,7 +533,7 @@ def test_operator_terminal_transition_requires_non_empty_reason_without_mutation
         store.transition_case(
             opened.case_id,
             status=terminal_status,
-            actor_type="operator",
+            actor_type=actor_type,
             actor_ref="juan",
             reason=bad_reason,
             transitioned_at=utc_dt(10),
@@ -538,6 +541,34 @@ def test_operator_terminal_transition_requires_non_empty_reason_without_mutation
 
     after = store.get_case(opened.case_id)
     assert after == before
+
+
+def test_owner_and_worker_actor_types_are_canonical_timeline_actors(conn):
+    """OperationalCase timeline actors should match the WorkItem contract, not only operators."""
+
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run"), detected_at=utc_dt(8))
+        owner_commented = store.add_comment(
+            opened.case_id,
+            actor_type="owner",
+            actor_ref="owner:artemea",
+            comment="Owner confirmed this is actionable",
+            commented_at=utc_dt(9),
+        )
+        worker_assigned = store.assign_case(
+            opened.case_id,
+            actor_type="worker",
+            actor_ref="worker:auto-triage",
+            assignee_ref="ops:stock-team",
+            assigned_at=utc_dt(10),
+        )
+
+        assert owner_commented.timeline[-1].actor_type == "owner", f"{label}: owner comments must persist"
+        assert worker_assigned.timeline[-1].actor_type == "worker", f"{label}: worker assignment must persist"
+        assert [event.actor_type for event in worker_assigned.timeline[-2:]] == ["owner", "worker"]
 
 
 @pytest.mark.parametrize("mutation", ["detection", "transition", "comment", "assign"])

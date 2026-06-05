@@ -56,7 +56,7 @@ TimelineEventType = Literal[
     "evidence_attached",
     "operator_comment",
 ]
-ActorType = Literal["system", "operator"]
+ActorType = Literal["system", "operator", "owner", "worker"]
 
 _CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]] = {
     "open": {"acknowledged", "in_progress", "dismissed"},
@@ -719,8 +719,8 @@ class _OperationalCaseMutations:
         if status not in _CASE_STATUS_TRANSITIONS[record.status]:
             raise OperationalCaseStatusError(f"case {case_id} cannot transition from {record.status} to {status}")
         normalized_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
-        if actor_type == "operator" and status in TERMINAL_OPERATIONAL_CASE_STATUSES and normalized_reason is None:
-            raise OperationalCaseStatusError(f"operator transition to {status} requires a non-empty reason")
+        if actor_type != "system" and status in TERMINAL_OPERATIONAL_CASE_STATUSES and normalized_reason is None:
+            raise OperationalCaseStatusError(f"{actor_type} transition to {status} requires a non-empty reason")
         transitioned_at = _as_utc(transitioned_at) if transitioned_at is not None else _now_utc()
         _assert_mutation_timestamp_is_current(record, transitioned_at)
         update: dict[str, Any] = {
