@@ -320,6 +320,8 @@ def summarize_builtin_case_view(
                 "priority_bracket_counts": _sorted_counts(
                     _classify_priority_bracket(case.priority_score) for case in matching
                 ),
+                "evidence_count_total": sum(len(case.evidence_refs) for case in matching),
+                "evidence_count_distribution": _sorted_counts(len(case.evidence_refs) for case in matching),
                 "source_connector_counts": _sorted_counts(
                     source for case in matching for source in _case_source_connectors(case)
                 ),
