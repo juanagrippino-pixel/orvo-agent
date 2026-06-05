@@ -117,6 +117,35 @@ def test_list_case_timeline_filters_by_actor_type_and_excludes_system_events():
     assert all(event["actor_type"] == "operator" for event in result["events"])
 
 
+def test_list_case_timeline_filters_owner_and_worker_actor_types():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(_detection(run_id="run-1"), detected_at=_utc(8))
+    store.add_comment(
+        opened.case_id,
+        actor_type="owner",
+        actor_ref="owner:artemea",
+        comment="Owner reviewed the case",
+        commented_at=_utc(9),
+    )
+    store.assign_case(
+        opened.case_id,
+        actor_type="worker",
+        actor_ref="worker:auto-triage",
+        assignee_ref="ops:stock-team",
+        assigned_at=_utc(10),
+    )
+
+    owner_result = list_case_timeline(store, business_id="artemea", case_id=opened.case_id, actor_type="owner")
+    worker_result = list_case_timeline(store, business_id="artemea", case_id=opened.case_id, actor_type="worker")
+
+    assert owner_result["count"] == 1
+    assert owner_result["events"][0]["actor_type"] == "owner"
+    assert owner_result["events"][0]["event_type"] == "operator_comment"
+    assert worker_result["count"] == 1
+    assert worker_result["events"][0]["actor_type"] == "worker"
+    assert worker_result["events"][0]["event_type"] == "case_assigned"
+
+
 def test_list_case_timeline_limits_to_most_recent_events_in_chronological_order():
     store, case_id = _seed_full_lifecycle()
 
