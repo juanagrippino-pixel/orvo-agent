@@ -18,13 +18,21 @@ from typing import Any, Literal
 from app.brain.action_catalog import ActionDefinition as WorkflowActionDefinition
 from app.brain.action_catalog import workflow_action_registry
 from app.brain.operational_cases import OperationalCase
-from app.brain.operator_case_projections import is_case_degraded, source_connectors
+from app.brain.operator_case_projections import entity_kind, is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.workflow_action_ledger import WorkflowActionLedgerStore
 
 WorkflowTrigger = Literal["case_opened", "case_updated", "manual"]
 WORKFLOW_TRIGGER_VALUES = {"case_opened", "case_updated", "manual"}
-WorkflowConditionField = Literal["status", "case_type", "severity", "min_priority_score", "degraded", "source_connector"]
+WorkflowConditionField = Literal[
+    "status",
+    "case_type",
+    "severity",
+    "min_priority_score",
+    "degraded",
+    "source_connector",
+    "entity_kind",
+]
 WorkflowActionMode = Literal["manual", "suggestion", "approval_required"]
 WorkflowSideEffect = Literal["none", "case_transition", "case_comment", "operator_request", "external"]
 
@@ -126,6 +134,8 @@ def _condition_actual(case: OperationalCase, field_name: str) -> Any:
         return is_case_degraded(case)
     if field_name == "source_connector":
         return source_connectors(case)
+    if field_name == "entity_kind":
+        return entity_kind(case)
     raise WorkflowAutomationError("unsupported_workflow_condition", f"unsupported workflow condition field: {field_name}")
 
 
@@ -147,6 +157,11 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
         if not isinstance(actual, list):
             return False
         return condition.value in actual
+    if condition.field == "entity_kind" and not _is_non_empty_string(condition.value):
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            "entity_kind condition value must be a non-empty string",
+        )
     return actual == condition.value
 
 
