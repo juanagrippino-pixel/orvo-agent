@@ -24,7 +24,19 @@ _SECRET_KEY_PARTS = (
     "secret",
     "token",
 )
-_SAFE_SECRET_CONTRACT_KEYS = {"secret_param_names", "legacy_secret_param_names"}
+_SAFE_SECRET_CONTRACT_KEYS = {
+    "secret_param_names",
+    "legacy_secret_param_names",
+    "required_secret_refs",
+    "secret_requirements",
+}
+_SAFE_SECRET_CONTRACT_VALUE_KEYS = {
+    "name",
+    "provider",
+    "description",
+    "scopes",
+    "legacy_config_field",
+}
 _SAFE_SECRET_REF_KEYS = {"secret_refs"}
 _SAFE_OPERATIONAL_SECRET_NAMED_KEYS = {"legacy_token_scoped"}
 
@@ -189,6 +201,29 @@ def _redact_secret_refs(value: Any) -> Any:
     return "[REDACTED]"
 
 
+def _redact_secret_contract_metadata(value: Any) -> Any:
+    """Preserve provisioning-contract metadata while dropping accidental values."""
+
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            key = str(raw_key)
+            normalized_key = key.lower().replace("-", "_")
+            redacted[key] = (
+                _redact_secret_contract_metadata(raw_value)
+                if normalized_key in _SAFE_SECRET_CONTRACT_VALUE_KEYS
+                else "[REDACTED]"
+            )
+        return redacted
+    if isinstance(value, list):
+        return [_redact_secret_contract_metadata(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_secret_contract_metadata(item) for item in value)
+    if isinstance(value, str):
+        return redact_uri(value)
+    return value
+
+
 def redact_secrets(value: Any) -> Any:
     """Recursively redact secrets while preserving safe operational identifiers."""
 
@@ -199,10 +234,9 @@ def redact_secrets(value: Any) -> Any:
             normalized_key = key.lower().replace("-", "_")
             if normalized_key in _SAFE_SECRET_REF_KEYS:
                 redacted[key] = _redact_secret_refs(raw_value)
-            elif (
-                normalized_key in _SAFE_SECRET_CONTRACT_KEYS
-                or normalized_key in _SAFE_OPERATIONAL_SECRET_NAMED_KEYS
-            ):
+            elif normalized_key in _SAFE_SECRET_CONTRACT_KEYS:
+                redacted[key] = _redact_secret_contract_metadata(raw_value)
+            elif normalized_key in _SAFE_OPERATIONAL_SECRET_NAMED_KEYS:
                 redacted[key] = redact_secrets(raw_value)
             else:
                 redacted[key] = "[REDACTED]" if is_secret_key(key) else redact_secrets(raw_value)
