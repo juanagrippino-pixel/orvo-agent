@@ -73,6 +73,7 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["priority_score"] == 87
     assert projection["priority_bracket"] == "high"
     assert projection["assignee_ref"] is None
+    assert projection["assigned_at"] is None
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
     assert projection["comment_count"] == 0
@@ -159,6 +160,27 @@ def test_case_work_item_projection_exposes_canonical_priority_brackets(tmp_path)
     assert case_work_item_projection(low)["priority_bracket"] == "low"
     assert case_work_item_projection(medium)["priority_bracket"] == "medium"
     assert case_work_item_projection(high)["priority_bracket"] == "high"
+
+
+def test_case_work_item_projection_exposes_assignment_timestamp(tmp_path):
+    db_path = tmp_path / "work-item-assignment-clock.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-assignment"))
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    assigned = store.assign_case(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        assignee_ref="operator:lucia",
+        assigned_at=datetime(2026, 6, 4, 15, 30, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    projection = case_work_item_projection(assigned)
+
+    assert projection["assignee_ref"] == "operator:lucia"
+    assert projection["assigned_at"] == "2026-06-04T15:30:00Z"
 
 
 def test_case_work_item_projection_summarizes_comments_without_copying_bodies(tmp_path):
