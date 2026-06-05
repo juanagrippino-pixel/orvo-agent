@@ -223,6 +223,7 @@ def test_internal_owner_case_brief_preview_is_read_only_scoped_and_redacted(monk
             severity="warning",
             title="Ventas bajaron access_token=raw_owner_secret",
             run_id="run-artemea-warn",
+            freshness_state="stale",
         ),
     )
     critical_case = _seed_case(db_path, _case_detection(run_id="run-artemea-critical"))
@@ -281,6 +282,11 @@ def test_internal_owner_case_brief_preview_is_read_only_scoped_and_redacted(monk
     assert data["displayed_case_count"] == 1
     assert data["truncated"] is True
     assert data["case_ids"] == [critical_case.case_id]
+    assert data["evidence_freshness"] == {
+        "displayed": {"fresh": 1},
+        "total_actionable": {"fresh": 1, "stale": 1},
+        "has_degraded_or_stale_evidence": True,
+    }
     assert warning_case.case_id not in data["case_ids"]
     assert resolved_case.case_id not in data["case_ids"]
     assert "Hay 2 temas operativos abiertos" in data["text"]

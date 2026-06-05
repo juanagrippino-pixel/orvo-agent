@@ -30,6 +30,31 @@ def _owner_brief_cases(store: OperationalCaseStore, business_id: str) -> list[Op
     return order_owner_case_brief_cases(cases)
 
 
+def _freshness_counts(cases: list[OperationalCase]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for case in cases:
+        if not case.evidence_snapshots:
+            counts["missing"] = counts.get("missing", 0) + 1
+            continue
+        for snapshot in case.evidence_snapshots:
+            state = snapshot.freshness_state or "missing"
+            counts[state] = counts.get(state, 0) + 1
+    return counts
+
+
+def _owner_brief_evidence_freshness(
+    *,
+    visible: list[OperationalCase],
+    actionable: list[OperationalCase],
+) -> dict[str, Any]:
+    total = _freshness_counts(actionable)
+    return {
+        "displayed": _freshness_counts(visible),
+        "total_actionable": total,
+        "has_degraded_or_stale_evidence": any(state in {"degraded", "stale", "missing"} for state in total),
+    }
+
+
 def preview_owner_case_brief(
     store: OperationalCaseStore,
     *,
@@ -68,6 +93,7 @@ def preview_owner_case_brief(
         "displayed_case_count": len(visible),
         "truncated": len(actionable) > len(visible),
         "case_ids": [case.case_id for case in visible],
+        "evidence_freshness": _owner_brief_evidence_freshness(visible=visible, actionable=actionable),
         "text": text,
     }
     return redact_secrets(payload)
