@@ -286,6 +286,12 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
                 }
             ],
         },
+        "event_certification": {
+            "status": "passed",
+            "issue_count": 0,
+            "issues": [],
+            "events": ["connector.execution.succeeded", "connector.health.ok"],
+        },
     }
     assert "abc123" not in json.dumps(record.connector_outcomes[0].metadata)
     assert record.dispatch_outcomes[0].status == "sent"
@@ -380,6 +386,12 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
             "status": "active",
             "owner": "orvo-brain",
             "version": "phase-a",
+        },
+        "event_certification": {
+            "status": "passed",
+            "issue_count": 0,
+            "issues": [],
+            "events": ["connector.execution.failed", "connector.health.failed"],
         },
     }
     assert run.artifacts == []

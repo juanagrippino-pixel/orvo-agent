@@ -15,6 +15,7 @@ from app.brain.connector_health import classify_connector_failure_health_state
 from app.brain.connector_registry import (
     UnknownConnectorError,
     default_connector_registry,
+    validate_emitted_events_for_connector,
     validate_emitted_metric_objects_for_connector,
 )
 from app.brain.operational_cases import (
@@ -146,6 +147,40 @@ def _metric_certification_metadata(connector_type: str, metrics: Sequence[Any]) 
     }
 
 
+def _event_certification_metadata(connector_type: str, events: Sequence[str]) -> dict[str, Any]:
+    """Return deterministic connector event-family certification metadata.
+
+    Connector outcomes are run-ledger audit records, so every synthesized
+    connector outcome event is checked against the registry's declared event
+    families instead of relying on ad-hoc naming conventions. Unknown legacy
+    connector types are represented as a skipped certification record so failure
+    logging remains terminal and non-throwing.
+    """
+
+    try:
+        issues = validate_emitted_events_for_connector(connector_type, events)
+    except UnknownConnectorError:
+        return {
+            "status": "skipped_unknown_connector",
+            "issue_count": 0,
+            "issues": [],
+            "events": list(events),
+        }
+    return {
+        "status": "passed" if not issues else "warning",
+        "issue_count": len(issues),
+        "issues": [
+            {
+                "code": issue.code,
+                "event_type": issue.event_type,
+                "index": issue.index,
+            }
+            for issue in issues
+        ],
+        "events": list(events),
+    }
+
+
 def _owner_brief_cases(case_store: OperationalCaseStore, business_id: str) -> list[OperationalCase]:
     cases: list[OperationalCase] = []
     for status in ACTIONABLE_OPERATIONAL_CASE_STATUSES:
@@ -178,15 +213,20 @@ def _failed_connector_outcome(
     error_summary: str,
     failed_at: datetime,
 ) -> ConnectorRunOutcome:
+    health_state = classify_connector_failure_health_state(error_summary)
     metadata = {
         "failure_stage": "pre_dispatch",
         **_connector_contract_metadata(connector_type, connector_label=connector_label),
+        "event_certification": _event_certification_metadata(
+            connector_type,
+            ("connector.execution.failed", f"connector.health.{health_state}"),
+        ),
     }
     return ConnectorRunOutcome(
         connector_id=connector_id,
         connector_type=connector_type,
         status="failed",
-        health_state=classify_connector_failure_health_state(error_summary),
+        health_state=health_state,
         started_at=failed_at,
         finished_at=failed_at,
         error_summary=error_summary,
@@ -331,6 +371,10 @@ def record_pipeline_success(
         connector_metadata["metric_certification"] = _metric_certification_metadata(
             connector.connector_type,
             connector_metrics,
+        )
+        connector_metadata["event_certification"] = _event_certification_metadata(
+            connector.connector_type,
+            ("connector.execution.succeeded", "connector.health.ok"),
         )
         run_ledger.append_connector_outcome(
             run_id,
