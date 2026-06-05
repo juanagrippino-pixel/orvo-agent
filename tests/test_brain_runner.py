@@ -194,6 +194,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
             "required_params": ["spreadsheet_id", "range_name"],
             "secret_param_names": [],
             "legacy_secret_param_names": [],
+            "secret_requirements": [],
             "capabilities": ["daily_report", "sheet_import"],
             "emitted_metric_families": [
                 "commerce.orders",
@@ -249,6 +250,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
             "runtime.data_quality",
         ],
         "emitted_event_families": ["connector.execution", "connector.health"],
+        "required_secret_refs": [],
         "required_scopes": ["spreadsheets.readonly"],
         "health_policy": {
             "readiness_check": "metadata_only",
@@ -350,6 +352,7 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
             "runtime.data_quality",
         ],
         "emitted_event_families": ["connector.execution", "connector.health"],
+        "required_secret_refs": [],
         "required_scopes": ["spreadsheets.readonly"],
         "health_policy": {
             "readiness_check": "metadata_only",
