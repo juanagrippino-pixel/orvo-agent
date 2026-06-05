@@ -1053,7 +1053,7 @@ def test_internal_case_view_summary_returns_scoped_facets_without_cases(monkeypa
             run_id="run-ack-stale",
             freshness_state="stale",
             dedupe_suffix="stockout_risk/sku/ACK_STALE/inventory.on_hand/daily",
-            priority=80,
+            priority=70,
         ),
     )
     resolved = _seed_case(
@@ -1116,6 +1116,7 @@ def test_internal_case_view_summary_returns_scoped_facets_without_cases(monkeypa
         "status_category_counts": {"in_progress": 1, "to_do": 1},
         "severity_counts": {"critical": 2},
         "case_type_counts": {"stockout_risk": 2},
+        "priority_bracket_counts": {"high": 1, "medium": 1},
         "source_connector_counts": {"meta_ads": 1, "tiendanube": 1},
         "freshness_state_counts": {"fresh": 1, "stale": 1},
         "degraded_total": 1,

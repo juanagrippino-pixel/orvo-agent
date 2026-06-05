@@ -17,6 +17,7 @@ from app.brain.operational_cases import (
     OperationalCaseStore,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
+from app.brain.operator_api.common import _classify_priority_bracket
 from app.brain.operator_case_projections import evidence_freshness_states, is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
@@ -380,6 +381,9 @@ def summarize_builtin_case_view(
                 "status_category_counts": _sorted_counts(case_status_category(case) for case in matching),
                 "severity_counts": _sorted_counts(case.severity for case in matching),
                 "case_type_counts": _sorted_counts(case.case_type for case in matching),
+                "priority_bracket_counts": _sorted_counts(
+                    _classify_priority_bracket(case.priority_score) for case in matching
+                ),
                 "source_connector_counts": _sorted_counts(
                     source for case in matching for source in _case_source_connectors(case)
                 ),
