@@ -577,6 +577,59 @@ def test_list_service_management_cases_filters_by_owner_status_before_limit():
     assert result["by_owner_status"] == {"new": 1, "waiting_external": 1}
 
 
+def test_list_service_management_cases_filters_by_escalation_reason_before_limit():
+    store = InMemoryOperationalCaseStore()
+    breached = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="filter-escalation-breached/business/monitored/inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-filter-escalation-breached",
+        ),
+        detected_at=NOW - timedelta(hours=5),
+    )
+    waiting_external = store.upsert_detection(
+        _detection(
+            case_type="data_stale",
+            dedupe_suffix="filter-escalation-waiting/connector/tiendanube/freshness/daily",
+            severity="warning",
+            priority=80,
+            run_id="run-filter-escalation-waiting",
+            metadata={"waiting_on": "external"},
+        ),
+        detected_at=NOW - timedelta(hours=2),
+    )
+    store.transition_case(
+        waiting_external.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=1, minutes=30),
+    )
+
+    result = list_service_management_cases(
+        store,
+        business_id="artemea",
+        now=NOW,
+        limit=1,
+        escalation_reason="waiting_external",
+    )
+
+    assert result["filters"] == {"escalation_reason": "waiting_external"}
+    assert result["total"] == 1
+    assert result["unfiltered_total"] == 2
+    assert result["count"] == 1
+    assert [item["case_id"] for item in result["service_cases"]] == [waiting_external.case_id]
+    assert breached.case_id not in [item["case_id"] for item in result["service_cases"]]
+    assert result["by_escalation_reason"] == {
+        "critical_case_unacknowledged": 1,
+        "first_response_sla_breached": 1,
+        "resolution_sla_breached": 1,
+        "waiting_external": 1,
+    }
+
+
 def test_list_service_management_cases_rejects_unknown_sla_status_filter():
     store = InMemoryOperationalCaseStore()
 
@@ -610,4 +663,16 @@ def test_list_service_management_cases_rejects_unknown_owner_status_filter():
             business_id="artemea",
             now=NOW,
             owner_status="blocked",
+        )
+
+
+def test_list_service_management_cases_rejects_unknown_escalation_reason_filter():
+    store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(ValueError, match="unsupported escalation_reason"):
+        list_service_management_cases(
+            store,
+            business_id="artemea",
+            now=NOW,
+            escalation_reason="manager_vibes",
         )

@@ -60,6 +60,16 @@ ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES = frozenset(
     | {payload["code"] for payload in _WAITING_OWNER_STATUSES.values()}
 )
 
+ALLOWED_SERVICE_MANAGEMENT_ESCALATION_REASONS = frozenset(
+    {
+        "critical_case_unacknowledged",
+        "first_response_sla_breached",
+        "resolution_sla_breached",
+        "waiting_external",
+        "waiting_owner",
+    }
+)
+
 _FIRST_RESPONSE_TARGET_SECONDS: dict[str, int] = {
     "critical": 60 * 60,
     "warning": 4 * 60 * 60,
@@ -115,6 +125,14 @@ def _normalize_owner_status_filter(owner_status: str | None) -> str | None:
     if owner_status not in ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES:
         raise ValueError(f"unsupported owner_status: {owner_status}")
     return str(owner_status)
+
+
+def _normalize_escalation_reason_filter(escalation_reason: str | None) -> str | None:
+    if escalation_reason in (None, ""):
+        return None
+    if escalation_reason not in ALLOWED_SERVICE_MANAGEMENT_ESCALATION_REASONS:
+        raise ValueError(f"unsupported escalation_reason: {escalation_reason}")
+    return str(escalation_reason)
 
 
 def _service_record_type(case: OperationalCase) -> dict[str, str]:
@@ -347,6 +365,7 @@ def list_service_management_cases(
     sla_status: str | None = None,
     service_record_type: str | None = None,
     owner_status: str | None = None,
+    escalation_reason: str | None = None,
 ) -> dict[str, Any]:
     """List service-management projections for cases in one business scope."""
 
@@ -354,6 +373,7 @@ def list_service_management_cases(
     parsed_sla_status = _normalize_sla_status_filter(sla_status)
     parsed_service_record_type = _normalize_service_record_type_filter(service_record_type)
     parsed_owner_status = _normalize_owner_status_filter(owner_status)
+    parsed_escalation_reason = _normalize_escalation_reason_filter(escalation_reason)
     all_cases = store.list_cases(business_id=business_id, limit=None)
     all_rows = [service_management_case_item(case, now=reference) for case in all_cases]
     filtered_rows = all_rows
@@ -365,10 +385,17 @@ def list_service_management_cases(
         ]
     if parsed_owner_status is not None:
         filtered_rows = [row for row in filtered_rows if row["owner_status"]["code"] == parsed_owner_status]
+    if parsed_escalation_reason is not None:
+        filtered_rows = [
+            row
+            for row in filtered_rows
+            if any(reason["code"] == parsed_escalation_reason for reason in row["escalation_reasons"])
+        ]
     rows = filtered_rows[:limit] if limit is not None else filtered_rows
     by_record_type: dict[str, int] = {}
     by_owner_status: dict[str, int] = {}
     by_sla_status: dict[str, int] = {}
+    by_escalation_reason: dict[str, int] = {}
     for row in all_rows:
         record_type = row["service_record_type"]["code"]
         status = row["owner_status"]["code"]
@@ -376,6 +403,9 @@ def list_service_management_cases(
         by_record_type[record_type] = by_record_type.get(record_type, 0) + 1
         by_owner_status[status] = by_owner_status.get(status, 0) + 1
         by_sla_status[row_sla_status] = by_sla_status.get(row_sla_status, 0) + 1
+        for reason in row["escalation_reasons"]:
+            reason_code = reason["code"]
+            by_escalation_reason[reason_code] = by_escalation_reason.get(reason_code, 0) + 1
     filters = {}
     if parsed_sla_status is not None:
         filters["sla_status"] = parsed_sla_status
@@ -383,6 +413,8 @@ def list_service_management_cases(
         filters["service_record_type"] = parsed_service_record_type
     if parsed_owner_status is not None:
         filters["owner_status"] = parsed_owner_status
+    if parsed_escalation_reason is not None:
+        filters["escalation_reason"] = parsed_escalation_reason
     return redact_secrets(
         {
             "business_id": business_id,
@@ -395,6 +427,7 @@ def list_service_management_cases(
             "by_service_record_type": by_record_type,
             "by_owner_status": by_owner_status,
             "by_sla_status": by_sla_status,
+            "by_escalation_reason": by_escalation_reason,
             "service_cases": rows,
         }
     )
