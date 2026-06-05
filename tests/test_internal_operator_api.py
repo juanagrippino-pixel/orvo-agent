@@ -179,6 +179,34 @@ def test_internal_error_envelope_and_audit_redact_secret_shaped_request_id(monke
     assert "raw_denied_request_id_secret" not in json.dumps(event, sort_keys=True)
 
 
+def test_internal_error_envelope_and_audit_reject_oversized_request_id(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+    oversized_request_id = "req-" + "a" * 256
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "viewer",
+            "X-Orvo-Businesses": "other",
+            "X-Request-ID": oversized_request_id,
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert oversized_request_id not in raw_body
+    body = response.get_json()
+    assert body["request_id"] == "[REDACTED]"
+    assert body["redaction_applied"] is True
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["request_id"] == "[REDACTED]"
+    assert oversized_request_id not in json.dumps(event, sort_keys=True)
+
+
 def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     warning = _case_detection(

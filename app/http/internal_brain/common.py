@@ -24,12 +24,18 @@ from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 
 
+_MAX_INTERNAL_REQUEST_ID_LENGTH = 128
+
+
 def _internal_request_id() -> str:
     supplied = request.headers.get("X-Request-ID")
     if supplied is None or not supplied.strip():
         return f"req_{uuid4().hex}"
-    redacted = redact_text(supplied) or "[REDACTED]"
-    return redacted if redacted == supplied else "[REDACTED]"
+    candidate = supplied.strip()
+    if len(candidate) > _MAX_INTERNAL_REQUEST_ID_LENGTH:
+        return "[REDACTED]"
+    redacted = redact_text(candidate) or "[REDACTED]"
+    return redacted if redacted == candidate else "[REDACTED]"
 
 
 def _internal_success(business_id: str, data: dict, *, warnings: list[str] | None = None):
