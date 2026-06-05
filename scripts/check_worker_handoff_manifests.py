@@ -191,14 +191,20 @@ def _git_commit_exists(repo_root: Path, revision: str) -> bool:
     return _git(repo_root, "cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
 
 
-def _git_branch_exists(repo_root: Path, branch: str) -> bool:
+def _git_branch_tip(repo_root: Path, branch: str) -> str | None:
+    """Return the local or origin branch tip SHA for ``branch`` when it exists."""
+
     if not branch:
-        return False
-    local = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
-    if local.returncode == 0:
-        return True
-    remote = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
-    return remote.returncode == 0
+        return None
+    for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}"):
+        result = _git(repo_root, "rev-parse", "--verify", "--quiet", ref)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return None
+
+
+def _git_branch_exists(repo_root: Path, branch: str) -> bool:
+    return _git_branch_tip(repo_root, branch) is not None
 
 
 def _changed_files_between(repo_root: Path, base_sha: str, head_sha: str) -> tuple[str, ...] | None:
@@ -244,6 +250,12 @@ def verify_manifest_git_claims(
     head_exists = _git_commit_exists(repo_root, head_sha)
     if not head_exists:
         problems.append(f"head_sha does not resolve to a commit: {head_sha}")
+
+    branch_tip = _git_branch_tip(repo_root, branch)
+    if branch_tip is not None and head_exists and branch_tip != head_sha:
+        problems.append(
+            f"branch {branch} points at {branch_tip[:12]}, not claimed head_sha {head_sha[:12]}"
+        )
 
     if base_exists and head_exists:
         changed_files = _changed_files_between(repo_root, base_sha, head_sha)

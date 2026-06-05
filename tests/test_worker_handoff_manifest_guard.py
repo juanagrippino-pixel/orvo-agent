@@ -180,6 +180,31 @@ def test_verify_manifest_git_claims_rejects_files_changed_that_do_not_match_diff
     )
 
 
+def test_verify_manifest_git_claims_rejects_branch_that_does_not_point_at_head_sha(tmp_path: Path) -> None:
+    repo, manifest_path = _make_git_repo_with_manifest(tmp_path)
+    claimed_branch = "codex/sample-guard"
+    claimed_head = _run_git(repo, "rev-parse", "HEAD")
+    _run_git(repo, "checkout", "--detach", "HEAD~1")
+    (repo / "other.txt").write_text("other branch work\n", encoding="utf-8")
+    _run_git(repo, "checkout", "-b", "codex/other-guard")
+    _run_git(repo, "add", "other.txt")
+    _run_git(repo, "commit", "-m", "other guard")
+    other_head = _run_git(repo, "rev-parse", "HEAD")
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8").replace(claimed_head, other_head),
+        encoding="utf-8",
+    )
+
+    result = verify_manifest_git_claims(parse_manifest(manifest_path), repo_root=repo)
+
+    assert result.passed is False
+    assert result.problems == (
+        f"branch {claimed_branch} points at {claimed_head[:12]}, not claimed head_sha {other_head[:12]}",
+        "files_changed does not match git diff base_sha...head_sha; "
+        "missing from manifest: other.txt; not present in diff: scripts/guard.py, tests/test_guard.py",
+    )
+
+
 def test_verify_manifest_git_claims_allows_uncommitted_head_when_worktree_exists(tmp_path: Path) -> None:
     repo, manifest_path = _make_git_repo_with_manifest(tmp_path)
     manifest_path.write_text(
