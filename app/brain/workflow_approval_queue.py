@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from app.brain.action_catalog import ACTION_CATALOG
+from app.brain.action_catalog import is_workflow_approval_required_action
 from app.brain.security.redaction import redact_secrets
 from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerRecord,
@@ -40,7 +40,7 @@ def _is_pending_approval(
         and request.action_key == record.action_key
         and request.approval_request_id == record.approval_request_id
         and request.status == "pending"
-        and record.action_key in ACTION_CATALOG
+        and is_workflow_approval_required_action(record.action_key)
         and record.approval_state == "pending"
         and record.execution_state == "blocked_approval_required"
     )
@@ -83,9 +83,9 @@ def list_workflow_approval_queue(
 ) -> dict[str, Any]:
     """Project pending workflow approval requests for one business.
 
-    Only ledger-backed requests scoped to ``business_id`` with a registered
-    action key, ``status=pending``, ``approval_state=pending``, and
-    ``execution_state=blocked_approval_required`` are returned. The projection
+    Only ledger-backed requests scoped to ``business_id`` with a catalog-defined
+    approval-required action key, ``status=pending``, ``approval_state=pending``,
+    and ``execution_state=blocked_approval_required`` are returned. The projection
     is ordered deterministically by request time and approval request id,
     redacted at the service boundary, and explicitly declares that this surface
     performs zero approval/execution side effects.

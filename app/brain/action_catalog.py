@@ -220,6 +220,23 @@ def workflow_action_registry() -> dict[str, ActionDefinition]:
     return dict(ACTION_CATALOG)
 
 
+def is_workflow_approval_required_action(action_key: str) -> bool:
+    """Return whether a registered action may enter approval/execution queues.
+
+    Ledger writes can carry defensive or malformed ``approval_required=True``
+    metadata, but queue projections must not promote arbitrary registered manual
+    actions into workflow automation. The catalog is the source of truth for the
+    governed workflow approval model.
+    """
+
+    definition = ACTION_CATALOG.get(action_key)
+    return bool(
+        definition is not None
+        and definition.mode == "approval_required"
+        and definition.requires_approval
+    )
+
+
 def list_case_action_catalog(*, business_id: str, can_execute_case_actions: bool = True) -> dict[str, Any]:
     """Return the internal operator action contract for one business.
 
