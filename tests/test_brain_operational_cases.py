@@ -147,12 +147,17 @@ def test_owner_facing_actionable_cases_excludes_legacy_cases_without_evidence_sn
         make_stockout_detection(run_id="run-visible", snapshots=[make_stock_snapshot(run_id="run-visible")]),
         detected_at=utc_dt(8),
     )
+    legacy_payload = with_evidence.model_dump()
     legacy_without_snapshot = OperationalCase.model_validate(
         {
-            **with_evidence.model_dump(),
+            **legacy_payload,
             "case_id": "case-legacy-no-snapshot",
             "dedupe_key": "artemea/stockout_risk/business/legacy/commerce.inventory/daily",
             "evidence_snapshots": [],
+            "timeline": [
+                {**event, "case_id": "case-legacy-no-snapshot"}
+                for event in legacy_payload["timeline"]
+            ],
         }
     )
 
@@ -629,6 +634,28 @@ def test_case_mutations_reject_backdated_timestamps_without_rewinding_timeline(c
         assert after is not None
         assert after == before, f"{label}: rejected {mutation} must not mutate case history"
         assert [event.created_at for event in after.timeline] == [utc_dt(8), utc_dt(9)]
+
+
+def test_operational_case_model_rejects_corrupted_timeline_order_and_case_refs():
+    """Persisted WorkItem history must remain chronological and scoped to its case."""
+
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    commented = store.add_comment(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="juan",
+        comment="Primera revisión",
+        commented_at=utc_dt(9),
+    )
+    payload = commented.model_dump(mode="python")
+
+    with pytest.raises(ValueError, match="timeline events must be chronological"):
+        OperationalCase.model_validate({**payload, "timeline": [payload["timeline"][1], payload["timeline"][0]]})
+
+    mismatched_event = {**payload["timeline"][0], "case_id": "other-case"}
+    with pytest.raises(ValueError, match="timeline event case_id must match case_id"):
+        OperationalCase.model_validate({**payload, "timeline": [mismatched_event, *payload["timeline"][1:]]})
 
 
 def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reopen():
