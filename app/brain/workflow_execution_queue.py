@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from app.brain.action_catalog import ACTION_CATALOG
+from app.brain.action_catalog import ACTION_CATALOG, is_workflow_approval_required_action
 from app.brain.security.redaction import redact_secrets
 from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerRecord,
@@ -26,7 +26,7 @@ def _iso(value: datetime) -> str:
 
 def _is_pending_execution(record: WorkflowActionLedgerRecord) -> bool:
     return (
-        record.action_key in ACTION_CATALOG
+        is_workflow_approval_required_action(record.action_key)
         and record.approval_state == "approved"
         and record.execution_state == "pending_execution"
     )
@@ -68,11 +68,12 @@ def list_workflow_execution_queue(
 ) -> dict[str, Any]:
     """Project approved actions waiting for a future executor.
 
-    Only records scoped to ``business_id`` with a registered action key,
-    ``approval_state=approved``, and ``execution_state=pending_execution`` are
-    returned. The projection is ordered deterministically by approval/update time
-    and ledger id, redacted at the service boundary, and explicitly declares
-    that execution is disabled with zero side effects.
+    Only records scoped to ``business_id`` with a catalog-defined
+    approval-required action key, ``approval_state=approved``, and
+    ``execution_state=pending_execution`` are returned. The projection is ordered
+    deterministically by approval/update time and ledger id, redacted at the
+    service boundary, and explicitly declares that execution is disabled with
+    zero side effects.
     """
 
     records = [
