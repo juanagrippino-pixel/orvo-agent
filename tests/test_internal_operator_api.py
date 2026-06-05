@@ -440,6 +440,41 @@ def test_internal_case_action_actor_identity_comes_from_authenticated_header(mon
     assert all("payload-spoof" not in event.actor_ref for event in reloaded.timeline)
 
 
+def test_internal_case_action_replays_same_request_id_without_duplicate_transition(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {**AUTH, "X-Request-ID": "req-idempotent-ack"}
+    payload = {"action_key": "acknowledge_case", "reason": "Estoy encima"}
+
+    first = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json=payload,
+    )
+    replay = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    first_body = first.get_json()
+    replay_body = replay.get_json()
+    assert first_body["data"]["case"]["status"] == "acknowledged"
+    assert replay_body["data"]["case"]["status"] == "acknowledged"
+    assert replay_body["warnings"] == ["duplicate_case_action_request_replayed"]
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "acknowledged"
+    status_events = [event for event in reloaded.timeline if event.event_type == "status_changed"]
+    assert len(status_events) == 1
+    assert status_events[0].metadata == {"from_status": "open", "to_status": "acknowledged"}
+
+
 def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())

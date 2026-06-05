@@ -237,11 +237,16 @@ class SQLiteIdempotencyStore:
         )
         return cursor.fetchone() is not None
 
-    def mark(self, key: str) -> None:
-        """Persist *key* as processed (idempotent — duplicate marks are ignored)."""
+    def reserve(self, key: str) -> bool:
+        """Persist *key* only if absent; return True when this call reserved it."""
         created_at = datetime.now(tz=timezone.utc).isoformat()
-        self._conn.execute(
+        cursor = self._conn.execute(
             "INSERT OR IGNORE INTO idempotency_keys (key, created_at) VALUES (?, ?)",
             (key, created_at),
         )
         self._conn.commit()
+        return cursor.rowcount == 1
+
+    def mark(self, key: str) -> None:
+        """Persist *key* as processed (idempotent — duplicate marks are ignored)."""
+        self.reserve(key)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
+import json
 import os
 import sqlite3
 from contextlib import closing
@@ -30,6 +32,35 @@ def _internal_request_id() -> str:
         return f"req_{uuid4().hex}"
     redacted = redact_text(supplied) or "[REDACTED]"
     return redacted if redacted == supplied else "[REDACTED]"
+
+
+def _internal_request_idempotency_key(
+    namespace: str,
+    *,
+    business_id: str,
+    target_id: str,
+    payload: dict | None = None,
+) -> str | None:
+    """Return a non-secret idempotency key for a supplied internal request id.
+
+    Generated fallback request IDs are intentionally excluded: only callers that
+    provide ``X-Request-ID`` get replay protection. The persisted key stores only
+    a digest of scoped request material, never raw headers or payload secrets.
+    """
+
+    supplied = request.headers.get("X-Request-ID")
+    if supplied is None or not supplied.strip():
+        return None
+    material = {
+        "namespace": namespace,
+        "business_id": business_id,
+        "target_id": target_id,
+        "request_id": supplied.strip(),
+        "payload": redact_secrets(payload or {}),
+    }
+    serialized = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return f"internal:{namespace}:{digest}"
 
 
 def _internal_success(business_id: str, data: dict, *, warnings: list[str] | None = None):

@@ -12,6 +12,7 @@ from .common import (
     _internal_success,
     _internal_error,
     _internal_principal_or_error,
+    _internal_request_idempotency_key,
     _require_internal_header_permission,
     _with_internal_stores,
 )
@@ -137,6 +138,12 @@ def register_dashboard_view_routes(app):
                     business_id=business_id,
                     case_id=case_id,
                     action_key=str(payload.get("action_key", "")),
+                    idempotency_key=_internal_request_idempotency_key(
+                        "case_action",
+                        business_id=business_id,
+                        target_id=case_id,
+                        payload=payload,
+                    ),
                     actor_ref=actor_ref,
                     reason=payload.get("reason"),
                     comment=payload.get("comment"),
@@ -159,6 +166,9 @@ def register_dashboard_view_routes(app):
                     },
                 )
                 raise
-            return _internal_success(business_id, data)
+            warnings = []
+            if data.pop("_idempotency_replayed", False):
+                warnings.append("duplicate_case_action_request_replayed")
+            return _internal_success(business_id, data, warnings=warnings)
 
         return _with_internal_stores(business_id, _handle)
