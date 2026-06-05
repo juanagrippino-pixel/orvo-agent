@@ -112,6 +112,15 @@ class WorkflowActionLedgerStore(Protocol):
 
     def list_actions(self, *, business_id: str) -> list[WorkflowActionLedgerRecord]: ...
 
+    def update_action_execution_state(
+        self,
+        *,
+        business_id: str,
+        ledger_id: str,
+        execution_state: ExecutionState,
+        now: datetime | None = None,
+    ) -> WorkflowActionLedgerRecord: ...
+
     def list_approval_requests(self, *, business_id: str) -> list[WorkflowApprovalRequest]: ...
 
     def decide_approval_request(
@@ -300,6 +309,22 @@ class InMemoryWorkflowActionLedgerStore:
 
     def list_actions(self, *, business_id: str) -> list[WorkflowActionLedgerRecord]:
         return [record for record in self._actions.values() if record.business_id == business_id]
+
+    def update_action_execution_state(
+        self,
+        *,
+        business_id: str,
+        ledger_id: str,
+        execution_state: ExecutionState,
+        now: datetime | None = None,
+    ) -> WorkflowActionLedgerRecord:
+        timestamp = _coerce_utc(now)
+        for key, record in self._actions.items():
+            if record.business_id == business_id and record.ledger_id == ledger_id:
+                updated = replace(record, execution_state=execution_state, updated_at=timestamp)
+                self._actions[key] = updated
+                return updated
+        raise WorkflowActionLedgerError("action_record_not_found", "workflow action ledger record not found")
 
     def list_approval_requests(self, *, business_id: str) -> list[WorkflowApprovalRequest]:
         return [request for request in self._approvals.values() if request.business_id == business_id]
@@ -533,6 +558,32 @@ class SQLiteWorkflowActionLedgerStore:
                 (business_id,),
             ).fetchall()
         return [_record_from_row(row) for row in rows]
+
+    def update_action_execution_state(
+        self,
+        *,
+        business_id: str,
+        ledger_id: str,
+        execution_state: ExecutionState,
+        now: datetime | None = None,
+    ) -> WorkflowActionLedgerRecord:
+        timestamp = _coerce_utc(now)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_action_ledger
+                SET execution_state = ?, updated_at = ?
+                WHERE business_id = ? AND ledger_id = ?
+                """,
+                (execution_state, _iso(timestamp), business_id, ledger_id),
+            )
+            if cursor.rowcount != 1:
+                raise WorkflowActionLedgerError("action_record_not_found", "workflow action ledger record not found")
+            row = conn.execute(
+                "SELECT * FROM workflow_action_ledger WHERE business_id = ? AND ledger_id = ?",
+                (business_id, ledger_id),
+            ).fetchone()
+        return _record_from_row(row)
 
     def list_approval_requests(self, *, business_id: str) -> list[WorkflowApprovalRequest]:
         with self._connect() as conn:
