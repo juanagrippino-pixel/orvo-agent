@@ -146,8 +146,8 @@ Projection rules:
 - derive `waiting_owner` and `waiting_external` from case metadata only for active `acknowledged`/`in_progress` cases;
 - include first-response and resolution SLA clocks as deterministic UTC timers; terminal `resolved` and `dismissed` cases must stop open SLA clocks at their terminal timestamp;
 - expose `sla_status` as a read-only queue summary over those clocks (`breached`, `on_track`, `paused`, `completed`) plus `by_sla_status` counts across the full scoped result set;
-- support the read-only `sla_status`, `service_record_type`, `owner_status`, and `escalation_reason` query filters on the service-management endpoint so operators can open deterministic SLA, incident, request, problem, change, waiting-owner, waiting-external, or escalation-reason queues without changing case lifecycle state; `total` counts the filtered queue and `unfiltered_total` preserves the full scoped case count;
-- expose deterministic `escalation_reasons` and `by_escalation_reason` counts for unacknowledged critical cases, active SLA breaches, and active waiting-on-owner/external blockers without changing priority or lifecycle state;
+- support the read-only `sla_status`, `service_record_type`, `owner_status`, `escalation_reason`, and boolean `needs_escalation` query filters on the service-management endpoint so operators can open deterministic SLA, incident, request, problem, change, waiting-owner, waiting-external, escalation-reason, or all-escalation queues without changing case lifecycle state; `total` counts the filtered queue and `unfiltered_total` preserves the full scoped case count;
+- expose deterministic `needs_escalation`, `escalation_reasons`, and `by_escalation_reason` counts for unacknowledged critical cases, active SLA breaches, and active waiting-on-owner/external blockers without changing priority or lifecycle state;
 - redact secret-shaped values at the projection boundary;
 - preserve explicit tenant scope and stable internal response envelopes.
 
