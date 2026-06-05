@@ -55,6 +55,15 @@ def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_stat
     [outcome] = reloaded.connector_outcomes
     assert outcome.status == "failed"
     assert outcome.health_state == "unauthorized"
+    assert outcome.metadata["required_secret_refs"] == [
+        {
+            "name": "access_token",
+            "provider": "tiendanube_oauth",
+            "description": "Tiendanube API access token reference.",
+            "scopes": ["orders.read", "products.read"],
+            "legacy_config_field": "access_token",
+        }
+    ]
     assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
     assert outcome.metadata["health_policy"]["allowed_states"] == [
         "ok",
