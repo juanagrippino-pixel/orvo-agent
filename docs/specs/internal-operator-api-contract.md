@@ -102,8 +102,8 @@ allowlisted `freshness_state` values (`fresh`, `stale`, `degraded`, `missing`,
 `unknown`) derived from persisted case evidence snapshots, and may filter
 `evidence_count` with bounded integer comparison operators over canonical case
 evidence references. View summaries return aggregate facets only, not raw case
-rows, including priority-bracket counts and evidence freshness-state counts
-where available.
+rows, including priority-bracket counts, evidence freshness-state counts, and
+evidence-count totals/distributions where available.
 
 ### Operator audit events
 
