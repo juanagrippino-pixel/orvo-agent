@@ -49,6 +49,7 @@ class CompiledConnectorRuntime(BaseModel):
     required_params: list[str] = Field(default_factory=list)
     secret_param_names: list[str] = Field(default_factory=list)
     legacy_secret_param_names: list[str] = Field(default_factory=list)
+    secret_requirements: list[dict[str, Any]] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     emitted_metric_families: list[str] = Field(default_factory=list)
     emitted_event_families: list[str] = Field(default_factory=list)
@@ -162,6 +163,7 @@ def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, An
         "required_params": list(connector.required_params),
         "secret_param_names": list(connector.secret_param_names),
         "legacy_secret_param_names": list(connector.legacy_secret_param_names),
+        "secret_requirements": [dict(requirement) for requirement in connector.secret_requirements],
         "capabilities": list(connector.capabilities),
         "emitted_metric_families": list(connector.emitted_metric_families),
         "emitted_event_families": list(connector.emitted_event_families),
@@ -296,6 +298,7 @@ def _compile_connectors(
                 required_params=list(spec.required_config_fields),
                 secret_param_names=secret_names,
                 legacy_secret_param_names=legacy_secret_names,
+                secret_requirements=spec.secret_requirements_metadata(),
                 capabilities=list(spec.capabilities),
                 emitted_metric_families=list(spec.emitted_metric_families),
                 emitted_event_families=list(spec.emitted_event_families),

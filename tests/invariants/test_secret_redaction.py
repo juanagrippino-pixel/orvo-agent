@@ -55,6 +55,16 @@ def test_redact_secrets_preserves_safe_connector_reference_metadata_without_raw_
                 },
                 "secret_param_names": ["access_token"],
                 "legacy_secret_param_names": ["access_token"],
+                "required_secret_refs": [
+                    {
+                        "name": "access_token",
+                        "provider": "tiendanube_oauth",
+                        "description": "Tiendanube API access token reference.",
+                        "scopes": ["orders.read", "products.read"],
+                        "legacy_config_field": "access_token",
+                        "value": "raw_contract_secret",
+                    }
+                ],
                 "raw_token": "tn_live_raw_secret",
             }
         ],
@@ -71,12 +81,23 @@ def test_redact_secrets_preserves_safe_connector_reference_metadata_without_raw_
     }
     assert redacted["connector_refs"][0]["secret_param_names"] == ["access_token"]
     assert redacted["connector_refs"][0]["legacy_secret_param_names"] == ["access_token"]
+    assert redacted["connector_refs"][0]["required_secret_refs"] == [
+        {
+            "name": "access_token",
+            "provider": "tiendanube_oauth",
+            "description": "Tiendanube API access token reference.",
+            "scopes": ["orders.read", "products.read"],
+            "legacy_config_field": "access_token",
+            "value": "[REDACTED]",
+        }
+    ]
     assert redacted["connector_refs"][0]["raw_token"] == "[REDACTED]"
     assert redacted["access_token"] == "[REDACTED]"
     assert "tn_live_raw_secret" not in rendered
     assert "top_level_raw_secret" not in rendered
     assert "raw_inline_secret_ref" not in rendered
     assert "raw_ref_query" not in rendered
+    assert "raw_contract_secret" not in rendered
 
 
 def test_redact_text_removes_multi_token_basic_authorization_headers():
