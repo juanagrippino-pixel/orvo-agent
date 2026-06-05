@@ -95,9 +95,11 @@ view execution, exports, and summaries must remain route-scoped by
 `business_id`, use allowlisted JQL-lite definitions, and return redacted
 enveloped responses. JQL-lite may filter evidence freshness through the
 allowlisted `freshness_state` values (`fresh`, `stale`, `degraded`, `missing`,
-`unknown`) derived from persisted case evidence snapshots. View summaries return
-aggregate facets only, not raw case rows, including priority-bracket counts and
-evidence freshness-state counts where available.
+`unknown`) derived from persisted case evidence snapshots, and may filter
+`evidence_count` with bounded integer comparison operators over canonical case
+evidence references. View summaries return aggregate facets only, not raw case
+rows, including priority-bracket counts and evidence freshness-state counts
+where available.
 
 ### Operator audit events
 
