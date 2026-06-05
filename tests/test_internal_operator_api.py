@@ -474,6 +474,151 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
     assert "raw_action_secret" not in reloaded.model_dump_json()
 
 
+def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(monkeypatch, tmp_path):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {**AUTH, "X-Idempotency-Key": "case-action-ack-1"}
+
+    first = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
+    )
+
+    assert first.status_code == 200
+    first_body = first.get_json()
+    assert first_body["data"]["case"]["status"] == "acknowledged"
+    assert first_body["data"]["action"]["status"] == "executed"
+    assert first_body["data"]["action"]["idempotency_key"] == "case-action-ack-1"
+    timeline_count_after_first = len(first_body["data"]["case"]["timeline"])
+
+    duplicate = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={"action_key": "acknowledge_case", "reason": "Duplicate retry should not add timeline"},
+    )
+
+    assert duplicate.status_code == 200
+    duplicate_body = duplicate.get_json()
+    assert duplicate_body["data"]["case"]["status"] == "acknowledged"
+    assert duplicate_body["data"]["action"]["status"] == "skipped_duplicate"
+    assert duplicate_body["data"]["action"]["idempotency_key"] == "case-action-ack-1"
+    assert len(duplicate_body["data"]["case"]["timeline"]) == timeline_count_after_first
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "acknowledged"
+    assert len(reloaded.timeline) == timeline_count_after_first
+
+    actions = SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea")
+    assert len(actions) == 1
+    [record] = actions
+    assert record.source == "manual_operator"
+    assert record.action_key == "acknowledge_case"
+    assert record.case_id == case.case_id
+    assert record.idempotency_key == "case-action-ack-1"
+    assert record.execution_state == "executed"
+    assert record.approval_state == "not_required"
+    assert record.params["reason"] == "Estoy encima"
+
+
+def test_internal_case_action_rejects_unsafe_idempotency_key_without_mutation_or_secret_echo(
+    monkeypatch,
+    tmp_path,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Idempotency-Key": "Bearer raw_idempotency_secret"},
+        json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_idempotency_secret" not in raw_body
+    body = response.get_json()
+    assert body["error"]["code"] == "invalid_idempotency_key"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+
+def test_internal_case_action_failed_attempt_does_not_consume_idempotency_key(monkeypatch, tmp_path):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {**AUTH, "X-Idempotency-Key": "case-action-retry-after-validation"}
+
+    invalid = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={"action_key": "resolve_case"},
+    )
+
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "missing_case_action_reason"
+    assert SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea") == []
+
+    retry = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={"action_key": "acknowledge_case", "reason": "valid retry"},
+    )
+
+    assert retry.status_code == 200
+    retry_body = retry.get_json()
+    assert retry_body["data"]["case"]["status"] == "acknowledged"
+    assert retry_body["data"]["action"]["status"] == "executed"
+    assert retry_body["data"]["action"]["idempotency_key"] == "case-action-retry-after-validation"
+
+    actions = SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea")
+    assert len(actions) == 1
+    assert actions[0].action_key == "acknowledge_case"
+
+
+def test_internal_case_action_idempotency_key_conflict_rejects_different_action_without_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {**AUTH, "X-Idempotency-Key": "case-action-conflict-1"}
+
+    first = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
+    )
+    assert first.status_code == 200
+
+    conflict = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={"action_key": "mark_in_progress", "reason": "different action"},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.get_json()["error"]["code"] == "idempotency_key_conflict"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "acknowledged"
+    assert len(reloaded.timeline) == len(first.get_json()["data"]["case"]["timeline"])
+
+
 def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
