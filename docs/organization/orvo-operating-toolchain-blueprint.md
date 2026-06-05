@@ -87,7 +87,7 @@ The autonomous organization should be managed as a product company, not a task s
 - **COO / Product Operating System**: resolves overlap, allocates capacity, enforces product-first strategy, owns the operating graph.
 - **Architecture Review Board**: owns ADRs, bounded contexts, source-of-truth boundaries, and platform invariants.
 - **Knowledge / Roadmap Librarian**: turns research and decisions into durable docs, ADRs, specs, roadmaps, and deprecation notes.
-- **Board Reporter**: reports product progress, integration queue, risks, decisions, and next bets to Juan.
+- **Board Reporter**: reports product progress, integration queue, risks, decisions, and next bets to operator.
 
 ### Product/platform departments
 

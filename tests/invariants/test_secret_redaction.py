@@ -91,6 +91,18 @@ def test_redact_text_removes_multi_token_basic_authorization_headers():
     assert redacted == "connector failed with Authorization: [REDACTED] while syncing"
 
 
+def test_redact_text_removes_token_scheme_authorization_header_credentials():
+    from app.brain.security.redaction import redact_text
+
+    text = "connector failed with Authorization: Token raw_auth_header_secret while syncing"
+
+    redacted = redact_text(text)
+
+    assert "Token raw_auth_header_secret" not in (redacted or "")
+    assert "raw_auth_header_secret" not in (redacted or "")
+    assert redacted == "connector failed with Authorization: [REDACTED] while syncing"
+
+
 def test_redact_uri_removes_url_userinfo_credentials_without_dropping_safe_context():
     from app.brain.security.redaction import redact_uri
 

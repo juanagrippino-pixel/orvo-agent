@@ -158,6 +158,27 @@ def test_internal_case_queue_filters_degraded_cases_and_keeps_business_scope(mon
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
+def test_internal_case_queue_redacts_secret_shaped_jql_echo(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-jql-redaction"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "assignee_ref = token:raw_jql_secret"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_jql_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["redaction_applied"] is True
+    assert body["data"]["jql"] == "assignee_ref = token:[REDACTED]"
+    assert body["data"]["normalized_jql"] == "assignee_ref = token:[REDACTED] ORDER BY priority_score DESC, opened_at ASC"
+    assert body["data"]["cases"] == []
+
+
 def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-open", priority=95))

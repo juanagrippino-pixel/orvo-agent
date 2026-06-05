@@ -3,17 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from flask import request
-
 from app.brain.operator_api import *  # noqa: F401,F403
-from app.brain.operator_auth import CASE_ACTION_PERMISSION
 
-from .common import (
-    _internal_success,
-    _internal_error,
-    _internal_principal_or_error,
-    _require_internal_header_permission,
-    _with_internal_stores,
-)
+from .common import _internal_success, _with_internal_stores
 
 
 def register_case_activity_routes(app):
@@ -140,6 +132,17 @@ def register_case_activity_routes(app):
                     case_store,
                     business_id=business_id,
                 ),
+            ),
+        )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/cases/resolution-latency/by-priority-bracket")
+    def internal_brain_cases_resolution_latency_by_priority_bracket(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_resolution_latency_histogram_by_priority_bracket(case_store, business_id=business_id),
             ),
         )
 

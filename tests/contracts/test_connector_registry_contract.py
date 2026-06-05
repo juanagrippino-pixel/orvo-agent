@@ -27,7 +27,7 @@ def test_runtime_compiler_uses_connector_registry_contract_not_private_duplicate
     business = BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[

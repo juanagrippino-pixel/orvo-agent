@@ -97,4 +97,12 @@ python scripts/check_worker_handoff_manifests.py
 python scripts/check_worker_handoff_manifests.py docs/workers/<task-id>.md
 ```
 
-The guard verifies that every committed Markdown manifest has the required fields, non-empty required list sections, and an allowed status value. It does not replace human review of branch existence, exact `head_sha`, diff/test claims, or secret-scan credibility.
+The default guard verifies that every committed Markdown manifest has the required fields, non-empty required list sections, and an allowed status value. It does not replace human review of branch existence, exact `head_sha`, diff/test claims, or secret-scan credibility.
+
+For a single committed worker manifest with real `base_sha` and `head_sha` values, reviewers can also run the opt-in git claim check:
+
+```bash
+python scripts/check_worker_handoff_manifests.py --verify-git docs/workers/<task-id>.md
+```
+
+The git check verifies that the worktree path still exists or the branch is present locally/remotely, that `base_sha` and committed `head_sha` resolve to commits, and that `files_changed` exactly matches `git diff --name-only base_sha...head_sha`. Use it on specific manifests first because older durable manifests may contain human placeholders or intentionally dirty `head_sha: uncommitted` handoffs.

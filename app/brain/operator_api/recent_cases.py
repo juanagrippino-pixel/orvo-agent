@@ -41,7 +41,6 @@ def list_recently_resolved_cases(
             continue
         resolved.append((case.resolved_at.astimezone(timezone.utc), case.case_id, case))
 
-    # Most recently resolved first; tie-break by case_id ASC for deterministic order.
     resolved.sort(key=lambda item: (-item[0].timestamp(), item[1]))
     limited = resolved[:parsed_limit]
     cases_payload = [
@@ -92,7 +91,6 @@ def list_recently_opened_cases(
     for case in store.list_cases(business_id=business_id, status="open", limit=None):
         opened.append((case.opened_at.astimezone(timezone.utc), case.case_id, case))
 
-    # Most recently opened first; tie-break by case_id ASC for deterministic order.
     opened.sort(key=lambda item: (-item[0].timestamp(), item[1]))
     limited = opened[:parsed_limit]
     cases_payload = [
@@ -143,7 +141,6 @@ def list_recently_acknowledged_cases(
             continue
         acknowledged.append((case.acknowledged_at.astimezone(timezone.utc), case.case_id, case))
 
-    # Most recently acknowledged first; tie-break by case_id ASC for deterministic order.
     acknowledged.sort(key=lambda item: (-item[0].timestamp(), item[1]))
     limited = acknowledged[:parsed_limit]
     cases_payload = [
@@ -168,7 +165,6 @@ def list_recently_acknowledged_cases(
             "count": len(cases_payload),
         }
     )
-
 
 def list_recently_assigned_cases(
     store: OperationalCaseStore,
@@ -219,23 +215,31 @@ def list_recently_assigned_cases(
         }
     )
 
+def _latest_transition_to_at(case: OperationalCase, status: str) -> datetime | None:
+    """Return the latest canonical status-change timestamp for a status."""
+
+    latest: datetime | None = None
+    for event in case.timeline:
+        if event.event_type != "status_changed":
+            continue
+        if event.metadata.get("to_status") != status:
+            continue
+        created_at = event.created_at.astimezone(timezone.utc)
+        if latest is None or created_at > latest:
+            latest = created_at
+    return latest
+
 
 def _case_transitioned_to_at(case: OperationalCase, status: str) -> datetime:
-    """Return the canonical timeline timestamp for a status transition.
+    """Return canonical transition timestamp with a legacy fixture fallback.
 
     ``in_progress`` has no dedicated model timestamp yet. The case timeline is
     the source of truth for lifecycle events, so derive the projection timestamp
-    from the status-change event instead of treating updated_at/comments as the
-    lifecycle transition. ``updated_at`` remains a backward-compatible fallback
-    for older fixtures that predate timeline metadata.
+    from status-change events. ``updated_at`` remains a backward-compatible
+    fallback for older fixtures that predate timeline metadata.
     """
 
-    for event in reversed(case.timeline):
-        if event.event_type != "status_changed":
-            continue
-        if event.metadata.get("to_status") == status:
-            return event.created_at
-    return case.updated_at
+    return _latest_transition_to_at(case, status) or case.updated_at.astimezone(timezone.utc)
 
 
 def list_recently_in_progress_cases(
@@ -246,11 +250,11 @@ def list_recently_in_progress_cases(
 ) -> dict[str, Any]:
     """Top-N most-recently-started in-progress cases for a business.
 
-    Complements recently-opened/acknowledged/resolved/dismissed projections with
-    the active-work slice needed by internal queues. Only cases currently in
-    ``in_progress`` status are included; terminal cases that passed through
-    in-progress belong to terminal projections. Ordered by the canonical
-    timeline transition into ``in_progress`` DESC with ``case_id`` ASC as a
+    This projection fills the operator handoff gap between recently acknowledged
+    and recently resolved work. It includes only cases whose current status is
+    ``in_progress`` and derives the start timestamp from canonical
+    ``status_changed`` timeline events rather than ad-hoc surface state. Ordered
+    by latest in-progress transition DESC with ``case_id`` ASC as a
     deterministic tie-breaker.
     """
 
@@ -271,6 +275,7 @@ def list_recently_in_progress_cases(
             "priority_score": case.priority_score,
             "opened_at": case.opened_at.isoformat(),
             "in_progress_at": in_progress_at.isoformat(),
+            "handling_seconds": int((in_progress_at - case.opened_at).total_seconds()),
             "time_to_in_progress_seconds": int((in_progress_at - case.opened_at).total_seconds()),
         }
         for in_progress_at, _case_id, case in limited
@@ -306,9 +311,7 @@ def list_recently_reopened_cases(
     reopened: list[tuple[datetime, str, OperationalCase]] = []
     for status in ("open", "acknowledged", "in_progress"):
         for case in store.list_cases(business_id=business_id, status=status, limit=None):
-            reopened_events = [
-                event.created_at for event in case.timeline if event.event_type == "case_reopened"
-            ]
+            reopened_events = [event.created_at for event in case.timeline if event.event_type == "case_reopened"]
             if not reopened_events:
                 continue
             reopened_at = max(event.astimezone(timezone.utc) for event in reopened_events)

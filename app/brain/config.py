@@ -42,6 +42,65 @@ class ConnectorConfig(BaseModel):
     secret_refs: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
 
+    @model_validator(mode="after")
+    def known_connector_params_must_be_complete(self) -> "ConnectorConfig":
+        """Fail fast on incomplete first-party connector configs.
+
+        Secret-shaped requirements may be supplied either as raw params in test
+        fixtures/dry-runs or as durable `secret_refs` in production configs.
+        Unknown connector types are preserved for forward compatibility and are
+        rejected later by the runtime dispatcher if unsupported.
+        """
+
+        required_params_by_type: dict[str, tuple[str, ...]] = {
+            "google_sheets": ("spreadsheet_id", "range_name"),
+            "csv": ("csv_path",),
+            "tiendanube": ("store_id",),
+            "mercadolibre": ("seller_id",),
+            "meta_ads": ("ad_account_id",),
+            "woocommerce": ("store_url",),
+        }
+        required_secret_by_type: dict[str, tuple[str, ...]] = {
+            "tiendanube": ("access_token",),
+            "mercadolibre": ("access_token",),
+            "meta_ads": ("access_token",),
+            "woocommerce": ("consumer_key", "consumer_secret"),
+        }
+        example_by_type: dict[str, str] = {
+            "google_sheets": "examples/google_sheets_business_config.json",
+            "csv": "docs/orvo-brain-runtime.md#configure-a-csv-connector",
+            "tiendanube": "examples/tiendanube_business_config.json",
+            "mercadolibre": "examples/mercadolibre_business_config.json",
+            "meta_ads": "examples/meta_ads_business_config.json",
+            "woocommerce": "examples/woocommerce_business_config.json",
+        }
+        if not self.enabled:
+            return self
+
+        required_params = required_params_by_type.get(self.connector_type)
+        required_secrets = required_secret_by_type.get(self.connector_type, ())
+        if required_params is None:
+            return self
+
+        def _has(mapping: dict, key: str) -> bool:
+            value = mapping.get(key)
+            return value is not None and str(value).strip() != ""
+
+        missing = [key for key in required_params if not _has(self.params, key)]
+        missing.extend(
+            key for key in required_secrets if not (_has(self.params, key) or _has(self.secret_refs, key))
+        )
+        if missing:
+            required = [*required_params, *required_secrets]
+            missing_list = " and ".join(missing) if len(missing) == 2 else ", ".join(missing)
+            required_list = " and ".join(required) if len(required) == 2 else ", ".join(required)
+            example = example_by_type[self.connector_type]
+            raise ValueError(
+                f"{self.connector_type} connector config must include {missing_list} "
+                f"(required: {required_list}). See {example}."
+            )
+        return self
+
 
 # ---------------------------------------------------------------------------
 # BusinessConfig

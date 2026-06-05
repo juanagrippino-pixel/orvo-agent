@@ -1,113 +1,116 @@
 # Reporte ejecutivo autónomo — Orvo Codex Board
 
-Fecha de corte: 2026-06-04 03:47 UTC<br>
-Repo: `/root/orvo-agent`<br>
-Rama canónica: `feat/orvo-brain-control-plane`<br>
-Código verificado hasta: `fc06134` / `fc06134e5da4f7a7c3a1d26993bf28ee8fec80bd` antes de este reporte docs-only<br>
-Estado repo: `HEAD` sincronizado con `origin/feat/orvo-brain-control-plane` (`0/0` ahead/behind); parent repo limpio antes de escribir este reporte.
+Fecha de corte: 2026-06-05 03:52 UTC
+Repo: `/root/orvo-agent`
+Rama canónica: `feat/orvo-brain-control-plane`
+HEAD verificado: `8f69b9409cd1b0f5cb22566256affefb2bfd7da6`
+Estado repo: limpio, sincronizado con `origin/feat/orvo-brain-control-plane` (`0/0` ahead/behind).
+Inventario: 97 worktrees registrados, 0 dirty; 55 ramas locales y 73 remotas siguen con commits no mergeados.
 
 ## 1. Qué shipped desde el último board report
 
-La rama canónica avanzó de forma saludable y quedó publicada en origin. Shipped relevante:
+La rama canónica avanzó de `fc06134` a `8f69b94` con foco en seguridad, operator APIs y control-plane invariants. Commits destacados:
 
-- **Endpoint de latencia de acknowledgment por source connector** — `d769e87 codex: expose acknowledgment latency source connector endpoint`
-  - Nuevo `GET /internal/brain/businesses/<business_id>/cases/acknowledgment-latency/by-source-connector`.
-  - Mantiene route thin y delega en operator API existente.
-  - Tests reportados por build loop: full suite `1248 passed` después de merge/push.
-- **Invariant de promoción de case families owner-facing** — `fc06134 test: guard case family promotion policy`
-  - Asegura que los casos owner-facing salgan sólo de familias promovidas por semantic/metric registry.
-  - Mantiene `channel_mix_shift` como deferred/internal hasta promoción explícita.
-  - Release lo integró fast-forward; tests: focused `11 passed`, full suite `1249 passed in 20.63s`, push OK.
-- **Guardas recientes ya absorbidas en canonical** — entre `d769e87` y `fc06134` la rama también contiene hardening de whitelist de operator actions, endpoints de aging/handling latency, metadata de connector lifecycle, runtime config immutability, auth de rutas internas y documentación de arquitectura/integration train.
+- **Operator API / analytics de casos**
+  - `8f69b94 codex: expose resolution latency priority endpoint` — nuevo endpoint interno `GET /internal/brain/businesses/<business_id>/cases/resolution-latency/by-priority-bracket`; ruta thin, auth interna existente, service-layer projection reutilizada. Full suite reportada: `1296 passed`.
+  - `559c044 codex: expose recently in-progress cases`
+  - `b22b08d codex: expose resolution latency case-type endpoint`
+  - `4de1659 codex: expose ack latency entity-kind endpoint`
+  - `3f76888 codex: expose handling latency source connector endpoint`
+  - `1c9a50a codex: expose case aging entity-kind endpoint`
 
-Lectura producto: el control plane sigue acercándose a un piloto vendible, no a un bot de reportes. WhatsApp/operator UI siguen siendo proyecciones; el source of truth permanece en runtime/ledger/metric registry/Operational Cases.
+- **Trust / Seguridad / Redacción**
+  - `8c733be merge: wrong-token internal route auth invariant` + `8ea7397 test: guard internal routes against wrong bearer tokens` — todos los `/internal/brain` fallan cerrado con token incorrecto antes de lógica de negocio. Full suite release: `1295 passed`.
+  - `aa0c01a merge: connector health rate limit classification` + `7a02299 codex: classify connector rate limit failures`.
+  - `b91d9ec test: harden denied case action audit redaction`.
+  - `e18a545 test: cover owner brief action redaction`.
+  - `d054c65` / `40e4bc4` — cobertura de redacción para authorization headers.
+  - `bab7904 test: guard operator actions against non-object payloads`.
+  - `1dcc320 test: redact jql echoes in case queue`.
+  - `00d65a8 codex: redact malformed operator role audit data`.
+
+- **Connector / runtime / worker quality**
+  - `aa95711 feat: validate first-party connector configs`.
+  - `55bc94e test: preserve lower-layer missing-param coverage`.
+  - `63bbf32 test: guard pytest nodeid regressions`.
+  - `3bd1bd0 test: verify worker manifest git claims`.
+  - `bf08a04 fix: reconcile branch runtime report fixes`.
+
+- **Docs / producto**
+  - `7f7d791 docs: add MercadoLibre onboarding example`.
+  - `c4be022 docs: add 2026-06-04 architecture review`.
+  - `35f7820` / `96a02ca` — repo framing público más limpio.
+  - `16341db docs: refresh autonomous board report`.
+
+Lectura producto: el sistema está reforzando el core de control plane — casos, endpoints internos, auditoría, redacción, connector health y invariants — sin convertir WhatsApp/reportes en source of truth.
 
 ## 2. Qué está corriendo
 
-Departamentos/líneas activas según cron outputs y operating-system doc:
-
-- **Build loop** cada 180m: último run green, commit `d769e87`, push exitoso, full suite `1248 passed`.
-- **Release / Integration** cada 240m: integró `codex/qa-case-family-promotion` en `fc06134`, push exitoso, full suite `1249 passed`.
-- **Engineering Factory** cada 240m: produjo rama nueva `codex/eng-factory-external-action-response-redaction-20260604` con commit `05fa26b`, pushed, full suite en worktree `1250 passed`.
-- **QA / Red Team** cada 240m: produjo la invariant owner-facing case-family (`fc06134`), ya integrada.
-- **SRE / Ops** cada 240m: estado general saludable con 2 alertas; repo limpio, dry-run diario Artemea OK, full suite `1249 passed`, caches generados limpiados.
-- **COO / Strategic Planner / ARB / lane jobs** siguen activos; el COO insiste en frenar breadth y cerrar un Pilot Closure Sprint Tiendanube→ledger→cases→WhatsApp/operator.
-
-Watchdogs recientes:
-
-- Repo hygiene: silent/OK (`6049c8fa64b7`, 03:18 UTC).
-- Hermes gateway liveness: silent/OK (`4d3d8d2b478b`, 03:18 UTC).
-- Agents watchdog: silent/OK (`b9ddbef094f8`, 03:18 UTC).
-- Dirty worktree inventory: silent/OK (`7b60ac922c7f`, 03:18 UTC).
-- Review queue watchdog: silent/OK (`891a1856d6bd`, 03:18 UTC); la alerta previa de cola ya no apareció en el último run.
-
-Inventario actual leído por este reporte:
-
-- Worktrees registrados: `82`.
-- Local branches no mergeadas contra canonical: `41`.
-- Remote branches no mergeadas contra canonical: `84`.
-- Parent repo: limpio y sincronizado `0/0` con origin.
+- **Build loop:** green; shipped `8f69b94`, push OK, full suite `1296 passed`.
+- **Release / Integration:** green; integró `qa/internal-operator-wrong-token-auth-invariant` en `8c733be`, push OK, full suite `1295 passed`.
+- **QA / Red Team:** produjo invariant de token incorrecto `8ea7397`; ya integrado. Próximo gate recomendado: scope forbiddance con token válido + `X-Orvo-Businesses` restringido.
+- **Engineering Factory:** branch listo `codex/operator-audit-business-scope-redaction-20260604` @ `aa6749b`; full suite en worktree `1294 passed`; push OK.
+- **Work Management Core:** branch local `codex/work-management` @ `e61e934` green (`1312 passed`) tras rebase, pero remote quedó stale porque el push fue non-fast-forward.
+- **SRE / Ops:** estado **degraded, no crítico**; limpió 270 cache dirs; repo/worktrees limpios; Hermes gateway y watchdogs OK.
+- **Watchdogs recientes:** repo hygiene, gateway liveness, agents watchdog y review queue watchdog salieron silent/OK entre 03:30–03:49 UTC.
 
 ## 3. Bloqueos y riesgos que importan
 
-1. **Backup Hermes con fallo de credenciales**
-   - SRE reportó job `a6c402fefa1c`: push del backup repo falló por auth.
-   - Hay commit local preservado; no se tocó credencial/remote automáticamente por riesgo de secretos.
+1. **Meta Ads rompe el dry-run diario de Artemea**
+   - SRE observó `PipelineConnectorError: Meta Ads error: HTTP 400` en `python scripts/run_orvo_brain_reports.py --dry-run --force --business-id artemea`.
+   - Riesgo directo: afectar el WhatsApp/report diario de las 11:00 UTC si el conector sigue fallando.
+   - Tiendanube-only había funcionado; el foco es Meta Ads/config/API response.
 
-2. **Service Management / SLA Lane timed out**
-   - Job `797bec930cc5`: idle timeout después de 600s.
-   - Próximo run ya está agendado; si repite, revisar transcript/worktree antes de tocar schedule.
+2. **Backup Hermes: metadata del cron aún muestra fallo viejo**
+   - El repo de backup ya aparece con commit limpio/pushed `17b0116 backup: 2026-06-05`, pero el job conserva último estado fallido por auth del 2026-06-04.
+   - Vigilar el próximo run antes de tocar credenciales/remotes.
 
-3. **Backlog de integración todavía grande**
-   - Hay 41 ramas locales y 84 remotas no mergeadas; varias quedaron behind después de `fc06134`.
-   - Riesgo: ramas envejecidas reintroducen drift semántico o duplican endpoints ya absorbidos.
+3. **Backlog de integración todavía alto**
+   - 55 ramas locales y 73 remotas no mergeadas; varias están behind tras `8f69b94`.
+   - Riesgo: drift semántico, conflictos y duplicación de endpoints si se mergea wholesale.
 
-4. **Identidad/operator auth sigue siendo scaffolding interno**
-   - Shared bearer + role headers sirven para migración/interno; no son identidad SaaS multi-operador productiva.
+4. **`codex/work-management` está green local pero remote stale**
+   - Rebase correcto, suite green, pero requiere `--force-with-lease` o integración desde worktree local.
+   - Decisión humana útil: autorizar actualización segura del remote rebased o dejar que Release integre desde local.
 
-5. **`codex/edge-developer-platform` requiere reframe**
-   - ARB la marcó como útil para manifest/contracts, pero no debe presentarse como enforcement real de gateway/rate-limit/security todavía.
+5. **Hermes update disponible**
+   - SRE reporta Hermes Agent `v0.15.1`, ~500 commits behind. No se actualizó por ser cambio de plataforma riesgoso.
 
-6. **Riesgo de proliferación de operator surfaces**
-   - Ya hay muchos endpoints. La prioridad debe ser cerrar workflows vendibles, no sumar dashboards sin acción.
+## 4. Branches que necesitan integración / decisión
 
-## 4. Branches que necesitan integración/decisión
+Orden recomendado, una rama por corrida con focused + full suite:
 
-Prioridad recomendada, una por corrida y con focused + full tests:
+1. **`codex/operator-audit-business-scope-redaction-20260604` @ `aa6749b`**
+   - Pequeña y de alto valor Trust/Security.
+   - Persiste `business_id` redacted, consulta por `business_scope_key` hash determinístico y evita leak/collision entre tenants secret-shaped.
+   - Estado relativo: canonical 5 commits ahead / branch 1 ahead.
 
-1. **`codex/eng-factory-external-action-response-redaction-20260604`** @ `05fa26b`
-   - Nueva rama Engineering Factory, pushed y green (`1250 passed`).
-   - Cambia `app/brain/external_actions.py` + tests para validar `toolkit` / `action_key` seguros antes de ledger/provider side effects.
-   - Diff pequeño: 2 archivos, 55 insertions. Recomendada como siguiente integración de Trust/Security.
+2. **`codex/trust-admin-security`**
+   - Scope pequeño de trust/admin follow-up; canonical 6 ahead / branch 1 ahead.
 
-2. **`codex/eng-factory-test-nodeid-regression-20260603`** @ `e1f17be`
-   - Test/tooling guard pequeño; Release lo recomendó como próximo si sigue green.
+3. **`codex/work-management` @ local `e61e934`**
+   - Importante para OperationalCase/WorkItem; canonical 3 ahead / branch 15 ahead.
+   - Bloqueo: remote stale; requiere aprobación de `--force-with-lease` o merge desde local worktree tras revisión.
 
-3. **Redaction/security QA-only branches**
-   - `codex/qa-owner-brief-action-secret-redaction-20260603`
-   - `codex/qa-case-redaction-20260603`
-   - `codex/qa-auth-scheme-redaction-20260603`
-   - Integrar/cherry-pick sólo si no están cubiertas por hardening ya mergeado.
+4. **`codex/connector-platform`**
+   - Cerca de ready, pero toca runtime/registry/ledger contracts; canonical 6 ahead / branch 13 ahead. Requiere contract/full-suite gate.
 
-4. **Trust/admin y operator projection slices**
-   - `codex/trust-admin-security`
-   - `codex/eng-factory-recent-in-progress-20260603`
-   - `codex/operator-surfaces` sólo en slices pequeños, no wholesale.
-
-5. **Larger branches con review semántico previo**
-   - `codex/connector-platform`, `codex/workflow-automation`, `codex/service-management`, `codex/search-analytics`, `codex/work-management`.
-   - Rebase/review antes de merge; evitar vocabularios paralelos a `OperationalCase` / `WorkItem`.
-
-Diferir/reencuadrar: `codex/edge-developer-platform` hasta aclarar enforcement scope.
+5. **Diferir/reencuadrar por tamaño o drift**
+   - `codex/workflow-automation`, `codex/service-management`, `codex/search-analytics`, `codex/operator-surfaces`, `codex/edge-developer-platform`.
+   - ARB marcó `operator-surfaces`, `search-analytics` y `edge-developer-platform` como needing rebase/split/work.
 
 ## 5. Próximas acciones autónomas
 
-- **Release/Integration:** integrar primero `codex/eng-factory-external-action-response-redaction-20260604` o `codex/eng-factory-test-nodeid-regression-20260603`, uno por corrida, con full suite y push.
-- **QA/Red Team:** seguir convirtiendo review blockers en invariants; foco en redacción/action boundaries y promoción explícita de case families.
-- **SRE/Ops:** resolver credenciales del backup con intervención segura y vigilar timeout de Service Management/SLA; no mutar cron ni borrar worktrees sin ancestry checks.
-- **Engineering Factory:** dejar de abrir breadth si hay backlog; usar capacidad para glue/integration gaps o fixer branches sobre blockers concretos.
-- **COO/GTM:** preparar el Pilot Closure Sprint: prueba Tiendanube + runtime/ledger + cases/evidence + owner brief + operator view.
+- **SRE/Ops:** investigar Meta Ads HTTP 400 antes de la ventana diaria; monitorear backup metadata; no cambiar cron ni credenciales sin necesidad explícita.
+- **Release:** mergear `operator-audit-business-scope-redaction` primero; luego `trust-admin-security`; después resolver `work-management` local-vs-remote.
+- **QA:** agregar invariant de business-scope forbidden para rutas internas.
+- **Engineering Factory:** evitar breadth; producir sólo fixer/glue branches para blockers concretos de integration train.
+- **COO/Product:** mantener el Pilot Closure Sprint: Tiendanube/runtime/ledger → Operational Cases/evidence → owner brief/WhatsApp + operator view demoable.
 
 ## Decisión pedida a Juan
 
-Autorizar una ventana corta de **Pilot Closure Sprint**: congelar nuevas features amplias por un ciclo, integrar sólo Trust/Security + test guards críticos, y producir un artefacto demoable Tiendanube→ledger→cases→WhatsApp/operator view.
+Autorizar una de estas dos opciones para `codex/work-management`:
+1. permitir `git push --force-with-lease` del branch rebased green; o
+2. pedir a Release integrar desde el worktree local verificado y luego reconciliar el remote.
+
+Además, priorizar investigación de Meta Ads HTTP 400 antes del reporte diario si Artemea sigue siendo una demo/piloto sensible.

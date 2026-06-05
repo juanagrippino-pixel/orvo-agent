@@ -52,6 +52,21 @@ def _mark_in_progress(
     )
 
 
+def _acknowledge(
+    store: InMemoryOperationalCaseStore,
+    case_id: str,
+    *,
+    acknowledged_at: datetime,
+) -> None:
+    store.transition_case(
+        case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=acknowledged_at,
+    )
+
+
 def test_returns_empty_when_no_cases():
     store = InMemoryOperationalCaseStore()
 
@@ -72,6 +87,7 @@ def test_orders_most_recently_marked_in_progress_first_and_redacts_payload():
     for run_id, since_in_progress in [
         ("old", timedelta(days=2)),
         ("new", timedelta(hours=3)),
+        ("middle", timedelta(hours=6)),
     ]:
         opened_at = NOW - since_in_progress - timedelta(hours=5)
         case = store.upsert_detection(
@@ -89,13 +105,18 @@ def test_orders_most_recently_marked_in_progress_first_and_redacts_payload():
 
     result = list_recently_in_progress_cases(store, business_id="artemea")
 
-    assert result["in_progress_total"] == 2
-    assert result["count"] == 2
-    assert [entry["case_id"] for entry in result["cases"]] == [cases_by_run["new"], cases_by_run["old"]]
+    assert result["in_progress_total"] == 3
+    assert result["count"] == 3
+    assert [entry["case_id"] for entry in result["cases"]] == [
+        cases_by_run["new"],
+        cases_by_run["middle"],
+        cases_by_run["old"],
+    ]
     first = result["cases"][0]
     assert first["status"] == "in_progress"
     assert first["case_type"] == "sales_drop"
     assert first["in_progress_at"].startswith("2026-06-02T09:00:00")
+    assert first["handling_seconds"] == int(timedelta(hours=5).total_seconds())
     assert first["time_to_in_progress_seconds"] == int(timedelta(hours=5).total_seconds())
     assert "raw_secret_title" not in str(result)
 
@@ -130,7 +151,7 @@ def test_excludes_open_acknowledged_and_terminal_cases():
     store = InMemoryOperationalCaseStore()
     in_progress = store.upsert_detection(_detection(run_id="run-progress"), detected_at=NOW - timedelta(days=1))
     _mark_in_progress(store, in_progress.case_id, in_progress_at=NOW - timedelta(hours=1))
-    store.upsert_detection(
+    open_case = store.upsert_detection(
         _detection(run_id="run-open", dedupe_suffix="stockout_risk/business/open/commerce.inventory/daily"),
         detected_at=NOW - timedelta(hours=2),
     )
@@ -138,13 +159,7 @@ def test_excludes_open_acknowledged_and_terminal_cases():
         _detection(run_id="run-ack", dedupe_suffix="stockout_risk/business/ack/commerce.inventory/daily"),
         detected_at=NOW - timedelta(hours=3),
     )
-    store.transition_case(
-        acknowledged.case_id,
-        status="acknowledged",
-        actor_type="operator",
-        actor_ref="operator@example.com",
-        transitioned_at=NOW - timedelta(hours=2),
-    )
+    _acknowledge(store, acknowledged.case_id, acknowledged_at=NOW - timedelta(hours=2))
     resolved = store.upsert_detection(
         _detection(run_id="run-resolved", dedupe_suffix="stockout_risk/business/resolved/commerce.inventory/daily"),
         detected_at=NOW - timedelta(hours=4),
@@ -163,7 +178,11 @@ def test_excludes_open_acknowledged_and_terminal_cases():
 
     assert result["in_progress_total"] == 1
     assert result["count"] == 1
+    returned_case_ids = {entry["case_id"] for entry in result["cases"]}
     assert result["cases"][0]["case_id"] == in_progress.case_id
+    assert open_case.case_id not in returned_case_ids
+    assert acknowledged.case_id not in returned_case_ids
+    assert resolved.case_id not in returned_case_ids
 
 
 def test_tiebreaks_on_case_id():

@@ -92,7 +92,8 @@ def register_dashboard_view_routes(app):
 
     @app.post("/internal/brain/businesses/<business_id>/cases/<case_id>/actions")
     def internal_brain_case_action(business_id: str, case_id: str):
-        payload = request.get_json(silent=True) or {}
+        raw_payload = request.get_json(silent=True)
+        payload = raw_payload if isinstance(raw_payload, dict) else {}
         actor_ref = request.headers.get("X-Orvo-Operator", "")
 
         def _handle(case_store, run_ledger):
@@ -108,10 +109,29 @@ def register_dashboard_view_routes(app):
                         "action_key": str(payload.get("action_key", "")),
                         "permission": CASE_ACTION_PERMISSION,
                         "status_code": 403,
-                        "payload": payload,
+                        "payload": raw_payload if raw_payload is not None else payload,
                     },
                 )
                 return permission_error
+            if raw_payload is not None and not isinstance(raw_payload, dict):
+                _append_operator_audit_event(
+                    business_id=business_id,
+                    actor_ref=actor_ref,
+                    event_type="operator.case_action.failed",
+                    target_type="operational_case",
+                    target_id=case_id,
+                    data={
+                        "action_key": "",
+                        "error_code": "invalid_case_action_payload",
+                        "status_code": 400,
+                        "payload": raw_payload,
+                    },
+                )
+                raise OperatorAPIError(
+                    "invalid_case_action_payload",
+                    "case action payload must be a JSON object",
+                    status_code=400,
+                )
             try:
                 data = apply_case_action(
                     case_store,

@@ -74,7 +74,7 @@ Measures: Is there an accountable human who will own case follow-up?
 | Score | Criteria |
 |-------|----------|
 | 0-4 | No clear owner. "Lo vemos entre todos." Alerts would become noise because nobody acts. |
-| 5-9 | Informal owner but no process. "Generalmente lo mira Juan pero depende del día." |
+| 5-9 | Informal owner but no process. "Generalmente lo mira operator pero depende del día." |
 | 10-14 | Named owner who checks daily. Has some process for follow-up. Will engage with Orvo cases. |
 | 15-17 | Dedicated ecommerce operator. Daily routine includes checking operations. Has accountability for results. |
 | 18-20 | Owner/founder personally accountable. Checks operations daily, follows up rigorously. Will champion Orvo internally. |

@@ -23,21 +23,7 @@ def _sample_path(rule) -> str:
     return path
 
 
-def test_every_internal_brain_route_rejects_missing_bearer_token_before_business_logic(monkeypatch, tmp_path):
-    """Gateway/auth invariant: every internal operator route must fail closed.
-
-    This dynamically walks the Flask route map so newly added internal Brain
-    endpoints are covered by default. The probe intentionally uses missing case,
-    run, and view identifiers; a correct route must return the auth envelope
-    before touching storage or surfacing resource-specific errors.
-    """
-
-    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
-    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(tmp_path / "auth-invariant.sqlite3"))
-
-    from server import app
-
-    client = app.test_client()
+def _assert_internal_brain_routes_reject_auth(client, app, *, headers: dict[str, str] | None = None) -> None:
     failures: list[dict[str, object]] = []
     checked_routes: list[tuple[str, str]] = []
 
@@ -50,6 +36,7 @@ def test_every_internal_brain_route_rejects_missing_bearer_token_before_business
             response = client.open(
                 path,
                 method=method,
+                headers=headers,
                 json={} if method in {"POST", "PUT", "PATCH"} else None,
             )
             body = response.get_json(silent=True) or {}
@@ -67,3 +54,41 @@ def test_every_internal_brain_route_rejects_missing_bearer_token_before_business
 
     assert checked_routes, "expected at least one /internal/brain route to protect"
     assert failures == []
+
+
+def test_every_internal_brain_route_rejects_missing_bearer_token_before_business_logic(monkeypatch, tmp_path):
+    """Gateway/auth invariant: every internal operator route must fail closed.
+
+    This dynamically walks the Flask route map so newly added internal Brain
+    endpoints are covered by default. The probe intentionally uses missing case,
+    run, and view identifiers; a correct route must return the auth envelope
+    before touching storage or surfacing resource-specific errors.
+    """
+
+    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
+    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(tmp_path / "auth-invariant.sqlite3"))
+
+    from server import app
+
+    _assert_internal_brain_routes_reject_auth(app.test_client(), app)
+
+
+def test_every_internal_brain_route_rejects_wrong_bearer_token_before_business_logic(monkeypatch, tmp_path):
+    """Gateway/auth invariant: invalid internal tokens must fail like missing tokens.
+
+    A stale or mistyped bearer token is more dangerous than a missing header
+    because failed-auth audit writes may run. This probe locks the route-wide
+    contract that auth still returns the safe unauthorized envelope before any
+    resource-specific case/run/view response can leak across operator surfaces.
+    """
+
+    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
+    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(tmp_path / "wrong-token-auth-invariant.sqlite3"))
+
+    from server import app
+
+    _assert_internal_brain_routes_reject_auth(
+        app.test_client(),
+        app,
+        headers={"Authorization": "Bearer wrong-internal-token"},
+    )

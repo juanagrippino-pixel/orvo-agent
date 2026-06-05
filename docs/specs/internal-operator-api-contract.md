@@ -18,6 +18,17 @@ The internal operator API is the controlled surface for inspecting runtimes, con
 
 ## Initial endpoints
 
+### Operator session
+
+```http
+GET /internal/brain/businesses/{business_id}/operator-session
+```
+
+Returns the authenticated operator's redacted actor ref, normalized role,
+permission flags, and redacted business-grant projection. Legacy callers without
+`X-Orvo-Businesses` are marked `legacy_token_scoped=true`; explicit grants return
+only safe business labels or `[REDACTED]`, never raw pasted header material.
+
 ### Compile preview
 
 ```http
@@ -106,6 +117,10 @@ unbounded historical export.
 
 ## Response envelope
 
+`request_id` mirrors `X-Request-ID` only when it is a safe operational
+identifier; secret-shaped request IDs are collapsed to `[REDACTED]` in responses
+and durable audit events.
+
 ```json
 {
   "ok": true,
@@ -140,6 +155,7 @@ Before exposing beyond local/dev:
 - authenticate operator identity;
 - scope access to business/tenant;
 - enforce explicit `X-Orvo-Businesses` operator grants when present: comma-separated business IDs grant only those businesses, `*` grants all businesses, and an empty/present header fails closed while legacy callers without the header remain token-scoped during migration;
+- audit failed internal bearer-token authentication attempts without persisting raw `Authorization` header values or token tails;
 - log mutating actions with actor ref;
 - rate-limit force-run endpoints;
 - require approval for external side effects;
@@ -149,6 +165,8 @@ Before exposing beyond local/dev:
 
 - compile preview does not execute connectors;
 - readiness endpoint redacts secret refs;
+- invalid internal bearer-token attempts create redacted operator audit events without persisting raw `Authorization` headers;
+- internal envelopes and durable audit events redact secret-shaped `X-Request-ID` values;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
