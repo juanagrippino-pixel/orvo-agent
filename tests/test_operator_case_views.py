@@ -41,6 +41,15 @@ def test_parse_case_jql_uses_canonical_work_item_field_registry():
     )
 
 
+def _case_detection_with_evidence_count(*, evidence_count: int, run_id: str, **kwargs):
+    detection = _case_detection(run_id=run_id, **kwargs)
+    evidence_refs = [
+        f"evidence://{detection.business_id}/{run_id}/{detection.case_type}/{index}"
+        for index in range(evidence_count)
+    ]
+    return detection.model_copy(update={"evidence_refs": evidence_refs, "evidence_snapshots": []})
+
+
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
     with pytest.raises(OperatorAPIError) as business_scope:
         parse_case_jql("business_id = other")
@@ -171,6 +180,24 @@ def test_parse_case_jql_supports_actionable_boolean_filter():
 
     with pytest.raises(OperatorAPIError) as sql_shape:
         parse_case_jql("actionable = true OR status = resolved")
+    assert sql_shape.value.code == "invalid_jql"
+
+
+def test_parse_case_jql_supports_evidence_count_filter():
+    assert parse_case_jql("evidence_count >= 2").normalized == (
+        "evidence_count >= 2 ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_operator:
+        parse_case_jql("evidence_count IN (1, 2)")
+    assert unsupported_operator.value.code == "unsupported_jql_operator"
+
+    with pytest.raises(OperatorAPIError) as unsupported_value:
+        parse_case_jql("evidence_count = two")
+    assert unsupported_value.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as sql_shape:
+        parse_case_jql("evidence_count >= 1 OR 1 = 1")
     assert sql_shape.value.code == "invalid_jql"
 
 
@@ -644,6 +671,52 @@ def test_internal_case_queue_jql_reports_scoped_total_and_truncation(monkeypatch
     assert body["data"]["limit"] == 1
     assert [case["case_id"] for case in body["data"]["cases"]] == [top_case.case_id]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_filters_by_evidence_count_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection_with_evidence_count(evidence_count=1, run_id="run-one", priority=100))
+    rich_evidence = _seed_case(
+        db_path,
+        _case_detection_with_evidence_count(
+            evidence_count=2,
+            run_id="run-two",
+            dedupe_suffix="stockout_risk/sku/TWO_EVIDENCE/inventory.on_hand/daily",
+            priority=90,
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection_with_evidence_count(
+            evidence_count=3,
+            run_id="run-other-evidence",
+            business_id="other",
+            priority=99,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=evidence_count%20%3E%3D%202",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "evidence_count >= 2 ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [rich_evidence.case_id]
+    assert body["data"]["cases"][0]["evidence_count"] == 2
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+    invalid = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "evidence_count = token:raw_evidence_secret"},
+    )
+
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "unsupported_jql_value"
+    assert "raw_evidence_secret" not in invalid.get_data(as_text=True)
 
 
 def test_internal_case_queue_rejects_conflicting_filters_and_invalid_jql(monkeypatch, tmp_path):
