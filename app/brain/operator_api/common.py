@@ -123,6 +123,24 @@ def normalize_case_assignee(assignee_ref: Any, owner_ref: Any) -> str:
         raise OperatorAPIError("invalid_assignee_ref", "assignee_ref must be a non-empty string", status_code=400)
     return normalized
 
+
+def normalize_case_action_idempotency_key(value: Any) -> str | None:
+    """Return a safe optional key for retrying manual operator case actions."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise OperatorAPIError(
+            "invalid_case_action_idempotency_key",
+            "case action idempotency_key must be a string",
+            status_code=400,
+        )
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return redact_text(normalized) or "[REDACTED]"
+
+
 _ACTIONABLE_STATUSES = ACTIONABLE_OPERATIONAL_CASE_STATUSES
 
 

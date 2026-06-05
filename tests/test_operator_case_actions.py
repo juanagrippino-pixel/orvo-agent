@@ -637,6 +637,51 @@ def test_apply_case_action_add_comment_rejects_missing_actor_and_preserves_cross
     assert len(store.get_case(other.case_id).timeline) == len(other.timeline)
 
 
+def test_internal_case_action_route_retries_status_action_with_same_idempotency_key_without_duplicate_timeline(
+    monkeypatch, tmp_path
+):
+    test_client, db_path = client(monkeypatch, tmp_path)
+    case = seed_sqlite_case(db_path)
+    payload = {
+        "action_key": "acknowledge_case",
+        "idempotency_key": f"manual/artemea/{case.case_id}/acknowledge/req-1",
+    }
+
+    first = test_client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=AUTH,
+        json=payload,
+    )
+    retry = test_client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=AUTH,
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert retry.status_code == 200
+    retry_body = retry.get_json()
+    assert retry_body["ok"] is True
+    assert retry_body["data"]["idempotency"] == {
+        "decision": "duplicate",
+        "idempotency_key": payload["idempotency_key"],
+    }
+    assert retry_body["data"]["case"]["status"] == "acknowledged"
+
+    connection = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(connection).get_case(case.case_id)
+    connection.close()
+    assert reloaded is not None
+    status_events = [event for event in reloaded.timeline if event.event_type == "status_changed"]
+    assert len(status_events) == 1
+    assert status_events[0].metadata == {
+        "from_status": "open",
+        "to_status": "acknowledged",
+        "operator_case_action_key": "acknowledge_case",
+        "operator_case_action_idempotency_key": payload["idempotency_key"],
+    }
+
+
 def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts_and_persists(monkeypatch, tmp_path):
     test_client, db_path = client(monkeypatch, tmp_path)
     case = seed_sqlite_case(db_path)

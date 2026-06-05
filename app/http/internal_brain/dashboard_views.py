@@ -132,6 +132,9 @@ def register_dashboard_view_routes(app):
                     status_code=400,
                 )
             try:
+                idempotency_key = payload.get("idempotency_key")
+                if idempotency_key is None:
+                    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key")
                 data = apply_case_action(
                     case_store,
                     business_id=business_id,
@@ -143,6 +146,7 @@ def register_dashboard_view_routes(app):
                     metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
                     assignee_ref=payload.get("assignee_ref"),
                     owner_ref=payload.get("owner_ref"),
+                    idempotency_key=idempotency_key,
                 )
             except OperatorAPIError as exc:
                 _append_operator_audit_event(

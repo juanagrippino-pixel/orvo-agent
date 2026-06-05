@@ -498,6 +498,7 @@ class OperationalCaseStore(Protocol):
         actor_ref: str,
         reason: str | None = None,
         transitioned_at: datetime | None = None,
+        extra_timeline_metadata: dict[str, Any] | None = None,
     ) -> OperationalCase: ...
 
     def add_comment(
@@ -643,6 +644,7 @@ class _OperationalCaseMutations:
         actor_ref: str,
         reason: str | None = None,
         transitioned_at: datetime | None = None,
+        extra_timeline_metadata: dict[str, Any] | None = None,
     ) -> OperationalCase:
         record = self._load_for_update(case_id)
         if status == record.status:
@@ -653,6 +655,9 @@ class _OperationalCaseMutations:
         if actor_type == "operator" and status in TERMINAL_OPERATIONAL_CASE_STATUSES and normalized_reason is None:
             raise OperationalCaseStatusError(f"operator transition to {status} requires a non-empty reason")
         transitioned_at = _as_utc(transitioned_at) if transitioned_at is not None else _now_utc()
+        event_metadata = {"from_status": record.status, "to_status": status}
+        if extra_timeline_metadata:
+            event_metadata.update(extra_timeline_metadata)
         update: dict[str, Any] = {
             "status": status,
             "updated_at": transitioned_at,
@@ -665,7 +670,7 @@ class _OperationalCaseMutations:
                     case_id=record.case_id,
                     created_at=transitioned_at,
                     summary=normalized_reason or f"Status changed from {record.status} to {status}.",
-                    metadata={"from_status": record.status, "to_status": status},
+                    metadata=event_metadata,
                 ),
             ],
         }
