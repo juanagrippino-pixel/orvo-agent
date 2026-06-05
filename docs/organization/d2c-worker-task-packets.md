@@ -539,7 +539,7 @@ Current source-of-truth check:
 - `app/brain/workflow_action_ledger.py` records durable workflow action ledger rows, enforces idempotency keys, redacts params, and creates approval-request objects for approval-required actions.
 - `app/brain/workflow_automation.py` can write planned workflow actions to the ledger while preserving projection-only behavior.
 - `app/brain/workflow_approval_queue.py` and `app/brain/workflow_execution_queue.py` expose read-only queue projections with execution disabled and `side_effects_executed = 0`.
-- Manual case-action idempotency and a governed executor are still out of scope unless a separate packet adds actor identity, provider idempotency, execution-attempt ledgering, RBAC, retry/failure semantics, and audit linkage.
+- Manual case-action idempotency now covers the internal operator API when callers provide `X-Idempotency-Key`: keys are reserved before mutation, stored as `source="manual_operator"`, and duplicate completed requests replay without a second timeline mutation. Governed external/provider execution remains out of scope unless a separate packet adds provider idempotency, execution-attempt ledgering, retry/failure semantics, and approval-backed side-effect execution.
 
 Read:
 

@@ -6,10 +6,12 @@ from flask import request
 
 from app.brain.operator_api import *  # noqa: F401,F403
 from app.brain.operator_auth import CASE_ACTION_PERMISSION
+from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
 
 from .common import (
     _append_operator_audit_event,
     _gateway_policy_or_error,
+    _internal_brain_db_path,
     _internal_success,
     _internal_principal_or_error,
     _with_internal_stores,
@@ -153,11 +155,13 @@ def register_dashboard_view_routes(app):
                     status_code=400,
                 )
             try:
-                data = apply_case_action(
+                data = apply_case_action_with_idempotency(
                     case_store,
+                    SQLiteWorkflowActionLedgerStore(_internal_brain_db_path()),
                     business_id=business_id,
                     case_id=case_id,
                     action_key=str(payload.get("action_key", "")),
+                    idempotency_key=request.headers.get("X-Idempotency-Key"),
                     actor_ref=actor_ref,
                     reason=payload.get("reason"),
                     comment=payload.get("comment"),

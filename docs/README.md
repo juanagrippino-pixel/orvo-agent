@@ -45,6 +45,8 @@ Start here:
 - [`docs/product/report-design.md`](product/report-design.md)
 - [`docs/product/feedback-design.md`](product/feedback-design.md)
 - [`docs/gtm/d2c-packaging-and-messaging.md`](gtm/d2c-packaging-and-messaging.md)
+- [`docs/gtm/2026-06-01-paid-pilot-close-kit.md`](gtm/2026-06-01-paid-pilot-close-kit.md) — close-ready USD 149 paid-pilot asset.
+- [`docs/gtm/2026-06-05-first-10-paid-pilot-lead-build-packet.md`](gtm/2026-06-05-first-10-paid-pilot-lead-build-packet.md) — current lead-build workflow for the first 10 qualified commercial conversations.
 - [`docs/research/2026-05-26-product-market-intel-tiendanube-control-plane.md`](research/2026-05-26-product-market-intel-tiendanube-control-plane.md)
 
 ## Operations and autonomous workers
@@ -53,7 +55,8 @@ Start here:
 - [`docs/organization/d2c-worker-task-packets.md`](organization/d2c-worker-task-packets.md)
 - [`docs/specs/integration-train-contract.md`](specs/integration-train-contract.md) — current integration order and next recommendations.
 - [`docs/ops/2026-05-31-integration-train.md`](ops/2026-05-31-integration-train.md) — historical blocked-run record with supersession note; use the integration-train contract for current queue state.
-- [`docs/architecture-reviews/2026-06-03-architecture-board-update.md`](architecture-reviews/2026-06-03-architecture-board-update.md) — latest ARB branch disposition, shipped baseline checkpoint, and next merge-train recommendations.
+- [`docs/architecture-reviews/2026-06-05-arb-review.md`](architecture-reviews/2026-06-05-arb-review.md) — latest ARB branch disposition, shipped baseline checkpoint, and next merge-train recommendations.
+- [`docs/ops/latest-autonomous-board-report.md`](ops/latest-autonomous-board-report.md) — latest executive board report for shipped commits, active blockers, and near-term integration order.
 - [`docs/ops/d2c-pilot-readiness-checklist.md`](ops/d2c-pilot-readiness-checklist.md)
 - [`docs/ops/d2c-pilot-runbook.md`](ops/d2c-pilot-runbook.md)
 - [`docs/operability/worktree-hygiene.md`](operability/worktree-hygiene.md)

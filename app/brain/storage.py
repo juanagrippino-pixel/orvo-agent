@@ -15,6 +15,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
+from app.brain.audit_scope import audit_business_scope_key
 from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.run_ledger import SQLiteRunLedger
 from app.brain.config import (
@@ -108,6 +109,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS operator_audit_events (
             event_id     TEXT PRIMARY KEY,
             business_id  TEXT NOT NULL,
+            business_scope_key TEXT NOT NULL,
             actor_ref    TEXT NOT NULL,
             event_type   TEXT NOT NULL,
             target_type  TEXT NOT NULL,
@@ -124,7 +126,41 @@ def init_schema(conn: sqlite3.Connection) -> None:
             ON operator_audit_events (target_type, target_id, created_at DESC);
         """
     )
+    _ensure_operator_audit_scope_key(conn)
     conn.commit()
+
+
+def _ensure_operator_audit_scope_key(conn: sqlite3.Connection) -> None:
+    """Add/backfill the non-secret operator-audit tenant lookup key."""
+
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(operator_audit_events)").fetchall()
+    }
+    if "business_scope_key" not in columns:
+        conn.execute("ALTER TABLE operator_audit_events ADD COLUMN business_scope_key TEXT")
+    rows = conn.execute(
+        """
+        SELECT event_id, business_id
+        FROM operator_audit_events
+        WHERE business_scope_key IS NULL OR business_scope_key = ''
+        """
+    ).fetchall()
+    for event_id, business_id in rows:
+        conn.execute(
+            """
+            UPDATE operator_audit_events
+            SET business_scope_key = ?
+            WHERE event_id = ?
+            """,
+            (audit_business_scope_key(str(business_id)), event_id),
+        )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_operator_audit_business_scope_created
+            ON operator_audit_events (business_scope_key, created_at DESC)
+        """
+    )
 
 
 # ---------------------------------------------------------------------------
