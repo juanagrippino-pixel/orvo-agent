@@ -59,6 +59,15 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
     assert [connector.connector_id for connector in runtime.connectors] == ["sheet", "tn"]
     assert runtime.connectors[0].required_params == ["spreadsheet_id", "range_name"]
     assert runtime.connectors[1].secret_param_names == ["access_token"]
+    assert runtime.connectors[1].secret_requirements == [
+        {
+            "name": "access_token",
+            "provider": "tiendanube_oauth",
+            "description": "Tiendanube API access token reference.",
+            "scopes": ["orders.read", "products.read"],
+            "legacy_config_field": "access_token",
+        }
+    ]
     assert runtime.connectors[1].health_policy == {
         "readiness_check": "metadata_only",
         "supports_health_check": False,
@@ -105,6 +114,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
             "required_params": ["spreadsheet_id", "range_name"],
             "secret_param_names": [],
             "legacy_secret_param_names": [],
+            "secret_requirements": [],
             "capabilities": ["daily_report", "sheet_import"],
             "emitted_metric_families": [
                 "commerce.orders",
@@ -152,6 +162,15 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
             "required_params": ["store_id"],
             "secret_param_names": ["access_token"],
             "legacy_secret_param_names": ["access_token"],
+            "secret_requirements": [
+                {
+                    "name": "access_token",
+                    "provider": "tiendanube_oauth",
+                    "description": "Tiendanube API access token reference.",
+                    "scopes": ["orders.read", "products.read"],
+                    "legacy_config_field": "access_token",
+                }
+            ],
             "capabilities": ["daily_report", "commerce_metrics", "inventory_metrics"],
             "emitted_metric_families": [
                 "commerce.orders",
