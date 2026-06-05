@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+
+from app.brain.operator_audit import SQLiteOperatorAuditStore
+from app.brain.storage import init_schema
+
 
 _SAMPLE_ROUTE_VALUES = {
     "business_id": "artemea",
@@ -92,3 +98,46 @@ def test_every_internal_brain_route_rejects_wrong_bearer_token_before_business_l
         app,
         headers={"Authorization": "Bearer wrong-internal-token"},
     )
+
+
+def test_failed_internal_basic_auth_audit_records_shape_without_credential_tail(monkeypatch, tmp_path):
+    """Durable auth-denial audit must not persist Basic auth credential material.
+
+    Internal operator routes only accept the configured Bearer token, but probes
+    often arrive with Basic-style gateway credentials. The durable audit record
+    should keep investigable shape metadata while dropping the credential tail so
+    admin exports cannot leak base64 user:password material.
+    """
+
+    db_path = tmp_path / "basic-auth-audit-redaction.sqlite3"
+    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
+    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(db_path))
+
+    from server import app
+
+    credential_tail = "dXNlcj" + "pvcGVyYXRvci1wYXNzd29yZA=="
+    response = app.test_client().get(
+        "/internal/brain/businesses/artemea/runs",
+        headers={"Authorization": "Basic " + credential_tail},
+    )
+
+    assert response.status_code == 401
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    events = SQLiteOperatorAuditStore(conn).list_events(
+        business_id="artemea",
+        retention_days=90,
+        limit=10,
+    )
+
+    assert [event["event_type"] for event in events] == ["operator.authentication.denied"]
+    assert events[0]["data"] == {
+        "header_present": True,
+        "method": "GET",
+        "reason": "invalid_internal_token",
+        "scheme": "Basic",
+        "status": "denied",
+    }
+    serialized = json.dumps(events[0], sort_keys=True)
+    assert credential_tail not in serialized
+    assert "Basic " + credential_tail not in serialized
