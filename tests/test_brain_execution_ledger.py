@@ -65,6 +65,12 @@ def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_stat
         }
     ]
     assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
+    assert outcome.metadata["event_certification"] == {
+        "status": "passed",
+        "issue_count": 0,
+        "issues": [],
+        "events": ["connector.execution.failed", "connector.health.unauthorized"],
+    }
     assert outcome.metadata["health_policy"]["allowed_states"] == [
         "ok",
         "degraded",
