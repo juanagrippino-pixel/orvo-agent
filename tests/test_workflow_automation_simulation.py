@@ -915,11 +915,23 @@ def test_workflow_approval_queue_projects_only_pending_requests_without_side_eff
         rule_id="approval-queue",
         now=utc(19, 20),
     )
+    malformed_manual_gate = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-manual-gate",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/approval-queue/case-manual-gate/acknowledge_case/manual-gate",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"reason": "Malformed manual approval gate"},
+        rule_id="approval-queue",
+        now=utc(19, 25),
+    )
 
     assert later.approval_request is not None
     assert earlier.approval_request is not None
     assert approved.approval_request is not None
     assert no_approval.approval_request is None
+    assert malformed_manual_gate.approval_request is not None
     ledger.decide_approval_request(
         business_id="artemea",
         approval_request_id=approved.approval_request.approval_request_id,
@@ -951,6 +963,7 @@ def test_workflow_approval_queue_projects_only_pending_requests_without_side_eff
     assert "case-approved" not in str(queue)
     assert "case-other" not in str(queue)
     assert "case-no-approval" not in str(queue)
+    assert "case-manual-gate" not in str(queue)
     assert "raw_approval_queue" not in str(queue)
 
 
@@ -1074,11 +1087,23 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
         rule_id="execution-queue",
         now=utc(19, 20),
     )
+    manual_gate = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-manual-gate",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/execution-queue/case-manual-gate/acknowledge_case/manual-gate",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"reason": "Malformed manual action approval"},
+        rule_id="execution-queue",
+        now=utc(19, 25),
+    )
 
     assert later.approval_request is not None
     assert earlier.approval_request is not None
     assert rejected.approval_request is not None
     assert unknown.approval_request is not None
+    assert manual_gate.approval_request is not None
     ledger.decide_approval_request(
         business_id="artemea",
         approval_request_id=later.approval_request.approval_request_id,
@@ -1111,6 +1136,14 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
         reason="Unknown actions must remain outside execution queue",
         now=utc(19, 45),
     )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=manual_gate.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Manual actions must remain outside execution queue",
+        now=utc(19, 46),
+    )
 
     queue = list_workflow_execution_queue(ledger, business_id="artemea")
 
@@ -1130,6 +1163,7 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert "case-rejected" not in str(queue)
     assert "case-other" not in str(queue)
     assert "case-unknown" not in str(queue)
+    assert "case-manual-gate" not in str(queue)
     assert "invented_llm_action" not in str(queue)
     assert "raw_queue" not in str(queue)
 
