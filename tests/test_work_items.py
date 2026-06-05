@@ -147,7 +147,9 @@ def test_case_work_item_projection_exposes_acknowledgment_sla_clock(tmp_path):
     assert on_time_projection["acknowledgment_due_at"] == "2026-05-24T09:00:00Z"
     assert on_time_projection["acknowledged_at"] is None
     assert on_time_projection["acknowledgment_sla_breached"] is False
+    assert on_time_projection["acknowledgment_sla_status"] == "pending"
     assert overdue_projection["acknowledgment_sla_breached"] is True
+    assert overdue_projection["acknowledgment_sla_status"] == "breached"
 
     conn = sqlite3.connect(db_path)
     init_schema(conn)
@@ -168,6 +170,7 @@ def test_case_work_item_projection_exposes_acknowledgment_sla_clock(tmp_path):
 
     assert acknowledged_projection["acknowledged_at"] == "2026-05-24T09:15:00Z"
     assert acknowledged_projection["acknowledgment_sla_breached"] is True
+    assert acknowledged_projection["acknowledgment_sla_status"] == "breached"
 
 
 def test_acknowledgment_sla_stops_at_terminal_status_when_never_acknowledged(tmp_path):
@@ -223,7 +226,9 @@ def test_acknowledgment_sla_stops_at_terminal_status_when_never_acknowledged(tmp
     assert on_time_projection["acknowledged_at"] is None
     assert on_time_projection["acknowledgment_due_at"] == "2026-05-24T09:00:00Z"
     assert on_time_projection["acknowledgment_sla_breached"] is False
+    assert on_time_projection["acknowledgment_sla_status"] == "met"
     assert late_projection["acknowledgment_sla_breached"] is True
+    assert late_projection["acknowledgment_sla_status"] == "breached"
 
 
 def test_case_work_item_projection_exposes_resolution_sla_clock(tmp_path):
@@ -237,7 +242,9 @@ def test_case_work_item_projection_exposes_resolution_sla_clock(tmp_path):
     assert on_time_projection["resolution_due_at"] == "2026-05-25T08:00:00Z"
     assert on_time_projection["resolved_at"] is None
     assert on_time_projection["resolution_sla_breached"] is False
+    assert on_time_projection["resolution_sla_status"] == "pending"
     assert overdue_projection["resolution_sla_breached"] is True
+    assert overdue_projection["resolution_sla_status"] == "breached"
 
     conn = sqlite3.connect(db_path)
     init_schema(conn)
@@ -268,6 +275,7 @@ def test_case_work_item_projection_exposes_resolution_sla_clock(tmp_path):
     assert resolved_projection["resolved_at"] == "2026-05-25T07:30:00Z"
     assert resolved_projection["resolution_due_at"] == "2026-05-25T08:00:00Z"
     assert resolved_projection["resolution_sla_breached"] is False
+    assert resolved_projection["resolution_sla_status"] == "met"
 
 
 def test_resolution_sla_stops_at_terminal_status_when_closed_late(tmp_path):
@@ -303,6 +311,7 @@ def test_resolution_sla_stops_at_terminal_status_when_closed_late(tmp_path):
     assert projection["resolution_due_at"] == "2026-05-27T08:00:00Z"
     assert projection["resolved_at"] == "2026-05-27T09:30:00Z"
     assert projection["resolution_sla_breached"] is True
+    assert projection["resolution_sla_status"] == "breached"
 
 
 def test_issue_type_definitions_expose_owner_visibility_and_metric_gates():
