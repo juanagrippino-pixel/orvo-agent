@@ -81,6 +81,7 @@ GET /internal/brain/businesses/{business_id}/cases/recently-assigned
 GET /internal/brain/businesses/{business_id}/cases/recently-reopened
 GET /internal/brain/businesses/{business_id}/cases/recently-resolved
 GET /internal/brain/businesses/{business_id}/cases/recently-dismissed
+GET /internal/brain/businesses/{business_id}/cases/suggested-actions
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/case-actions
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
@@ -90,7 +91,10 @@ GET /internal/brain/businesses/{business_id}/owner-case-brief/preview
 Actions must use registered action keys and append timeline events. The
 `recently-assigned` endpoint is a read-only projection over actionable cases with
 `assigned_at`/`assignee_ref`; it does not mutate lifecycle state or treat
-assignment as a source of truth. The action
+assignment as a source of truth. The `suggested-actions` endpoint is a read-only,
+actionable-case projection that filters `suggested_action_keys` through the
+registered action catalog, suppresses invented keys, and redacts case titles and
+entity scope at the API boundary. The action
 catalog endpoint is an authenticated, business-scoped projection of registered
 case action keys; it must mark which catalog actions are actually enabled by the
 current internal API (including `assign_owner` once the scoped assignment path is
