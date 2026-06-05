@@ -24,5 +24,15 @@ def source_connectors(case: OperationalCase) -> list[str]:
     return sorted({snapshot.source for snapshot in case.evidence_snapshots if snapshot.source})
 
 
+def entity_kind(case: OperationalCase) -> str:
+    """Return the canonical entity kind bucket used by operator projections."""
+
+    kind = case.entity_scope.get("kind")
+    if not isinstance(kind, str):
+        return "unknown"
+    normalized = kind.strip()
+    return normalized or "unknown"
+
+
 def is_case_degraded(case: OperationalCase) -> bool:
     return any(snapshot.freshness_state in _DEGRADED_FRESHNESS_STATES for snapshot in case.evidence_snapshots)

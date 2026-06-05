@@ -447,6 +447,54 @@ def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapsho
     assert result["actions"][0]["execution_status"] == "dry_run"
 
 
+def test_simulate_case_workflow_matches_entity_kind_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="product-stock-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="entity_kind", value="product")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check product owner"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 5), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "entity_kind", "expected": "product", "actual": "product", "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actions_when_entity_kind_does_not_match():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="channel-stock-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="entity_kind", value="channel")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check channel owner"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 10), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "entity_kind", "expected": "channel", "actual": "product", "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "entity_kind", "expected": "channel", "actual": "product"}
+    ]
+    assert ledger.list_actions(business_id="artemea") == []
+
+
 def test_simulate_case_workflow_matches_source_connector_condition_from_evidence_snapshots():
     _, case = seed_case(degraded=True)
     ledger = InMemoryWorkflowActionLedgerStore()
