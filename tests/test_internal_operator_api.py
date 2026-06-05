@@ -721,18 +721,46 @@ def test_internal_case_action_rejects_viewer_role_without_mutation(monkeypatch, 
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=VIEWER_AUTH,
-        json={"action_key": "acknowledge_case"},
+        headers={
+            **VIEWER_AUTH,
+            "X-Orvo-Operator": "viewer:ana access_token=raw_viewer_actor_secret",
+            "X-Request-ID": "req-viewer-action-denied",
+        },
+        json={
+            "action_key": "acknowledge_case",
+            "reason": "Intento viewer api_key=raw_viewer_payload_secret",
+        },
     )
 
     assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_viewer_actor_secret" not in raw_body
+    assert "raw_viewer_payload_secret" not in raw_body
     body = response.get_json()
     assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
     conn = sqlite3.connect(db_path)
     reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
     conn.close()
     assert reloaded is not None
     assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    events = _audit_events(db_path)
+    matching_events = [event for event in events if event["request_id"] == "req-viewer-action-denied"]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["event_type"] == "operator.case_action.denied"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["data"]["action_key"] == "acknowledge_case"
+    assert event["data"]["permission"] == "case:action"
+    assert event["data"]["status_code"] == 403
+    assert event["data"]["payload"]["reason"] == "Intento viewer api_key=[REDACTED]"
+    assert "raw_viewer_actor_secret" not in json.dumps(event, sort_keys=True)
+    assert "raw_viewer_payload_secret" not in json.dumps(event, sort_keys=True)
 
 
 def test_internal_read_rejects_unknown_role(monkeypatch, tmp_path):
@@ -1995,6 +2023,114 @@ def test_internal_case_resolution_latency_by_case_type_returns_scoped_envelope(m
     assert data["fastest_resolved"]["case_type"] == "stockout_risk"
     assert data["slowest_resolved"]["case_id"] == sales.case_id
     assert data["slowest_resolved"]["case_type"] == "sales_drop"
+
+
+def test_internal_case_resolution_latency_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    high = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-high-resolved-priority",
+            priority=95,
+            dedupe_suffix="stockout_risk/product/sku-high-resolved-priority/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        high.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        high.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    medium = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-medium-resolved-priority",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        medium.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        medium.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=10),
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            priority=20,
+            run_id="run-other-resolved-priority",
+            dedupe_suffix="data_stale/business/monitored/observability.feeds/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        other.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/resolution-latency/by-priority-bracket",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["resolved_total"] == 2
+    assert data["by_resolution_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_resolution_bucket_priority_bracket"] == {
+        "under_1h": {},
+        "under_6h": {"high": 1},
+        "under_24h": {"medium": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }
+    assert data["fastest_resolved"]["case_id"] == high.case_id
+    assert data["slowest_resolved"]["case_id"] == medium.case_id
 
 
 def test_internal_case_handling_latency_histogram_returns_scoped_envelope(monkeypatch, tmp_path):
