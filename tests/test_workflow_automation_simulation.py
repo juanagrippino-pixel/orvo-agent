@@ -1168,6 +1168,133 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert "raw_queue" not in str(queue)
 
 
+def test_workflow_execution_queue_requires_matching_approved_approval_request():
+    valid_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/valid",
+        business_id="artemea",
+        case_id="case-valid",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-valid/request_external_action/valid",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-a", "reason": "Approved Authorization: Basic raw_exec_valid_secret"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/valid",
+        created_at=utc(20),
+        updated_at=utc(20, 10),
+    )
+    missing_request_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/missing-request",
+        business_id="artemea",
+        case_id="case-missing-request",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-missing-request/request_external_action/missing",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-b", "reason": "Forged missing approval request"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/missing-request",
+        created_at=utc(20, 1),
+        updated_at=utc(20, 11),
+    )
+    mismatched_request_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/mismatched-request",
+        business_id="artemea",
+        case_id="case-canonical",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-canonical/request_external_action/mismatched",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-c", "reason": "Forged mismatched approval request"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/mismatched-request",
+        created_at=utc(20, 2),
+        updated_at=utc(20, 12),
+    )
+    pending_request_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/pending-request",
+        business_id="artemea",
+        case_id="case-pending-request",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-pending-request/request_external_action/pending",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-d", "reason": "Forged pending approval request"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/pending-request",
+        created_at=utc(20, 3),
+        updated_at=utc(20, 13),
+    )
+    valid_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/valid",
+        ledger_id=valid_record.ledger_id,
+        business_id="artemea",
+        case_id="case-valid",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(20),
+        decided_at=utc(20, 10),
+        decision_actor_ref="manager",
+        decision_reason="Approved",
+    )
+    mismatched_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/mismatched-request",
+        ledger_id=mismatched_request_record.ledger_id,
+        business_id="artemea",
+        case_id="case-forged",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(20, 2),
+        decided_at=utc(20, 12),
+        decision_actor_ref="manager",
+        decision_reason="Approved forged request",
+    )
+    pending_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/pending-request",
+        ledger_id=pending_request_record.ledger_id,
+        business_id="artemea",
+        case_id="case-pending-request",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="pending",
+        requested_at=utc(20, 3),
+    )
+
+    class ExecutionLedgerWithForgedRequests(InMemoryWorkflowActionLedgerStore):
+        def list_actions(self, *, business_id: str):
+            return [
+                valid_record,
+                missing_request_record,
+                mismatched_request_record,
+                pending_request_record,
+            ]
+
+        def list_approval_requests(self, *, business_id: str):
+            return [valid_request, mismatched_request, pending_request]
+
+    queue = list_workflow_execution_queue(ExecutionLedgerWithForgedRequests(), business_id="artemea")
+
+    assert queue["total"] == 1
+    assert queue["returned"] == 1
+    assert [action["case_id"] for action in queue["actions"]] == ["case-valid"]
+    assert queue["actions"][0]["params"]["reason"] == "Approved Authorization: [REDACTED]"
+    assert "case-missing-request" not in str(queue)
+    assert "case-canonical" not in str(queue)
+    assert "case-forged" not in str(queue)
+    assert "case-pending-request" not in str(queue)
+    assert "raw_exec_valid_secret" not in str(queue)
+
+
 @pytest.mark.parametrize(
     "store_factory",
     [
