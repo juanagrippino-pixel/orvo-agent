@@ -132,11 +132,13 @@ def test_executor_metadata_reports_missing_execution_params_without_secret_value
         currency="ARS",
         connectors=[],
     )
-    connector = ConnectorConfig(
+    connector = ConnectorConfig.model_construct(
         connector_id="tn-main",
         connector_type="tiendanube",
         label="TN Artemea",
         params={"store_id": "123"},
+        secret_refs={},
+        enabled=True,
     )
 
     with pytest.raises(ValueError) as exc_info:

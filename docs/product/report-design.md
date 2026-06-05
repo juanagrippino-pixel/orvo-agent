@@ -6,7 +6,7 @@ This document defines the Hito-0/Hito-1 owner-facing WhatsApp report for Orvo.
 
 North star:
 
-> Each morning, Orvo should tell Juan what happened yesterday and what to prioritize today, in under 30 seconds of reading.
+> Each morning, Orvo should tell operator what happened yesterday and what to prioritize today, in under 30 seconds of reading.
 
 The report is not a dashboard export and not a chatty assistant message. It should read like a dry operator who checked the systems early, found the important thing, and wrote the minimum necessary.
 
@@ -62,7 +62,7 @@ The voice should sound like a dry, direct operator. It should not sound like a c
 
 ### Bad tone examples
 
-- "Good morning Juan! Here are your exciting insights for today ✨"
+- "Good morning operator! Here are your exciting insights for today ✨"
 - "I noticed an incredible opportunity to optimize your business performance."
 - "It seems customers may be feeling less engaged with your brand story."
 - "Based on my analysis, I would recommend a holistic review of your funnel."
@@ -101,7 +101,7 @@ Recommended shape:
 - `ARTEMEA · 2026-05-21`
 - optional state tag if degraded: `ARTEMEA · 2026-05-21 · partial`
 
-Avoid heavy branding at the top. In the owner flow, the sender identity already tells Juan this is Orvo.
+Avoid heavy branding at the top. In the owner flow, the sender identity already tells operator this is Orvo.
 
 ### Block 2: top line / primary priority
 
@@ -114,7 +114,7 @@ Examples:
 - `Priority: clear aged orders before pushing more volume.`
 - `Priority: no urgent issue today.`
 
-This line should answer "what do I do first?" even if Juan only reads one line.
+This line should answer "what do I do first?" even if operator only reads one line.
 
 ### Block 3: critical finding or daily summary
 
@@ -194,7 +194,7 @@ Sources: Tiendanube, Meta Ads, WhatsApp
 
 ## Option B — Situation / action split
 
-Useful if Juan responds better to a more procedural format.
+Useful if operator responds better to a more procedural format.
 
 ### Format
 
@@ -215,7 +215,7 @@ Facts:
 ### Why it works
 
 - Very clear separation between diagnosis and action.
-- Reduces risk that Juan sees numbers but misses the recommendation.
+- Reduces risk that operator sees numbers but misses the recommendation.
 
 ### Weaknesses
 
@@ -277,7 +277,7 @@ Facts: revenue ARS 418k vs 603k baseline; orders 7 vs 12; pending payments 14 vs
 
 ## Recommendation
 
-Start with **Option A** as the default. Keep **Option C** as a fallback when there are two distinct actionable issues. Use **Option B** if early user feedback says Juan wants more explicit separation between facts and action.
+Start with **Option A** as the default. Keep **Option C** as a fallback when there are two distinct actionable issues. Use **Option B** if early user feedback says operator wants more explicit separation between facts and action.
 
 ---
 
@@ -514,7 +514,7 @@ Reply U / N / I on any line: useful / noisy / incorrect.
 ### Alternative even lighter version
 
 - No footer on every report.
-- Teach Juan once that he can reply:
+- Teach operator once that he can reply:
   - `useful 1`
   - `noisy 2`
   - `incorrect 1`
@@ -571,7 +571,7 @@ Priority: {{limited_action_or_none}}.
 ## Open questions
 
 1. Should the owner-facing message include the word `Priority`, or is `First:` even tighter and more natural?
-2. Will Juan prefer an explicit `Secondary:` line, or should secondary items be folded into one `Watch:` line?
+2. Will operator prefer an explicit `Secondary:` line, or should secondary items be folded into one `Watch:` line?
 3. Is a persistent feedback footer too noisy for a premium-feeling product, requiring onboarding/training instead?
 4. Should channel names be abbreviated (`TN`, `ML`) after onboarding, or kept fully spelled out for clarity?
 5. Do we want a single consistent template always, or a dynamic formatter that chooses between Option A and C based on issue count?

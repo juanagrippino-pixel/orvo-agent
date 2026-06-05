@@ -17,7 +17,7 @@ def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_stat
     business = BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[
@@ -71,7 +71,7 @@ def test_record_pipeline_failure_maps_rate_limit_errors_to_typed_health_state():
     business = BusinessConfig(
         business_id="artemea",
         business_name="Artemea",
-        owner_phone="+5491149724933",
+        owner_phone="+5491100000000",
         timezone="America/Argentina/Buenos_Aires",
         currency="ARS",
         connectors=[

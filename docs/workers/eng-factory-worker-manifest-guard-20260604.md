@@ -1,0 +1,28 @@
+# Worker handoff manifest — eng-factory-worker-manifest-guard-20260604
+
+- task_id: eng-factory-worker-manifest-guard-20260604
+- objective: Add a lightweight guard that validates committed autonomous worker handoff manifests against the required Markdown contract.
+- bounded_context: Engineering Factory / Release Integration glue
+- worktree_path: /root/orvo-agent-worktrees/eng-factory-worker-manifest-guard-20260604
+- branch: codex/eng-factory-worker-manifest-guard-20260604
+- base_sha: 3f768883d3fc41cc19fab36acf63a23794324540
+- head_sha: branch HEAD after final commit; see factory-manager final report
+- status: review-ready
+- files_changed:
+  - docs/specs/worker-handoff-manifest.md
+  - docs/workers/eng-factory-worker-manifest-guard-20260604.md
+  - scripts/check_worker_handoff_manifests.py
+  - tests/test_worker_handoff_manifest_guard.py
+- tests_run:
+  - `pytest tests/test_worker_handoff_manifest_guard.py -q` => RED before implementation: ModuleNotFoundError for `scripts.check_worker_handoff_manifests`; GREEN after implementation: 5 passed in 0.02s
+  - `python scripts/check_worker_handoff_manifests.py` => pass, 4 manifests checked
+  - `pytest tests/test_worker_handoff_manifest_guard.py tests/test_test_collection_regression_guard.py -q` => pass, 13 passed in 0.03s
+  - `pytest -q` => pass, 1257 passed in 13.28s
+- docs_updated:
+  - docs/specs/worker-handoff-manifest.md
+  - docs/workers/eng-factory-worker-manifest-guard-20260604.md
+- risks:
+  - Guard intentionally validates manifest structure only; reviewers still need to verify branch existence, exact head SHA, diff/test claims, and secret-scan credibility.
+- secrets_checked: yes; touched docs/tests/script only and no secret-bearing config or credential values were added.
+- integration_notes: Additive script/test/docs guard only; no migrations, runtime paths, connectors, operator surfaces, or external side effects. Rollback is a normal git revert.
+- recommended_next_action: review then merge after focused and full tests stay green

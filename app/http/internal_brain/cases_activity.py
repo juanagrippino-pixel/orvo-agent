@@ -3,17 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from flask import request
-
 from app.brain.operator_api import *  # noqa: F401,F403
-from app.brain.operator_auth import CASE_ACTION_PERMISSION
 
-from .common import (
-    _internal_success,
-    _internal_error,
-    _internal_principal_or_error,
-    _require_internal_header_permission,
-    _with_internal_stores,
-)
+from .common import _internal_success, _with_internal_stores
 
 
 def register_case_activity_routes(app):
@@ -75,6 +67,20 @@ def register_case_activity_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/acknowledgment-latency/by-entity-kind")
+    def internal_brain_cases_acknowledgment_latency_by_entity_kind(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_acknowledgment_latency_histogram_by_entity_kind(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/acknowledgment-latency/by-source-connector")
     def internal_brain_cases_acknowledgment_latency_by_source_connector(business_id: str):
         return _with_internal_stores(
@@ -116,6 +122,30 @@ def register_case_activity_routes(app):
             ),
         )
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/resolution-latency/by-case-type")
+    def internal_brain_cases_resolution_latency_by_case_type(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_resolution_latency_histogram_by_case_type(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/cases/resolution-latency/by-priority-bracket")
+    def internal_brain_cases_resolution_latency_by_priority_bracket(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_resolution_latency_histogram_by_priority_bracket(case_store, business_id=business_id),
+            ),
+        )
+
 
     @app.get("/internal/brain/businesses/<business_id>/cases/handling-latency")
     def internal_brain_cases_handling_latency(business_id: str):
@@ -138,6 +168,20 @@ def register_case_activity_routes(app):
             lambda case_store, run_ledger: _internal_success(
                 business_id,
                 summarize_case_handling_latency_histogram_by_case_type(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/cases/handling-latency/by-source-connector")
+    def internal_brain_cases_handling_latency_by_source_connector(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_handling_latency_histogram_by_source_connector(
                     case_store,
                     business_id=business_id,
                 ),
@@ -315,6 +359,21 @@ def register_case_activity_routes(app):
             lambda case_store, run_ledger: _internal_success(
                 business_id,
                 list_recently_acknowledged_cases(
+                    case_store,
+                    business_id=business_id,
+                    limit=request.args.get("limit"),
+                ),
+            ),
+        )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/cases/recently-in-progress")
+    def internal_brain_cases_recently_in_progress(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_recently_in_progress_cases(
                     case_store,
                     business_id=business_id,
                     limit=request.args.get("limit"),

@@ -14,7 +14,7 @@ The system should answer four questions every morning:
 
 1. What materially changed yesterday?
 2. What is broken or at risk right now?
-3. What should Juan do first today?
+3. What should operator do first today?
 4. How confident is Orvo in that advice?
 
 ## Scope and non-goals
@@ -51,7 +51,7 @@ The system should answer four questions every morning:
 ## Product principles
 
 1. **Reliable before clever.** A blunter true insight is better than a sophisticated wrong one.
-2. **Operational before strategic.** Focus on issues Juan can act on today.
+2. **Operational before strategic.** Focus on issues operator can act on today.
 3. **Evidence-backed only.** Every insight must point to concrete source metrics.
 4. **Short reading budget.** A normal daily report should be readable in 20–30 seconds.
 5. **One priority, not five priorities.** Reports may mention multiple issues, but should identify the first thing to do.
@@ -353,7 +353,7 @@ For each candidate insight:
 Where:
 
 - **impact_score (1–5)**: estimated size of business downside/upside.
-- **actionability_score (1–5)**: whether Juan can realistically act today.
+- **actionability_score (1–5)**: whether operator can realistically act today.
 - **confidence_score (0.4–1.0)**: depends on data completeness and rule specificity.
 - **recency_multiplier (0.8–1.2)**: persistent/accelerating issues rank above isolated noise.
 
@@ -382,7 +382,7 @@ This prevents a generic revenue dip from outranking a concrete stockout.
 
 ## Confidence
 
-Confidence is not shown as a numeric score to Juan in v0, but it should drive suppression and phrasing.
+Confidence is not shown as a numeric score to operator in v0, but it should drive suppression and phrasing.
 
 ### High confidence
 
@@ -815,7 +815,7 @@ Track repeated noisy findings and suppress them unless they worsen.
 
 ### 4. Feedback-weighted suppression
 
-If Juan repeatedly marks a class of insight noisy, raise its threshold for this business until reevaluated.
+If operator repeatedly marks a class of insight noisy, raise its threshold for this business until reevaluated.
 
 ### 5. Action outcome tracking
 
@@ -827,13 +827,13 @@ Not for automatic reinforcement yet, but for internal learning.
 
 ## Evaluation and feedback loop
 
-A useful insight engine is not just one that sounds plausible. It should be judged on whether it helps Juan act with less wasted attention.
+A useful insight engine is not just one that sounds plausible. It should be judged on whether it helps operator act with less wasted attention.
 
 ## Primary evaluation questions
 
 1. **Precision:** How often are owner-facing insights actually worth reading?
 2. **Safety:** How often does the system give materially bad advice?
-3. **Actionability:** How often is the top priority something Juan can do immediately?
+3. **Actionability:** How often is the top priority something operator can do immediately?
 4. **Brevity:** Does the report stay within the reading budget?
 5. **Coverage:** On days with real operational problems, does Orvo catch them?
 
@@ -882,7 +882,7 @@ Three levels of feedback matter.
 
 ### Level 1: per-insight owner feedback
 
-Juan marks an insight as:
+operator marks an insight as:
 
 - useful
 - noisy
@@ -954,7 +954,7 @@ Use feedback to adjust:
 
 Example:
 
-- If Juan marks mild revenue-dip alerts as noisy 4 times, raise threshold or require persistence.
+- If operator marks mild revenue-dip alerts as noisy 4 times, raise threshold or require persistence.
 
 ## Global tuning
 
@@ -1037,7 +1037,7 @@ Because ARTEMEA is a physical-product D2C brand, these are the best first high-v
 3. Should normal-day reports always include one explicit priority, or allow "no urgent action today" as the primary line?
 4. What freshness window is acceptable for inventory versus orders before suppressing stock-based advice?
 5. How much Mercado Libre detail will exist in Hito-1: just revenue/orders by channel, or product-level marketplace signals too?
-6. Should certain insight families be hidden entirely until Juan opts in, or start broad and learn through feedback?
+6. Should certain insight families be hidden entirely until operator opts in, or start broad and learn through feedback?
 
 ## Recommendation
 

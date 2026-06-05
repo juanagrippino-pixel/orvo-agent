@@ -91,6 +91,19 @@ def _acknowledge_case(db_path, case_id: str, *, acknowledged_hours_ago: int = 0)
     conn.close()
 
 
+def _mark_case_in_progress(db_path, case_id: str, *, in_progress_hours_ago: int = 0) -> None:
+    conn = sqlite3.connect(str(db_path))
+    store = SQLiteOperationalCaseStore(conn)
+    store.transition_case(
+        case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=datetime.now(timezone.utc) - timedelta(hours=in_progress_hours_ago),
+    )
+    conn.close()
+
+
 def _resolve_case(db_path, case_id: str, *, resolved_hours_ago: int = 0) -> None:
     resolved_at = datetime.now(timezone.utc) - timedelta(hours=resolved_hours_ago)
     conn = sqlite3.connect(str(db_path))
@@ -217,6 +230,62 @@ def test_recently_acknowledged_returns_scoped_acknowledged_cases_ordered_newest_
     assert data["cases"][0]["case_id"] == newest
     assert data["cases"][0]["status"] == "acknowledged"
     assert data["cases"][0]["acknowledgment_seconds"] > 0
+    returned_case_ids = {case["case_id"] for case in data["cases"]}
+    assert older not in returned_case_ids
+    assert still_open not in returned_case_ids
+
+
+def test_recently_in_progress_returns_scoped_cases_ordered_by_progress_transition(_isolate_db):
+    from server import app
+
+    older = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=8,
+        run_id="run-progress-older",
+        dedupe_suffix="recent/progress/older",
+    )
+    _mark_case_in_progress(_isolate_db, older, in_progress_hours_ago=4)
+    newest = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=4,
+        run_id="run-progress-newest",
+        dedupe_suffix="recent/progress/newest",
+    )
+    _mark_case_in_progress(_isolate_db, newest, in_progress_hours_ago=1)
+    still_open = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=0,
+        run_id="run-progress-still-open",
+        dedupe_suffix="recent/progress/still-open",
+    )
+    other_business = _seed_open_case(
+        _isolate_db,
+        business_id="other-biz",
+        opened_hours_ago=0,
+        run_id="run-progress-other",
+        dedupe_suffix="recent/progress/other",
+    )
+    _mark_case_in_progress(_isolate_db, other_business, in_progress_hours_ago=0)
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/recently-in-progress?limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["in_progress_total"] == 2
+    assert data["limit"] == 1
+    assert data["count"] == 1
+    assert data["cases"][0]["case_id"] == newest
+    assert data["cases"][0]["status"] == "in_progress"
+    assert data["cases"][0]["handling_seconds"] > 0
     returned_case_ids = {case["case_id"] for case in data["cases"]}
     assert older not in returned_case_ids
     assert still_open not in returned_case_ids

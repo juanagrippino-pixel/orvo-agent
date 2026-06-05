@@ -11,7 +11,7 @@ This file is the stop-point requested before any Phase 1+ refactor. Treat it as 
 
 ## Non-negotiable guardrails
 
-1. **`docs/specs/` are the contract source of truth.** If a refactor requires changing a spec contract, stop and ask Juan.
+1. **`docs/specs/` are the contract source of truth.** If a refactor requires changing a spec contract, stop and ask operator.
 2. **The `/internal/brain/*` HTTP surface must remain behaviorally identical** unless explicitly approved.
 3. **No Phase 1 module move may start before this file is reviewed.**
 4. **Do not touch Packet Q, Packet U, or Packet O scope in this refactor.** Mark adjacent issues as follow-ups only:

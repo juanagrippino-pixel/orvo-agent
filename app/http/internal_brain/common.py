@@ -22,6 +22,8 @@ from app.brain.operator_auth import (
     INTERNAL_READ_PERMISSION,
     InternalOperatorAuthorizationError,
     InternalOperatorPrincipal,
+    audit_safe_business_values,
+    audit_safe_operator_role,
     build_internal_operator_principal,
     permissions_for_role,
     require_internal_business_scope,
@@ -32,7 +34,11 @@ from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_
 
 
 def _internal_request_id() -> str:
-    return request.headers.get("X-Request-ID") or f"req_{uuid4().hex}"
+    supplied = request.headers.get("X-Request-ID")
+    if supplied is None or not supplied.strip():
+        return f"req_{uuid4().hex}"
+    redacted = redact_text(supplied) or "[REDACTED]"
+    return redacted if redacted == supplied else "[REDACTED]"
 
 
 def _internal_success(business_id: str, data: dict, *, warnings: list[str] | None = None):
@@ -74,6 +80,42 @@ def _public_error_response(payload: dict, status_code: int):
     return jsonify(redact_secrets(payload)), status_code
 
 
+def _authorization_scheme(value: str) -> str | None:
+    if not value.strip():
+        return None
+    scheme = value.strip().split(None, 1)[0]
+    return redact_text(scheme) or "[REDACTED]"
+
+
+def _record_internal_authentication_denial(*, business_id: str, actor_ref: str, supplied_authorization: str):
+    """Best-effort audit for failed internal bearer-token authentication.
+
+    The raw Authorization header is intentionally not persisted; only safe shape
+    metadata is kept so operators can investigate auth abuse without leaking
+    bearer-token tails into the durable audit log.
+    """
+
+    try:
+        _append_operator_audit_event(
+            business_id=business_id,
+            actor_ref=actor_ref or "anonymous",
+            event_type="operator.authentication.denied",
+            target_type="internal_operator_api",
+            target_id=business_id,
+            data={
+                "status": "denied",
+                "reason": "invalid_internal_token",
+                "method": request.method,
+                "header_present": bool(supplied_authorization),
+                "scheme": _authorization_scheme(supplied_authorization),
+            },
+        )
+    except Exception:
+        # Authentication must still fail closed even if the audit sink is
+        # temporarily unavailable. Do not expose persistence details to callers.
+        return
+
+
 def _authorize_internal_operator(business_id: str):
     expected = os.environ.get("ORVO_INTERNAL_OPERATOR_TOKEN", "")
     if not expected:
@@ -85,6 +127,12 @@ def _authorize_internal_operator(business_id: str):
         )
     supplied = request.headers.get("Authorization", "")
     if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+        if supplied:
+            _record_internal_authentication_denial(
+                business_id=business_id,
+                actor_ref=request.headers.get("X-Orvo-Operator", ""),
+                supplied_authorization=supplied,
+            )
         return _internal_error(business_id, "unauthorized", "Unauthorized", status_code=401)
     return None
 
@@ -123,26 +171,16 @@ def _internal_operator_businesses_header() -> str | None:
     return request.headers.get("X-Orvo-Businesses", "")
 
 
-def _safe_audit_values(values: tuple[str, ...] | None) -> list[str] | None:
-    if values is None:
-        return None
-    safe_values: list[str] = []
-    for value in values:
-        redacted = redact_text(value) or "[REDACTED]"
-        safe_values.append(redacted if redacted == value else "[REDACTED]")
-    return safe_values
-
-
 def _authorization_denial_data(exc: InternalOperatorAuthorizationError) -> dict:
     data = {
         "status": "denied",
         "reason": exc.code,
         "status_code": exc.status_code,
         "method": request.method,
-        "role": exc.role,
+        "role": audit_safe_operator_role(exc.role),
         "permission": exc.permission,
     }
-    safe_allowed_businesses = _safe_audit_values(exc.allowed_businesses)
+    safe_allowed_businesses = audit_safe_business_values(exc.allowed_businesses)
     if safe_allowed_businesses is not None:
         data["allowed_businesses"] = safe_allowed_businesses
     return data

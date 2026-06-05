@@ -52,7 +52,7 @@ WhatsApp is a surface. Reports are a wedge/projection. The product is the **case
 | Release / Integration Manager | `9273c4bc5131` | Verifies branches/commits/tests and prepares product integration trains. |
 | SRE / Operations Director | `d62555476c05` | Keeps cron/gateway/worktrees/repo/runtime healthy and observable. |
 | Knowledge / Roadmap Librarian | `c155ea848ddb` | Keeps product docs, ADRs, specs, roadmap, and operating map coherent. |
-| Board Report | `61c5bd141ea2` | Executive synthesis for Juan: product progress, shipped artifacts, risks, decisions. |
+| Board Report | `61c5bd141ea2` | Executive synthesis for operator: product progress, shipped artifacts, risks, decisions. |
 | Work Management Platform | `e5a97cfadbb8` | Owns OperationalCase/WorkItem, lifecycle, comments, evidence, audit, transitions. |
 | Workflow Automation Platform | `6cbd04a19d3b` | Owns rules, triggers, approvals, playbooks, controlled automations. |
 | Connector Platform | existing `daad02bc0620` + product expansion | Owns connector registry, contracts, health, scopes, secrets, emitted events/metrics. |

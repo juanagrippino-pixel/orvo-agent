@@ -54,7 +54,7 @@ The organization is split by bounded ownership, not by random feature generation
 | Search/Query/Analytics | JQL-lite, saved views, dashboards, exports | query primitives/tests/specs |
 | Service Management/SLA | incidents, escalations, request/change/problem records | SLA/case extensions/tests/specs |
 | Edge/Developer Platform | broker/API, compiled runtime specs, gateway/auth/rate-limit/telemetry conventions | ADRs/specs/code slices for platform hardening |
-| Board Reporter | concise executive synthesis for Juan | daily/periodic status and decisions |
+| Board Reporter | concise executive synthesis for operator | daily/periodic status and decisions |
 
 ## 24/7 execution rules
 

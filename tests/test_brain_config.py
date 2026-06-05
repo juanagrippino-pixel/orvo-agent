@@ -120,7 +120,7 @@ class TestConnectorConfigModel:
             connector_id="gs-sales",
             connector_type="google_sheets",
             label="Ventas Artemea",
-            params={"spreadsheet_id": "abc123", "sheet_name": "Ventas"},
+            params={"spreadsheet_id": "abc123", "range_name": "Ventas!A1:F1000"},
         )
         assert conn.connector_id == "gs-sales"
         assert conn.connector_type == "google_sheets"
@@ -159,6 +159,39 @@ class TestConnectorConfigModel:
                 params={},
             )
 
+    def test_known_connectors_validate_required_params_and_secret_refs(self):
+        from app.brain.config import ConnectorConfig
+
+        conn = ConnectorConfig(
+            connector_id="tn-main",
+            connector_type="tiendanube",
+            label="Tiendanube",
+            params={"store_id": "123"},
+            secret_refs={"access_token": "secret://businesses/demo/connectors/tn/access_token"},
+        )
+        assert conn.secret_refs["access_token"].startswith("secret://")
+
+        with pytest.raises(ValidationError) as exc_info:
+            ConnectorConfig(
+                connector_id="bad-meta",
+                connector_type="meta_ads",
+                label="Meta Ads",
+                params={"access_token": "meta_test_token"},
+            )
+        assert "meta_ads connector config must include ad_account_id" in str(exc_info.value)
+        assert "examples/meta_ads_business_config.json" in str(exc_info.value)
+
+    def test_unknown_connector_type_is_preserved_for_runtime_error(self):
+        from app.brain.config import ConnectorConfig
+
+        conn = ConnectorConfig(
+            connector_id="future",
+            connector_type="shopify",
+            label="Future connector",
+            params={},
+        )
+        assert conn.connector_type == "shopify"
+
 
 # ---------------------------------------------------------------------------
 # BusinessConfig with connectors
@@ -172,7 +205,7 @@ class TestBusinessConfigWithConnectors:
             connector_id="gs-sales",
             connector_type="google_sheets",
             label="Ventas",
-            params={"spreadsheet_id": "abc"},
+            params={"spreadsheet_id": "abc", "range_name": "Ventas!A1:F1000"},
         )
         cfg = BusinessConfig(
             business_id="artemea-001",
@@ -192,7 +225,7 @@ class TestBusinessConfigWithConnectors:
             connector_id="dup",
             connector_type="google_sheets",
             label="A",
-            params={},
+            params={"spreadsheet_id": "abc", "range_name": "Ventas!A1:F1000"},
         )
         conn2 = ConnectorConfig(
             connector_id="dup",
@@ -295,7 +328,7 @@ class TestJSONSerialisation:
             connector_id="gs-1",
             connector_type="google_sheets",
             label="Ventas",
-            params={"spreadsheet_id": "xyz"},
+            params={"spreadsheet_id": "xyz", "range_name": "Ventas!A1:F1000"},
         )
         cfg = BusinessConfig(
             business_id="artemea-001",

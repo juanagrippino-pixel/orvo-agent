@@ -6,7 +6,7 @@ This document defines the Hito-1+ feedback loop for owner-facing Orvo reports.
 
 Goal:
 
-- Let Juan quickly mark which insights were useful, noisy, or incorrect from WhatsApp.
+- Let operator quickly mark which insights were useful, noisy, or incorrect from WhatsApp.
 - Store feedback at the insight level, not just the report level.
 - Turn that signal into weekly internal summaries and bounded tuning inputs.
 
@@ -16,17 +16,17 @@ The feedback loop exists to improve precision and safety, not to create a chat-h
 
 ## Product principles
 
-1. **Low friction beats rich annotation.** Juan should be able to give feedback in a few seconds.
+1. **Low friction beats rich annotation.** operator should be able to give feedback in a few seconds.
 2. **Insight-level feedback is more useful than report-level sentiment.**
 3. **Incorrect is a safety signal, not just a preference signal.**
 4. **No direct auto-learning from one message.** Feedback should inform bounded tuning and internal review.
-5. **The report should remain readable even if Juan never gives feedback.**
+5. **The report should remain readable even if operator never gives feedback.**
 
 ---
 
 ## User interaction design
 
-There are three feedback classes Juan can send from WhatsApp:
+There are three feedback classes operator can send from WhatsApp:
 
 - **Useful**: this was worth seeing
 - **Noisy**: not wrong exactly, but not worth the interruption / attention
@@ -49,7 +49,7 @@ ARTEMEA · 2026-05-21
 Reply: useful 1 / noisy 3 / incorrect 2
 ```
 
-Juan can reply with simple text:
+operator can reply with simple text:
 
 - `useful 1`
 - `noisy 3`
@@ -71,7 +71,7 @@ Juan can reply with simple text:
 
 ## Option B — quoted reply to message line
 
-Juan replies to the WhatsApp message and quotes the relevant line, then adds:
+operator replies to the WhatsApp message and quotes the relevant line, then adds:
 
 - `useful`
 - `noisy`
@@ -143,7 +143,7 @@ Only show footer:
 - after critical alerts
 - on evaluation campaigns
 
-This reduces clutter once Juan already knows the pattern.
+This reduces clutter once operator already knows the pattern.
 
 ---
 
@@ -349,7 +349,7 @@ This supports product learning across businesses later.
 
 ## Weekly internal summary design
 
-The weekly summary is for Orvo internal operators, not Juan.
+The weekly summary is for Orvo internal operators, not operator.
 
 Goal:
 
@@ -383,7 +383,7 @@ Example:
 
 ### Section 2: useful insights this week
 
-List the insight types and exact instances Juan marked useful.
+List the insight types and exact instances operator marked useful.
 
 Example:
 
@@ -516,7 +516,7 @@ Unsafe automations:
 
 ## Review workflow for incorrect feedback
 
-When Juan marks an insight incorrect, internal review should classify root cause into one of these buckets:
+When operator marks an insight incorrect, internal review should classify root cause into one of these buckets:
 
 1. **Data stale/incomplete**
 2. **Metric mapping bug**
@@ -561,8 +561,8 @@ This classification matters because the fix is different in each case.
 
 1. Will WhatsApp delivery infrastructure expose stable message IDs and quoted-reply metadata cleanly enough to support richer parsing later?
 2. Should ordinal numbers be visible in the owner message, or only implied in a footer mapping?
-3. Is `noisy` the right word for Juan, or would `not useful` feel clearer in Spanish while preserving the same internal label?
-4. How often will Juan realistically send feedback without periodic prompting?
+3. Is `noisy` the right word for operator, or would `not useful` feel clearer in Spanish while preserving the same internal label?
+4. How often will operator realistically send feedback without periodic prompting?
 5. Should incorrect feedback immediately pause similar insight classes for that business until reviewed, or only flag them internally?
 
 ## Recommendation

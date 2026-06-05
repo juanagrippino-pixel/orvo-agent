@@ -388,7 +388,7 @@ Next tasks:
 ### Board Report
 
 Responsibilities:
-- Give Juan concise evidence-backed executive status.
+- Give operator concise evidence-backed executive status.
 - Surface only real decisions: merge, push, deploy, credentials, customer action, product trade-off, external Hito 0 info.
 
 Next tasks:

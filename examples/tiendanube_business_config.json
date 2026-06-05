@@ -1,7 +1,7 @@
 {
   "business_id": "demo-shop",
   "business_name": "Demo Shop",
-  "owner_phone": "+5491150380097",
+  "owner_phone": "+5491100000001",
   "timezone": "America/Argentina/Buenos_Aires",
   "currency": "ARS",
   "connectors": [
