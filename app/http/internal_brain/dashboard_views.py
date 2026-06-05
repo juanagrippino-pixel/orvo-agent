@@ -6,6 +6,10 @@ from flask import request
 
 from app.brain.operator_api import *  # noqa: F401,F403
 from app.brain.operator_auth import CASE_ACTION_PERMISSION
+from app.brain.operator_api.idempotency import (
+    SQLiteCaseActionIdempotencyStore,
+    case_action_payload_fingerprint,
+)
 
 from .common import (
     _append_operator_audit_event,
@@ -131,12 +135,38 @@ def register_dashboard_view_routes(app):
                     "case action payload must be a JSON object",
                     status_code=400,
                 )
+            action_key = str(payload.get("action_key", ""))
+            idempotency_key = request.headers.get("X-Idempotency-Key", "")
+            idempotency_key = idempotency_key.strip() if idempotency_key else ""
+            idempotency_store = None
+            reservation = None
+            if idempotency_key:
+                conn = getattr(case_store, "connection", None)
+                if conn is not None:
+                    idempotency_store = SQLiteCaseActionIdempotencyStore(conn)
+                    payload_fingerprint = case_action_payload_fingerprint(
+                        business_id=business_id,
+                        case_id=case_id,
+                        action_key=action_key,
+                        actor_ref=actor_ref,
+                        payload=payload,
+                    )
+                    reservation = idempotency_store.reserve(
+                        business_id=business_id,
+                        idempotency_key=idempotency_key,
+                        case_id=case_id,
+                        action_key=action_key,
+                        actor_ref=actor_ref,
+                        payload_fingerprint=payload_fingerprint,
+                    )
+                    if reservation.is_replay:
+                        return _internal_success(business_id, reservation.replayed_data or {})
             try:
                 data = apply_case_action(
                     case_store,
                     business_id=business_id,
                     case_id=case_id,
-                    action_key=str(payload.get("action_key", "")),
+                    action_key=action_key,
                     actor_ref=actor_ref,
                     reason=payload.get("reason"),
                     comment=payload.get("comment"),
@@ -152,13 +182,20 @@ def register_dashboard_view_routes(app):
                     target_type="operational_case",
                     target_id=case_id,
                     data={
-                        "action_key": str(payload.get("action_key", "")),
+                        "action_key": action_key,
                         "error_code": exc.code,
                         "status_code": exc.status_code,
                         "payload": payload,
                     },
                 )
                 raise
+            if idempotency_store is not None and reservation is not None:
+                idempotency_store.complete(
+                    business_id=business_id,
+                    idempotency_key=idempotency_key,
+                    response_data=data,
+                    status_code=200,
+                )
             return _internal_success(business_id, data)
 
         return _with_internal_stores(business_id, _handle)

@@ -124,6 +124,25 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_operator_audit_target
             ON operator_audit_events (target_type, target_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS operator_case_action_idempotency (
+            business_scope_key   TEXT NOT NULL,
+            idempotency_key_hash TEXT NOT NULL,
+            business_id          TEXT NOT NULL,
+            case_id              TEXT NOT NULL,
+            action_key           TEXT NOT NULL,
+            actor_ref            TEXT NOT NULL,
+            payload_fingerprint  TEXT NOT NULL,
+            status               TEXT NOT NULL,
+            response_data        TEXT,
+            status_code          INTEGER,
+            created_at           TEXT NOT NULL,
+            updated_at           TEXT NOT NULL,
+            PRIMARY KEY (business_scope_key, idempotency_key_hash)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_operator_case_action_idempotency_case
+            ON operator_case_action_idempotency (business_scope_key, case_id, updated_at DESC);
         """
     )
     _ensure_operator_audit_scope_key(conn)

@@ -474,6 +474,74 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
     assert "raw_action_secret" not in reloaded.model_dump_json()
 
 
+def test_internal_case_action_replays_idempotency_key_without_second_mutation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    ack = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Request-ID": "req-idempotency-ack"},
+        json={"action_key": "acknowledge_case"},
+    )
+    assert ack.status_code == 200
+
+    payload = {"action_key": "resolve_case", "reason": "Fixed access_token=raw_idempotency_secret"}
+    first = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Request-ID": "req-idempotency-first",
+            "X-Idempotency-Key": "operator-resolve-case-1",
+        },
+        json=payload,
+    )
+    replay = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Request-ID": "req-idempotency-replay",
+            "X-Idempotency-Key": "operator-resolve-case-1",
+        },
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert "raw_idempotency_secret" not in first.get_data(as_text=True)
+    assert "raw_idempotency_secret" not in replay.get_data(as_text=True)
+    assert first.get_json()["data"]["case"]["status"] == "resolved"
+    assert replay.get_json()["data"]["case"]["status"] == "resolved"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    idempotency_row = conn.execute(
+        """
+        SELECT idempotency_key_hash, payload_fingerprint, response_data
+        FROM operator_case_action_idempotency
+        WHERE business_id = ? AND case_id = ?
+        """,
+        ("artemea", case.case_id),
+    ).fetchone()
+    conn.close()
+    assert reloaded is not None
+    assert idempotency_row is not None
+    assert "raw_idempotency_secret" not in json.dumps(tuple(idempotency_row), default=str)
+    resolved_events = [
+        event
+        for event in reloaded.timeline
+        if event.event_type == "status_changed" and event.metadata.get("to_status") == "resolved"
+    ]
+    assert len(resolved_events) == 1
+    assert "raw_idempotency_secret" not in reloaded.model_dump_json()
+
+    failed_events = [
+        event
+        for event in _audit_events(db_path)
+        if event["event_type"] == "operator.case_action.failed"
+        and event["request_id"] in {"req-idempotency-first", "req-idempotency-replay"}
+    ]
+    assert failed_events == []
+
+
 def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
