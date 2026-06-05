@@ -1043,9 +1043,18 @@ def test_internal_case_view_export_rejects_unknown_view_without_echoing_secret(m
 
 def test_internal_case_view_summary_returns_scoped_facets_without_cases(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
+    open_detection = _case_detection_with_source(source="tiendanube", run_id="run-open", priority=90)
     _seed_case(
         db_path,
-        _case_detection_with_source(source="tiendanube", run_id="run-open", priority=90),
+        open_detection.model_copy(
+            update={
+                "evidence_refs": [
+                    "evidence://tiendanube/run-open/stockout_risk/0",
+                    "evidence://tiendanube/run-open/stockout_risk/1",
+                    "evidence://tiendanube/run-open/stockout_risk/2",
+                ]
+            }
+        ),
     )
     acknowledged = _seed_case(
         db_path,
@@ -1118,6 +1127,8 @@ def test_internal_case_view_summary_returns_scoped_facets_without_cases(monkeypa
         "severity_counts": {"critical": 2},
         "case_type_counts": {"stockout_risk": 2},
         "priority_bracket_counts": {"high": 1, "medium": 1},
+        "evidence_count_total": 4,
+        "evidence_count_distribution": {"1": 1, "3": 1},
         "source_connector_counts": {"meta_ads": 1, "tiendanube": 1},
         "freshness_state_counts": {"fresh": 1, "stale": 1},
         "degraded_total": 1,
