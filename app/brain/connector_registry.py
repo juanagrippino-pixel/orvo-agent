@@ -73,6 +73,22 @@ def _metric_object_key(metric: object) -> str:
     return key
 
 
+def _event_type_value(event: object) -> str:
+    """Extract an event type from a string, Event-shaped object, or mapping."""
+
+    if isinstance(event, str):
+        event_type = event
+    elif isinstance(event, Mapping):
+        event_type = event.get("event_type")
+    else:
+        event_type = getattr(event, "event_type", None)
+    if not isinstance(event_type, str) or not event_type:
+        raise ValueError(
+            "validate_emitted_events requires events with a non-empty string event_type"
+        )
+    return event_type
+
+
 class UnknownConnectorError(ValueError):
     """Raised when a connector type is not registered."""
 
@@ -118,6 +134,17 @@ class ConnectorValidationIssue:
     key: str
     message: str
     severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorEventValidationIssue:
+    """Deterministic advisory diagnostic for connector event certification."""
+
+    code: str
+    event_type: str
+    message: str
+    severity: str = SEVERITY_WARNING
+    index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -604,6 +631,43 @@ class ConnectorSpec:
             *value_kind_issues,
             *money_currency_issues,
         ]
+
+    def validate_emitted_events(
+        self,
+        events: Iterable[object],
+    ) -> list[ConnectorEventValidationIssue]:
+        """Validate emitted connector event types against registry families.
+
+        Connector specs declare event *families* (for example
+        ``connector.execution`` and ``connector.health``). Runtime/adapters may
+        emit concrete event types under those families, such as
+        ``connector.execution.succeeded``. This deterministic certification check
+        flags event types outside the connector's declared envelope without
+        inventing connector-specific event registries.
+        """
+
+        allowed_families = tuple(self.emitted_event_families)
+        issues: list[ConnectorEventValidationIssue] = []
+        for index, event in enumerate(events):
+            event_type = _event_type_value(event)
+            if any(
+                event_type == family or event_type.startswith(f"{family}.")
+                for family in allowed_families
+            ):
+                continue
+            issues.append(
+                ConnectorEventValidationIssue(
+                    code="undeclared_event_family",
+                    event_type=event_type,
+                    index=index,
+                    message=(
+                        f"{self.connector_type} connector emitted event {event_type} "
+                        "outside declared event families: "
+                        + ", ".join(allowed_families)
+                    ),
+                )
+            )
+        return issues
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:
         """Return legacy inline execution-param errors without logging credentials.
@@ -1095,3 +1159,16 @@ def validate_emitted_metric_objects_for_connector(
     return get_connector_spec(connector_type).validate_emitted_metric_objects(
         metrics, registry=registry
     )
+
+
+def validate_emitted_events_for_connector(
+    connector_type: str,
+    events: Iterable[object],
+) -> list[ConnectorEventValidationIssue]:
+    """Convenience wrapper around ``ConnectorSpec.validate_emitted_events``.
+
+    Raises ``UnknownConnectorError`` when ``connector_type`` is not registered
+    so callers cannot silently skip event-family certification.
+    """
+
+    return get_connector_spec(connector_type).validate_emitted_events(events)
