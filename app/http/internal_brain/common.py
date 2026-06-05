@@ -27,6 +27,18 @@ from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_
 _MAX_INTERNAL_REQUEST_ID_LENGTH = 128
 
 
+def _safe_internal_business_id(business_id: str) -> str:
+    """Return a route business id safe for internal API envelopes.
+
+    Normal business ids are operational routing labels and remain visible. If a
+    pasted credential lands in the path parameter, collapse the whole label so
+    the response cannot echo secret tails before auth or in success projections.
+    """
+
+    redacted = redact_text(business_id) or "[REDACTED]"
+    return redacted if redacted == business_id else "[REDACTED]"
+
+
 def _internal_request_id() -> str:
     supplied = request.headers.get("X-Request-ID")
     if supplied is None or not supplied.strip():
@@ -42,7 +54,7 @@ def _internal_success(business_id: str, data: dict, *, warnings: list[str] | Non
     return jsonify(
         {
             "ok": True,
-            "business_id": business_id,
+            "business_id": _safe_internal_business_id(business_id),
             "request_id": _internal_request_id(),
             "data": data,
             "warnings": warnings or [],
@@ -56,7 +68,7 @@ def _internal_error(business_id: str, code: str, message: str, *, status_code: i
         jsonify(
             {
                 "ok": False,
-                "business_id": business_id,
+                "business_id": _safe_internal_business_id(business_id),
                 "request_id": _internal_request_id(),
                 "error": {"code": code, "message": message, "safe_to_show_owner": False},
                 "redaction_applied": True,

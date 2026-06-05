@@ -235,6 +235,20 @@ def register_case_activity_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/workflow/throughput/by-entity-kind")
+    def internal_brain_workflow_throughput_by_entity_kind(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_workflow_throughput_by_entity_kind(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/workflow/throughput/by-source-connector")
     def internal_brain_workflow_throughput_by_source_connector(business_id: str):
         return _with_internal_stores(

@@ -88,23 +88,27 @@ POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 GET /internal/brain/businesses/{business_id}/owner-case-brief/preview
 ```
 
-Actions must use registered action keys and append timeline events. The
+Actions must use registered action keys and append timeline events. Manual case-action
+requests may include `X-Idempotency-Key`; when present the key is reserved in the
+durable workflow action ledger before the case mutation, duplicate completed
+requests replay the current case with `data.action.status = "skipped_duplicate"`,
+and duplicate pending/failed keys are rejected with a safe `409` envelope. The
 `recently-assigned` endpoint is a read-only projection over actionable cases with
 `assigned_at`/`assignee_ref`; it does not mutate lifecycle state or treat
 assignment as a source of truth. The `suggested-actions` endpoint is a read-only,
 actionable-case projection that filters `suggested_action_keys` through the
 registered action catalog, suppresses invented keys, and redacts case titles and
-entity scope at the API boundary. The action
-catalog endpoint is an authenticated, business-scoped projection of registered
-case action keys; it must mark which catalog actions are actually enabled by the
-current internal API (including `assign_owner` once the scoped assignment path is
-wired) so clients do not infer executable capabilities from docs or owner-facing
-copy. Enabled assignment entries must advertise required input fields without
-exposing unredacted assignee values. The owner-case-brief preview endpoint is a
-read-only WhatsApp projection over canonical actionable cases; it returns the
-composed, redacted text plus projection metadata (`total_actionable_cases`,
-`displayed_case_count`, `truncated`, and displayed `case_ids`) and must not
-dispatch, mutate cases, or treat brief text as state.
+entity scope at the API boundary. The action catalog endpoint is an authenticated,
+business-scoped projection of registered case action keys; it must mark which
+catalog actions are actually enabled by the current internal API (including
+`assign_owner` once the scoped assignment path is wired) so clients do not infer
+executable capabilities from docs or owner-facing copy. Enabled assignment entries
+must advertise required input fields without exposing unredacted assignee values.
+The owner-case-brief preview endpoint is a read-only WhatsApp projection over
+canonical actionable cases; it returns the composed, redacted text plus projection
+metadata (`total_actionable_cases`, `displayed_case_count`, `truncated`, and
+displayed `case_ids`) and must not dispatch, mutate cases, or treat brief text as
+state.
 
 ### Operator audit events
 
