@@ -317,7 +317,7 @@ def summarize_builtin_case_view(
                 "severity_counts": _sorted_counts(case.severity for case in matching),
                 "case_type_counts": _sorted_counts(case.case_type for case in matching),
                 "priority_bracket_counts": _sorted_counts(
-                    classify_work_item_priority_bracket(case.priority_score) for case in matching
+                    case_priority_bracket(case) for case in matching
                 ),
                 "evidence_count_total": sum(len(case.evidence_refs) for case in matching),
                 "evidence_count_distribution": _sorted_counts(len(case.evidence_refs) for case in matching),
@@ -550,8 +550,6 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_priority_bracket(case)
     if field == "evidence_count":
         return len(case.evidence_refs)
-    if field == "priority_bracket":
-        return classify_work_item_priority_bracket(case.priority_score)
     if field == "assigned":
         return case.assignee_ref is not None
     if field == "actionable":
