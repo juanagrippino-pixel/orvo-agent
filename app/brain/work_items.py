@@ -147,6 +147,18 @@ def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory
     return operational_case_status_category(case.status)
 
 
+def case_available_operator_transitions(case: OperationalCase) -> list[OperationalCaseStatus]:
+    """Return operator-initiated transitions allowed from the case's current status."""
+
+    return sorted(operational_case_status_transitions()[case.status])
+
+
+def case_system_reopen_transition(case: OperationalCase) -> OperationalCaseStatus | None:
+    """Return the deterministic recurrence transition without exposing manual reopen."""
+
+    return operational_case_system_reopen_transitions().get(case.status)
+
+
 def priority_bracket_for_score(priority_score: int) -> str:
     """Return the canonical WorkItem priority bracket for a 0..100 score."""
 
@@ -335,6 +347,8 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
         "issue_type": case_issue_type(case),
         "status": case.status,
         "status_category": case_status_category(case),
+        "available_operator_transitions": case_available_operator_transitions(case),
+        "system_reopen_transition": case_system_reopen_transition(case),
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
         "assignee_ref": case.assignee_ref,
