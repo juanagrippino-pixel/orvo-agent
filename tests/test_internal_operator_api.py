@@ -624,6 +624,50 @@ def test_internal_case_action_failed_validation_does_not_consume_idempotency_key
     assert retry_body["data"]["action"]["idempotency_key"] == "case-action-retry-after-validation"
 
 
+def test_internal_case_action_secret_shaped_idempotency_key_is_rejected_without_ledger_or_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    secret_idempotency_key = "case-action/access_token:raw_idempotency_secret"
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Idempotency-Key": secret_idempotency_key,
+            "X-Request-ID": "req-secret-idempotency-key",
+        },
+        json={"action_key": "acknowledge_case", "reason": "valid mutation must not run"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_idempotency_secret" not in raw_body
+    body = response.get_json()
+    assert body["error"]["code"] == "invalid_idempotency_key"
+    assert body["redaction_applied"] is True
+    assert SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea") == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    matching_events = [
+        event for event in _audit_events(db_path) if event["request_id"] == "req-secret-idempotency-key"
+    ]
+    assert len(matching_events) == 1
+    event_json = json.dumps(matching_events[0], sort_keys=True)
+    assert "raw_idempotency_secret" not in event_json
+    assert secret_idempotency_key not in event_json
+
+
 def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
@@ -1448,6 +1492,54 @@ def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envel
     assert data["by_idle_bucket"]["under_6h"] == 1
     assert data["by_idle_bucket_priority_bracket"]["under_6h"] == {"high": 1}
     assert data["most_stalled_actionable"]["case_type"] == "stockout_risk"
+
+
+def test_internal_case_queue_stagnation_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(run_id="run-artemea-critical", severity="critical"),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas en baja",
+            run_id="run-artemea-warning",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical",
+            severity="critical",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 2
+    assert data["by_idle_bucket_severity"]["under_6h"] == {"critical": 1, "warning": 1}
+    assert data["most_stalled_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
 
 
 def test_internal_workflow_throughput_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
