@@ -439,7 +439,11 @@ def test_internal_operator_api_does_not_import_external_action_execution_boundar
 def test_internal_case_action_actor_identity_comes_from_authenticated_header(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
-    headers = {**AUTH, "X-Orvo-Operator": "operator:trusted"}
+    headers = {
+        **AUTH,
+        "X-Orvo-Operator": "operator:trusted",
+        "X-Idempotency-Key": "case-action-actor-identity",
+    }
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
@@ -474,7 +478,7 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
 
     ack = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-ack-redaction"},
         json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
     )
     assert ack.status_code == 200
@@ -482,7 +486,7 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
 
     resolved = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-resolve-redaction"},
         json={"action_key": "resolve_case", "reason": "Fixed access_token=raw_action_secret"},
     )
 
@@ -500,6 +504,43 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
     assert reloaded.status == "resolved"
     assert reloaded.timeline[-1].actor_ref == "operator:juan"
     assert "raw_action_secret" not in reloaded.model_dump_json()
+
+
+def test_internal_case_action_requires_idempotency_key_before_mutation_and_ledger(monkeypatch, tmp_path):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Request-ID": "req-missing-idempotency-key"},
+        json={"action_key": "acknowledge_case", "reason": "valid mutation must not run"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "missing_idempotency_key"
+    assert body["redaction_applied"] is True
+    assert SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea") == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    matching_events = [
+        event for event in _audit_events(db_path) if event["request_id"] == "req-missing-idempotency-key"
+    ]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["data"]["action_key"] == "acknowledge_case"
+    assert event["data"]["error_code"] == "missing_idempotency_key"
+    assert event["data"]["status_code"] == 400
 
 
 def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(monkeypatch, tmp_path):
@@ -674,7 +715,7 @@ def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monk
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-assign-owner-alias"},
         json={"action_key": "assign_owner", "owner_ref": "dueña access_token=raw_owner_secret"},
     )
 
@@ -3585,12 +3626,17 @@ def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypat
     )
     operator = client.post(
         f"/internal/brain/businesses/artemea/cases/{operator_case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "operator"},
+        headers={**AUTH, "X-Orvo-Role": "operator", "X-Idempotency-Key": "case-action-role-operator"},
         json={"action_key": "acknowledge_case"},
     )
     admin = client.post(
         f"/internal/brain/businesses/artemea/cases/{admin_case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "admin",
+            "X-Orvo-Operator": "admin:sol",
+            "X-Idempotency-Key": "case-action-role-admin",
+        },
         json={"action_key": "acknowledge_case"},
     )
 

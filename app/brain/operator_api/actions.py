@@ -237,22 +237,6 @@ def apply_case_action_with_idempotency(
     assignee_ref: Any = None,
     owner_ref: Any = None,
 ) -> dict[str, Any]:
-    normalized_idempotency_key = normalize_case_action_idempotency_key(idempotency_key)
-    if normalized_idempotency_key is None:
-        return apply_case_action(
-            store,
-            business_id=business_id,
-            case_id=case_id,
-            action_key=action_key,
-            actor_ref=actor_ref,
-            actor=actor,
-            reason=reason,
-            comment=comment,
-            metadata=metadata,
-            assignee_ref=assignee_ref,
-            owner_ref=owner_ref,
-        )
-
     _case, effective_actor_ref = _validate_case_action_inputs(
         store,
         business_id=business_id,
@@ -265,6 +249,13 @@ def apply_case_action_with_idempotency(
         assignee_ref=assignee_ref,
         owner_ref=owner_ref,
     )
+    normalized_idempotency_key = normalize_case_action_idempotency_key(idempotency_key)
+    if normalized_idempotency_key is None:
+        raise OperatorAPIError(
+            "missing_idempotency_key",
+            "X-Idempotency-Key is required for manual case actions",
+            status_code=400,
+        )
     params = _manual_action_params(
         reason=reason,
         comment=comment,
