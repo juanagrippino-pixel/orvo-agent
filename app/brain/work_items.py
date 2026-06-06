@@ -231,6 +231,20 @@ def case_last_commented_at(case: OperationalCase) -> str | None:
     return _iso_utc(max(event.created_at for event in comment_events))
 
 
+def case_sla_started_at(case: OperationalCase) -> datetime:
+    """Return the WorkItem SLA clock anchor for the current actionable occurrence.
+
+    OperationalCase keeps one durable case across deduped recurrences. When
+    deterministic evidence reopens a terminal case, the WorkItem SLA should
+    measure the new actionable occurrence, not the original historical opening.
+    """
+
+    reopened_events = [event.created_at for event in case.timeline if event.event_type == "case_reopened"]
+    if reopened_events:
+        return max(reopened_events)
+    return case.opened_at
+
+
 def acknowledgment_sla_minutes_for_priority_score(priority_score: int) -> int:
     """Return the deterministic first-acknowledgment SLA target for a priority score."""
 
@@ -254,11 +268,11 @@ def resolution_sla_minutes_for_priority_score(priority_score: int) -> int:
 
 
 def case_acknowledgment_due_at(case: OperationalCase) -> datetime:
-    return case.opened_at + timedelta(minutes=acknowledgment_sla_minutes_for_priority_score(case.priority_score))
+    return case_sla_started_at(case) + timedelta(minutes=acknowledgment_sla_minutes_for_priority_score(case.priority_score))
 
 
 def case_resolution_due_at(case: OperationalCase) -> datetime:
-    return case.opened_at + timedelta(minutes=resolution_sla_minutes_for_priority_score(case.priority_score))
+    return case_sla_started_at(case) + timedelta(minutes=resolution_sla_minutes_for_priority_score(case.priority_score))
 
 
 def _acknowledgment_sla_comparison_time(case: OperationalCase, *, as_of: datetime) -> datetime:
@@ -345,6 +359,7 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
         "comment_count": case_comment_count(case),
         "last_commented_at": case_last_commented_at(case),
         "acknowledged_at": _iso_utc(case.acknowledged_at) if case.acknowledged_at is not None else None,
+        "sla_started_at": _iso_utc(case_sla_started_at(case)),
         "acknowledgment_sla_minutes": acknowledgment_sla_minutes_for_priority_score(case.priority_score),
         "acknowledgment_due_at": _iso_utc(case_acknowledgment_due_at(case)),
         "acknowledgment_sla_breached": case_acknowledgment_sla_breached(case, as_of=effective_as_of),
