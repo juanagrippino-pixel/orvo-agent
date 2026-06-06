@@ -1,5 +1,41 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-06 15:59 UTC
+
+Status: **No branch promoted; first safe-looking QA invariant conflicted and was preserved**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head reviewed: `0250e18` (`test: cover jql error redaction`)
+
+The release/integration controller inventoried unmerged branches after the latest canonical commits (`connector resolved-secret runtime bindings`, WorkItem priority registry, required case-action idempotency, and JQL error redaction). `git branch --no-merged feat/orvo-brain-control-plane` currently reports 65 local unmerged branches, including 44 `codex/*`, 13 `codex/eng-factory-*`, 13 `codex/qa-*`, 7 `qa/*`, and 7 `docs/*` branches. The previous ARB top candidate, `codex/eng-factory-secret-ref-runtime-20260606`, is now integrated: `git merge-base --is-ancestor codex/eng-factory-secret-ref-runtime-20260606 feat/orvo-brain-control-plane` returned `0`.
+
+Candidate attempted:
+
+- `codex/qa-case-action-redaction-20260606` @ `5ee93d7` (`test: lock project jql tenant scope`)
+- Worker worktree: `/root/orvo-agent-worktrees/qa-redteam-case-action-redaction-20260606`
+- Worker status before test: clean.
+- Worker focused test: `pytest tests/test_operator_case_views.py -q` -> `15 passed in 2.56s`.
+- Architecture disposition: useful QA-only invariant. It verifies that a `project = OTHER` JQL clause cannot widen the route-owned business scope and that the other tenant's case ID is not echoed in the response.
+
+Result:
+
+- Merge attempt into `feat/orvo-brain-control-plane` was stopped and aborted because `tests/test_operator_case_views.py` conflicted with the newer canonical `test_internal_case_queue_redacts_secret_shaped_jql_error_messages` added in `0250e18`.
+- Conflict was confined to adjacent test insertion near `test_internal_case_queue_redacts_secret_shaped_jql_echo`; no production code conflicted.
+- Source branch was preserved; canonical worktree was restored clean with `git merge --abort`.
+
+Required fix before retry:
+
+- Rebase or cherry-pick the QA invariant on top of `0250e18+`, placing both tests in `tests/test_operator_case_views.py` without dropping the canonical JQL error-redaction coverage.
+- Re-run `pytest tests/test_operator_case_views.py -q` and then `pytest -q` before promotion.
+
+Current next integration order:
+
+1. **JQL project-scope QA invariant repair:** retry `codex/qa-case-action-redaction-20260606` only after the one-file test conflict is resolved against the canonical JQL error-redaction test.
+2. **Connector-platform reconcile:** review `codex/eng-factory-connector-platform-reconcile-20260606` after secret-ref runtime bindings are now canonical; branch is useful but larger (16 files, 7 unique commits) and needs focused contract/full-suite gates.
+3. **Idempotency cleanup:** inspect `codex/eng-factory-required-case-action-idempotency-20260606` and `codex/qa-mutating-action-idempotency-20260606` for unique tests only; canonical head already includes `5c98742` (`codex: require case action idempotency keys`).
+4. **Manifest guard slices:** `codex/eng-factory-manifest-branch-head-20260605` is small but ops-only; merge after product/security QA invariants unless the autonomous-fleet manifest checker becomes the bottleneck.
+5. **Broad platform branches:** keep `codex/work-management`, `codex/operator-surfaces`, `codex/search-analytics`, `codex/workflow-automation`, `codex/service-management`, and `codex/edge-developer-platform` behind rebase/decomposition review.
+
 ## Release integration update — 2026-06-01 17:02 UTC
 
 Status: **Work Management follow-up promoted**.

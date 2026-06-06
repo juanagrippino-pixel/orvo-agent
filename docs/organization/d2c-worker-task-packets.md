@@ -402,9 +402,17 @@ Acceptance:
 
 ## Packet Q — Connector registry secret-ref runtime hardening
 
+Status: satisfied in the current baseline; dispatch only as a narrow regression/fixer packet if connector executor bindings drift or a new secret-bearing connector is added.
+
 Goal: move registry-driven daily report execution away from transitional inline secret params before calling the connector platform compiled-runtime complete.
 
-Dependency: dispatch after `codex/connector-platform` is present and current connector compatibility tests are green.
+Dependency: current connector registry/executor tests are green. New connector workers must run this packet's invariant checks whenever they introduce adapter kwargs backed by secrets.
+
+Current source-of-truth check:
+
+- `app/brain/connector_registry.py` now defines `resolved_secret_param` factory bindings for secret-backed legacy adapter kwargs, and rejects resolved-secret bindings that are not declared in `legacy_secret_config_fields`.
+- `tests/contracts/test_connector_registry_contract.py` asserts forced/scheduled connector secrets are supplied through `resolved_secret_param`, not durable public `connector_param` bindings.
+- Durable control-plane config still carries `secret_refs`; raw values may exist only on execution-scoped connector copies returned by the resolver.
 
 Read:
 
@@ -423,10 +431,11 @@ Likely files:
 
 Acceptance:
 
-- required secret refs resolve at execution time without entering runtime hashes;
-- Tiendanube/MercadoLibre/Meta Ads legacy inline token paths are either removed or explicitly isolated as compatibility shims with redaction tests;
+- required secret refs continue to resolve at execution time without entering runtime hashes;
+- Tiendanube/MercadoLibre/Meta Ads/WooCommerce legacy inline-token adapter signatures remain isolated as execution-bound compatibility shims with redaction tests;
 - connector factory imports remain static/allowlisted and not tenant-controlled;
-- missing/invalid secrets produce redacted typed failures and, where runtime/case integration exists, open/update `data_stale` instead of unsupported advice.
+- missing/invalid secrets produce redacted typed failures and, where runtime/case integration exists, open/update `data_stale` instead of unsupported advice;
+- adding a new secret-backed connector fails tests unless every secret-backed factory kwarg uses `resolved_secret_param`.
 
 ## Packet R — Connector/semantic family alignment gate
 
@@ -457,7 +466,7 @@ Acceptance:
 
 ## Packet S — WorkItem envelope and status-category projection
 
-Status: satisfied in the current baseline; dispatch only as a narrow regression/fixer packet if WorkItem projection invariants drift. Do **not** revive older status-category/JQL branches that use `todo` or add a second work-item lifecycle store.
+Status: mostly satisfied in the current baseline; dispatch only as a narrow regression/fixer packet if WorkItem projection invariants drift. The remaining ARB item is the query-field registry now captured separately in Packet W. Do **not** revive older status-category/JQL branches that use `todo` or add a second work-item lifecycle store.
 
 Goal: keep the shipped Jira-like work-management projection layer aligned without rewriting `OperationalCase` or making manually-created work the source of truth for deterministic cases.
 
@@ -466,7 +475,8 @@ Dependency: dispatch after current case-action, built-in view, and JQL-lite test
 Current source-of-truth check:
 
 - `app/brain/work_items.py` now exposes project/work-item projections, deterministic project keys with a hash suffix for long names, issue-type definitions, workflow/status definitions, and canonical status categories.
-- `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `status_category`, and `assignee_ref` through the WorkItem/OperationalCase helpers.
+- `app/brain/work_items.py` now also exposes canonical priority bracket helpers and `operational_case_priority_definitions()`; `app/brain/operator_api/common.py` routes priority-bracket analytics through those helpers.
+- `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `status_category`, and `assignee_ref` through the WorkItem/OperationalCase helpers, but still owns the local `_FIELD_SPECS` allowlist pending Packet W.
 - `OperationalCase` remains the durable state owner; there is no separate WorkItem persistence table or owner-facing copy change from this slice.
 
 Read:
@@ -604,6 +614,41 @@ Acceptance:
 - dedupe/entity-scope tests prevent repeated daily stuck-order spam while preserving distinct merchant/channel/order-flow issues;
 - no customer messaging, refunds/cancellations, shipping mutations, or carrier-side effects are introduced;
 - package/demo copy remains readiness-gated unless the implementation and tests prove owner-facing monitoring is safe.
+
+## Packet W — WorkItem query-field registry hardening
+
+Goal: close the remaining 2026-06-06 ARB gap by making query/view/facet field definitions canonical WorkItem/OperationalCase projection semantics instead of local `operator_views.py` vocabulary.
+
+Dependency: dispatch after current WorkItem projection and operator JQL-lite tests are green. Do not combine with saved-view persistence, custom tenant fields, dashboard rewrites, or new owner-facing copy.
+
+Current source-of-truth check:
+
+- `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, and priority-bracket projection helpers.
+- `app/brain/operator_views.py` still defines `_FIELD_SPECS` locally for JQL-lite fields (`status`, `status_category`, `project`, `issue_type`, `assignee_ref`, case/evidence/source fields, and timestamp fields).
+- `docs/architecture-reviews/2026-06-06-arb-review.md` recommends a canonical WorkItem field registry so JQL/views/facets do not become a second semantic registry.
+
+Read:
+
+- `docs/architecture-reviews/2026-06-06-arb-review.md`
+- `docs/specs/internal-operator-api-contract.md`
+- `docs/specs/integration-train-contract.md`
+- `docs/specs/testing-invariant-matrix.md`
+
+Likely files:
+
+- `app/brain/work_items.py` or a narrow `app/brain/work_item_fields.py`
+- `app/brain/operator_views.py`
+- operator API/facet modules only to replace local literals with registry imports, not to add new endpoints
+- `tests/test_work_items.py`
+- `tests/test_operator_case_views.py`
+
+Acceptance:
+
+- queryable fields are exposed by one canonical allowlist with value type, allowed operators, and allowed enum values where applicable;
+- `operator_views.py` imports the registry and no longer owns a divergent `_FIELD_SPECS` source of truth;
+- built-in views and JQL-lite tests prove `project`, `issue_type`, `status_category`, `assignee_ref`, and priority-related filters derive from canonical WorkItem/OperationalCase helpers;
+- metric values and aliases remain in `MetricRegistry`, not the WorkItem field registry;
+- SQL-looking input is still rejected before storage, route/context still owns business scope, and no writable saved views or tenant-custom fields are introduced.
 
 ## Packet output format
 

@@ -156,13 +156,14 @@ def register_dashboard_view_routes(app):
                     status_code=400,
                 )
             try:
+                idempotency_key = require_case_action_idempotency_key(_idempotency_key_from_headers())
                 data = apply_case_action_with_idempotency(
                     case_store,
                     SQLiteWorkflowActionLedgerStore(_internal_brain_db_path()),
                     business_id=business_id,
                     case_id=case_id,
                     action_key=str(payload.get("action_key", "")),
-                    idempotency_key=_idempotency_key_from_headers(),
+                    idempotency_key=idempotency_key,
                     actor_ref=actor_ref,
                     reason=payload.get("reason"),
                     comment=payload.get("comment"),

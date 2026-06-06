@@ -25,6 +25,19 @@ def register_case_resolution_latency_routes(app):
             ),
         )
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/resolution-latency/by-severity")
+    def internal_brain_cases_resolution_latency_by_severity(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_resolution_latency_histogram(
+                    case_store,
+                    business_id=business_id,
+                ),
+            ),
+        )
+
     @app.get("/internal/brain/businesses/<business_id>/cases/resolution-latency/by-case-type")
     def internal_brain_cases_resolution_latency_by_case_type(business_id: str):
         return _with_internal_stores(

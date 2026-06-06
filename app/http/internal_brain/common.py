@@ -73,13 +73,15 @@ def _internal_success(business_id: str, data: dict, *, warnings: list[str] | Non
 
 
 def _internal_error(business_id: str, code: str, message: str, *, status_code: int):
+    safe_message = redact_text(message) or "[REDACTED]"
+    safe_message = str(redact_secrets(safe_message))
     return (
         jsonify(
             {
                 "ok": False,
                 "business_id": _safe_internal_business_id(business_id),
                 "request_id": _internal_request_id(),
-                "error": {"code": code, "message": message, "safe_to_show_owner": False},
+                "error": {"code": code, "message": safe_message, "safe_to_show_owner": False},
                 "redaction_applied": True,
             }
         ),

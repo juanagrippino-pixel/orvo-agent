@@ -377,7 +377,7 @@ def test_internal_case_action_cannot_cross_business_scope_or_mutate_foreign_case
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{other_case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action:artemea:cross-business"},
         json={"action_key": "acknowledge_case"},
     )
 
@@ -514,7 +514,7 @@ def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, 
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action:artemea:unknown-key"},
         json={"action_key": "delete_everything"},
     )
 
@@ -547,7 +547,11 @@ def test_internal_case_action_rejects_registered_external_action_at_operator_api
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers={**AUTH, "X-Request-ID": "req-external-boundary"},
+        headers={
+            **AUTH,
+            "X-Idempotency-Key": "case-action:artemea:external-boundary",
+            "X-Request-ID": "req-external-boundary",
+        },
         json={
             "action_key": "request_external_action",
             "reason": "Create CRM ticket access_token=raw_external_boundary_secret",
@@ -610,7 +614,11 @@ def test_internal_operator_api_does_not_import_external_action_execution_boundar
 def test_internal_case_action_actor_identity_comes_from_authenticated_header(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
-    headers = {**AUTH, "X-Orvo-Operator": "operator:trusted"}
+    headers = {
+        **AUTH,
+        "X-Orvo-Operator": "operator:trusted",
+        "X-Idempotency-Key": "case-action:artemea:actor-identity",
+    }
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
@@ -645,7 +653,7 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
 
     ack = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action:artemea:ack-redaction"},
         json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
     )
     assert ack.status_code == 200
@@ -839,13 +847,48 @@ def test_internal_case_action_secret_shaped_idempotency_key_is_rejected_without_
     assert secret_idempotency_key not in event_json
 
 
+def test_internal_case_action_requires_idempotency_key_before_mutation(monkeypatch, tmp_path):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    headers = {key: value for key, value in AUTH.items() if key != "X-Idempotency-Key"}
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**headers, "X-Request-ID": "req-missing-idempotency-key"},
+        json={"action_key": "acknowledge_case", "reason": "should require replay safety"},
+    )
+
+    assert response.status_code == 428
+    body = response.get_json()
+    assert body["error"]["code"] == "missing_idempotency_key"
+    assert SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea") == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    matching_events = [
+        event for event in _audit_events(db_path) if event["request_id"] == "req-missing-idempotency-key"
+    ]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["event_type"] == "operator.case_action.denied"
+    assert event["data"]["gateway_policy"]["decision_code"] == "missing_idempotency_key"
+    assert event["data"]["status_code"] == 428
+
+
 def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action:artemea:assign-owner"},
         json={"action_key": "assign_owner", "owner_ref": "dueña access_token=raw_owner_secret"},
     )
 
@@ -3718,7 +3761,12 @@ def test_internal_case_action_failure_writes_redacted_operator_audit_event(monke
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-failed"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "operator",
+            "X-Idempotency-Key": "case-action:artemea:audit-failed",
+            "X-Request-ID": "req-failed",
+        },
         json={
             "action_key": "unknown_action",
             "comment": "Authorization: Basic cmF3X2F1ZGl0X3NlY3JldA==",
@@ -3759,7 +3807,11 @@ def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypat
     )
     operator = client.post(
         f"/internal/brain/businesses/artemea/cases/{operator_case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "operator"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "operator",
+            "X-Idempotency-Key": "case-action:artemea:role-operator",
+        },
         json={"action_key": "acknowledge_case"},
     )
     admin = client.post(
@@ -3828,7 +3880,12 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     case = _seed_case(db_path, _case_detection())
     failure = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-audit-source"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "operator",
+            "X-Idempotency-Key": "case-action:artemea:audit-export-source",
+            "X-Request-ID": "req-audit-source",
+        },
         json={
             "action_key": "unknown_action",
             "comment": "Authorization: Basic " + "cmF3X2F1ZGl0X3NlY3JldA==",
