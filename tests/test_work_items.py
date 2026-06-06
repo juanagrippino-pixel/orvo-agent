@@ -8,6 +8,8 @@ from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCa
 from app.brain.semantics import CASE_FAMILY_METRICS
 from app.brain.storage import init_schema
 from app.brain.work_items import (
+    allowed_case_query_field_names,
+    allowed_case_query_sort_fields,
     allowed_priority_brackets,
     allowed_status_categories,
     allowed_work_item_facet_fields,
@@ -17,8 +19,11 @@ from app.brain.work_items import (
     case_status_category,
     case_type_release_state,
     case_work_item_projection,
+    classify_work_item_priority_bracket,
     operational_case_issue_type_definitions,
+    operational_case_priority_bracket_definitions,
     operational_case_priority_definitions,
+    operational_case_query_field_definitions,
     operational_case_status_definitions,
     operational_case_workflow_definition,
     priority_bracket_for_score,
@@ -268,9 +273,11 @@ def test_query_field_registry_is_canonical_work_item_semantics():
     assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
     assert allowed_work_item_facet_fields() == {
         "assignee_ref",
+        "assigned",
         "case_type",
         "degraded",
         "entity.kind",
+        "freshness_state",
         "issue_type",
         "priority_bracket",
         "project",
@@ -280,3 +287,39 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "status",
         "status_category",
     }
+
+
+def test_work_item_query_field_registry_is_canonical_for_case_search_fields():
+    definitions = operational_case_query_field_definitions()
+    by_field = {definition["field"]: definition for definition in definitions}
+
+    assert "business_id" not in by_field
+    assert allowed_case_query_field_names() == set(by_field)
+    assert allowed_case_query_sort_fields() == {"priority_score", "opened_at", "updated_at"}
+    assert allowed_case_query_sort_fields() <= allowed_case_query_field_names()
+
+    assert by_field["status"]["source"] == "operational_case"
+    assert by_field["status"]["allowed_values"] == ["acknowledged", "dismissed", "in_progress", "open", "resolved"]
+    assert by_field["status"]["operators"] == ["=", "!=", "IN"]
+    assert by_field["status_category"]["source"] == "work_item_projection"
+    assert by_field["status_category"]["allowed_values"] == ["done", "in_progress", "to_do"]
+    assert by_field["project"]["source"] == "work_item_projection"
+    assert by_field["source_connector"]["source"] == "evidence_projection"
+    assert by_field["freshness_state"]["allowed_values"] == ["degraded", "fresh", "missing", "stale", "unknown"]
+    assert by_field["priority_score"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
+    assert by_field["priority_score"]["sortable"] is True
+    assert by_field["entity.label"]["operators"] == ["=", "!="]
+
+
+def test_work_item_priority_bracket_registry_matches_classification_boundaries():
+    assert operational_case_priority_bracket_definitions() == [
+        {"bracket": "low", "min_inclusive": None, "max_exclusive": 50},
+        {"bracket": "medium", "min_inclusive": 50, "max_exclusive": 80},
+        {"bracket": "high", "min_inclusive": 80, "max_exclusive": None},
+    ]
+
+    assert classify_work_item_priority_bracket(0) == "low"
+    assert classify_work_item_priority_bracket(49) == "low"
+    assert classify_work_item_priority_bracket(50) == "medium"
+    assert classify_work_item_priority_bracket(79) == "medium"
+    assert classify_work_item_priority_bracket(80) == "high"
