@@ -248,6 +248,88 @@ def test_registry_as_mapping_is_read_only():
         mutable_mapping["new"] = mapping["csv"]
 
 
+def test_registry_filters_enabled_connector_types_by_capability_and_runtime_mode():
+    from app.brain.config import ConnectorConfig
+    from app.brain.connector_registry import (
+        CAPABILITY_DAILY_REPORT,
+        ConnectorExecutorMetadata,
+        ConnectorRegistry,
+        ConnectorSpec,
+        RUNTIME_MODE_SCHEDULED,
+        get_connector_spec,
+    )
+
+    registry = ConnectorRegistry(
+        (
+            get_connector_spec("google_sheets"),
+            ConnectorSpec(
+                connector_type="preview_only_daily",
+                display_name="Preview-only daily connector",
+                adapter_module="app.brain.adapters.csv_file",
+                report_factory="build_daily_report_from_csv_file",
+                capabilities=(CAPABILITY_DAILY_REPORT,),
+                executor=ConnectorExecutorMetadata(
+                    adapter_module="app.brain.adapters.csv_file",
+                    report_factory="build_daily_report_from_csv_file",
+                    supported_runtime_modes=("preview",),
+                ),
+            ),
+            ConnectorSpec(
+                connector_type="operator_only_payload",
+                display_name="Operator-only payload",
+                adapter_module="app.brain.adapters.sample",
+                report_factory="build_daily_report_from_payload",
+                capabilities=("manual_payload",),
+            ),
+        )
+    )
+    connectors = [
+        ConnectorConfig(
+            connector_id="preview",
+            connector_type="preview_only_daily",
+            label="Preview only",
+            params={},
+        ),
+        ConnectorConfig(
+            connector_id="sheet-1",
+            connector_type="google_sheets",
+            label="Sheet 1",
+            params={"spreadsheet_id": "abc", "range_name": "Daily!A:F"},
+        ),
+        ConnectorConfig(
+            connector_id="sheet-2",
+            connector_type="google_sheets",
+            label="Sheet 2",
+            params={"spreadsheet_id": "def", "range_name": "Daily!A:F"},
+        ),
+        ConnectorConfig(
+            connector_id="manual",
+            connector_type="operator_only_payload",
+            label="Manual",
+            params={},
+        ),
+        ConnectorConfig(
+            connector_id="disabled",
+            connector_type="google_sheets",
+            label="Disabled",
+            params={"spreadsheet_id": "ghi", "range_name": "Daily!A:F"},
+            enabled=False,
+        ),
+        ConnectorConfig(
+            connector_id="unknown",
+            connector_type="shopify",
+            label="Unknown",
+            params={},
+        ),
+    ]
+
+    assert registry.enabled_connector_types_for(
+        connectors,
+        capability=CAPABILITY_DAILY_REPORT,
+        runtime_mode=RUNTIME_MODE_SCHEDULED,
+    ) == ("google_sheets",)
+
+
 def test_default_specs_separate_public_required_fields_from_secret_refs():
     from app.brain.connector_registry import list_connector_specs
 
