@@ -390,6 +390,8 @@ class OperationalCase(BaseModel):
                 raise ValueError("timeline event case_id must match case_id")
             if previous_event_at is not None and event.created_at < previous_event_at:
                 raise ValueError("timeline events must be chronological")
+            if event.created_at > self.updated_at:
+                raise ValueError("updated_at must include latest timeline event")
             previous_event_at = event.created_at
         return self
 
