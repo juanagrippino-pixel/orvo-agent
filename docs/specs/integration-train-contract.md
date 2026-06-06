@@ -27,13 +27,13 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ### 2026-06-06 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `e2280b8` (`merge: integrate workitem priority registry`). This supersedes the 2026-06-05 checkpoint and the 2026-06-06 Architecture Review Board recommendation that still treated connector resolved-secret bindings and WorkItem priority brackets as pending.
+The current repository `HEAD` before this reconciliation is `be03342` (`docs: record 2026-06-06 integration blocker`). This supersedes the 2026-06-05 checkpoint and the 2026-06-06 Architecture Review Board recommendation that still treated connector resolved-secret bindings and WorkItem priority brackets as pending.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
 - WorkItem remains projection-only: `app/brain/work_items.py` derives project keys, work item IDs, issue types, workflow/status definitions, status categories, and priority brackets without a separate WorkItem store.
 - WorkItem priority semantics are now centralized: `priority_bracket_for_score()`, `case_priority_bracket()`, `allowed_priority_brackets()`, and `operational_case_priority_definitions()` define the `low` / `medium` / `high` cutoffs; `app/brain/operator_api/common.py` delegates `_classify_priority_bracket()` to that registry.
-- The remaining WorkItem/search gap is the query-field registry: `app/brain/operator_views.py` still owns `_FIELD_SPECS` locally, so new JQL/view/facet fields can drift from WorkItem/OperationalCase projection semantics if broad search branches merge wholesale.
+- WorkItem query-field semantics are now centralized near the projection helpers: `app/brain/work_items.py` exposes `WorkItemQueryFieldDefinition`, `work_item_query_field_spec()`, `work_item_query_field_definitions()`, and `allowed_work_item_query_sort_fields()`; `app/brain/operator_views.py` imports that registry instead of owning a local `_FIELD_SPECS` allowlist.
 - Connector secret-boundary hardening is now baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and `tests/contracts/test_connector_registry_contract.py` asserts forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
 - Internal operator analytics continue to use thin route wrappers and shared service helpers; the current branch adds another resolution-latency severity endpoint while preserving route-level delegation.
 - Manual case actions reserve a workflow/action ledger row before mutation at the internal HTTP boundary; missing `X-Idempotency-Key` headers fail before case mutation with a stable envelope and redacted audit event. The transport-agnostic helper still exposes a direct-mutation fallback for non-HTTP/internal callers.
@@ -46,9 +46,9 @@ Recommended order:
    - Guard the `POST /internal/brain/businesses/<business_id>/cases/<case_id>/actions` route-boundary requirement: every successful mutation request carries a safe `X-Idempotency-Key`, reserves before mutation, and replays/skips duplicates without a second side effect.
    - Gate: missing/blank/secret-shaped keys fail before mutation with redacted stable envelopes/audit events; duplicate or racing keyed requests cannot apply the same side effect twice.
 
-2. **WorkItem query-field registry before more search/operator facets**
-   - Move JQL-lite/view field definitions out of `operator_views.py` into a canonical WorkItem/OperationalCase query-field registry near the projection helpers, while keeping metric keys in the semantic metric registry.
-   - Gate: built-in views, JQL parser, dashboard facets, and histogram/search filters import the same allowlisted field definitions; no SQL translation, persisted saved views, or tenant-custom schemas are introduced.
+2. **Keep WorkItem query-field registry as the only JQL/search vocabulary source**
+   - Future JQL-lite/view/facet fields must be added through the canonical WorkItem/OperationalCase query-field registry near the projection helpers, while keeping metric keys in the semantic metric registry.
+   - Gate: built-in views and the JQL parser continue importing the same allowlisted field definitions; future dashboard/search filters must either reuse existing WorkItem helpers (for example priority brackets) or extend the registry first. No SQL translation, persisted saved views, or tenant-custom schemas are introduced.
 
 3. **Connector-platform hardening after resolved-secret bindings**
    - Treat Packet Q's resolved-secret binding work as integrated; the next connector milestone is connector instance/health-history/provisioning audit storage plus typed stale/unauthorized/rate-limit paths.

@@ -9,43 +9,30 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, get_args
+from typing import Any
 
 from app.brain.operational_cases import (
     OperationalCase,
-    OperationalCaseSeverity,
-    OperationalCaseStatus,
     OperationalCaseStore,
-    OperationalCaseType,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
 from app.brain.operator_case_projections import is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
-    allowed_status_categories,
+    WorkItemQueryFieldDefinition,
+    allowed_work_item_query_sort_fields,
     case_issue_type,
+    case_priority_bracket,
     case_project_key,
     case_status_category,
+    work_item_query_field_spec,
 )
 
 _MAX_JQL_LENGTH = 512
 _MAX_CLAUSES = 8
 _MAX_IN_VALUES = 20
 _DEFAULT_SORT: tuple[tuple[str, str], ...] = (("priority_score", "DESC"), ("opened_at", "ASC"))
-_ALLOWED_SORT_FIELDS = {"priority_score", "opened_at", "updated_at"}
-_ALLOWED_STATUS = set(get_args(OperationalCaseStatus))
-_ALLOWED_STATUS_CATEGORIES = allowed_status_categories()
-_ALLOWED_CASE_TYPES = set(get_args(OperationalCaseType))
-_ALLOWED_SEVERITY = set(get_args(OperationalCaseSeverity))
-
-FieldType = Literal["bool", "enum", "int", "string", "datetime"]
-
-
-@dataclass(frozen=True)
-class FieldSpec:
-    value_type: FieldType
-    allowed_values: set[str] | None = None
-    allowed_operators: frozenset[str] = frozenset({"=", "!=", "IN"})
+_ALLOWED_SORT_FIELDS = allowed_work_item_query_sort_fields()
 
 
 @dataclass(frozen=True)
@@ -74,28 +61,6 @@ class ParsedCaseJQL:
         if clause_parts:
             return f"{' AND '.join(clause_parts)} ORDER BY {order}"
         return f"ORDER BY {order}"
-
-
-_FIELD_SPECS: dict[str, FieldSpec] = {
-    "status": FieldSpec("enum", _ALLOWED_STATUS),
-    "status_category": FieldSpec("enum", _ALLOWED_STATUS_CATEGORIES),
-    "project": FieldSpec("string"),
-    "issue_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
-    "assignee_ref": FieldSpec("string"),
-    "case_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
-    "severity": FieldSpec("enum", _ALLOWED_SEVERITY),
-    "priority_score": FieldSpec("int", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-    "entity.kind": FieldSpec("string"),
-    "entity.id": FieldSpec("string"),
-    "entity.label": FieldSpec("string", None, frozenset({"=", "!="})),
-    "latest_run_id": FieldSpec("string"),
-    "source_connector": FieldSpec("string"),
-    "degraded": FieldSpec("bool", None, frozenset({"=", "!="})),
-    "dedupe_key": FieldSpec("string", None, frozenset({"=", "!="})),
-    "opened_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-    "updated_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-    "resolved_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-}
 
 
 _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
@@ -264,19 +229,19 @@ def _parse_clause(text: str) -> CaseJQLClause:
     return CaseJQLClause(field=field, operator=operator, values=(_coerce_value(field, raw_value, spec),))
 
 
-def _field_spec(field: str) -> FieldSpec:
-    spec = _FIELD_SPECS.get(field)
+def _field_spec(field: str) -> WorkItemQueryFieldDefinition:
+    spec = work_item_query_field_spec(field)
     if spec is None:
         raise OperatorAPIError("unsupported_jql_field", f"Unsupported JQL field: {field}", status_code=400)
     return spec
 
 
-def _ensure_operator(field: str, operator: str, spec: FieldSpec) -> None:
+def _ensure_operator(field: str, operator: str, spec: WorkItemQueryFieldDefinition) -> None:
     if operator not in spec.allowed_operators:
         raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator for {field}: {operator}", status_code=400)
 
 
-def _coerce_value(field: str, raw_value: str, spec: FieldSpec) -> Any:
+def _coerce_value(field: str, raw_value: str, spec: WorkItemQueryFieldDefinition) -> Any:
     value = _unquote(raw_value.strip())
     if not re.fullmatch(r"[A-Za-z0-9_:\-+.]+", value):
         raise OperatorAPIError("invalid_jql", "JQL value contains unsupported characters", status_code=400)
@@ -379,6 +344,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_issue_type(case)
     if field == "status_category":
         return case_status_category(case)
+    if field == "priority_bracket":
+        return case_priority_bracket(case)
     return getattr(case, field)
 
 
