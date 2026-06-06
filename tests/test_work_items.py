@@ -7,6 +7,7 @@ from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.storage import init_schema
 from app.brain.work_items import (
     allowed_priority_brackets,
+    case_available_operator_transitions,
     case_priority_bracket,
     case_project_key,
     case_status_category,
@@ -73,6 +74,36 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
     assert case_priority_bracket(case) == "high"
+
+
+def test_case_work_item_projection_exposes_operator_transition_boundaries(tmp_path):
+    db_path = tmp_path / "work-item-transition-boundaries.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-transitions"))
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    resolved = store.transition_case(
+        store.transition_case(
+            case.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator:ana",
+        ).case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Restocked",
+    )
+    conn.close()
+
+    open_projection = case_work_item_projection(case)
+    resolved_projection = case_work_item_projection(resolved)
+
+    assert case_available_operator_transitions(case) == ["acknowledged", "dismissed", "in_progress"]
+    assert open_projection["available_operator_transitions"] == ["acknowledged", "dismissed", "in_progress"]
+    assert open_projection["system_reopen_transition"] is None
+    assert resolved_projection["available_operator_transitions"] == []
+    assert resolved_projection["system_reopen_transition"] == "open"
 
 
 def test_priority_definitions_are_canonical_work_item_semantics(tmp_path):

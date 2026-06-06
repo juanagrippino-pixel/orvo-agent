@@ -474,7 +474,7 @@ Dependency: dispatch after current case-action, built-in view, and JQL-lite test
 
 Current source-of-truth check:
 
-- `app/brain/work_items.py` now exposes project/work-item projections, deterministic project keys with a hash suffix for long names, issue-type definitions, workflow/status definitions, and canonical status categories.
+- `app/brain/work_items.py` now exposes project/work-item projections, deterministic project keys with a hash suffix for long names, issue-type definitions, workflow/status definitions, canonical status categories, and per-case operator/system recurrence transition boundaries.
 - `app/brain/work_items.py` now also exposes canonical priority bracket helpers and `operational_case_priority_definitions()`; `app/brain/operator_api/common.py` routes priority-bracket analytics through those helpers.
 - `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `status_category`, and `assignee_ref` through the WorkItem/OperationalCase helpers, but still owns the local `_FIELD_SPECS` allowlist pending Packet W.
 - `OperationalCase` remains the durable state owner; there is no separate WorkItem persistence table or owner-facing copy change from this slice.
@@ -498,7 +498,7 @@ Likely files:
 Acceptance:
 
 - projects remain represented as a projection/envelope over `business_id` with stable, collision-resistant project keys and no tenant-crossing leakage;
-- issue/work-item projection includes `work_item_id`, `project_key`, `issue_type`, `status`, `status_category`, priority score/bracket, assignee/owner, created/updated timestamps, and canonical `case_id` for detected Operational Cases;
+- issue/work-item projection includes `work_item_id`, `project_key`, `issue_type`, `status`, `status_category`, available operator transitions, system recurrence transition hints for terminal statuses, priority score/bracket, assignee/owner, created/updated timestamps, and canonical `case_id` for detected Operational Cases;
 - status categories are deterministic (`to_do`, `in_progress`, `done`) and terminal flags match existing `resolved`/`dismissed` behavior;
 - workflow/status definition helpers expose the current transition table for projection/validation without enabling tenant-custom workflows yet;
 - JQL-lite grows `project`, `status_category`, `assignee_ref`, and `issue_type` fields only after they derive from the canonical projection helpers;
