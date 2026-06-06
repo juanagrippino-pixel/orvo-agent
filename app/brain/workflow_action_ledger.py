@@ -206,8 +206,13 @@ def _decision_states(decision: ApprovalDecision) -> tuple[ApprovalState, Executi
     return "rejected", "failed"
 
 
-def _safe_text(value: str | None) -> str | None:
-    return redact_text(value) if value else None
+def _require_approval_decision_text(value: str | None, *, code: str, message: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise WorkflowActionLedgerError(code, message)
+    safe_value = redact_text(value)
+    if not safe_value or not safe_value.strip():
+        raise WorkflowActionLedgerError(code, message)
+    return safe_value
 
 
 def _decision_audit_event(
@@ -427,8 +432,16 @@ class InMemoryWorkflowActionLedgerStore:
             raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
         timestamp = _coerce_utc(now)
         approval_state, execution_state = _decision_states(approved_decision)
-        safe_actor_ref = _safe_text(actor_ref)
-        safe_reason = _safe_text(reason)
+        safe_actor_ref = _require_approval_decision_text(
+            actor_ref,
+            code="invalid_approval_decision_actor",
+            message="approval decision actor_ref is required",
+        )
+        safe_reason = _require_approval_decision_text(
+            reason,
+            code="invalid_approval_decision_reason",
+            message="approval decision reason is required",
+        )
         record = replace(
             self._actions[record_key],
             approval_state=approval_state,
@@ -481,8 +494,16 @@ class InMemoryWorkflowActionLedgerStore:
         if record_key is None:
             raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
         timestamp = _coerce_utc(now)
-        safe_actor_ref = _safe_text(actor_ref)
-        safe_reason = _safe_text(reason)
+        safe_actor_ref = _require_approval_decision_text(
+            actor_ref,
+            code="invalid_approval_decision_actor",
+            message="approval decision actor_ref is required",
+        )
+        safe_reason = _require_approval_decision_text(
+            reason,
+            code="invalid_approval_decision_reason",
+            message="approval decision reason is required",
+        )
         record = replace(
             self._actions[record_key],
             approval_state="cancelled",
@@ -726,8 +747,6 @@ class SQLiteWorkflowActionLedgerStore:
         approved_decision = _validate_approval_decision(decision)
         timestamp = _coerce_utc(now)
         approval_state, execution_state = _decision_states(approved_decision)
-        safe_actor_ref = _safe_text(actor_ref)
-        safe_reason = _safe_text(reason)
         with self._connect() as conn:
             request_row = conn.execute(
                 "SELECT * FROM workflow_approval_requests WHERE business_id = ? AND approval_request_id = ?",
@@ -747,6 +766,16 @@ class SQLiteWorkflowActionLedgerStore:
             ).fetchone()
             if record_row is None:
                 raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
+            safe_actor_ref = _require_approval_decision_text(
+                actor_ref,
+                code="invalid_approval_decision_actor",
+                message="approval decision actor_ref is required",
+            )
+            safe_reason = _require_approval_decision_text(
+                reason,
+                code="invalid_approval_decision_reason",
+                message="approval decision reason is required",
+            )
             conn.execute(
                 """
                 UPDATE workflow_approval_requests
@@ -801,8 +830,6 @@ class SQLiteWorkflowActionLedgerStore:
         now: datetime | None = None,
     ) -> WorkflowApprovalCancellationRecord:
         timestamp = _coerce_utc(now)
-        safe_actor_ref = _safe_text(actor_ref)
-        safe_reason = _safe_text(reason)
         with self._connect() as conn:
             request_row = conn.execute(
                 "SELECT * FROM workflow_approval_requests WHERE business_id = ? AND approval_request_id = ?",
@@ -822,6 +849,16 @@ class SQLiteWorkflowActionLedgerStore:
             ).fetchone()
             if record_row is None:
                 raise WorkflowActionLedgerError("approval_record_not_found", "approval ledger record not found")
+            safe_actor_ref = _require_approval_decision_text(
+                actor_ref,
+                code="invalid_approval_decision_actor",
+                message="approval decision actor_ref is required",
+            )
+            safe_reason = _require_approval_decision_text(
+                reason,
+                code="invalid_approval_decision_reason",
+                message="approval decision reason is required",
+            )
             conn.execute(
                 """
                 UPDATE workflow_approval_requests
