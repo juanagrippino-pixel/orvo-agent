@@ -637,7 +637,7 @@ def test_apply_case_action_add_comment_rejects_missing_actor_and_preserves_cross
     assert len(store.get_case(other.case_id).timeline) == len(other.timeline)
 
 
-def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts_and_persists(monkeypatch, tmp_path):
+def test_internal_case_action_route_accepts_add_comment_payload_envelope_collapses_secret_actor_and_persists(monkeypatch, tmp_path):
     test_client, db_path = client(monkeypatch, tmp_path)
     case = seed_sqlite_case(db_path)
 
@@ -663,7 +663,7 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     detail = body["data"]["case"]
     assert detail["status"] == "open"
     assert detail["timeline"][-1]["event_type"] == "operator_comment"
-    assert detail["timeline"][-1]["actor_ref"] == "operator access_token=[REDACTED]"
+    assert detail["timeline"][-1]["actor_ref"] == "[REDACTED]"
 
     connection = sqlite3.connect(db_path)
     reloaded = SQLiteOperationalCaseStore(connection).get_case(case.case_id)
@@ -671,6 +671,6 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     assert reloaded is not None
     assert reloaded.status == "open"
     assert reloaded.timeline[-1].event_type == "operator_comment"
-    assert reloaded.timeline[-1].actor_ref == "operator access_token=[REDACTED]"
+    assert reloaded.timeline[-1].actor_ref == "[REDACTED]"
     assert_no_raw_comment_secret(reloaded.model_dump_json())
     assert_no_raw_actor_secret(reloaded.model_dump_json())

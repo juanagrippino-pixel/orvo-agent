@@ -564,6 +564,50 @@ def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(m
     assert record.params["reason"] == "Estoy encima"
 
 
+def test_internal_case_action_secret_shaped_operator_actor_is_collapsed_before_durable_records(
+    monkeypatch,
+    tmp_path,
+):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    actor_with_secret = "operator:juan access_token=raw_actor_secret"
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Orvo-Operator": actor_with_secret,
+            "X-Idempotency-Key": "case-action-actor-redaction-1",
+        },
+        json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_actor_secret" not in raw_body
+    body = response.get_json()
+    assert body["data"]["case"]["timeline"][-1]["actor_ref"] == "[REDACTED]"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.timeline[-1].actor_ref == "[REDACTED]"
+    persisted_case_json = reloaded.model_dump_json()
+    assert "raw_actor_secret" not in persisted_case_json
+    assert actor_with_secret not in persisted_case_json
+
+    actions = SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea")
+    assert len(actions) == 1
+    [record] = actions
+    assert record.actor_ref == "[REDACTED]"
+    persisted_action_json = json.dumps(record.__dict__, default=str, sort_keys=True)
+    assert "raw_actor_secret" not in persisted_action_json
+    assert actor_with_secret not in persisted_action_json
+
+
 def test_internal_case_action_existing_pending_idempotency_key_blocks_duplicate_side_effect(
     monkeypatch,
     tmp_path,
