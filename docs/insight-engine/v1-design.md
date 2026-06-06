@@ -1,14 +1,16 @@
 # Orvo Insight Engine v1 Design
 
+> **Supersession note (2026-06-05):** This is a historical design note from the Hito/report-first era. Preserve its useful insight taxonomy and evidence discipline, but do **not** use its Hito-0/Hito-1 sequencing, ARTEMEA morning-report north star, or report-output scope as current product strategy. Current priority comes from ADR-0005, the Phase A architecture contract, the D2C control-plane PRD, and the D2C roadmap: Orvo is a Tiendanube/WhatsApp-first operations control plane where `OperationalCase` / WorkItem state is the source of truth and WhatsApp/reports are projections.
+
 ## Purpose
 
-This document defines the Hito-0 and Hito-1 product-intelligence layer for Orvo Brain.
+This document originally defined the Hito-0 and Hito-1 product-intelligence layer for Orvo Brain. Use it today only as archived background for deterministic insight families, freshness/degraded-mode language, and evidence-backed prioritization.
 
-North star:
+Historical north star, superseded:
 
 > Each morning, Orvo should tell the owner of ARTEMEA what happened yesterday and what to prioritize today, in under 30 seconds of reading, with reliable data and enough judgment to act.
 
-This is not a generic BI system and not an open-ended "AI analyst." It is a narrow operational assistant for a physical-product D2C owner, starting Tiendanube-first, WhatsApp-first, with Mercado Libre added later.
+This is not a generic BI system and not an open-ended "AI analyst." Its current sellable direction is a narrow operations control plane for physical-product D2C owners, starting Tiendanube-first and WhatsApp-first, with other channels added only through runtime/registry/ledger/case contracts.
 
 The system should answer four questions every morning:
 

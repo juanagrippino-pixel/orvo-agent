@@ -33,8 +33,14 @@ def _detection(
     severity: str = "critical",
     priority: int = 100,
     run_id: str = "run-1",
+    entity_kind: str = "business",
+    source: str | None = None,
 ) -> OperationalCaseDetection:
-    evidence_ref = f"evidence://{business_id}/{run_id}/{case_type}"
+    evidence_ref = (
+        f"evidence://{source}/{business_id}/{run_id}/{case_type}"
+        if source is not None
+        else f"evidence://{business_id}/{run_id}/{case_type}"
+    )
     return OperationalCaseDetection(
         business_id=business_id,
         case_type=case_type,
@@ -42,7 +48,7 @@ def _detection(
         title="Case under test",
         severity=severity,
         priority_score=priority,
-        entity_scope={"kind": "business", "id": "monitored"},
+        entity_scope={"kind": entity_kind, "id": "monitored"},
         evidence_refs=[evidence_ref],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/daily-report"],
@@ -55,12 +61,21 @@ def _seed_open_case(
     business_id: str = "artemea",
     opened_hours_ago: int = 2,
     run_id: str = "run-1",
+    dedupe_suffix: str = "stockout_risk/business/monitored/commerce.inventory/daily",
+    entity_kind: str = "business",
+    source: str | None = None,
 ) -> str:
     now = datetime.now(timezone.utc)
     conn = sqlite3.connect(str(db_path))
     store = SQLiteOperationalCaseStore(conn)
     case = store.upsert_detection(
-        _detection(business_id=business_id, run_id=run_id),
+        _detection(
+            business_id=business_id,
+            run_id=run_id,
+            dedupe_suffix=dedupe_suffix,
+            entity_kind=entity_kind,
+            source=source,
+        ),
         detected_at=now - timedelta(hours=opened_hours_ago),
     )
     conn.close()
@@ -104,6 +119,80 @@ def test_case_stagnation_returns_idle_buckets_for_actionable_cases(_isolate_db):
     assert data["by_idle_bucket"]["under_6h"] == 1
     assert data["most_stalled_actionable"] is not None
     assert data["most_stalled_actionable"]["idle_seconds"] >= 10800  # >= 3h
+
+
+def test_case_stagnation_by_source_connector_exposes_split_projection(_isolate_db):
+    from server import app
+
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=3,
+        run_id="run-tiendanube-stalled",
+        dedupe_suffix="case-tiendanube-stalled",
+        source="tiendanube",
+    )
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=8,
+        run_id="run-sheets-stalled",
+        dedupe_suffix="case-sheets-stalled",
+        source="google_sheets",
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-source-connector",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 1
+    assert data["by_idle_bucket"]["under_24h"] == 1
+    assert data["by_idle_bucket_source_connector"]["under_6h"] == {"tiendanube": 1}
+    assert data["by_idle_bucket_source_connector"]["under_24h"] == {"google_sheets": 1}
+
+
+def test_case_stagnation_by_entity_kind_exposes_split_projection(_isolate_db):
+    from server import app
+
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=3,
+        run_id="run-product-stalled",
+        dedupe_suffix="case-product-stalled",
+        entity_kind="product",
+    )
+    _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=8,
+        run_id="run-business-stalled",
+        dedupe_suffix="case-business-stalled",
+        entity_kind="business",
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-entity-kind",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 1
+    assert data["by_idle_bucket"]["under_24h"] == 1
+    assert data["by_idle_bucket_entity_kind"]["under_6h"] == {"product": 1}
+    assert data["by_idle_bucket_entity_kind"]["under_24h"] == {"business": 1}
 
 
 def test_case_stagnation_scopes_to_business_id(_isolate_db):

@@ -567,6 +567,44 @@ Acceptance:
 - manual case mutations either accept/enforce idempotency keys or are explicitly documented as non-automated operator actions with audit coverage from Packet O;
 - no external side effects are executed and existing dry-run projections remain backward-compatible.
 
+## Packet V — Fulfillment backlog truth gates
+
+Goal: turn the registered `fulfillment_backlog` case family into a readiness-gated Tiendanube workflow without noisy owner-facing stuck-order claims.
+
+Dependency: dispatch after current metric registry, case evidence snapshot, data-stale suppression, and Tiendanube runtime tests are green. Do not combine with unrelated shipping automation, customer messaging, carrier integrations, or generic ERP features.
+
+Current source-of-truth check:
+
+- `app/brain/semantics/metric_registry.py` includes `fulfillment_backlog` in `CASE_FAMILY_METRICS` with `commerce.fulfillment.pending_count` and `commerce.fulfillment.oldest_pending_age_hours`.
+- `app/brain/operational_cases.py` includes the `fulfillment_backlog` type, Tiendanube entity scope, dedupe suffix, and action-catalog alignment, and contract tests keep registered case families aligned.
+- Current report-derived detection remains heuristic and does not yet prove Tiendanube payment/fulfillment/timestamp/SLA/exclusion truth gates. Commercial docs therefore package fulfillment backlog as a Growth/readiness-gated module, not a default Starter promise.
+
+Read:
+
+- `docs/research/2026-06-05-fulfillment-backlog-pilot-packaging.md`
+- `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/operational-case-engine-contract.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
+- `docs/roadmap/d2c-control-plane-roadmap.md`
+
+Likely files:
+
+- `app/brain/operational_cases.py`
+- Tiendanube adapter/normalizer code only if fulfillment status fields already exist and can be mapped deterministically
+- `tests/test_brain_operational_cases.py`
+- `tests/contracts/test_metric_registry_contract.py` only if canonical metric mappings change
+- focused Tiendanube fixture tests with redacted/synthetic order refs
+
+Acceptance:
+
+- fulfillment backlog opens only when paid/unfulfilled count or oldest age crosses configured thresholds and payment, fulfillment, timestamp, SLA, exclusion, resolver, and freshness gates all pass;
+- stale/missing Tiendanube fulfillment evidence suppresses backlog and opens/updates `data_stale` or a setup-required operator case instead;
+- evidence snapshots use registered fulfillment metrics and redacted order sample refs, never raw customer PII, full addresses, OAuth tokens, or full order identifiers;
+- dedupe/entity-scope tests prevent repeated daily stuck-order spam while preserving distinct merchant/channel/order-flow issues;
+- no customer messaging, refunds/cancellations, shipping mutations, or carrier-side effects are introduced;
+- package/demo copy remains readiness-gated unless the implementation and tests prove owner-facing monitoring is safe.
+
 ## Packet output format
 
 Workers must report:

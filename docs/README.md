@@ -49,6 +49,11 @@ Start here:
 - [`docs/gtm/2026-06-05-first-10-paid-pilot-lead-build-packet.md`](gtm/2026-06-05-first-10-paid-pilot-lead-build-packet.md) — current lead-build workflow for the first 10 qualified commercial conversations.
 - [`docs/research/2026-05-26-product-market-intel-tiendanube-control-plane.md`](research/2026-05-26-product-market-intel-tiendanube-control-plane.md)
 
+## Historical / superseded design notes
+
+- [`docs/insight-engine/v1-design.md`](insight-engine/v1-design.md) — archived Hito/report-first insight-engine design. Keep its evidence and degraded-mode ideas as background only; current sequencing and source-of-truth rules come from ADR-0005, the Phase A contract, PRD, and roadmap.
+- [`docs/organization/product-pivot-correction.md`](organization/product-pivot-correction.md) — supersession rule for older Hito/report-first docs.
+
 ## Operations and autonomous workers
 
 - [`docs/organization/d2c-autonomous-worker-addendum.md`](organization/d2c-autonomous-worker-addendum.md)
