@@ -2,6 +2,7 @@
 
 from .cases_activity import register_case_activity_routes
 from .cases_resolution_latency import register_case_resolution_latency_routes
+from .cases_stagnation import register_case_stagnation_routes
 from .cases_summary import register_case_summary_routes
 from .dashboard_views import register_dashboard_view_routes
 from .operator_audit import register_operator_audit_routes
@@ -13,6 +14,7 @@ def register_internal_brain_routes(app):
     register_session_routes(app)
     register_case_summary_routes(app)
     register_case_resolution_latency_routes(app)
+    register_case_stagnation_routes(app)
     register_case_activity_routes(app)
     register_dashboard_view_routes(app)
     register_operator_audit_routes(app)

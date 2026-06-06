@@ -9,49 +9,6 @@ from .common import _internal_success, _with_internal_stores
 
 
 def register_case_activity_routes(app):
-    @app.get("/internal/brain/businesses/<business_id>/cases/stagnation")
-    def internal_brain_cases_stagnation(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
-                business_id,
-                summarize_case_queue_stagnation(
-                    case_store,
-                    business_id=business_id,
-                    now=datetime.now(timezone.utc),
-                ),
-            ),
-        )
-
-
-    @app.get("/internal/brain/businesses/<business_id>/cases/stagnation/by-priority-bracket")
-    def internal_brain_cases_stagnation_by_priority_bracket(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
-                business_id,
-                summarize_case_queue_stagnation_by_priority_bracket(
-                    case_store,
-                    business_id=business_id,
-                    now=datetime.now(timezone.utc),
-                ),
-            ),
-        )
-
-    @app.get("/internal/brain/businesses/<business_id>/cases/stagnation/by-severity")
-    def internal_brain_cases_stagnation_by_severity(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
-                business_id,
-                summarize_case_queue_stagnation_by_severity(
-                    case_store,
-                    business_id=business_id,
-                    now=datetime.now(timezone.utc),
-                ),
-            ),
-        )
-
     @app.get("/internal/brain/businesses/<business_id>/cases/acknowledgment-latency")
     def internal_brain_cases_acknowledgment_latency(business_id: str):
         return _with_internal_stores(

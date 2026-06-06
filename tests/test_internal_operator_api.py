@@ -1494,6 +1494,58 @@ def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envel
     assert data["most_stalled_actionable"]["case_type"] == "stockout_risk"
 
 
+def test_internal_case_queue_stagnation_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(run_id="run-artemea-stockout-stalled"),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas en baja",
+            run_id="run-artemea-sales-stalled",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas en baja",
+            run_id="run-other-sales-stalled",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 2
+    assert data["by_idle_bucket_case_type"]["under_6h"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert data["most_stalled_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
+
+
 def test_internal_case_queue_stagnation_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
