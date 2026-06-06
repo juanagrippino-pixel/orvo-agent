@@ -11,6 +11,7 @@ The service catalog is Orvo's lightweight Python-runtime translation of a Compas
 - which component owns a runtime/control-plane concern;
 - which module is the source of truth;
 - which docs and tests prove the contract;
+- which operational runbooks explain safe inspection and response paths;
 - which runtime surfaces and observability signals a component participates in;
 - which components depend on each other.
 
@@ -40,6 +41,7 @@ It is intentionally not a new infrastructure service. The first slice is an in-r
 | `docs` | Durable docs/specs that explain the component. |
 | `code_paths` | Source paths reviewers should inspect. |
 | `test_paths` | Tests that protect the component. |
+| `runbooks` | Operational docs for safe inspection, degraded-state handling, and escalation. |
 | `dependencies` | Other catalog component IDs required by this component. |
 | `runtime_surfaces` | Runtime/API surfaces touched by the component. |
 | `observability_signals` | Stable log/ledger/API field names useful for provenance. Signal names that reference actors, keys, or external identifiers must describe redacted/projected values, never raw credential-bearing values. |
@@ -54,7 +56,7 @@ The initial catalog covers the current Orvo Brain control-plane spine:
 4. `run_ledger` — runtime execution provenance and status.
 5. `operational_cases` — WorkItem/OperationalCase lifecycle source of truth.
 6. `operator_api` — internal operator API projection layer.
-7. `gateway_policy` — shared auth, permission, rate-limit, idempotency, request/trace provenance, schema-versioned gateway telemetry, and audit-decision conventions for internal edges.
+7. `gateway_policy` — shared auth, permission, rate-limit, idempotency, request/trace provenance, schema-versioned gateway telemetry, and audit-decision conventions for internal edges. Its catalog entry points at `docs/operability/gateway-policy-telemetry-runbook.md` so operators and reviewers can inspect policy decisions without exposing raw idempotency keys or credentials.
 8. `delivery_dispatch` — dispatch/idempotency boundary for report and owner brief delivery.
 9. `edge_developer_platform` — in-repo platform conventions and catalog contract.
 
@@ -64,6 +66,7 @@ Required tests live in `tests/contracts/test_service_catalog_contract.py` and pr
 
 - default catalog coverage for core control-plane components;
 - gateway policy ownership, source-of-truth metadata, and telemetry/provenance observability signals;
+- gateway policy runbook metadata is included in the public manifest and points at durable docs;
 - stable public manifest schema and component ordering;
 - duplicate component IDs are rejected;
 - dependencies must point at known components;

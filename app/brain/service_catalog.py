@@ -42,6 +42,7 @@ class ServiceComponent(BaseModel):
     docs: tuple[str, ...] = Field(default_factory=tuple)
     code_paths: tuple[str, ...] = Field(default_factory=tuple)
     test_paths: tuple[str, ...] = Field(default_factory=tuple)
+    runbooks: tuple[str, ...] = Field(default_factory=tuple)
     dependencies: tuple[str, ...] = Field(default_factory=tuple)
     runtime_surfaces: tuple[RuntimeSurface, ...] = Field(default_factory=tuple)
     observability_signals: tuple[str, ...] = Field(default_factory=tuple)
@@ -59,6 +60,7 @@ class ServiceComponent(BaseModel):
             "docs": list(self.docs),
             "code_paths": list(self.code_paths),
             "test_paths": list(self.test_paths),
+            "runbooks": list(self.runbooks),
             "dependencies": list(self.dependencies),
             "runtime_surfaces": list(self.runtime_surfaces),
             "observability_signals": list(self.observability_signals),
@@ -224,6 +226,7 @@ def default_service_catalog() -> ServiceCatalog:
                 docs=("docs/specs/gateway-policy-contract.md",),
                 code_paths=("app/brain/gateway_policy.py",),
                 test_paths=("tests/contracts/test_gateway_policy_contract.py",),
+                runbooks=("docs/operability/gateway-policy-telemetry-runbook.md",),
                 dependencies=("operator_api", "run_ledger"),
                 runtime_surfaces=("operator_api", "developer_platform"),
                 observability_signals=(

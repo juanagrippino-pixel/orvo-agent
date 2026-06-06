@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 
@@ -28,6 +30,9 @@ def test_default_service_catalog_covers_core_control_plane_components():
     assert "trace_id_redacted" in catalog.get("gateway_policy").observability_signals
     assert "gateway_telemetry_schema" in catalog.get("gateway_policy").observability_signals
     assert "provenance_ref" in catalog.get("gateway_policy").observability_signals
+    assert catalog.get("gateway_policy").runbooks == (
+        "docs/operability/gateway-policy-telemetry-runbook.md",
+    )
     assert "docs/specs/compiled-runtime-contract.md" in catalog.get("compiled_runtime").docs
 
 
@@ -46,6 +51,27 @@ def test_service_catalog_manifest_is_stable_public_and_secret_safe():
     assert "token" not in serialized
     assert "secret://" not in serialized
     assert "access_token" not in serialized
+
+
+def test_service_catalog_runbooks_are_public_durable_and_exist():
+    from app.brain.service_catalog import service_catalog_manifest
+
+    manifest = service_catalog_manifest()
+    components = {component["component_id"]: component for component in manifest["components"]}
+
+    gateway_policy = components["gateway_policy"]
+    assert gateway_policy["runbooks"] == [
+        "docs/operability/gateway-policy-telemetry-runbook.md",
+    ]
+
+    repo_root = Path(__file__).resolve().parents[2]
+    for component in manifest["components"]:
+        for runbook in component["runbooks"]:
+            path = repo_root / runbook
+            assert path.exists(), f"missing service catalog runbook: {runbook}"
+            content = path.read_text(encoding="utf-8")
+            assert component["component_id"] in content
+            assert "[REDACTED]" in content
 
 
 def test_service_catalog_rejects_duplicate_ids_and_unknown_dependencies():
