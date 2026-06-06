@@ -477,6 +477,73 @@ def test_simulate_case_workflow_matches_status_category_condition_without_side_e
     assert len(ledger.list_actions(business_id="artemea")) == 1
 
 
+def test_simulate_case_workflow_matches_min_case_age_minutes_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="aged-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="min_case_age_minutes", value=120)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Case has aged enough"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(10), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "min_case_age_minutes", "expected": 120, "actual": 120, "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actions_until_min_case_age_minutes_elapsed():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="aged-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="min_case_age_minutes", value=121)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Wait until old enough"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(10), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "min_case_age_minutes", "expected": 121, "actual": 120, "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "min_case_age_minutes", "expected": 121, "actual": 120}
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+
+
+@pytest.mark.parametrize("condition_value", ["soon", -1])
+def test_simulate_case_workflow_rejects_invalid_min_case_age_minutes_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-aged-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="min_case_age_minutes", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid age gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(10))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "min_case_age_minutes" in exc.value.message
+
+
 def test_simulate_case_workflow_matches_entity_kind_condition_without_side_effects():
     _, case = seed_case()
     ledger = InMemoryWorkflowActionLedgerStore()
