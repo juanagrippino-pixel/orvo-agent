@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import get_args
+
 import sqlite3
 
-from app.brain.operational_cases import SQLiteOperationalCaseStore
+from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCaseStore
 from app.brain.storage import init_schema
 from app.brain.work_items import (
     allowed_priority_brackets,
+    allowed_status_categories,
+    allowed_work_item_query_sort_fields,
     case_priority_bracket,
     case_project_key,
     case_status_category,
@@ -16,6 +20,8 @@ from app.brain.work_items import (
     priority_bracket_for_score,
     project_key_for_business,
     project_projection,
+    work_item_query_field_definitions,
+    work_item_query_field_spec,
 )
 from tests.test_internal_operator_api import _case_detection, _seed_case
 
@@ -152,3 +158,31 @@ def test_status_and_workflow_definitions_expose_current_transition_table(tmp_pat
     assert "acknowledged" in workflow["transitions"]["open"]
     assert "resolved" in workflow["transitions"]["in_progress"]
     assert workflow["transitions"]["resolved"] == []
+
+
+def test_query_field_registry_is_canonical_work_item_semantics():
+    fields = {definition["field"]: definition for definition in work_item_query_field_definitions()}
+
+    assert "business_id" not in fields
+    assert fields["project"] == {
+        "field": "project",
+        "value_type": "string",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+    }
+    assert fields["issue_type"]["allowed_values"] == sorted(get_args(OperationalCaseType))
+    assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
+    assert fields["assignee_ref"]["value_type"] == "string"
+    assert fields["priority_score"] == {
+        "field": "priority_score",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+    }
+
+    priority_spec = work_item_query_field_spec("priority_score")
+    assert priority_spec.value_type == "int"
+    assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
+    assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}

@@ -12,12 +12,13 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import timezone
-from typing import Any, get_args
+from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
     TERMINAL_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
+    OperationalCaseSeverity,
     OperationalCaseStatus,
     OperationalCaseStatusCategory,
     OperationalCaseType,
@@ -39,11 +40,56 @@ class WorkItemPriorityDefinition:
     upper_bound: int
 
 
+WorkItemQueryFieldValueType = Literal["bool", "enum", "int", "string", "datetime"]
+
+
+@dataclass(frozen=True)
+class WorkItemQueryFieldDefinition:
+    """Canonical allowlisted field definition for WorkItem/Case projections.
+
+    The registry describes query/view/facet semantics over OperationalCase and
+    WorkItem projections. It intentionally does not define business metrics or
+    aliases; those remain owned by the semantic MetricRegistry.
+    """
+
+    field: str
+    value_type: WorkItemQueryFieldValueType
+    allowed_values: frozenset[str] | None = None
+    allowed_operators: frozenset[str] = frozenset({"=", "!=", "IN"})
+    sortable: bool = False
+
+
 _PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
     WorkItemPriorityDefinition("low", "Low", 0, 49),
     WorkItemPriorityDefinition("medium", "Medium", 50, 79),
     WorkItemPriorityDefinition("high", "High", 80, 100),
 )
+
+_RANGE_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
+
+_WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
+    WorkItemQueryFieldDefinition("status", "enum", frozenset(get_args(OperationalCaseStatus))),
+    WorkItemQueryFieldDefinition("status_category", "enum", frozenset(get_args(OperationalCaseStatusCategory))),
+    WorkItemQueryFieldDefinition("project", "string"),
+    WorkItemQueryFieldDefinition("issue_type", "enum", frozenset(get_args(OperationalCaseType))),
+    WorkItemQueryFieldDefinition("assignee_ref", "string"),
+    WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType))),
+    WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity))),
+    WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("priority_bracket", "enum", frozenset({definition.bracket for definition in _PRIORITY_DEFINITIONS})),
+    WorkItemQueryFieldDefinition("entity.kind", "string"),
+    WorkItemQueryFieldDefinition("entity.id", "string"),
+    WorkItemQueryFieldDefinition("entity.label", "string", allowed_operators=frozenset({"=", "!="})),
+    WorkItemQueryFieldDefinition("latest_run_id", "string"),
+    WorkItemQueryFieldDefinition("source_connector", "string"),
+    WorkItemQueryFieldDefinition("degraded", "bool", allowed_operators=frozenset({"=", "!="})),
+    WorkItemQueryFieldDefinition("dedupe_key", "string", allowed_operators=frozenset({"=", "!="})),
+    WorkItemQueryFieldDefinition("opened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("updated_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("resolved_at", "datetime", allowed_operators=_RANGE_OPERATORS),
+)
+
+_WORK_ITEM_QUERY_FIELD_BY_KEY = {definition.field: definition for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS}
 
 
 def _iso_utc(value: Any) -> str:
@@ -108,6 +154,33 @@ def case_priority_bracket(case: OperationalCase) -> str:
 
 def allowed_priority_brackets() -> set[str]:
     return {definition.bracket for definition in _PRIORITY_DEFINITIONS}
+
+
+def work_item_query_field_spec(field: str) -> WorkItemQueryFieldDefinition | None:
+    """Return the canonical query field definition, if the field is allowlisted."""
+
+    return _WORK_ITEM_QUERY_FIELD_BY_KEY.get(field)
+
+
+def allowed_work_item_query_sort_fields() -> set[str]:
+    """Return canonical fields allowed in JQL-lite ORDER BY clauses."""
+
+    return {definition.field for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS if definition.sortable}
+
+
+def work_item_query_field_definitions() -> list[dict[str, Any]]:
+    """Expose canonical query-field metadata for tests/docs/operator surfaces."""
+
+    return [
+        {
+            "field": definition.field,
+            "value_type": definition.value_type,
+            "allowed_values": sorted(definition.allowed_values) if definition.allowed_values is not None else None,
+            "allowed_operators": sorted(definition.allowed_operators),
+            "sortable": definition.sortable,
+        }
+        for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS
+    ]
 
 
 def case_work_item_id(case: OperationalCase) -> str:

@@ -476,7 +476,7 @@ Current source-of-truth check:
 
 - `app/brain/work_items.py` now exposes project/work-item projections, deterministic project keys with a hash suffix for long names, issue-type definitions, workflow/status definitions, and canonical status categories.
 - `app/brain/work_items.py` now also exposes canonical priority bracket helpers and `operational_case_priority_definitions()`; `app/brain/operator_api/common.py` routes priority-bracket analytics through those helpers.
-- `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `status_category`, and `assignee_ref` through the WorkItem/OperationalCase helpers, but still owns the local `_FIELD_SPECS` allowlist pending Packet W.
+- `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `status_category`, `assignee_ref`, and `priority_bracket` through the canonical WorkItem query-field registry integrated in Packet W.
 - `OperationalCase` remains the durable state owner; there is no separate WorkItem persistence table or owner-facing copy change from this slice.
 
 Read:
@@ -617,15 +617,18 @@ Acceptance:
 
 ## Packet W — WorkItem query-field registry hardening
 
-Goal: close the remaining 2026-06-06 ARB gap by making query/view/facet field definitions canonical WorkItem/OperationalCase projection semantics instead of local `operator_views.py` vocabulary.
+Status: satisfied in the current baseline by `3c737c1` (`merge: workitem query field registry`); dispatch only as a narrow regression/fixer packet if query/view/facet fields drift back into route-local vocabularies or a new search/analytics surface adds fields outside the canonical registry.
 
-Dependency: dispatch after current WorkItem projection and operator JQL-lite tests are green. Do not combine with saved-view persistence, custom tenant fields, dashboard rewrites, or new owner-facing copy.
+Goal: keep query/view/facet field definitions canonical WorkItem/OperationalCase projection semantics instead of local `operator_views.py` vocabulary.
+
+Dependency: current WorkItem projection and operator JQL-lite tests are green. Any future fixer must not combine this with saved-view persistence, custom tenant fields, dashboard rewrites, or new owner-facing copy.
 
 Current source-of-truth check:
 
-- `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, and priority-bracket projection helpers.
-- `app/brain/operator_views.py` still defines `_FIELD_SPECS` locally for JQL-lite fields (`status`, `status_category`, `project`, `issue_type`, `assignee_ref`, case/evidence/source fields, and timestamp fields).
-- `docs/architecture-reviews/2026-06-06-arb-review.md` recommends a canonical WorkItem field registry so JQL/views/facets do not become a second semantic registry.
+- `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
+- `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
+- `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `status_category`, `assignee_ref`, and `priority_bracket`.
+- `docs/architecture-reviews/2026-06-06-arb-review-c69b03e.md` remains the latest ARB input: future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
 
 Read:
 

@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from app.brain import operator_views
 from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.operator_api import OperatorAPIError
 from app.brain.operator_views import parse_case_jql
@@ -27,6 +28,16 @@ def _case_detection_with_source(*, source: str, run_id: str, freshness_state: st
             "evidence_refs": [f"evidence://{source}/{run_id}/{detection.case_type}"],
             "evidence_snapshots": [snapshot],
         }
+    )
+
+
+def test_parse_case_jql_uses_canonical_work_item_field_registry():
+    assert not hasattr(operator_views, "_FIELD_SPECS")
+    assert parse_case_jql("priority_score >= 80 ORDER BY priority_score DESC").normalized == (
+        "priority_score >= 80 ORDER BY priority_score DESC"
+    )
+    assert parse_case_jql("priority_bracket = high").normalized == (
+        "priority_bracket = high ORDER BY priority_score DESC, opened_at ASC"
     )
 
 
@@ -179,6 +190,27 @@ def test_internal_case_queue_redacts_secret_shaped_jql_echo(monkeypatch, tmp_pat
     assert body["data"]["cases"] == []
 
 
+def test_internal_case_queue_redacts_secret_shaped_jql_error_messages(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-jql-error-redaction"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "status = token:raw_jql_error_secret"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_jql_error_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["redaction_applied"] is True
+    assert body["error"]["code"] == "unsupported_jql_value"
+    assert body["error"]["safe_to_show_owner"] is False
+    assert "[REDACTED]" in body["error"]["message"]
+
+
 def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-open", priority=95))
@@ -233,7 +265,8 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     response = client.get(
         "/internal/brain/businesses/artemea/cases?jql="
         "project%20%3D%20ARTEMEA%20AND%20issue_type%20%3D%20stockout_risk%20AND%20"
-        "status_category%20%3D%20in_progress%20AND%20assignee_ref%20%3D%20operator:juan",
+        "status_category%20%3D%20in_progress%20AND%20priority_bracket%20%3D%20high%20AND%20"
+        "assignee_ref%20%3D%20operator:juan",
         headers=AUTH,
     )
 
@@ -242,7 +275,7 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert body["ok"] is True
     assert body["data"]["normalized_jql"] == (
         "project = ARTEMEA AND issue_type = stockout_risk AND status_category = in_progress "
-        "AND assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
+        "AND priority_bracket = high AND assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
     )
     assert [case["case_id"] for case in body["data"]["cases"]] == [assigned.case_id]
     case = body["data"]["cases"][0]
