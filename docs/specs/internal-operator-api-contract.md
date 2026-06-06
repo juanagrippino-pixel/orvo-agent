@@ -85,6 +85,21 @@ reserved in the durable workflow action ledger before the case mutation, duplica
 completed requests replay the current case with `data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope.
 
+### Service-management cases
+
+```http
+GET /internal/brain/businesses/{business_id}/service-management/cases
+GET /internal/brain/businesses/{business_id}/service-management/cases?sort=sla_urgency
+```
+
+Read-only Jira Service Management-style projection over canonical Operational
+Cases. Allowed filters are `sla_status`, `service_record_type`, `owner_status`,
+`escalation_reason`, and `needs_escalation`. Allowed sort modes are `priority`
+(default, matching canonical case queue order) and `sla_urgency` (breached SLA
+first, then nearest active due date, with deterministic priority/opened/case-id
+tie-breakers). This endpoint must not mutate case lifecycle, priority, SLA clocks,
+or escalation state.
+
 ### Operator audit events
 
 ```http
