@@ -447,6 +447,36 @@ def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapsho
     assert result["actions"][0]["execution_status"] == "dry_run"
 
 
+def test_simulate_case_workflow_matches_status_category_condition_without_side_effects():
+    store, case = seed_case()
+    case = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=utc(13, 2),
+    )
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="in-progress-category-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status_category", value="in_progress")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Keep work moving"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 3), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "status_category", "expected": "in_progress", "actual": "in_progress", "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
 def test_simulate_case_workflow_matches_entity_kind_condition_without_side_effects():
     _, case = seed_case()
     ledger = InMemoryWorkflowActionLedgerStore()
