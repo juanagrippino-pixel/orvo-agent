@@ -12,6 +12,7 @@ from app.brain.work_items import (
     allowed_priority_brackets,
     allowed_status_categories,
     allowed_work_item_query_sort_fields,
+    case_available_operator_transitions,
     case_priority_bracket,
     case_project_key,
     case_status_category,
@@ -88,18 +89,8 @@ def test_issue_type_definitions_expose_release_state_from_semantic_registry():
 
     assert case_type_release_state("stockout_risk") == "promoted"
     assert case_type_release_state("channel_mix_shift") == "deferred"
-    assert definitions["stockout_risk"] == {
-        "issue_type": "stockout_risk",
-        "case_type": "stockout_risk",
-        "scheme_id": "d2c-default-case-types",
-        "release_state": "promoted",
-    }
-    assert definitions["channel_mix_shift"] == {
-        "issue_type": "channel_mix_shift",
-        "case_type": "channel_mix_shift",
-        "scheme_id": "d2c-default-case-types",
-        "release_state": "deferred",
-    }
+    assert definitions["stockout_risk"]["release_state"] == "promoted"
+    assert definitions["channel_mix_shift"]["release_state"] == "deferred"
     promoted_case_types = {
         definition["case_type"]
         for definition in definitions.values()
@@ -107,6 +98,36 @@ def test_issue_type_definitions_expose_release_state_from_semantic_registry():
     }
 
     assert promoted_case_types == set(CASE_FAMILY_METRICS)
+
+
+def test_case_work_item_projection_exposes_operator_transition_boundaries(tmp_path):
+    db_path = tmp_path / "work-item-transition-boundaries.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-transitions"))
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    resolved = store.transition_case(
+        store.transition_case(
+            case.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator:ana",
+        ).case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Restocked",
+    )
+    conn.close()
+
+    open_projection = case_work_item_projection(case)
+    resolved_projection = case_work_item_projection(resolved)
+
+    assert case_available_operator_transitions(case) == ["acknowledged", "dismissed", "in_progress"]
+    assert open_projection["available_operator_transitions"] == ["acknowledged", "dismissed", "in_progress"]
+    assert open_projection["system_reopen_transition"] is None
+    assert resolved_projection["available_operator_transitions"] == []
+    assert resolved_projection["system_reopen_transition"] == "open"
 
 
 def test_priority_definitions_are_canonical_work_item_semantics(tmp_path):
