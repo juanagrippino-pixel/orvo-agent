@@ -136,6 +136,59 @@ def test_enabled_daily_connector_types_are_discovered_from_registry_metadata(mon
     assert _enabled_daily_connector_types(business) == ["shopify", "google_sheets"]
 
 
+def test_enabled_daily_connector_types_require_scheduled_runtime_mode(monkeypatch):
+    from app.brain.connector_registry import (
+        CAPABILITY_DAILY_REPORT,
+        ConnectorExecutorMetadata,
+        ConnectorRegistry,
+        ConnectorSpec,
+        get_connector_spec,
+    )
+    from app.brain.runner import _enabled_daily_connector_types
+
+    registry = ConnectorRegistry(
+        (
+            ConnectorSpec(
+                connector_type="preview_only_daily",
+                display_name="Preview-only daily connector",
+                adapter_module="app.brain.adapters.csv_file",
+                report_factory="build_daily_report_from_csv_file",
+                capabilities=(CAPABILITY_DAILY_REPORT,),
+                executor=ConnectorExecutorMetadata(
+                    adapter_module="app.brain.adapters.csv_file",
+                    report_factory="build_daily_report_from_csv_file",
+                    supported_runtime_modes=("preview",),
+                ),
+            ),
+            get_connector_spec("google_sheets"),
+        )
+    )
+    monkeypatch.setattr("app.brain.runner.default_connector_registry", lambda: registry)
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="preview",
+                connector_type="preview_only_daily",
+                label="Preview only",
+                params={},
+            ),
+            ConnectorConfig(
+                connector_id="sheet",
+                connector_type="google_sheets",
+                label="Sheet Artemea",
+                params={"spreadsheet_id": "abc123", "range_name": "Daily!A1:G1000"},
+            ),
+        ],
+    )
+
+    assert _enabled_daily_connector_types(business) == ["google_sheets"]
+
+
 def test_run_due_daily_reports_dispatches_due_google_sheet_report():
     from app.brain.runner import run_due_daily_reports
 

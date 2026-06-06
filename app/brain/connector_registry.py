@@ -769,6 +769,38 @@ class ConnectorRegistry:
     def validate_config(self, connector_type: str, params: Mapping[str, object]) -> list[str]:
         return self.get(connector_type).validate_params(params)
 
+    def enabled_connector_types_for(
+        self,
+        connectors: Iterable[object],
+        *,
+        capability: str | None = None,
+        runtime_mode: str | None = None,
+    ) -> tuple[str, ...]:
+        """Return enabled registered connector types matching registry policy.
+
+        The result preserves business-config order while deduplicating connector
+        types. Unknown connector types and disabled connector configs are ignored
+        so callers can keep runner/controller code as thin wiring around the
+        registry's source-of-truth capability and runtime-mode metadata.
+        """
+
+        connector_types: list[str] = []
+        for connector in connectors:
+            if not bool(getattr(connector, "enabled", False)):
+                continue
+            connector_type = getattr(connector, "connector_type", None)
+            if not isinstance(connector_type, str) or not self.has(connector_type):
+                continue
+            spec = self.get(connector_type)
+            if capability is not None and capability not in spec.capabilities:
+                continue
+            assert spec.executor is not None  # set in ConnectorSpec.__post_init__
+            if runtime_mode is not None and runtime_mode not in spec.executor.supported_runtime_modes:
+                continue
+            if connector_type not in connector_types:
+                connector_types.append(connector_type)
+        return tuple(connector_types)
+
     def validate_control_plane_config(
         self,
         connector_type: str,
