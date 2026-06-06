@@ -106,8 +106,12 @@ class ConnectorFactoryParam:
     """Declarative binding from connector/runtime context to adapter kwargs.
 
     ``source`` is intentionally allowlisted so registry-driven execution cannot
-    smuggle arbitrary connector params into adapter calls. ``fallback`` is used
-    only for absent/empty optional values and must be non-secret static data.
+    smuggle arbitrary connector params into adapter calls. Secret-backed legacy
+    adapter kwargs must use ``resolved_secret_param``: those values may exist
+    only on the execution-scoped connector copy returned by the secret resolver,
+    while durable control-plane config carries ``secret_refs``. ``fallback`` is
+    used only for absent/empty optional values and must be non-secret static
+    data.
     """
 
     argument: str
@@ -280,6 +284,15 @@ class ConnectorSpec:
             value = params.get(binding.key or binding.argument)
             if value in (None, "") and binding.fallback is not None:
                 value = binding.fallback
+            return value not in (None, ""), value
+        if binding.source == "resolved_secret_param":
+            key = binding.key or binding.argument
+            if key not in set(self.legacy_secret_config_fields):
+                raise ValueError(
+                    f"{self.connector_type} connector resolved_secret_param {key} "
+                    "is not declared in legacy_secret_config_fields"
+                )
+            value = params.get(key)
             return value not in (None, ""), value
         if binding.source == "connector_param_bool":
             return True, bool(params.get(binding.key or binding.argument, binding.fallback))
@@ -761,7 +774,7 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             factory_params=(
                 *_common_daily_params(),
                 ConnectorFactoryParam("seller_id", "connector_param", key="seller_id"),
-                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+                ConnectorFactoryParam("access_token", "resolved_secret_param", key="access_token"),
                 ConnectorFactoryParam(
                     "site_id",
                     "connector_param",
@@ -814,7 +827,7 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             factory_params=(
                 *_common_daily_params(),
                 ConnectorFactoryParam("ad_account_id", "connector_param", key="ad_account_id"),
-                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+                ConnectorFactoryParam("access_token", "resolved_secret_param", key="access_token"),
                 ConnectorFactoryParam(
                     "source_label",
                     "connector_param_or_label",
@@ -880,8 +893,10 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             factory_params=(
                 *_common_daily_params(),
                 ConnectorFactoryParam("store_url", "connector_param", key="store_url"),
-                ConnectorFactoryParam("consumer_key", "connector_param", key="consumer_key"),
-                ConnectorFactoryParam("consumer_secret", "connector_param", key="consumer_secret"),
+                ConnectorFactoryParam("consumer_key", "resolved_secret_param", key="consumer_key"),
+                ConnectorFactoryParam(
+                    "consumer_secret", "resolved_secret_param", key="consumer_secret"
+                ),
                 ConnectorFactoryParam(
                     "http_client",
                     "service_binding",
@@ -938,7 +953,7 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             factory_params=(
                 ConnectorFactoryParam("business_name", "business_attr", key="business_name"),
                 ConnectorFactoryParam("store_id", "connector_param", key="store_id"),
-                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+                ConnectorFactoryParam("access_token", "resolved_secret_param", key="access_token"),
                 ConnectorFactoryParam("report_date", "report_date"),
                 ConnectorFactoryParam(
                     "http_client",
