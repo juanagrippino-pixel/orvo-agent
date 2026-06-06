@@ -70,7 +70,7 @@ def test_compiled_runtime_carries_registry_executor_binding_metadata_without_raw
     }["access_token"]
     assert access_token_binding == {
         "argument": "access_token",
-        "source": "connector_param",
+        "source": "resolved_secret_param",
         "key": "access_token",
         "required": True,
         "has_fallback": False,

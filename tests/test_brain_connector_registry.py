@@ -103,7 +103,7 @@ def test_connector_executor_metadata_exposes_serializable_factory_bindings_witho
         "access_token"
     ] == {
         "argument": "access_token",
-        "source": "connector_param",
+        "source": "resolved_secret_param",
         "key": "access_token",
         "required": True,
         "has_fallback": False,
