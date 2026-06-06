@@ -73,6 +73,12 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["priority_bracket"] == "high"
     assert projection["assignee_ref"] is None
     assert projection["assigned_at"] is None
+    assert projection["latest_run_id"] == "run-work-item"
+    assert projection["source_run_ids"] == ["run-work-item"]
+    assert projection["source_connectors"] == ["tiendanube"]
+    assert projection["latest_evidence_at"] == "2026-05-24T08:00:00Z"
+    assert projection["evidence_snapshot_count"] == 1
+    assert projection["evidence_snapshot_ids"] == [case.evidence_snapshots[0].snapshot_id]
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
     assert projection["comment_count"] == 0
