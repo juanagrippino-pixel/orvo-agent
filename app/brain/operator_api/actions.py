@@ -51,6 +51,19 @@ def normalize_case_action_idempotency_key(value: Any) -> str | None:
     return normalized
 
 
+def require_case_action_idempotency_key(value: Any) -> str:
+    """Return a safe idempotency key required by mutating HTTP operator boundaries."""
+
+    normalized = normalize_case_action_idempotency_key(value)
+    if normalized is None:
+        raise OperatorAPIError(
+            "missing_idempotency_key",
+            "X-Idempotency-Key is required for case actions",
+            status_code=400,
+        )
+    return normalized
+
+
 def _manual_action_params(
     *,
     reason: str | None = None,

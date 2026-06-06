@@ -36,15 +36,15 @@ Recent shipped baseline facts, grounded in repo inspection:
 - The remaining WorkItem/search gap is the query-field registry: `app/brain/operator_views.py` still owns `_FIELD_SPECS` locally, so new JQL/view/facet fields can drift from WorkItem/OperationalCase projection semantics if broad search branches merge wholesale.
 - Connector secret-boundary hardening is now baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and `tests/contracts/test_connector_registry_contract.py` asserts forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
 - Internal operator analytics continue to use thin route wrappers and shared service helpers; the current branch adds another resolution-latency severity endpoint while preserving route-level delegation.
-- Manual case actions reserve a workflow/action ledger row before mutation only when `X-Idempotency-Key` is present; `apply_case_action_with_idempotency()` still falls back to direct mutation when no idempotency key is supplied, so the internal HTTP boundary is not yet Atlassian-grade for mutating actions.
+- Manual case actions reserve a workflow/action ledger row before mutation at the internal HTTP boundary; missing `X-Idempotency-Key` headers fail before case mutation with a stable envelope and redacted audit event. The transport-agnostic helper still exposes a direct-mutation fallback for non-HTTP/internal callers.
 - Workflow planning/approval/execution queues remain projection-only: queue views still report execution disabled / `side_effects_executed = 0`; broad workflow execution remains blocked until durable audit, RBAC, provider idempotency, retry/failure semantics, and approval gates are all enforced.
 - `channel_mix_shift` is still present in type/projection mappings but absent from `CASE_FAMILY_METRICS`; `DETECTABLE_OPERATIONAL_CASE_TYPES` and `OWNER_FACING_OPERATIONAL_CASE_TYPES` continue deriving from `CASE_FAMILY_METRICS`, so the family remains deferred/internal until Packet N promotes it.
 
 Recommended order:
 
-1. **Require idempotency keys on mutating internal case-action endpoints**
-   - Promote the existing optional idempotency path into a route-boundary requirement for `POST /internal/brain/businesses/<business_id>/cases/<case_id>/actions`.
-   - Gate: missing keys fail before mutation with a redacted stable envelope/audit event; duplicate or racing keyed requests cannot apply the same side effect twice; existing replay behavior remains backward-compatible for callers already sending keys.
+1. **Keep manual case-action idempotency enforced while continuing workflow hardening**
+   - Guard the `POST /internal/brain/businesses/<business_id>/cases/<case_id>/actions` route-boundary requirement: every successful mutation request carries a safe `X-Idempotency-Key`, reserves before mutation, and replays/skips duplicates without a second side effect.
+   - Gate: missing/blank/secret-shaped keys fail before mutation with redacted stable envelopes/audit events; duplicate or racing keyed requests cannot apply the same side effect twice.
 
 2. **WorkItem query-field registry before more search/operator facets**
    - Move JQL-lite/view field definitions out of `operator_views.py` into a canonical WorkItem/OperationalCase query-field registry near the projection helpers, while keeping metric keys in the semantic metric registry.
