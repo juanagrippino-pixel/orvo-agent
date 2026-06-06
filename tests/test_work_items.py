@@ -174,6 +174,9 @@ def test_work_item_query_field_registry_is_canonical_for_case_search_fields():
     assert by_field["status_category"]["source"] == "work_item_projection"
     assert by_field["status_category"]["allowed_values"] == ["done", "in_progress", "to_do"]
     assert by_field["project"]["source"] == "work_item_projection"
+    assert by_field["priority_bracket"]["source"] == "work_item_projection"
+    assert by_field["priority_bracket"]["allowed_values"] == ["high", "low", "medium"]
+    assert by_field["priority_bracket"]["operators"] == ["=", "!=", "IN"]
     assert by_field["source_connector"]["source"] == "evidence_projection"
     assert by_field["freshness_state"]["allowed_values"] == ["degraded", "fresh", "missing", "stale", "unknown"]
     assert by_field["priority_score"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
