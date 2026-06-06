@@ -751,6 +751,59 @@ def test_workflow_approval_decision_approves_pending_gate_without_executing_side
     assert listed_record.execution_state == "pending_execution"
 
 
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_approval_gate_decisions_require_non_empty_actor_and_reason(tmp_path, store_factory):
+    ledger = store_factory(tmp_path)
+    write = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approval-identity",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/approval-identity/case/request_external_action/once",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator:ana",
+        params={"target": "supplier", "reason": "Request supplier restock"},
+        rule_id="approval-identity",
+        now=utc(18),
+    )
+    assert write.approval_request is not None
+
+    with pytest.raises(WorkflowActionLedgerError) as blank_actor:
+        ledger.decide_approval_request(
+            business_id="artemea",
+            approval_request_id=write.approval_request.approval_request_id,
+            decision="approved",
+            actor_ref="   ",
+            reason="Manager approval",
+            now=utc(18, 5),
+        )
+    assert blank_actor.value.code == "invalid_approval_decision_actor"
+
+    with pytest.raises(WorkflowActionLedgerError) as blank_reason:
+        ledger.cancel_approval_request(
+            business_id="artemea",
+            approval_request_id=write.approval_request.approval_request_id,
+            actor_ref="manager",
+            reason="   ",
+            now=utc(18, 10),
+        )
+    assert blank_reason.value.code == "invalid_approval_decision_reason"
+
+    [request] = ledger.list_approval_requests(business_id="artemea")
+    [record] = ledger.list_actions(business_id="artemea")
+    assert request.status == "pending"
+    assert request.decided_at is None
+    assert record.approval_state == "pending"
+    assert record.execution_state == "blocked_approval_required"
+
+
 def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_decision(tmp_path):
     _, case = seed_case()
     ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
