@@ -92,9 +92,10 @@ GET /internal/brain/businesses/{business_id}/owner-case-brief/preview
 ```
 
 Actions must use registered action keys and append timeline events. Manual case-action
-requests may include `X-Idempotency-Key`; when present the key is reserved in the
-durable workflow action ledger before the case mutation, duplicate completed
-requests replay the current case with `data.action.status = "skipped_duplicate"`,
+requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
+mutation with a stable error envelope and redacted audit event. Valid keys are
+reserved in the durable workflow action ledger before the case mutation, duplicate
+completed requests replay the current case with `data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope. The
 `recently-assigned` endpoint is a read-only projection over actionable cases with
 `assigned_at`/`assignee_ref`; it does not mutate lifecycle state or treat

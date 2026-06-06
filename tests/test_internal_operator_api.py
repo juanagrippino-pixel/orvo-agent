@@ -383,7 +383,7 @@ def test_internal_case_action_cannot_cross_business_scope_or_mutate_foreign_case
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{other_case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-cross-business"},
         json={"action_key": "acknowledge_case"},
     )
 
@@ -443,7 +443,7 @@ def test_internal_case_action_rejects_unknown_key_without_mutation(monkeypatch, 
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-unknown-key"},
         json={"action_key": "delete_everything"},
     )
 
@@ -476,7 +476,11 @@ def test_internal_case_action_rejects_registered_external_action_at_operator_api
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers={**AUTH, "X-Request-ID": "req-external-boundary"},
+        headers={
+            **AUTH,
+            "X-Idempotency-Key": "case-action-external-boundary",
+            "X-Request-ID": "req-external-boundary",
+        },
         json={
             "action_key": "request_external_action",
             "reason": "Create CRM ticket access_token=raw_external_boundary_secret",
@@ -539,7 +543,11 @@ def test_internal_operator_api_does_not_import_external_action_execution_boundar
 def test_internal_case_action_actor_identity_comes_from_authenticated_header(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
-    headers = {**AUTH, "X-Orvo-Operator": "operator:trusted"}
+    headers = {
+        **AUTH,
+        "X-Orvo-Operator": "operator:trusted",
+        "X-Idempotency-Key": "case-action-actor-identity",
+    }
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
@@ -574,7 +582,7 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
 
     ack = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-ack-redaction"},
         json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
     )
     assert ack.status_code == 200
@@ -582,7 +590,7 @@ def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(
 
     resolved = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-resolve-redaction"},
         json={"action_key": "resolve_case", "reason": "Fixed access_token=raw_action_secret"},
     )
 
@@ -724,13 +732,91 @@ def test_internal_case_action_failed_validation_does_not_consume_idempotency_key
     assert retry_body["data"]["action"]["idempotency_key"] == "case-action-retry-after-validation"
 
 
+def test_internal_case_action_secret_shaped_idempotency_key_is_rejected_without_ledger_or_mutation(
+    monkeypatch,
+    tmp_path,
+):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    secret_idempotency_key = "case-action/access_token:raw_idempotency_secret"
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Idempotency-Key": secret_idempotency_key,
+            "X-Request-ID": "req-secret-idempotency-key",
+        },
+        json={"action_key": "acknowledge_case", "reason": "valid mutation must not run"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_idempotency_secret" not in raw_body
+    body = response.get_json()
+    assert body["error"]["code"] == "invalid_idempotency_key"
+    assert body["redaction_applied"] is True
+    assert SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea") == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    matching_events = [
+        event for event in _audit_events(db_path) if event["request_id"] == "req-secret-idempotency-key"
+    ]
+    assert len(matching_events) == 1
+    event_json = json.dumps(matching_events[0], sort_keys=True)
+    assert "raw_idempotency_secret" not in event_json
+    assert secret_idempotency_key not in event_json
+
+
+def test_internal_case_action_requires_idempotency_key_before_mutation(monkeypatch, tmp_path):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={**AUTH, "X-Request-ID": "req-missing-idempotency-key"},
+        json={"action_key": "acknowledge_case", "reason": "should require replay safety"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"]["code"] == "missing_idempotency_key"
+    assert SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea") == []
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+    matching_events = [
+        event for event in _audit_events(db_path) if event["request_id"] == "req-missing-idempotency-key"
+    ]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["data"]["error_code"] == "missing_idempotency_key"
+    assert event["data"]["status_code"] == 400
+
+
 def test_internal_case_action_assign_owner_uses_owner_ref_alias_and_redacts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "case-action-assign-owner"},
         json={"action_key": "assign_owner", "owner_ref": "dueña access_token=raw_owner_secret"},
     )
 
@@ -1562,6 +1648,106 @@ def test_internal_case_queue_stagnation_by_priority_bracket_returns_scoped_envel
     assert data["by_idle_bucket"]["under_6h"] == 1
     assert data["by_idle_bucket_priority_bracket"]["under_6h"] == {"high": 1}
     assert data["most_stalled_actionable"]["case_type"] == "stockout_risk"
+
+
+def test_internal_case_queue_stagnation_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(run_id="run-artemea-stockout-stalled"),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas en baja",
+            run_id="run-artemea-sales-stalled",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas en baja",
+            run_id="run-other-sales-stalled",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-case-type",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 2
+    assert data["by_idle_bucket_case_type"]["under_6h"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert data["most_stalled_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
+
+
+def test_internal_case_queue_stagnation_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        _case_detection(run_id="run-artemea-critical", severity="critical"),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas en baja",
+            run_id="run-artemea-warning",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical",
+            severity="critical",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=3),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/stagnation/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["by_idle_bucket"]["under_6h"] == 2
+    assert data["by_idle_bucket_severity"]["under_6h"] == {"critical": 1, "warning": 1}
+    assert data["most_stalled_actionable"]["case_type"] in {"stockout_risk", "sales_drop"}
 
 
 def test_internal_workflow_throughput_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
@@ -3514,7 +3700,12 @@ def test_internal_case_action_failure_writes_redacted_operator_audit_event(monke
 
     response = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-failed"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "operator",
+            "X-Idempotency-Key": "case-action-audit-failed",
+            "X-Request-ID": "req-failed",
+        },
         json={
             "action_key": "unknown_action",
             "comment": "Authorization: Basic cmF3X2F1ZGl0X3NlY3JldA==",
@@ -3555,12 +3746,21 @@ def test_internal_case_action_allows_operator_and_admin_but_not_viewer(monkeypat
     )
     operator = client.post(
         f"/internal/brain/businesses/artemea/cases/{operator_case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "operator"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "operator",
+            "X-Idempotency-Key": "case-action-role-operator",
+        },
         json={"action_key": "acknowledge_case"},
     )
     admin = client.post(
         f"/internal/brain/businesses/artemea/cases/{admin_case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "admin",
+            "X-Orvo-Operator": "admin:sol",
+            "X-Idempotency-Key": "case-action-role-admin",
+        },
         json={"action_key": "acknowledge_case"},
     )
 
@@ -3619,7 +3819,12 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     case = _seed_case(db_path, _case_detection())
     failure = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
-        headers={**AUTH, "X-Orvo-Role": "operator", "X-Request-ID": "req-audit-source"},
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "operator",
+            "X-Idempotency-Key": "case-action-audit-export-source",
+            "X-Request-ID": "req-audit-source",
+        },
         json={
             "action_key": "unknown_action",
             "comment": "Authorization: Basic " + "cmF3X2F1ZGl0X3NlY3JldA==",

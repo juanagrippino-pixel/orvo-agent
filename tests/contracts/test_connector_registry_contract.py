@@ -58,6 +58,112 @@ def test_sample_connector_is_not_declared_as_forced_or_scheduled_daily_runtime()
     assert sample.executor.supported_runtime_modes == ("preview", "operator_triggered")
 
 
+def test_scheduled_or_forced_connector_executors_bind_real_daily_report_factories():
+    """Forced/scheduled connectors must describe executable adapter paths.
+
+    The connector registry is the runtime control-plane source of truth: if a
+    connector advertises forced or scheduled execution, its factory must import,
+    expose the ``daily_report`` capability, and have registry bindings for every
+    required factory argument. This catches registry capability drift before a
+    compiled runtime reaches production.
+    """
+
+    import inspect
+
+    from app.brain.connector_registry import (
+        CAPABILITY_DAILY_REPORT,
+        RUNTIME_MODE_FORCED,
+        RUNTIME_MODE_SCHEDULED,
+        list_connector_specs,
+    )
+
+    required_modes = {RUNTIME_MODE_FORCED, RUNTIME_MODE_SCHEDULED}
+    missing_daily_report_capability: list[str] = []
+    unknown_bindings: list[str] = []
+    unbound_required_args: list[str] = []
+
+    for spec in list_connector_specs():
+        assert spec.executor is not None
+        modes = set(spec.executor.supported_runtime_modes)
+        if not (modes & required_modes):
+            continue
+
+        if CAPABILITY_DAILY_REPORT not in spec.capabilities:
+            missing_daily_report_capability.append(spec.connector_type)
+
+        factory = spec.load_report_factory()
+        signature = inspect.signature(factory)
+        factory_params = set(signature.parameters)
+        bound_arguments = {binding.argument for binding in spec.executor.factory_params}
+
+        unknown_bindings.extend(
+            f"{spec.connector_type}:{argument}"
+            for argument in sorted(bound_arguments - factory_params)
+        )
+        unbound_required_args.extend(
+            f"{spec.connector_type}:{name}"
+            for name, parameter in signature.parameters.items()
+            if parameter.default is inspect.Parameter.empty
+            and parameter.kind
+            in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+            and name not in bound_arguments
+        )
+
+    assert missing_daily_report_capability == []
+    assert unknown_bindings == []
+    assert unbound_required_args == []
+
+
+def test_scheduled_or_forced_secret_connectors_bind_adapter_credentials_as_resolved_secrets():
+    """Secret-bearing daily connectors must declare execution-boundary bindings.
+
+    Forced/scheduled runtime specs may still call legacy adapter signatures that
+    accept raw tokens, but the registry must make those kwargs explicitly
+    resolved-secret inputs. This prevents a future connector from satisfying a
+    daily adapter credential directly from durable public params while the
+    compiled runtime carries only ``secret_refs``.
+    """
+
+    from app.brain.connector_registry import (
+        RUNTIME_MODE_FORCED,
+        RUNTIME_MODE_SCHEDULED,
+        list_connector_specs,
+    )
+
+    required_modes = {RUNTIME_MODE_FORCED, RUNTIME_MODE_SCHEDULED}
+    wrong_secret_bindings: list[str] = []
+    missing_secret_bindings: list[str] = []
+
+    for spec in list_connector_specs():
+        assert spec.executor is not None
+        modes = set(spec.executor.supported_runtime_modes)
+        if not (modes & required_modes) or not spec.required_secret_refs:
+            continue
+
+        bindings_by_argument = {binding.argument: binding for binding in spec.executor.factory_params}
+        for requirement in spec.required_secret_refs:
+            legacy_field = requirement.legacy_config_field or requirement.name
+            binding = bindings_by_argument.get(legacy_field)
+            if binding is None:
+                missing_secret_bindings.append(f"{spec.connector_type}:{legacy_field}")
+                continue
+            if binding.source != "resolved_secret_param" or (binding.key or binding.argument) != legacy_field:
+                wrong_secret_bindings.append(
+                    f"{spec.connector_type}:{legacy_field}:{binding.source}:{binding.key or binding.argument}"
+                )
+
+        legacy_secret_fields = set(spec.legacy_secret_config_fields)
+        wrong_secret_bindings.extend(
+            f"{spec.connector_type}:{binding.argument}:{binding.source}:{binding.key or binding.argument}"
+            for binding in spec.executor.factory_params
+            if (binding.key or binding.argument) in legacy_secret_fields
+            and binding.source != "resolved_secret_param"
+        )
+
+    assert missing_secret_bindings == []
+    assert wrong_secret_bindings == []
+
+
 def test_connector_spec_validate_emitted_metrics_composes_unknown_source_and_family_diagnostics():
     """ConnectorSpec.validate_emitted_metrics must compose the three semantic
     envelope diagnostics deterministically so the runtime/control-plane can
