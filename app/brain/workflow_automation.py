@@ -31,6 +31,7 @@ WorkflowConditionField = Literal[
     "severity",
     "status_category",
     "min_priority_score",
+    "min_case_age_minutes",
     "degraded",
     "source_connector",
     "entity_kind",
@@ -123,7 +124,13 @@ def make_workflow_idempotency_key(
     return f"workflow/{business_id}/{rule_id}/{case_id}/{action_key}/{digest}"
 
 
-def _condition_actual(case: OperationalCase, field_name: str) -> Any:
+def _case_age_minutes(case: OperationalCase, now: datetime) -> int:
+    opened_at = case.opened_at.astimezone(timezone.utc)
+    age_seconds = (now.astimezone(timezone.utc) - opened_at).total_seconds()
+    return max(0, int(age_seconds // 60))
+
+
+def _condition_actual(case: OperationalCase, field_name: str, now: datetime) -> Any:
     if field_name == "status":
         return case.status
     if field_name == "case_type":
@@ -134,6 +141,8 @@ def _condition_actual(case: OperationalCase, field_name: str) -> Any:
         return case_status_category(case)
     if field_name == "min_priority_score":
         return case.priority_score
+    if field_name == "min_case_age_minutes":
+        return _case_age_minutes(case, now)
     if field_name == "degraded":
         return is_case_degraded(case)
     if field_name == "source_connector":
@@ -152,6 +161,20 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
                 "invalid_workflow_condition",
                 "min_priority_score condition value must be an integer",
             ) from exc
+    if condition.field == "min_case_age_minutes":
+        try:
+            minimum_age_minutes = int(condition.value)
+        except (TypeError, ValueError) as exc:
+            raise WorkflowAutomationError(
+                "invalid_workflow_condition",
+                "min_case_age_minutes condition value must be a non-negative integer",
+            ) from exc
+        if minimum_age_minutes < 0:
+            raise WorkflowAutomationError(
+                "invalid_workflow_condition",
+                "min_case_age_minutes condition value must be a non-negative integer",
+            )
+        return int(actual) >= minimum_age_minutes
     if condition.field == "source_connector":
         if not _is_non_empty_string(condition.value):
             raise WorkflowAutomationError(
@@ -190,8 +213,8 @@ def _missing_required_action_params(
     return missing
 
 
-def _condition_projection(case: OperationalCase, condition: CaseWorkflowCondition) -> dict[str, Any]:
-    actual = _condition_actual(case, condition.field)
+def _condition_projection(case: OperationalCase, condition: CaseWorkflowCondition, now: datetime) -> dict[str, Any]:
+    actual = _condition_actual(case, condition.field, now)
     return redact_secrets(
         {
             "field": condition.field,
@@ -455,7 +478,7 @@ def simulate_case_workflow(
     _validate_rule(rule, case)
     generated_at = _now_utc() if now is None else now.astimezone(timezone.utc)
     trigger_match = _trigger_match_projection(rule.trigger, event_trigger)
-    condition_results = [_condition_projection(case, condition) for condition in rule.conditions]
+    condition_results = [_condition_projection(case, condition, generated_at) for condition in rule.conditions]
     matched = bool(trigger_match["matched"]) and all(result["matched"] for result in condition_results)
     non_match_reasons = [] if matched else _non_match_reasons(trigger_match, condition_results)
     actions: list[dict[str, Any]] = []
