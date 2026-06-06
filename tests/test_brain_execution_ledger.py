@@ -79,7 +79,7 @@ def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_stat
         "access_token"
     ] == {
         "argument": "access_token",
-        "source": "connector_param",
+        "source": "resolved_secret_param",
         "key": "access_token",
         "required": True,
         "has_fallback": False,
