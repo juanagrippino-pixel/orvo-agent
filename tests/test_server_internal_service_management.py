@@ -105,12 +105,14 @@ def test_internal_service_management_cases_endpoint_returns_scoped_enveloped_pro
     assert row["owner_status"]["source_status"] == "acknowledged"
     assert row["sla_status"]["code"] == "paused"
     assert row["sla_status"]["active_policy_key"] == "resolution_warning_1440m"
+    assert row["sla_status"]["overdue_seconds"] == 0
     assert row["needs_escalation"] is True
     assert {reason["code"] for reason in row["escalation_reasons"]} >= {"waiting_external"}
     assert {"code": "waiting_external", "label_es": "Bloqueado por un tercero", "source": "owner_status"} in row[
         "escalation_reasons"
     ]
     assert row["sla"]["first_response"]["policy_key"] == "first_response_warning_240m"
+    assert row["sla"]["first_response"]["overdue_seconds"] == 0
     assert "hidden-secret" not in str(body)
 
 

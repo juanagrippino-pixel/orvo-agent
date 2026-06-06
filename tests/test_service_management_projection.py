@@ -162,6 +162,7 @@ def test_service_management_projection_computes_response_sla_state_deterministic
         "target_seconds": 3600,
         "elapsed_seconds": 5400,
         "remaining_seconds": 0,
+        "overdue_seconds": 1800,
         "breached": True,
         "completed": False,
         "started_at": "2026-05-24T10:30:00Z",
@@ -171,6 +172,7 @@ def test_service_management_projection_computes_response_sla_state_deterministic
     assert responded_item["sla"]["first_response"]["policy_key"] == "first_response_warning_240m"
     assert responded_item["sla"]["first_response"]["elapsed_seconds"] == 3600
     assert responded_item["sla"]["first_response"]["remaining_seconds"] == 10800
+    assert responded_item["sla"]["first_response"]["overdue_seconds"] == 0
     assert responded_item["sla"]["first_response"]["breached"] is False
     assert responded_item["sla"]["first_response"]["completed"] is True
 
@@ -411,6 +413,7 @@ def test_service_management_projection_summarizes_next_sla_status_and_counts():
         "active_policy_key": "first_response_critical_60m",
         "due_at": "2026-05-24T11:30:00Z",
         "remaining_seconds": 0,
+        "overdue_seconds": 1800,
     }
     assert by_id[paused.case_id]["sla_status"] == {
         "code": "paused",
@@ -418,6 +421,7 @@ def test_service_management_projection_summarizes_next_sla_status_and_counts():
         "active_policy_key": "resolution_warning_1440m",
         "due_at": "2026-05-25T02:00:00Z",
         "remaining_seconds": 72000,
+        "overdue_seconds": 0,
     }
     assert by_id[on_track.case_id]["sla_status"] == {
         "code": "on_track",
@@ -425,6 +429,7 @@ def test_service_management_projection_summarizes_next_sla_status_and_counts():
         "active_policy_key": "first_response_warning_240m",
         "due_at": "2026-05-24T14:00:00Z",
         "remaining_seconds": 7200,
+        "overdue_seconds": 0,
     }
     assert by_id[resolved.case_id]["sla_status"] == {
         "code": "completed",
@@ -432,6 +437,7 @@ def test_service_management_projection_summarizes_next_sla_status_and_counts():
         "active_policy_key": None,
         "due_at": None,
         "remaining_seconds": None,
+        "overdue_seconds": None,
     }
     assert result["by_sla_status"] == {
         "breached": 1,

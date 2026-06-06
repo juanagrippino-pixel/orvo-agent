@@ -176,11 +176,13 @@ def _sla_clock(
         effective_stop = reference
     elapsed_seconds = max(int((effective_stop - started_at).total_seconds()), 0)
     due_at = started_at + timedelta(seconds=target_seconds)
+    overdue_seconds = max(elapsed_seconds - target_seconds, 0)
     payload = {
         "policy_key": policy_key,
         "target_seconds": target_seconds,
         "elapsed_seconds": elapsed_seconds,
         "remaining_seconds": max(target_seconds - elapsed_seconds, 0),
+        "overdue_seconds": overdue_seconds,
         "breached": elapsed_seconds > target_seconds,
         "completed": normalized_stopped_at is not None,
         "started_at": _iso(started_at),
@@ -247,6 +249,7 @@ def _sla_status(sla: dict[str, Any]) -> dict[str, Any]:
             "active_policy_key": clock["policy_key"] if clock is not None else None,
             "due_at": clock["due_at"] if clock is not None else None,
             "remaining_seconds": clock["remaining_seconds"] if clock is not None else None,
+            "overdue_seconds": clock["overdue_seconds"] if clock is not None else None,
         }
 
     if breached_clocks:
