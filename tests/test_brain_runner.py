@@ -240,6 +240,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.connector_outcomes[0].metadata == {
         "label": "Sheet Artemea",
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "executor_metadata": get_connector_spec("google_sheets").executor_policy_metadata(),
         "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
         "capabilities": ["daily_report", "sheet_import"],
         "emitted_metric_families": [
@@ -300,6 +301,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
 
 
 def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_failure():
+    from app.brain.connector_registry import get_connector_spec
     from app.brain.runner import run_due_daily_reports
 
     class FailingExecute:
@@ -348,6 +350,7 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
         "failure_stage": "pre_dispatch",
         "label": "Sheet Artemea",
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "executor_metadata": get_connector_spec("google_sheets").executor_policy_metadata(),
         "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
         "capabilities": ["daily_report", "sheet_import"],
         "emitted_metric_families": [
