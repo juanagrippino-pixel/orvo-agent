@@ -19,6 +19,7 @@ from app.brain.action_catalog import ActionDefinition as WorkflowActionDefinitio
 from app.brain.action_catalog import workflow_action_registry
 from app.brain.operational_cases import OperationalCase
 from app.brain.operator_case_projections import entity_kind, is_case_degraded, source_connectors
+from app.brain.work_items import case_status_category
 from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.workflow_action_ledger import WorkflowActionLedgerStore
 
@@ -28,6 +29,7 @@ WorkflowConditionField = Literal[
     "status",
     "case_type",
     "severity",
+    "status_category",
     "min_priority_score",
     "degraded",
     "source_connector",
@@ -128,6 +130,8 @@ def _condition_actual(case: OperationalCase, field_name: str) -> Any:
         return case.case_type
     if field_name == "severity":
         return case.severity
+    if field_name == "status_category":
+        return case_status_category(case)
     if field_name == "min_priority_score":
         return case.priority_score
     if field_name == "degraded":
