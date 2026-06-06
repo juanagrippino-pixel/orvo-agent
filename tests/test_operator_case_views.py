@@ -135,14 +135,25 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("work_item_id = ARTEMEA:case-123").normalized == (
         "work_item_id = ARTEMEA:case-123 ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("priority_bracket IN (high, medium)").normalized == (
+        "priority_bracket IN (high, medium) ORDER BY priority_score DESC, opened_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
     assert unsupported_category.value.code == "unsupported_jql_value"
 
+    with pytest.raises(OperatorAPIError) as unsupported_priority_bracket:
+        parse_case_jql("priority_bracket = urgent")
+    assert unsupported_priority_bracket.value.code == "unsupported_jql_value"
+
     with pytest.raises(OperatorAPIError) as unsupported_work_item_operator:
         parse_case_jql("work_item_id > ARTEMEA:case-123")
     assert unsupported_work_item_operator.value.code == "unsupported_jql_operator"
+
+    with pytest.raises(OperatorAPIError) as sql_shape:
+        parse_case_jql("priority_bracket = high OR status = resolved")
+    assert sql_shape.value.code == "invalid_jql"
 
 
 def test_parse_case_jql_supports_assigned_boolean_filter():
@@ -480,7 +491,7 @@ def test_internal_case_queue_filters_unassigned_actionable_cases_and_keeps_busin
 
     assign_response = client.post(
         f"/internal/brain/businesses/artemea/cases/{assigned.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "assign-unassigned-filter"},
         json={"action_key": "assign_owner", "assignee_ref": "operator:ana"},
     )
     assert assign_response.status_code == 200
@@ -553,31 +564,31 @@ def test_internal_case_queue_filters_actionable_cases_and_builtin_view_matches_d
 
     ack_response = client.post(
         f"/internal/brain/businesses/artemea/cases/{acknowledged.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "ack-actionable-filter"},
         json={"action_key": "acknowledge_case", "reason": "En revisión"},
     )
     assert ack_response.status_code == 200
     progress_response = client.post(
         f"/internal/brain/businesses/artemea/cases/{in_progress.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "progress-actionable-filter"},
         json={"action_key": "mark_in_progress", "reason": "Tomado"},
     )
     assert progress_response.status_code == 200
     resolved_ack = client.post(
         f"/internal/brain/businesses/artemea/cases/{resolved.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "ack-resolved-actionable-filter"},
         json={"action_key": "acknowledge_case", "reason": "En revisión"},
     )
     assert resolved_ack.status_code == 200
     resolved_response = client.post(
         f"/internal/brain/businesses/artemea/cases/{resolved.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "resolve-actionable-filter"},
         json={"action_key": "resolve_case", "reason": "Resuelto"},
     )
     assert resolved_response.status_code == 200
     dismissed_response = client.post(
         f"/internal/brain/businesses/artemea/cases/{dismissed.case_id}/actions",
-        headers=AUTH,
+        headers={**AUTH, "X-Idempotency-Key": "dismiss-actionable-filter"},
         json={"action_key": "dismiss_case", "reason": "No aplica"},
     )
     assert dismissed_response.status_code == 200
@@ -602,6 +613,53 @@ def test_internal_case_queue_filters_actionable_cases_and_builtin_view_matches_d
     assert all(case["business_id"] == "artemea" for case in direct_body["data"]["cases"])
     assert view_body["data"]["view"]["view_id"] == "actionable_cases"
     assert view_body["data"]["cases"] == direct_body["data"]["cases"]
+
+
+def test_internal_case_queue_filters_by_priority_bracket_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    high_case = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-priority-high-query",
+            dedupe_suffix="stockout_risk/sku/HIGH/query.priority/daily",
+            priority=90,
+        ),
+    )
+    medium_case = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-priority-medium-query",
+            dedupe_suffix="stockout_risk/sku/MEDIUM/query.priority/daily",
+            priority=65,
+            title="Riesgo de stock medio",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-priority-low-query",
+            dedupe_suffix="stockout_risk/sku/LOW/query.priority/daily",
+            priority=10,
+            title="Riesgo de stock bajo",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-other-priority-query", business_id="other", priority=95))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "priority_bracket IN (high, medium)"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        "priority_bracket IN (high, medium) ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [high_case.case_id, medium_case.case_id]
+    assert [case["work_item"]["priority_bracket"] for case in body["data"]["cases"]] == ["high", "medium"]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
 def test_internal_case_queue_accepts_safe_jql_and_keeps_business_scope(monkeypatch, tmp_path):
