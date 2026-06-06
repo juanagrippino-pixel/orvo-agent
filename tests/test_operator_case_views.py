@@ -179,6 +179,36 @@ def test_internal_case_queue_redacts_secret_shaped_jql_echo(monkeypatch, tmp_pat
     assert body["data"]["cases"] == []
 
 
+def test_internal_case_queue_project_jql_cannot_expand_route_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-project-scope", priority=95))
+    other = _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-other-project-scope",
+            priority=100,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=project%20%3D%20OTHER",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["jql"] == "project = OTHER"
+    assert body["data"]["normalized_jql"] == "project = OTHER ORDER BY priority_score DESC, opened_at ASC"
+    assert body["data"]["count"] == 0
+    assert body["data"]["total"] == 0
+    assert body["data"]["cases"] == []
+    assert other.case_id not in response.get_data(as_text=True)
+    assert body["redaction_applied"] is True
+
+
 def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-open", priority=95))
