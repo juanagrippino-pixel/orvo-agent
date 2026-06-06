@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import timezone
 from typing import Any, get_args
 
@@ -28,6 +29,21 @@ _PROJECT_KEY_MAX_LENGTH = 32
 _DEFAULT_CASE_TYPE_SCHEME_ID = "d2c-default-case-types"
 _DEFAULT_WORKFLOW_SCHEME_ID = "operational-case-default-workflow"
 _DEFAULT_WORKFLOW_ID = "operational-case-default"
+
+
+@dataclass(frozen=True)
+class WorkItemPriorityDefinition:
+    bracket: str
+    label: str
+    lower_bound: int
+    upper_bound: int
+
+
+_PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
+    WorkItemPriorityDefinition("low", "Low", 0, 49),
+    WorkItemPriorityDefinition("medium", "Medium", 50, 79),
+    WorkItemPriorityDefinition("high", "High", 80, 100),
+)
 
 
 def _iso_utc(value: Any) -> str:
@@ -75,6 +91,25 @@ def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory
     return operational_case_status_category(case.status)
 
 
+def priority_bracket_for_score(priority_score: int) -> str:
+    """Return the canonical WorkItem priority bracket for a 0..100 score."""
+
+    for definition in _PRIORITY_DEFINITIONS:
+        if definition.lower_bound <= priority_score <= definition.upper_bound:
+            return definition.bracket
+    if priority_score < _PRIORITY_DEFINITIONS[0].lower_bound:
+        return _PRIORITY_DEFINITIONS[0].bracket
+    return _PRIORITY_DEFINITIONS[-1].bracket
+
+
+def case_priority_bracket(case: OperationalCase) -> str:
+    return priority_bracket_for_score(case.priority_score)
+
+
+def allowed_priority_brackets() -> set[str]:
+    return {definition.bracket for definition in _PRIORITY_DEFINITIONS}
+
+
 def case_work_item_id(case: OperationalCase) -> str:
     return f"{case_project_key(case)}:{case.case_id}"
 
@@ -89,6 +124,7 @@ def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
         "status": case.status,
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,
+        "priority_bracket": case_priority_bracket(case),
         "assignee_ref": case.assignee_ref,
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
@@ -122,6 +158,20 @@ def operational_case_status_definitions() -> list[dict[str, Any]]:
             "transitions": sorted(transitions[status]),
         }
         for status in get_args(OperationalCaseStatus)
+    ]
+
+
+def operational_case_priority_definitions() -> list[dict[str, Any]]:
+    """Expose the canonical priority-bracket scheme for WorkItem projections."""
+
+    return [
+        {
+            "bracket": definition.bracket,
+            "label": definition.label,
+            "lower_bound": definition.lower_bound,
+            "upper_bound": definition.upper_bound,
+        }
+        for definition in _PRIORITY_DEFINITIONS
     ]
 
 

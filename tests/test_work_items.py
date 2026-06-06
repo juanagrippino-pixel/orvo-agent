@@ -5,11 +5,15 @@ import sqlite3
 from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.storage import init_schema
 from app.brain.work_items import (
+    allowed_priority_brackets,
+    case_priority_bracket,
     case_project_key,
     case_status_category,
     case_work_item_projection,
+    operational_case_priority_definitions,
     operational_case_status_definitions,
     operational_case_workflow_definition,
+    priority_bracket_for_score,
     project_key_for_business,
     project_projection,
 )
@@ -57,11 +61,54 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["status"] == "open"
     assert projection["status_category"] == "to_do"
     assert projection["priority_score"] == 87
+    assert projection["priority_bracket"] == "high"
     assert projection["assignee_ref"] is None
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
+    assert case_priority_bracket(case) == "high"
+
+
+def test_priority_definitions_are_canonical_work_item_semantics(tmp_path):
+    db_path = tmp_path / "priority-definition.sqlite3"
+    low_case = _seed_case(db_path, _case_detection(run_id="run-priority-low", priority=49))
+    medium_case = _seed_case(db_path, _case_detection(run_id="run-priority-medium", priority=50))
+    high_case = _seed_case(db_path, _case_detection(run_id="run-priority-high", priority=80))
+
+    assert priority_bracket_for_score(0) == "low"
+    assert priority_bracket_for_score(49) == "low"
+    assert priority_bracket_for_score(50) == "medium"
+    assert priority_bracket_for_score(79) == "medium"
+    assert priority_bracket_for_score(80) == "high"
+    assert priority_bracket_for_score(100) == "high"
+    assert case_priority_bracket(low_case) == "low"
+    assert case_priority_bracket(medium_case) == "medium"
+    assert case_priority_bracket(high_case) == "high"
+
+    definitions = operational_case_priority_definitions()
+
+    assert allowed_priority_brackets() == {"low", "medium", "high"}
+    assert definitions == [
+        {
+            "bracket": "low",
+            "label": "Low",
+            "lower_bound": 0,
+            "upper_bound": 49,
+        },
+        {
+            "bracket": "medium",
+            "label": "Medium",
+            "lower_bound": 50,
+            "upper_bound": 79,
+        },
+        {
+            "bracket": "high",
+            "label": "High",
+            "lower_bound": 80,
+            "upper_bound": 100,
+        },
+    ]
 
 
 def test_status_and_workflow_definitions_expose_current_transition_table(tmp_path):
