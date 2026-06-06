@@ -476,6 +476,36 @@ def test_internal_case_action_actor_identity_comes_from_authenticated_header(mon
     assert all("payload-spoof" not in event.actor_ref for event in reloaded.timeline)
 
 
+def test_internal_case_action_collapses_secret_shaped_authenticated_actor_before_persistence(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Orvo-Operator": "operator:juan access_token=raw_action_actor_secret",
+            "X-Idempotency-Key": "case-action-redacted-actor",
+        },
+        json={"action_key": "add_comment", "comment": "Revisado por operaciones"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_action_actor_secret" not in raw_body
+    body = response.get_json()
+    latest_event = body["data"]["case"]["timeline"][-1]
+    assert latest_event["event_type"] == "operator_comment"
+    assert latest_event["actor_ref"] == "[REDACTED]"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.timeline[-1].actor_ref == "[REDACTED]"
+    assert "raw_action_actor_secret" not in reloaded.model_dump_json()
+
+
 def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())

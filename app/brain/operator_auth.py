@@ -90,6 +90,20 @@ def parse_allowed_businesses(value: str | None) -> tuple[str, ...] | None:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def safe_internal_operator_actor_ref(actor_ref: str | None) -> str:
+    """Return a durable-safe actor label for authenticated internal operators.
+
+    Internal operator headers are caller-controlled even after bearer-token auth.
+    If an operator accidentally pastes a credential-shaped value into the actor
+    header, collapse the principal label instead of letting redacted fragments
+    propagate into case timelines, action ledgers, audit events, or projections.
+    """
+
+    normalized = actor_ref.strip() if isinstance(actor_ref, str) and actor_ref.strip() else "anonymous"
+    redacted = redact_text(normalized) or "[REDACTED]"
+    return normalized if redacted == normalized else "[REDACTED]"
+
+
 def build_internal_operator_principal(
     *,
     actor_ref: str | None,
@@ -98,9 +112,8 @@ def build_internal_operator_principal(
 ) -> InternalOperatorPrincipal:
     """Build an authorization principal from authenticated operator headers."""
 
-    safe_actor_ref = actor_ref.strip() if isinstance(actor_ref, str) and actor_ref.strip() else "anonymous"
     return InternalOperatorPrincipal(
-        actor_ref=safe_actor_ref,
+        actor_ref=safe_internal_operator_actor_ref(actor_ref),
         role=normalize_operator_role(role),
         allowed_businesses=parse_allowed_businesses(allowed_businesses_header),
     )
