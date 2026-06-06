@@ -658,6 +658,24 @@ def test_operational_case_model_rejects_corrupted_timeline_order_and_case_refs()
         OperationalCase.model_validate({**payload, "timeline": [mismatched_event, *payload["timeline"][1:]]})
 
 
+def test_operational_case_model_rejects_updated_at_before_latest_timeline_event():
+    """Queue ordering must not rewind below the latest persisted WorkItem activity."""
+
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    commented = store.add_comment(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="juan",
+        comment="Primera revisión",
+        commented_at=utc_dt(9),
+    )
+    payload = commented.model_dump(mode="python")
+
+    with pytest.raises(ValueError, match="updated_at must include latest timeline event"):
+        OperationalCase.model_validate({**payload, "updated_at": utc_dt(8, 30)})
+
+
 def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reopen():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
