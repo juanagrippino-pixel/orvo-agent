@@ -29,7 +29,7 @@ def _detection(
         title="Caso access_token=raw_title_secret",
         severity=severity,  # type: ignore[arg-type]
         priority_score=priority,
-        entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado"},
+        entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado access_token=raw_entity_secret"},
         evidence_refs=[f"evidence://{business_id}/{run_id}/{case_type}"],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/daily-report"],
@@ -106,6 +106,12 @@ def test_orders_by_latest_operator_comment_and_redacts_comment_actor_and_title()
     first = result["cases"][0]
     assert first["status"] == "open"
     assert first["case_type"] == "sales_drop"
+    assert first["title"] == "Caso access_token=[REDACTED]"
+    assert first["entity_scope"] == {
+        "kind": "business",
+        "id": "monitored",
+        "label": "Monitoreado access_token=[REDACTED]",
+    }
     assert first["latest_comment_at"].startswith("2026-05-26T11:30:00")
     assert first["latest_comment_summary"] == "follow-up access_token=[REDACTED]"
     assert first["latest_comment_actor_ref"] == "operator access_token=[REDACTED]"
@@ -114,6 +120,7 @@ def test_orders_by_latest_operator_comment_and_redacts_comment_actor_and_title()
     assert "raw_newest_comment_secret" not in serialized
     assert "raw_newest_actor_secret" not in serialized
     assert "raw_title_secret" not in serialized
+    assert "raw_entity_secret" not in serialized
 
 
 def test_uses_latest_comment_per_case_respects_limit_and_scopes_business():

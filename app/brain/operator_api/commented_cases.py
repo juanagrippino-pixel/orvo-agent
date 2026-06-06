@@ -50,6 +50,8 @@ def list_recently_commented_cases(
             {
                 "case_id": case.case_id,
                 "case_type": case.case_type,
+                "title": case.title,
+                "entity_scope": case.entity_scope,
                 "status": case.status,
                 "severity": case.severity,
                 "priority_score": case.priority_score,

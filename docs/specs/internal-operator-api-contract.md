@@ -78,6 +78,7 @@ GET /internal/brain/businesses/{business_id}/cases/recently-opened
 GET /internal/brain/businesses/{business_id}/cases/recently-acknowledged
 GET /internal/brain/businesses/{business_id}/cases/recently-in-progress
 GET /internal/brain/businesses/{business_id}/cases/recently-assigned
+GET /internal/brain/businesses/{business_id}/cases/recently-commented
 GET /internal/brain/businesses/{business_id}/cases/recently-reopened
 GET /internal/brain/businesses/{business_id}/cases/recently-resolved
 GET /internal/brain/businesses/{business_id}/cases/recently-dismissed
@@ -99,7 +100,11 @@ completed requests replay the current case with `data.action.status = "skipped_d
 and duplicate pending/failed keys are rejected with a safe `409` envelope. The
 `recently-assigned` endpoint is a read-only projection over actionable cases with
 `assigned_at`/`assignee_ref`; it does not mutate lifecycle state or treat
-assignment as a source of truth. The `suggested-actions` endpoint is a read-only,
+assignment as a source of truth. The `recently-commented` endpoint is a
+read-only collaboration projection over canonical `operator_comment` timeline
+events; rows include redacted title and entity scope for queue context, order by
+latest comment timestamp, and do not mutate lifecycle state. The
+`suggested-actions` endpoint is a read-only,
 actionable-case projection that filters `suggested_action_keys` through the
 registered action catalog, suppresses invented keys, and redacts case titles and
 entity scope at the API boundary. The `stagnation` endpoints are read-only,

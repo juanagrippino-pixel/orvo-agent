@@ -158,6 +158,8 @@ def test_recently_commented_returns_scoped_cases_ordered_newest_first_and_redact
     assert data["count"] == 1
     assert data["cases"][0]["case_id"] == newest
     assert data["cases"][0]["status"] == "open"
+    assert data["cases"][0]["title"] == "Recently commented case under test access_token=[REDACTED]"
+    assert data["cases"][0]["entity_scope"] == {"kind": "business", "id": "monitored"}
     assert data["cases"][0]["latest_comment_summary"] == "follow-up access_token=[REDACTED]"
     assert data["cases"][0]["latest_comment_actor_ref"] == "operator access_token=[REDACTED]"
     assert data["cases"][0]["comment_count"] == 1
