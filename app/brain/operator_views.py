@@ -9,39 +9,31 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
-    EvidenceFreshnessState,
     OperationalCase,
-    OperationalCaseSeverity,
-    OperationalCaseStatus,
     OperationalCaseStore,
-    OperationalCaseType,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
-from app.brain.operator_api.common import _classify_priority_bracket
 from app.brain.operator_case_projections import evidence_freshness_states, is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
-    allowed_status_categories,
+    allowed_case_query_sort_fields,
     case_issue_type,
     case_project_key,
     case_status_category,
     case_work_item_id,
+    classify_work_item_priority_bracket,
+    operational_case_query_field_definitions,
 )
 
 _MAX_JQL_LENGTH = 512
 _MAX_CLAUSES = 8
 _MAX_IN_VALUES = 20
 _DEFAULT_SORT: tuple[tuple[str, str], ...] = (("priority_score", "DESC"), ("opened_at", "ASC"))
-_ALLOWED_SORT_FIELDS = {"priority_score", "opened_at", "updated_at"}
-_ALLOWED_STATUS = set(get_args(OperationalCaseStatus))
-_ALLOWED_STATUS_CATEGORIES = allowed_status_categories()
-_ALLOWED_CASE_TYPES = set(get_args(OperationalCaseType))
-_ALLOWED_SEVERITY = set(get_args(OperationalCaseSeverity))
-_ALLOWED_FRESHNESS_STATES = set(get_args(EvidenceFreshnessState))
+_ALLOWED_SORT_FIELDS = allowed_case_query_sort_fields()
 
 FieldType = Literal["bool", "enum", "int", "string", "datetime"]
 
@@ -81,31 +73,19 @@ class ParsedCaseJQL:
         return f"ORDER BY {order}"
 
 
-_FIELD_SPECS: dict[str, FieldSpec] = {
-    "status": FieldSpec("enum", _ALLOWED_STATUS),
-    "status_category": FieldSpec("enum", _ALLOWED_STATUS_CATEGORIES),
-    "project": FieldSpec("string"),
-    "issue_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
-    "work_item_id": FieldSpec("string"),
-    "assignee_ref": FieldSpec("string"),
-    "case_type": FieldSpec("enum", _ALLOWED_CASE_TYPES),
-    "severity": FieldSpec("enum", _ALLOWED_SEVERITY),
-    "priority_score": FieldSpec("int", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-    "evidence_count": FieldSpec("int", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-    "entity.kind": FieldSpec("string"),
-    "entity.id": FieldSpec("string"),
-    "entity.label": FieldSpec("string", None, frozenset({"=", "!="})),
-    "latest_run_id": FieldSpec("string"),
-    "source_connector": FieldSpec("string"),
-    "freshness_state": FieldSpec("enum", _ALLOWED_FRESHNESS_STATES),
-    "degraded": FieldSpec("bool", None, frozenset({"=", "!="})),
-    "assigned": FieldSpec("bool", None, frozenset({"=", "!="})),
-    "actionable": FieldSpec("bool", None, frozenset({"=", "!="})),
-    "dedupe_key": FieldSpec("string", None, frozenset({"=", "!="})),
-    "opened_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-    "updated_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-    "resolved_at": FieldSpec("datetime", None, frozenset({"=", "!=", ">", ">=", "<", "<="})),
-}
+def _field_specs_from_work_item_registry() -> dict[str, FieldSpec]:
+    specs: dict[str, FieldSpec] = {}
+    for definition in operational_case_query_field_definitions():
+        allowed_values = definition.get("allowed_values")
+        specs[definition["field"]] = FieldSpec(
+            definition["value_type"],
+            set(allowed_values) if allowed_values is not None else None,
+            frozenset(definition["operators"]),
+        )
+    return specs
+
+
+_FIELD_SPECS: dict[str, FieldSpec] = _field_specs_from_work_item_registry()
 
 
 _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
@@ -360,7 +340,7 @@ def summarize_builtin_case_view(
                 "severity_counts": _sorted_counts(case.severity for case in matching),
                 "case_type_counts": _sorted_counts(case.case_type for case in matching),
                 "priority_bracket_counts": _sorted_counts(
-                    _classify_priority_bracket(case.priority_score) for case in matching
+                    classify_work_item_priority_bracket(case.priority_score) for case in matching
                 ),
                 "evidence_count_total": sum(len(case.evidence_refs) for case in matching),
                 "evidence_count_distribution": _sorted_counts(len(case.evidence_refs) for case in matching),
