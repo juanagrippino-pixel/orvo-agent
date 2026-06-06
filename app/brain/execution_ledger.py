@@ -117,6 +117,7 @@ def _connector_contract_metadata(
     metadata.update(
         {
             "executor_factory_path": spec.factory_path,
+            "executor_metadata": spec.executor_policy_metadata(),
             "supported_runtime_modes": list(spec.executor.supported_runtime_modes),
             "capabilities": list(spec.capabilities),
             "emitted_metric_families": list(spec.emitted_metric_families),
