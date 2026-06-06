@@ -78,6 +78,20 @@ def register_case_recent_routes(app):
             ),
         )
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/recently-updated")
+    def internal_brain_cases_recently_updated(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_recently_updated_cases(
+                    case_store,
+                    business_id=business_id,
+                    limit=request.args.get("limit"),
+                ),
+            ),
+        )
+
     @app.get("/internal/brain/businesses/<business_id>/cases/recently-reopened")
     def internal_brain_cases_recently_reopened(business_id: str):
         return _with_internal_stores(
