@@ -50,6 +50,34 @@ def register_case_stagnation_routes(app):
             ),
         )
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/stagnation/by-entity-kind")
+    def internal_brain_cases_stagnation_by_entity_kind(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_queue_stagnation_by_entity_kind(
+                    case_store,
+                    business_id=business_id,
+                    now=datetime.now(timezone.utc),
+                ),
+            ),
+        )
+
+    @app.get("/internal/brain/businesses/<business_id>/cases/stagnation/by-source-connector")
+    def internal_brain_cases_stagnation_by_source_connector(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_queue_stagnation_by_source_connector(
+                    case_store,
+                    business_id=business_id,
+                    now=datetime.now(timezone.utc),
+                ),
+            ),
+        )
+
     @app.get("/internal/brain/businesses/<business_id>/cases/stagnation/by-severity")
     def internal_brain_cases_stagnation_by_severity(business_id: str):
         return _with_internal_stores(
