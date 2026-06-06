@@ -83,6 +83,7 @@ _RESOLUTION_TARGET_SECONDS: dict[str, int] = {
 }
 
 ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES = frozenset({"breached", "on_track", "paused", "completed"})
+ALLOWED_SERVICE_MANAGEMENT_SORTS = frozenset({"priority", "sla_urgency"})
 
 
 def _now_utc() -> datetime:
@@ -133,6 +134,14 @@ def _normalize_escalation_reason_filter(escalation_reason: str | None) -> str | 
     if escalation_reason not in ALLOWED_SERVICE_MANAGEMENT_ESCALATION_REASONS:
         raise ValueError(f"unsupported escalation_reason: {escalation_reason}")
     return str(escalation_reason)
+
+
+def _normalize_sort_by(sort_by: str | None) -> str:
+    if sort_by in (None, ""):
+        return "priority"
+    if sort_by not in ALLOWED_SERVICE_MANAGEMENT_SORTS:
+        raise ValueError(f"unsupported sort_by: {sort_by}")
+    return str(sort_by)
 
 
 def _service_record_type(case: OperationalCase) -> dict[str, str]:
@@ -322,6 +331,25 @@ def _escalation_reasons(
     return reasons
 
 
+def _sort_service_management_rows(rows: list[dict[str, Any]], *, sort_by: str) -> list[dict[str, Any]]:
+    if sort_by == "priority":
+        return rows
+
+    status_rank = {"breached": 0, "on_track": 1, "paused": 2, "completed": 3}
+    far_future = "9999-12-31T23:59:59Z"
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            status_rank[row["sla_status"]["code"]],
+            row["sla_status"]["due_at"] or far_future,
+            -int(row["priority_score"]),
+            row["opened_at"],
+            row["case_id"],
+        ),
+    )
+
+
 def service_management_case_item(case: OperationalCase, *, now: datetime | None = None) -> dict[str, Any]:
     """Project one OperationalCase into a service-management case row.
 
@@ -370,6 +398,7 @@ def list_service_management_cases(
     owner_status: str | None = None,
     escalation_reason: str | None = None,
     needs_escalation: bool | None = None,
+    sort_by: str | None = None,
 ) -> dict[str, Any]:
     """List service-management projections for cases in one business scope."""
 
@@ -378,6 +407,7 @@ def list_service_management_cases(
     parsed_service_record_type = _normalize_service_record_type_filter(service_record_type)
     parsed_owner_status = _normalize_owner_status_filter(owner_status)
     parsed_escalation_reason = _normalize_escalation_reason_filter(escalation_reason)
+    parsed_sort_by = _normalize_sort_by(sort_by)
     all_cases = store.list_cases(business_id=business_id, limit=None)
     all_rows = [service_management_case_item(case, now=reference) for case in all_cases]
     filtered_rows = all_rows
@@ -397,7 +427,8 @@ def list_service_management_cases(
         ]
     if needs_escalation is not None:
         filtered_rows = [row for row in filtered_rows if row["needs_escalation"] is needs_escalation]
-    rows = filtered_rows[:limit] if limit is not None else filtered_rows
+    sorted_rows = _sort_service_management_rows(filtered_rows, sort_by=parsed_sort_by)
+    rows = sorted_rows[:limit] if limit is not None else sorted_rows
     by_record_type: dict[str, int] = {}
     by_owner_status: dict[str, int] = {}
     by_sla_status: dict[str, int] = {}
@@ -428,6 +459,7 @@ def list_service_management_cases(
             "business_id": business_id,
             "now": _iso(reference),
             "limit": limit,
+            "sort_by": parsed_sort_by,
             "count": len(rows),
             "total": len(filtered_rows),
             "unfiltered_total": len(all_rows),

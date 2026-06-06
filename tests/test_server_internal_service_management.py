@@ -293,6 +293,37 @@ def test_internal_service_management_cases_endpoint_filters_by_needs_escalation(
     assert data["service_cases"][0]["needs_escalation"] is True
 
 
+def test_internal_service_management_cases_endpoint_sorts_by_sla_urgency(_isolate_db):
+    from server import app
+
+    with closing(sqlite3.connect(str(_isolate_db))) as conn:
+        store = SQLiteOperationalCaseStore(conn)
+        store.upsert_detection(
+            _detection(case_type="stockout_risk", run_id="run-sort-high-priority"),
+            detected_at=_utc(11, 50),
+        )
+        breached = store.upsert_detection(
+            _detection(case_type="sales_drop", run_id="run-sort-breached"),
+            detected_at=_utc(7),
+        )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"sort": "sla_urgency", "limit": "1"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    data = body["data"]
+    assert data["sort_by"] == "sla_urgency"
+    assert data["count"] == 1
+    assert data["total"] == 2
+    assert [row["case_id"] for row in data["service_cases"]] == [breached.case_id]
+    assert data["service_cases"][0]["sla_status"]["code"] == "breached"
+
+
 def test_internal_service_management_cases_endpoint_rejects_invalid_sla_status(_isolate_db):
     from server import app
 
@@ -371,3 +402,19 @@ def test_internal_service_management_cases_endpoint_rejects_invalid_needs_escala
     body = response.get_json()
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_needs_escalation"
+
+
+def test_internal_service_management_cases_endpoint_rejects_invalid_sort(_isolate_db):
+    from server import app
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"sort": "manager_vibes"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_sort"

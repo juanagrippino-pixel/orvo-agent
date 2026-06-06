@@ -10,6 +10,7 @@ from app.brain.service_management import (
     ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES,
     ALLOWED_SERVICE_MANAGEMENT_RECORD_TYPES,
     ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES,
+    ALLOWED_SERVICE_MANAGEMENT_SORTS,
     list_service_management_cases,
 )
 
@@ -75,6 +76,14 @@ def _parse_needs_escalation(value: str | None) -> bool | None:
     )
 
 
+def _parse_sort(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    if value not in ALLOWED_SERVICE_MANAGEMENT_SORTS:
+        raise OperatorAPIError("invalid_sort", f"unsupported sort: {value}", status_code=400)
+    return str(value)
+
+
 def register_service_management_routes(app):
     @app.get("/internal/brain/businesses/<business_id>/service-management/cases")
     def internal_brain_service_management_cases(business_id: str):
@@ -92,6 +101,7 @@ def register_service_management_routes(app):
                     owner_status=_parse_owner_status(request.args.get("owner_status")),
                     escalation_reason=_parse_escalation_reason(request.args.get("escalation_reason")),
                     needs_escalation=_parse_needs_escalation(request.args.get("needs_escalation")),
+                    sort_by=_parse_sort(request.args.get("sort") or request.args.get("sort_by")),
                 ),
             ),
         )

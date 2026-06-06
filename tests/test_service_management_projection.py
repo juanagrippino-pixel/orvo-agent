@@ -691,6 +691,46 @@ def test_list_service_management_cases_filters_by_needs_escalation_before_limit(
     }
 
 
+def test_list_service_management_cases_can_sort_by_sla_urgency_before_limit():
+    store = InMemoryOperationalCaseStore()
+    high_priority_on_track = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="sort-sla-high-priority/business/monitored/inventory/daily",
+            severity="critical",
+            priority=99,
+            run_id="run-sort-sla-high-priority",
+        ),
+        detected_at=NOW - timedelta(minutes=10),
+    )
+    breached_lower_priority = store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="sort-sla-breached/channel/all/revenue/daily",
+            severity="warning",
+            priority=70,
+            run_id="run-sort-sla-breached",
+        ),
+        detected_at=NOW - timedelta(hours=5),
+    )
+
+    default_result = list_service_management_cases(store, business_id="artemea", now=NOW, limit=1)
+    sla_sorted = list_service_management_cases(
+        store,
+        business_id="artemea",
+        now=NOW,
+        limit=1,
+        sort_by="sla_urgency",
+    )
+
+    assert [item["case_id"] for item in default_result["service_cases"]] == [high_priority_on_track.case_id]
+    assert sla_sorted["sort_by"] == "sla_urgency"
+    assert sla_sorted["total"] == 2
+    assert sla_sorted["count"] == 1
+    assert [item["case_id"] for item in sla_sorted["service_cases"]] == [breached_lower_priority.case_id]
+    assert sla_sorted["service_cases"][0]["sla_status"]["code"] == "breached"
+
+
 def test_list_service_management_cases_rejects_unknown_sla_status_filter():
     store = InMemoryOperationalCaseStore()
 
@@ -736,4 +776,16 @@ def test_list_service_management_cases_rejects_unknown_escalation_reason_filter(
             business_id="artemea",
             now=NOW,
             escalation_reason="manager_vibes",
+        )
+
+
+def test_list_service_management_cases_rejects_unknown_sort_by():
+    store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(ValueError, match="unsupported sort_by"):
+        list_service_management_cases(
+            store,
+            business_id="artemea",
+            now=NOW,
+            sort_by="manager_vibes",
         )
