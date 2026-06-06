@@ -61,6 +61,26 @@ def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_stat
         }
     ]
     assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
+    executor_metadata = outcome.metadata["executor_metadata"]
+    assert executor_metadata["factory_path"] == (
+        "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube"
+    )
+    assert executor_metadata["supported_runtime_modes"] == [
+        "preview",
+        "forced",
+        "scheduled",
+        "operator_triggered",
+    ]
+    assert {binding["argument"]: binding for binding in executor_metadata["factory_params"]}[
+        "access_token"
+    ] == {
+        "argument": "access_token",
+        "source": "connector_param",
+        "key": "access_token",
+        "required": True,
+        "has_fallback": False,
+    }
+    assert "tn_test_token" not in repr(executor_metadata)
     assert outcome.metadata["event_certification"] == {
         "status": "passed",
         "issue_count": 0,
