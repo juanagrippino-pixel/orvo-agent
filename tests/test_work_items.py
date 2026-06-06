@@ -231,6 +231,50 @@ def test_acknowledgment_sla_stops_at_terminal_status_when_never_acknowledged(tmp
     assert late_projection["acknowledgment_sla_status"] == "breached"
 
 
+def test_reopened_case_work_item_sla_clock_restarts_from_recurrence_event(tmp_path):
+    """Recurring evidence should make a done case actionable with a fresh SLA clock."""
+
+    db_path = tmp_path / "work-item-reopened-sla-clock.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-reopen-sla", priority=87))
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    acknowledged = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=datetime(2026, 5, 24, 8, 30, tzinfo=timezone.utc),
+    )
+    store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Restocked",
+        transitioned_at=datetime(2026, 5, 24, 9, 0, tzinfo=timezone.utc),
+    )
+    reopened = store.upsert_detection(
+        _case_detection(run_id="run-work-item-reopen-sla-2", priority=87),
+        detected_at=datetime(2026, 5, 26, 8, 0, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    projection = case_work_item_projection(
+        reopened,
+        as_of=datetime(2026, 5, 26, 8, 30, tzinfo=timezone.utc),
+    )
+
+    assert projection["status"] == "open"
+    assert projection["sla_started_at"] == "2026-05-26T08:00:00Z"
+    assert projection["acknowledged_at"] is None
+    assert projection["resolved_at"] is None
+    assert projection["acknowledgment_due_at"] == "2026-05-26T09:00:00Z"
+    assert projection["acknowledgment_sla_status"] == "pending"
+    assert projection["resolution_due_at"] == "2026-05-27T08:00:00Z"
+    assert projection["resolution_sla_status"] == "pending"
+
+
 def test_case_work_item_projection_exposes_resolution_sla_clock(tmp_path):
     db_path = tmp_path / "work-item-resolution-sla-clock.sqlite3"
     case = _seed_case(db_path, _case_detection(run_id="run-work-item-resolution-sla", priority=87))
