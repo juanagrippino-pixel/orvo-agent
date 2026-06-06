@@ -38,9 +38,10 @@ Included:
 
 - Tiendanube connector setup or assisted import.
 - Daily WhatsApp/operator brief.
-- 3 initial case families.
+- Starter-safe case families: sales/stock/data freshness, plus only the case families verified for that merchant.
 - Manual operator review/follow-up.
 - Weekly improvement notes.
+- Optional fulfillment readiness audit: inspect whether Tiendanube payment, shipping/fulfillment statuses, timestamps, exclusions, SLA, and resolver ownership are trustworthy enough for backlog monitoring.
 
 Not included:
 
@@ -62,17 +63,28 @@ Included:
 - configured thresholds.
 - data freshness/degraded alerts.
 
+Default off / setup-required unless verified:
+
+- fulfillment backlog monitoring. If order/payment/shipping statuses are ambiguous, Starter should show a data-quality/setup case rather than “stuck order” alerts.
+
 ### Control plane growth
 
 Goal: stores with ads and more operational complexity.
 
 Included:
 
+- verified `fulfillment_backlog` cases after the readiness audit passes;
 - Meta Ads + commerce mismatch cases.
-- marketplace/channel-mix cases when connectors exist.
+- marketplace/channel-mix cases only when connectors, freshness, and semantic-registry promotion gates exist.
 - operator workflows/comments/actions.
 - weekly case review.
 - stronger SLA/freshness monitoring.
+
+Fulfillment backlog positioning:
+
+> “Starter watches stock and data freshness. Growth adds verified dispatch backlog once we confirm your payment/shipping states are reliable.”
+
+Do not sell fulfillment backlog as a generic shipping app replacement. Orvo owns the evidence-backed Operational Case lifecycle and follow-up; shipping apps, ERPs, carrier tools, and Tiendanube admin remain the execution/source systems.
 
 ## Demo narrative
 
@@ -110,6 +122,7 @@ Allowed:
 - Tiendanube + WhatsApp are the first wedge.
 - The product is designed around cases, evidence, run history, and operator follow-up.
 - LLMs may help with wording, but business truth is deterministic.
+- `fulfillment_backlog` is a readiness-gated module: it can be audited during pilot/Activation Sprint, but owner-facing backlog claims require verified payment, fulfillment, timestamp, SLA, exclusion, resolver, and freshness gates.
 
 Do not claim live support for a connector/case/surface unless it is implemented and verified in the repo.
 

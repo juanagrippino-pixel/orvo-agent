@@ -2,7 +2,7 @@
 
 Status: Working roadmap
 Date: 2026-05-24
-Last reconciled: 2026-06-02
+Last reconciled: 2026-06-06
 Related: `docs/plans/2026-05-24-d2c-control-plane-first-product.md`
 
 ## Priority rule
@@ -117,12 +117,39 @@ Deliverables:
 - GTM packet aligned with actual capabilities;
 - board-report loop tracking pilot usefulness and blockers.
 
+Fulfillment backlog is a conditional pilot/Growth module, not a blanket Starter promise. Current code and contracts already recognize `fulfillment_backlog` as a registered case family (`CASE_FAMILY_METRICS`, `OperationalCaseType`, dedupe/entity/action catalog alignment), but commercial enablement must wait for merchant-specific payment, fulfillment-status, timestamp, SLA, exclusion, resolver, and freshness gates. If those gates fail, the pilot should surface `data_stale` / setup-required state instead of owner-facing stuck-order claims. See `docs/research/2026-06-05-fulfillment-backlog-pilot-packaging.md`.
+
 Exit criteria:
 
 - One real business can receive a daily useful brief.
 - Operator can explain every claim.
 - Failures degrade honestly.
 - Follow-up history exists for open/resolved cases.
+
+### Milestone 4A — Readiness-gated fulfillment backlog module
+
+Outcome: Orvo can safely decide whether a Tiendanube merchant is eligible for owner-facing `fulfillment_backlog` cases, and can explain when fulfillment data is not trustworthy enough.
+
+Source-of-truth checkpoint:
+
+- `app/brain/semantics/metric_registry.py` registers `fulfillment_backlog` metrics (`commerce.fulfillment.pending_count`, `commerce.fulfillment.oldest_pending_age_hours`).
+- `app/brain/operational_cases.py` defines the case type, dedupe shape, and Tiendanube entity scope, while `tests/contracts/test_metric_registry_contract.py` keeps registered case families aligned with Operational Cases/actions.
+- Detection still needs merchant-specific truth gates before this becomes a sellable owner-facing workflow; do not infer fulfillment backlog from generic report copy or ambiguous order statuses.
+
+Deliverables:
+
+- fulfillment readiness audit checklist for Tiendanube order/payment/shipping statuses;
+- deterministic suppression path that opens/updates `data_stale` or setup-required context when fulfillment status cannot be trusted;
+- redacted order-sample evidence policy for backlog cases;
+- operator/resolver assignment requirement before WhatsApp projection;
+- package copy that places verified backlog monitoring in Growth/upsell unless the Activation Sprint proves the gates are green.
+
+Exit criteria:
+
+- Payment, fulfillment, timestamp, SLA, exclusion, resolver, and freshness gates are represented in docs/tests before owner-facing backlog copy is enabled.
+- Backlog cases cite registered fulfillment metrics and redacted evidence refs only.
+- Stale Tiendanube data suppresses backlog and updates `data_stale`.
+- The Starter package can still launch without promising fulfillment monitoring.
 
 ## Milestone 5 — Post-pilot revenue/ads wedge expansion
 
