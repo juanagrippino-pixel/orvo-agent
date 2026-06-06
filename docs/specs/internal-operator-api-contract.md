@@ -79,9 +79,10 @@ POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
 
 Actions must use registered action keys and append timeline events. Manual case-action
-requests may include `X-Idempotency-Key`; when present the key is reserved in the
-durable workflow action ledger before the case mutation, duplicate completed
-requests replay the current case with `data.action.status = "skipped_duplicate"`,
+requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
+mutation with a stable error envelope and redacted audit event. Valid keys are
+reserved in the durable workflow action ledger before the case mutation, duplicate
+completed requests replay the current case with `data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope.
 
 ### Operator audit events
