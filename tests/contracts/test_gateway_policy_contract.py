@@ -87,6 +87,82 @@ def test_gateway_policy_manifest_is_stable_and_secret_safe():
     assert "authorization" not in serialized
 
 
+def test_gateway_policy_certification_report_accepts_default_registry():
+    from app.brain.gateway_policy import certify_gateway_policy_registry, default_gateway_policy_registry
+
+    report = certify_gateway_policy_registry(default_gateway_policy_registry())
+
+    assert report.schema_version == "2026-06-06.gateway-policy-certification.v1"
+    assert report.ok is True
+    assert report.checked_route_count == 4
+    assert report.enforced_route_count == 3
+    assert report.mutating_route_count == 2
+    assert report.findings == ()
+    serialized = repr(report.model_dump()).lower()
+    assert "token" not in serialized
+    assert "secret" not in serialized
+    assert "authorization" not in serialized
+
+
+def test_gateway_policy_certification_flags_unsafe_enforced_mutations():
+    from app.brain.gateway_policy import (
+        GatewayPolicyRegistry,
+        GatewayRateLimitPolicy,
+        GatewayRoutePolicy,
+        certify_gateway_policy_registry,
+    )
+
+    report = certify_gateway_policy_registry(
+        GatewayPolicyRegistry(
+            (
+                GatewayRoutePolicy(
+                    route_key="operator_api.unsafe_case_action.mutate",
+                    method="POST",
+                    path_template="/internal/brain/businesses/{business_id}/unsafe-actions",
+                    surface="operator_api",
+                    required_permissions=(CASE_ACTION_PERMISSION,),
+                    rate_limit=GatewayRateLimitPolicy(bucket="operator_api_mutation"),
+                    idempotency_required=False,
+                    audit_event_type="operator_unsafe_case_action_requested",
+                    enforcement_state="enforced",
+                ),
+            )
+        )
+    )
+
+    assert report.ok is False
+    assert [(finding.code, finding.route_key) for finding in report.findings] == [
+        ("mutating_route_missing_idempotency", "operator_api.unsafe_case_action.mutate"),
+    ]
+
+
+def test_gateway_policy_certification_flags_misdeclared_route_metadata():
+    from app.brain.gateway_policy import GatewayPolicyRegistry, GatewayRoutePolicy, certify_gateway_policy_registry
+
+    report = certify_gateway_policy_registry(
+        GatewayPolicyRegistry(
+            (
+                GatewayRoutePolicy(
+                    route_key="runtime.misdeclared.read",
+                    method="GET",
+                    path_template="internal/brain/businesses/{business_id}/misdeclared",
+                    surface="operator_api",
+                    required_permissions=(INTERNAL_READ_PERMISSION,),
+                    audit_event_type="",
+                    enforcement_state="enforced",
+                ),
+            )
+        )
+    )
+
+    assert report.ok is False
+    assert [finding.code for finding in report.findings] == [
+        "route_key_surface_mismatch",
+        "invalid_path_template",
+        "missing_audit_event_type",
+    ]
+
+
 def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_idempotency():
     from app.brain.gateway_policy import (
         GatewayPrincipal,

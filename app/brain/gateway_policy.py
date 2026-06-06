@@ -28,6 +28,8 @@ GatewayEnforcementState = Literal["contract_only", "enforced"]
 
 GATEWAY_POLICY_SCHEMA_VERSION = "2026-05-31.gateway-policy.v1"
 GATEWAY_TELEMETRY_SCHEMA_VERSION = "2026-06-04.gateway-telemetry.v1"
+GATEWAY_POLICY_CERTIFICATION_SCHEMA_VERSION = "2026-06-06.gateway-policy-certification.v1"
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 class GatewayRateLimitPolicy(BaseModel):
@@ -120,6 +122,30 @@ class GatewayPolicyDecision(BaseModel):
     idempotency_required: bool
     audit_event: dict[str, Any]
     telemetry_event: dict[str, Any]
+
+
+class GatewayPolicyCertificationFinding(BaseModel):
+    """Deterministic route-policy certification finding for developer review."""
+
+    model_config = ConfigDict(frozen=True)
+
+    severity: Literal["error"] = "error"
+    code: str
+    route_key: str
+    message: str
+
+
+class GatewayPolicyCertificationReport(BaseModel):
+    """Self-service gateway-policy certification report for route owners."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = GATEWAY_POLICY_CERTIFICATION_SCHEMA_VERSION
+    ok: bool
+    checked_route_count: int
+    enforced_route_count: int
+    mutating_route_count: int
+    findings: tuple[GatewayPolicyCertificationFinding, ...] = Field(default_factory=tuple)
 
 
 class GatewayPolicyRegistry:
@@ -289,6 +315,78 @@ def gateway_policy_manifest() -> dict[str, Any]:
     """Return the default public gateway-policy manifest."""
 
     return default_gateway_policy_registry().public_manifest()
+
+
+def certify_gateway_policy_registry(registry: GatewayPolicyRegistry) -> GatewayPolicyCertificationReport:
+    """Return a deterministic certification report for gateway route metadata.
+
+    The report gives route owners a lightweight Python-runtime quality gate before
+    exposing new developer-platform or operator-api boundaries. It checks only
+    static policy metadata; real authorization, idempotency, and audit decisions
+    still come from `GatewayPolicyRegistry.evaluate` at request time.
+    """
+
+    findings: list[GatewayPolicyCertificationFinding] = []
+    for policy in registry.policies:
+        findings.extend(_certification_findings_for_policy(policy))
+    return GatewayPolicyCertificationReport(
+        ok=not findings,
+        checked_route_count=len(registry.policies),
+        enforced_route_count=sum(1 for policy in registry.policies if policy.enforcement_state == "enforced"),
+        mutating_route_count=sum(1 for policy in registry.policies if policy.method in _MUTATING_METHODS),
+        findings=tuple(findings),
+    )
+
+
+def _certification_findings_for_policy(policy: GatewayRoutePolicy) -> list[GatewayPolicyCertificationFinding]:
+    findings: list[GatewayPolicyCertificationFinding] = []
+    expected_prefix = f"{policy.surface}."
+    if not policy.route_key.startswith(expected_prefix):
+        findings.append(
+            _certification_finding(
+                policy,
+                code="route_key_surface_mismatch",
+                message="Route key must use its declared surface prefix.",
+            )
+        )
+    if not policy.path_template.startswith("/") or "{business_id}" not in policy.path_template:
+        findings.append(
+            _certification_finding(
+                policy,
+                code="invalid_path_template",
+                message="Path template must be absolute and business-scoped.",
+            )
+        )
+    if not policy.audit_event_type.strip():
+        findings.append(
+            _certification_finding(
+                policy,
+                code="missing_audit_event_type",
+                message="Route policy must declare an audit event type.",
+            )
+        )
+    if (
+        policy.enforcement_state == "enforced"
+        and policy.method in _MUTATING_METHODS
+        and not policy.idempotency_required
+    ):
+        findings.append(
+            _certification_finding(
+                policy,
+                code="mutating_route_missing_idempotency",
+                message="Enforced mutating routes must require idempotency.",
+            )
+        )
+    return findings
+
+
+def _certification_finding(
+    policy: GatewayRoutePolicy,
+    *,
+    code: str,
+    message: str,
+) -> GatewayPolicyCertificationFinding:
+    return GatewayPolicyCertificationFinding(code=code, route_key=policy.route_key, message=message)
 
 
 def _idempotency_key_is_valid(idempotency_key: str | None, business_id: str) -> bool:

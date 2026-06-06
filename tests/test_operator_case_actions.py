@@ -647,7 +647,7 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
         headers={
             **AUTH,
             "X-Orvo-Operator": "operator access_token=raw_actor_secret",
-            "X-Idempotency-Key": "case-action-comment-route-redaction",
+            "X-Idempotency-Key": "case-action:artemea:comment-route-redaction",
         },
         json={"action_key": "add_comment", "comment": "Supplier pinged api_key=raw_comment_secret"},
     )
