@@ -1147,6 +1147,49 @@ def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch
     assert summary["by_severity"] == {}
 
 
+def test_internal_case_queue_summary_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-critical", severity="critical"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-warning",
+            freshness_state="stale",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical",
+            severity="critical",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_severity"] == {"critical": 1, "warning": 1}
+    assert summary["actionable_by_severity"] == {"critical": 1, "warning": 1}
+    assert summary["actionable_degraded_by_severity"] == {"warning": 1}
+
+
 def test_internal_case_queue_summary_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-artemea-high", priority=95))
