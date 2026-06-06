@@ -28,6 +28,7 @@ from app.brain.operational_cases import (
     operational_case_status_transitions,
     operational_case_system_reopen_transitions,
 )
+from app.brain.operator_case_projections import latest_evidence_at, source_connectors
 from app.brain.semantics import CASE_FAMILY_METRICS
 
 _PROJECT_KEY_MAX_LENGTH = 32
@@ -340,6 +341,7 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
     """Project an OperationalCase as a WorkItem-shaped API object."""
 
     effective_as_of = _as_utc(as_of) if as_of is not None else datetime.now(tz=timezone.utc)
+    case_latest_evidence_at = latest_evidence_at(case)
 
     return {
         "work_item_id": case_work_item_id(case),
@@ -353,6 +355,12 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
         "priority_bracket": case_priority_bracket(case),
         "assignee_ref": case.assignee_ref,
         "assigned_at": _iso_utc(case.assigned_at) if case.assigned_at is not None else None,
+        "latest_run_id": case.latest_run_id,
+        "source_run_ids": list(case.source_run_ids),
+        "source_connectors": source_connectors(case),
+        "latest_evidence_at": _iso_utc(case_latest_evidence_at) if case_latest_evidence_at is not None else None,
+        "evidence_snapshot_count": len(case.evidence_snapshots),
+        "evidence_snapshot_ids": [snapshot.snapshot_id for snapshot in case.evidence_snapshots],
         "comment_count": case_comment_count(case),
         "last_commented_at": case_last_commented_at(case),
         "acknowledged_at": _iso_utc(case.acknowledged_at) if case.acknowledged_at is not None else None,
