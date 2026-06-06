@@ -39,13 +39,6 @@ _EQUALITY_OPERATORS = frozenset({"=", "!=", "IN"})
 _COMPARISON_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
 _BOOLEAN_OPERATORS = frozenset({"=", "!="})
 _CASE_QUERY_SORT_FIELDS = frozenset({"priority_score", "opened_at", "updated_at"})
-_PRIORITY_BRACKETS: tuple[tuple[str, int | None, int | None], ...] = (
-    ("low", None, 50),
-    ("medium", 50, 80),
-    ("high", 80, None),
-)
-
-
 @dataclass(frozen=True)
 class WorkItemPriorityDefinition:
     bracket: str
@@ -321,6 +314,12 @@ def operational_case_query_field_definitions() -> list[dict[str, Any]]:
             operators=_COMPARISON_OPERATORS,
         ),
         _query_field_definition(
+            "priority_bracket",
+            "enum",
+            source="work_item_projection",
+            allowed_values=allowed_priority_brackets(),
+        ),
+        _query_field_definition(
             "evidence_count",
             "int",
             source="evidence_projection",
@@ -356,20 +355,26 @@ def allowed_case_query_sort_fields() -> set[str]:
 
 
 def classify_work_item_priority_bracket(priority_score: int) -> str:
-    for bracket, minimum, maximum in _PRIORITY_BRACKETS:
-        if minimum is not None and priority_score < minimum:
-            continue
-        if maximum is not None and priority_score >= maximum:
-            continue
-        return bracket
-    return _PRIORITY_BRACKETS[-1][0]
+    """Backward-compatible name for the canonical WorkItem priority classifier."""
+
+    return priority_bracket_for_score(priority_score)
 
 
 def operational_case_priority_bracket_definitions() -> list[dict[str, int | str | None]]:
-    return [
-        {"bracket": bracket, "min_inclusive": minimum, "max_exclusive": maximum}
-        for bracket, minimum, maximum in _PRIORITY_BRACKETS
-    ]
+    """Expose legacy exclusive-bound shape from canonical priority definitions."""
+
+    definitions: list[dict[str, int | str | None]] = []
+    for index, definition in enumerate(_PRIORITY_DEFINITIONS):
+        is_first = index == 0
+        is_last = index == len(_PRIORITY_DEFINITIONS) - 1
+        definitions.append(
+            {
+                "bracket": definition.bracket,
+                "min_inclusive": None if is_first else definition.lower_bound,
+                "max_exclusive": None if is_last else definition.upper_bound + 1,
+            }
+        )
+    return definitions
 
 
 def operational_case_issue_type_definitions() -> list[dict[str, str]]:

@@ -615,6 +615,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_priority_bracket(case)
     if field == "evidence_count":
         return len(case.evidence_refs)
+    if field == "priority_bracket":
+        return classify_work_item_priority_bracket(case.priority_score)
     if field == "assigned":
         return case.assignee_ref is not None
     if field == "actionable":
