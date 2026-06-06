@@ -179,6 +179,27 @@ def test_internal_case_queue_redacts_secret_shaped_jql_echo(monkeypatch, tmp_pat
     assert body["data"]["cases"] == []
 
 
+def test_internal_case_queue_redacts_secret_shaped_jql_error_messages(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-jql-error-redaction"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "status = token:raw_jql_error_secret"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_jql_error_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["redaction_applied"] is True
+    assert body["error"]["code"] == "unsupported_jql_value"
+    assert body["error"]["safe_to_show_owner"] is False
+    assert "[REDACTED]" in body["error"]["message"]
+
+
 def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-open", priority=95))
