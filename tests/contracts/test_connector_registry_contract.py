@@ -38,6 +38,26 @@ def test_connector_spec_certifies_emitted_event_families_deterministically():
     assert all(issue.severity == "warning" for issue in issues)
 
 
+def test_connector_spec_certifies_health_events_against_declared_health_states():
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    issues = tiendanube.validate_emitted_events(
+        (
+            "connector.health.ok",
+            "connector.health.partial_inventory_unavailable",
+            "connector.health.rate_limited.retry_scheduled",
+        )
+    )
+
+    assert [(issue.code, issue.event_type, issue.index) for issue in issues] == [
+        ("undeclared_health_state", "connector.health.partial_inventory_unavailable", 1),
+        ("undeclared_health_state", "connector.health.rate_limited.retry_scheduled", 2),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
 def test_validate_emitted_events_for_connector_module_function_matches_spec_method():
     from app.brain.connector_registry import (
         get_connector_spec,
