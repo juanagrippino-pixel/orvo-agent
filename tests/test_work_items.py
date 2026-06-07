@@ -561,7 +561,28 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
     }
 
+    assert fields["acknowledgment_due_at"] == {
+        "field": "acknowledgment_due_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+    }
+    assert fields["resolution_due_at"] == {
+        "field": "resolution_due_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+    }
+
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
-    assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
+    assert allowed_work_item_query_sort_fields() == {
+        "acknowledgment_due_at",
+        "opened_at",
+        "priority_score",
+        "resolution_due_at",
+        "updated_at",
+    }
