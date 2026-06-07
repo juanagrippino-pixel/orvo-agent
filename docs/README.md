@@ -52,6 +52,7 @@ Start here:
 ## Historical / superseded design notes
 
 - [`docs/insight-engine/v1-design.md`](insight-engine/v1-design.md) — archived Hito/report-first insight-engine design. Keep its evidence and degraded-mode ideas as background only; current sequencing and source-of-truth rules come from ADR-0005, the Phase A contract, PRD, and roadmap.
+- [`docs/connectors/depth-audit.md`](connectors/depth-audit.md) — historical ARTEMEA Hito/report-first connector depth audit. Keep its connector failure-mode inventory as background only; current runtime/connector/ledger status comes from the integration-train contract and current code inspection.
 - [`docs/organization/product-pivot-correction.md`](organization/product-pivot-correction.md) — supersession rule for older Hito/report-first docs.
 
 ## Operations and autonomous workers

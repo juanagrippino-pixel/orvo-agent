@@ -1,8 +1,12 @@
-# Connector depth audit — Hito 0 / ARTEMEA (Tiendanube + Meta Ads + WhatsApp)
+# Connector depth audit — historical Hito 0 / ARTEMEA (Tiendanube + Meta Ads + WhatsApp)
+
+> **Supersession note (2026-06-07):** This is a historical launch-readiness audit from the Hito/report-first ARTEMEA phase. Preserve it as connector robustness background only. Do **not** use its Hito 0 / 08:00 report framing, WhatsApp-only customer-surface assumption, or old forced-run behavior as current product strategy. Current source of truth is ADR-0005, the Phase A architecture contract, the D2C PRD/roadmap, and `docs/specs/integration-train-contract.md`: Orvo is a Tiendanube/WhatsApp-first D2C operations control plane where compiled runtime, connector registry, run ledger, semantic metrics, Operational Cases, WorkItem projections, audit, and redaction govern owner-facing claims. Re-audit code before treating any line item below as an active implementation requirement.
+>
+> Current shipped baseline that supersedes parts of this audit: `scripts/run_orvo_brain_reports.py::run_forced_report` now compiles a business runtime for forced runs and can execute all `runtime.execution_plan.daily_connector_types` through `run_enabled_connectors_daily_report_pipeline(...)`; connector credentials are resolved through `resolved_secret_param`; run-ledger/case/audit projections exist; and Meta Ads / `spend_without_orders` is gated as a later Growth ads-to-ops module rather than a Starter prerequisite. The still-useful lesson is the failure-mode shape: stale/failed sources need typed degraded handling and case/evidence lineage instead of report copy becoming the source of truth.
 
 ## Scope
 
-This audit is intentionally narrow: the first real ARTEMEA report for Hito 0, delivered at **08:00 Argentina time**, with a **dry/direct tone**, and **WhatsApp as the only customer-facing surface**.
+Original historical scope: the first real ARTEMEA report for Hito 0, delivered at **08:00 Argentina time**, with a **dry/direct tone**, and **WhatsApp as the only customer-facing surface**.
 
 It is based on the current codebase only. No live credentials were required or assumed.
 
