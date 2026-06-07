@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 import sqlite3
 from contextlib import closing
 from typing import cast
@@ -34,6 +35,8 @@ from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_
 
 
 _MAX_INTERNAL_REQUEST_ID_LENGTH = 128
+_MAX_INTERNAL_ERROR_CODE_LENGTH = 80
+_INTERNAL_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
 
 
 def _safe_internal_business_id(business_id: str) -> str:
@@ -72,6 +75,25 @@ def _internal_success(business_id: str, data: dict, *, warnings: list[str] | Non
     )
 
 
+def _safe_internal_error_code(code: str) -> str:
+    """Return a stable internal error code safe for JSON envelopes.
+
+    Route handlers normally pass static lowercase codes. If a dynamic exception
+    code, pasted credential, oversized value, or display text reaches this
+    boundary, collapse it to a generic code so the response cannot echo
+    caller-controlled/secret-shaped tails.
+    """
+
+    candidate = redact_text(code) or "internal_error"
+    if candidate != code:
+        return "internal_error"
+    if len(candidate) > _MAX_INTERNAL_ERROR_CODE_LENGTH:
+        return "internal_error"
+    if _INTERNAL_ERROR_CODE_RE.fullmatch(candidate) is None:
+        return "internal_error"
+    return candidate
+
+
 def _internal_error(business_id: str, code: str, message: str, *, status_code: int):
     safe_message = redact_text(message) or "[REDACTED]"
     safe_message = str(redact_secrets(safe_message))
@@ -81,7 +103,11 @@ def _internal_error(business_id: str, code: str, message: str, *, status_code: i
                 "ok": False,
                 "business_id": _safe_internal_business_id(business_id),
                 "request_id": _internal_request_id(),
-                "error": {"code": code, "message": safe_message, "safe_to_show_owner": False},
+                "error": {
+                    "code": _safe_internal_error_code(code),
+                    "message": safe_message,
+                    "safe_to_show_owner": False,
+                },
                 "redaction_applied": True,
             }
         ),

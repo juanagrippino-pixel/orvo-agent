@@ -647,6 +647,36 @@ def test_internal_case_action_actor_identity_comes_from_authenticated_header(mon
     assert all("payload-spoof" not in event.actor_ref for event in reloaded.timeline)
 
 
+def test_internal_case_action_collapses_secret_shaped_authenticated_actor_before_persistence(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+
+    response = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Orvo-Operator": "operator:juan access_token=raw_action_actor_secret",
+            "X-Idempotency-Key": "case-action-redacted-actor",
+        },
+        json={"action_key": "add_comment", "comment": "Revisado por operaciones"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_action_actor_secret" not in raw_body
+    body = response.get_json()
+    latest_event = body["data"]["case"]["timeline"][-1]
+    assert latest_event["event_type"] == "operator_comment"
+    assert latest_event["actor_ref"] == "[REDACTED]"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.timeline[-1].actor_ref == "[REDACTED]"
+    assert "raw_action_actor_secret" not in reloaded.model_dump_json()
+
+
 def test_internal_case_actions_acknowledge_and_resolve_with_actor_and_redaction(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())
@@ -1320,6 +1350,98 @@ def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch
     assert summary["actionable_degraded"] == 0
     assert summary["by_status"] == {}
     assert summary["by_severity"] == {}
+
+
+def test_internal_case_queue_summary_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-critical", severity="critical"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-warning",
+            freshness_state="stale",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical",
+            severity="critical",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["actionable_total"] == 2
+    assert summary["totals_by_severity"] == {"critical": 1, "warning": 1}
+    assert summary["actionable_by_severity"] == {"critical": 1, "warning": 1}
+    assert summary["actionable_degraded_by_severity"] == {"warning": 1}
+
+
+def test_internal_case_queue_summary_by_severity_excludes_terminal_stale_cases_from_actionable_counts(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea-critical", severity="critical"))
+    terminal_stale = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-terminal-stale",
+            freshness_state="stale",
+        ),
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        store.transition_case(
+            terminal_stale.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            transitioned_at=_utc(9),
+        )
+        store.transition_case(
+            terminal_stale.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            reason="Resolved stale warning before summary",
+            transitioned_at=_utc(10),
+        )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/summary/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    summary = response.get_json()["data"]
+    assert summary["total"] == 2
+    assert summary["totals_by_severity"] == {"critical": 1, "warning": 1}
+    assert summary["actionable_total"] == 1
+    assert summary["actionable_by_severity"] == {"critical": 1}
+    assert summary["actionable_degraded_by_severity"] == {}
 
 
 def test_internal_case_queue_summary_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
@@ -2986,6 +3108,85 @@ def test_internal_case_handling_latency_histogram_returns_scoped_envelope(monkey
     assert data["fastest_handled"]["time_to_handle_seconds"] == 7200
     assert data["slowest_handled"]["case_id"] == slow.case_id
     assert data["slowest_handled"]["time_to_handle_seconds"] == 32400
+
+
+def test_internal_handling_latency_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    handled = store.upsert_detection(
+        _case_detection(
+            severity="critical",
+            run_id="run-artemea-critical-handled-severity",
+            dedupe_suffix="stockout_risk/product/sku-critical-handled-severity/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        handled.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        handled.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(hours=3),
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            severity="critical",
+            run_id="run-other-critical-handled-severity",
+            dedupe_suffix="stockout_risk/product/sku-other-critical-handled-severity/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(hours=1),
+    )
+    store.transition_case(
+        other.case_id,
+        status="resolved",
+        actor_type="system",
+        actor_ref="orvo_runtime",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/handling-latency/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["handled_total"] == 1
+    assert data["by_handling_bucket"] == {
+        "under_1h": 0,
+        "under_6h": 1,
+        "under_24h": 0,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_handling_bucket_severity"]["under_6h"] == {"critical": 1}
+    assert data["by_handling_bucket_severity"]["over_7d"] == {}
+    assert data["fastest_handled"]["case_id"] == handled.case_id
+    assert data["slowest_handled"]["case_id"] == handled.case_id
 
 
 def test_internal_handling_latency_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
