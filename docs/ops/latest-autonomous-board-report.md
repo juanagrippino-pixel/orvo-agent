@@ -3,7 +3,7 @@
 Fecha de corte: 2026-06-07 04:04 UTC
 Repo: `/root/orvo-agent`
 Rama canónica: `feat/orvo-brain-control-plane`
-HEAD verificado: `a8b399cb6c26eb31b34aa1e0a3432f62d97a5d8f` (`codex: expose resolution latency severity service`)
+Baseline de producto verificado antes de publicar este reporte: `a8b399cb6c26eb31b34aa1e0a3432f62d97a5d8f` (`codex: expose resolution latency severity service`)
 Estado repo al corte: limpio y sincronizado con `origin/feat/orvo-brain-control-plane` (`0/0` ahead/behind).
 Inventario: 122 worktrees registrados, 0 dirty, 0 missing. Backlog: 68 ramas locales y 103 remotas no mergeadas.
 Gate local: `pytest -q` → `1329 passed in 27.22s`.
