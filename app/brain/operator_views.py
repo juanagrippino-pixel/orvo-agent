@@ -22,7 +22,9 @@ from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
     allowed_work_item_query_sort_fields,
     case_acknowledgment_due_at,
+    case_comment_count,
     case_issue_type,
+    case_last_commented_datetime,
     case_priority_bracket,
     case_project_key,
     case_resolution_due_at,
@@ -354,6 +356,10 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_acknowledgment_due_at(case)
     if field == "resolution_due_at":
         return case_resolution_due_at(case)
+    if field == "comment_count":
+        return case_comment_count(case)
+    if field == "last_commented_at":
+        return case_last_commented_datetime(case)
     return getattr(case, field)
 
 
@@ -362,11 +368,18 @@ def _sort_cases(cases: list[OperationalCase], order_by: tuple[tuple[str, str], .
     # Apply stable sorts from last to first so mixed directions work.
     for field, direction in reversed(order_by + (("case_id", "ASC"),)):
         reverse = direction == "DESC"
-        result.sort(key=lambda case, sort_field=field: _sort_value(case, sort_field), reverse=reverse)
+        result.sort(
+            key=lambda case, sort_field=field, sort_reverse=reverse: _sort_value(case, sort_field, reverse=sort_reverse),
+            reverse=reverse,
+        )
     return result
 
 
-def _sort_value(case: OperationalCase, field: str) -> Any:
+def _sort_value(case: OperationalCase, field: str, *, reverse: bool = False) -> Any:
     if field == "case_id":
-        return case.case_id
-    return _case_field_value(case, field)
+        actual = case.case_id
+    else:
+        actual = _case_field_value(case, field)
+    # Keep null projection fields (for example uncommented last_commented_at)
+    # at the end in both ascending and descending operator queues.
+    return (actual is not None if reverse else actual is None, actual)

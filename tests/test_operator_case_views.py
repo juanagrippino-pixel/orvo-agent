@@ -9,7 +9,7 @@ from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.operator_api import OperatorAPIError
 from app.brain.operator_views import parse_case_jql
 from app.brain.storage import init_schema
-from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
+from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case, _utc
 
 
 def _case_detection_with_source(*, source: str, run_id: str, freshness_state: str = "fresh", **kwargs):
@@ -113,10 +113,81 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("resolution_due_at > 2026-05-25T08:00:00Z ORDER BY resolution_due_at DESC").normalized == (
         "resolution_due_at > 2026-05-25T08:00:00+00:00 ORDER BY resolution_due_at DESC"
     )
+    assert parse_case_jql("comment_count >= 1 ORDER BY last_commented_at DESC").normalized == (
+        "comment_count >= 1 ORDER BY last_commented_at DESC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
     assert unsupported_category.value.code == "unsupported_jql_value"
+
+
+def test_internal_case_queue_filters_and_sorts_by_comment_activity(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    older = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-comment-old",
+            dedupe_suffix="stockout_risk/sku/COMMENT-OLD/commerce.inventory/daily",
+            priority=70,
+            title="Comentario anterior",
+        ),
+    )
+    latest = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-comment-latest",
+            dedupe_suffix="stockout_risk/sku/COMMENT-LATEST/commerce.inventory/daily",
+            priority=65,
+            title="Comentario reciente",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-comment-none",
+            dedupe_suffix="stockout_risk/sku/COMMENT-NONE/commerce.inventory/daily",
+            priority=100,
+            title="Sin comentario",
+        ),
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.add_comment(
+        older.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Revisar reposición",
+        commented_at=_utc(9),
+    )
+    store.add_comment(
+        latest.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Ya contacté proveedor",
+        commented_at=_utc(10),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "comment_count >= 1 ORDER BY last_commented_at DESC"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "comment_count >= 1 ORDER BY last_commented_at DESC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [latest.case_id, older.case_id]
+    assert [case["work_item"]["comment_count"] for case in body["data"]["cases"]] == [1, 1]
+    assert [case["work_item"]["last_commented_at"] for case in body["data"]["cases"]] == [
+        "2026-05-24T10:00:00Z",
+        "2026-05-24T09:00:00Z",
+    ]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
 def test_internal_case_queue_filters_and_sorts_by_sla_due_fields(monkeypatch, tmp_path):

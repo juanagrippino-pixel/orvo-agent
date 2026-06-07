@@ -95,6 +95,8 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("resolved_at", "datetime", allowed_operators=_RANGE_OPERATORS),
     WorkItemQueryFieldDefinition("acknowledgment_due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("resolution_due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("comment_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("last_commented_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
 )
 
 _WORK_ITEM_QUERY_FIELD_BY_KEY = {definition.field: definition for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS}
@@ -239,11 +241,18 @@ def case_comment_count(case: OperationalCase) -> int:
     return len(_case_comment_events(case))
 
 
-def case_last_commented_at(case: OperationalCase) -> str | None:
+def case_last_commented_datetime(case: OperationalCase) -> datetime | None:
+    """Return the latest timeline-backed comment timestamp for query/sort semantics."""
+
     comment_events = _case_comment_events(case)
     if not comment_events:
         return None
-    return _iso_utc(max(event.created_at for event in comment_events))
+    return max(event.created_at for event in comment_events)
+
+
+def case_last_commented_at(case: OperationalCase) -> str | None:
+    last_commented_at = case_last_commented_datetime(case)
+    return _iso_utc(last_commented_at) if last_commented_at is not None else None
 
 
 def case_sla_started_at(case: OperationalCase) -> datetime:

@@ -575,12 +575,28 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
         "sortable": True,
     }
+    assert fields["comment_count"] == {
+        "field": "comment_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+    }
+    assert fields["last_commented_at"] == {
+        "field": "last_commented_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {
         "acknowledgment_due_at",
+        "comment_count",
+        "last_commented_at",
         "opened_at",
         "priority_score",
         "resolution_due_at",
