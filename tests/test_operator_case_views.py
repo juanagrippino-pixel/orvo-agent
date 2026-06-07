@@ -1299,7 +1299,12 @@ def test_internal_case_view_summary_returns_scoped_facets_without_cases(monkeypa
         "source_connector_counts": {"meta_ads": 1, "tiendanube": 1},
         "freshness_state_counts": {"fresh": 1, "stale": 1},
         "degraded_total": 1,
+        "assigned_total": 1,
         "unassigned_total": 1,
+        "assignee_counts": [
+            {"assignee_ref": "operator:ana", "total": 1},
+            {"assignee_ref": None, "total": 1},
+        ],
     }
     assert "cases" not in body["data"]
     assert body["redaction_applied"] is True
@@ -1402,7 +1407,12 @@ def test_internal_case_query_summary_returns_scoped_facets_without_cases(monkeyp
         "source_connector_counts": {"meta_ads": 1, "tiendanube": 1},
         "freshness_state_counts": {"fresh": 1, "stale": 1},
         "degraded_total": 1,
+        "assigned_total": 1,
         "unassigned_total": 1,
+        "assignee_counts": [
+            {"assignee_ref": "operator:ana", "total": 1},
+            {"assignee_ref": None, "total": 1},
+        ],
     }
     assert "cases" not in body["data"]
     raw_response = response.get_data(as_text=True)
@@ -1426,3 +1436,37 @@ def test_internal_case_query_summary_rejects_unsafe_jql_without_echoing_secret(m
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_jql"
     assert "raw_query_summary_secret" not in response.get_data(as_text=True)
+
+
+def test_internal_case_query_summary_redacts_secret_shaped_assignee_facets(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    assigned = _seed_case(db_path, _case_detection(run_id="run-query-assignee-secret", priority=90))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.assign_case(
+        assigned.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        assignee_ref="operator:access_token=raw_assignee_summary_secret",
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/query-summary",
+        query_string={"jql": "status = open"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_response = response.get_data(as_text=True)
+    assert "raw_assignee_summary_secret" not in raw_response
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["summary"]["assigned_total"] == 1
+    assert body["data"]["summary"]["unassigned_total"] == 0
+    assert body["data"]["summary"]["assignee_counts"] == [
+        {"assignee_ref": "operator:access_token=[REDACTED]", "total": 1}
+    ]
+    assert "cases" not in body["data"]
