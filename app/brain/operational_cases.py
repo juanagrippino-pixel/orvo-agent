@@ -403,10 +403,19 @@ class OperationalCase(BaseModel):
             raise ValueError("dismissed case requires dismissed_at")
         if self.status != "dismissed" and self.dismissed_at is not None:
             raise ValueError("only dismissed cases may have dismissed_at")
+        persisted_snapshot_ids = {snapshot.snapshot_id for snapshot in self.evidence_snapshots}
         previous_event_at: datetime | None = None
         for event in self.timeline:
             if event.case_id is not None and event.case_id != self.case_id:
                 raise ValueError("timeline event case_id must match case_id")
+            if persisted_snapshot_ids:
+                unknown_snapshot_ids = [
+                    snapshot_id
+                    for snapshot_id in event.evidence_snapshot_ids
+                    if snapshot_id not in persisted_snapshot_ids
+                ]
+                if unknown_snapshot_ids:
+                    raise ValueError("timeline event references unknown evidence snapshot_id")
             if previous_event_at is not None and event.created_at < previous_event_at:
                 raise ValueError("timeline events must be chronological")
             if event.created_at > self.updated_at:

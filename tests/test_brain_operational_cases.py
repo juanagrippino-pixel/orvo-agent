@@ -141,6 +141,22 @@ def test_evidence_update_timeline_references_canonical_snapshot_id_when_duplicat
     assert updated.timeline[-1].evidence_snapshot_ids == ["snapshot-original"]
 
 
+def test_operational_case_rejects_timeline_events_referencing_unknown_evidence_snapshots():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(
+        make_stockout_detection(
+            run_id="run-1",
+            snapshots=[make_stock_snapshot(snapshot_id="snapshot-known", snapshot_key="run-1/evidence://tn/stock/known")],
+        ),
+        detected_at=utc_dt(8),
+    )
+    payload = opened.model_dump(mode="python")
+    payload["timeline"][-1]["evidence_snapshot_ids"] = ["snapshot-known", "snapshot-missing"]
+
+    with pytest.raises(ValueError, match="timeline event references unknown evidence snapshot_id"):
+        OperationalCase.model_validate(payload)
+
+
 def test_owner_facing_actionable_cases_excludes_legacy_cases_without_evidence_snapshots():
     store = InMemoryOperationalCaseStore()
     with_evidence = store.upsert_detection(
