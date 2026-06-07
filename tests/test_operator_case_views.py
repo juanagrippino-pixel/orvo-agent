@@ -101,10 +101,61 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("status_category IN (to_do, done)").normalized == (
         "status_category IN (to_do, done) ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql(
+        "acknowledgment_due_at <= 2026-05-24T09:00:00+00:00 ORDER BY acknowledgment_due_at ASC"
+    ).normalized == (
+        "acknowledgment_due_at <= 2026-05-24T09:00:00+00:00 ORDER BY acknowledgment_due_at ASC"
+    )
+    assert parse_case_jql("resolution_due_at > 2026-05-25T08:00:00Z ORDER BY resolution_due_at DESC").normalized == (
+        "resolution_due_at > 2026-05-25T08:00:00+00:00 ORDER BY resolution_due_at DESC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
     assert unsupported_category.value.code == "unsupported_jql_value"
+
+
+def test_internal_case_queue_filters_and_sorts_by_sla_due_fields(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    high = _seed_case(db_path, _case_detection(run_id="run-high", priority=95))
+    medium = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-medium",
+            dedupe_suffix="stockout_risk/sku/MEDIUM/commerce.inventory/daily",
+            priority=70,
+            severity="warning",
+            title="Riesgo de stock medio",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-other",
+            dedupe_suffix="stockout_risk/sku/OTHER/commerce.inventory/daily",
+            business_id="other",
+            priority=95,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={
+            "jql": "acknowledgment_due_at <= 2026-05-24T11:00:00Z ORDER BY acknowledgment_due_at DESC"
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        "acknowledgment_due_at <= 2026-05-24T11:00:00+00:00 ORDER BY acknowledgment_due_at DESC"
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [medium.case_id, high.case_id]
+    due_times = [case["work_item"]["acknowledgment_due_at"] for case in body["data"]["cases"]]
+    assert due_times == ["2026-05-24T11:00:00Z", "2026-05-24T09:00:00Z"]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
