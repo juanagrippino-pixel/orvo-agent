@@ -73,6 +73,22 @@ def summarize_case_handling_latency_histogram(
         }
     )
 
+
+def summarize_case_handling_latency_histogram_by_severity(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Severity-split deterministic histogram of operator handling time.
+
+    The base handling-latency histogram is the canonical severity projection:
+    it exposes total bucket counts plus ``by_handling_bucket_severity``. This
+    explicit helper gives HTTP routes and operator contracts a stable
+    service-layer function for the ``/by-severity`` surface without duplicating
+    the histogram implementation.
+    """
+
+    return summarize_case_handling_latency_histogram(store, business_id=business_id)
+
+
 def summarize_case_handling_latency_histogram_by_case_type(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
