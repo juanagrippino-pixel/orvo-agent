@@ -81,6 +81,7 @@ payloads.
 
 ```http
 GET /internal/brain/businesses/{business_id}/cases
+GET /internal/brain/businesses/{business_id}/cases/query-summary?jql=status%20IN%20(open,%20acknowledged)
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/cases/facets
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
@@ -113,7 +114,10 @@ make `business_id` caller-queryable.
 Built-in case views are read-only projections over the canonical Operational Case
 store; view execution, exports, and summaries must remain route-scoped by
 `business_id`, use allowlisted JQL-lite definitions, and return redacted
-enveloped responses. JQL-lite may filter evidence freshness through the
+enveloped responses. Direct case query summaries use the same parser and
+route-owned business scope for caller-supplied JQL-lite, but return aggregate
+facets only and must not include raw case rows or persist saved/custom views.
+JQL-lite may filter evidence freshness through the
 allowlisted `freshness_state` values (`fresh`, `stale`, `degraded`, `missing`,
 `unknown`) derived from persisted case evidence snapshots, and may filter
 `evidence_count` with bounded integer comparison operators over canonical case

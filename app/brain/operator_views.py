@@ -374,28 +374,58 @@ def summarize_builtin_case_view(
             "view": {key: view[key] for key in ("view_id", "label", "readonly")},
             "jql": parsed.raw,
             "normalized_jql": parsed.normalized,
-            "summary": {
-                "total": len(matching),
-                "status_counts": _sorted_counts(case.status for case in matching),
-                "status_category_counts": _sorted_counts(case_status_category(case) for case in matching),
-                "severity_counts": _sorted_counts(case.severity for case in matching),
-                "case_type_counts": _sorted_counts(case.case_type for case in matching),
-                "priority_bracket_counts": _sorted_counts(
-                    case_priority_bracket(case) for case in matching
-                ),
-                "evidence_count_total": sum(len(case.evidence_refs) for case in matching),
-                "evidence_count_distribution": _sorted_counts(len(case.evidence_refs) for case in matching),
-                "source_connector_counts": _sorted_counts(
-                    source for case in matching for source in _case_source_connectors(case)
-                ),
-                "freshness_state_counts": _sorted_counts(
-                    state for case in matching for state in _case_freshness_states(case)
-                ),
-                "degraded_total": sum(1 for case in matching if is_case_degraded(case)),
-                "unassigned_total": sum(1 for case in matching if case.assignee_ref is None),
-            },
+            "summary": _case_analytics_summary(matching),
         }
     )
+
+
+def summarize_case_query_facets(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    jql: str | None,
+) -> dict[str, Any]:
+    """Return scoped facet counts for caller-supplied safe JQL-lite.
+
+    This read-only analytics primitive shares the same allowlisted parser and
+    business-scoped OperationalCase source as executable queues. It returns
+    aggregate facets only, never case rows, and therefore remains a projection
+    rather than a saved-view or workflow source of truth.
+    """
+
+    parsed = parse_case_jql(jql)
+    cases = store.list_cases(business_id=business_id, limit=None)
+    matching = [case for case in cases if _matches(case, parsed.clauses)]
+    return redact_secrets(
+        {
+            "jql": parsed.raw,
+            "normalized_jql": parsed.normalized,
+            "summary": _case_analytics_summary(matching),
+        }
+    )
+
+
+def _case_analytics_summary(matching: list[OperationalCase]) -> dict[str, Any]:
+    return {
+        "total": len(matching),
+        "status_counts": _sorted_counts(case.status for case in matching),
+        "status_category_counts": _sorted_counts(case_status_category(case) for case in matching),
+        "severity_counts": _sorted_counts(case.severity for case in matching),
+        "case_type_counts": _sorted_counts(case.case_type for case in matching),
+        "priority_bracket_counts": _sorted_counts(
+            case_priority_bracket(case) for case in matching
+        ),
+        "evidence_count_total": sum(len(case.evidence_refs) for case in matching),
+        "evidence_count_distribution": _sorted_counts(len(case.evidence_refs) for case in matching),
+        "source_connector_counts": _sorted_counts(
+            source for case in matching for source in _case_source_connectors(case)
+        ),
+        "freshness_state_counts": _sorted_counts(
+            state for case in matching for state in _case_freshness_states(case)
+        ),
+        "degraded_total": sum(1 for case in matching if is_case_degraded(case)),
+        "unassigned_total": sum(1 for case in matching if case.assignee_ref is None),
+    }
 
 
 def _sorted_counts(values) -> dict[str, int]:
