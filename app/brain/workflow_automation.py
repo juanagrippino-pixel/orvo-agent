@@ -30,6 +30,7 @@ WorkflowConditionField = Literal[
     "case_type",
     "severity",
     "status_category",
+    "assigned",
     "min_priority_score",
     "min_case_age_minutes",
     "max_case_age_minutes",
@@ -140,6 +141,8 @@ def _condition_actual(case: OperationalCase, field_name: str, now: datetime) -> 
         return case.severity
     if field_name == "status_category":
         return case_status_category(case)
+    if field_name == "assigned":
+        return case.assignee_ref is not None
     if field_name == "min_priority_score":
         return case.priority_score
     if field_name == "min_case_age_minutes":
@@ -199,6 +202,11 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
         raise WorkflowAutomationError(
             "invalid_workflow_condition",
             "entity_kind condition value must be a non-empty string",
+        )
+    if condition.field == "assigned" and not isinstance(condition.value, bool):
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            "assigned condition value must be a boolean",
         )
     return actual == condition.value
 
