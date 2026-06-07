@@ -44,6 +44,15 @@ CAPABILITY_FILE_IMPORT = "file_import"
 CAPABILITY_INVENTORY_METRICS = "inventory_metrics"
 CAPABILITY_MANUAL_PAYLOAD = "manual_payload"
 CAPABILITY_SHEET_IMPORT = "sheet_import"
+KNOWN_CONNECTOR_CAPABILITIES = (
+    CAPABILITY_DAILY_REPORT,
+    CAPABILITY_AD_METRICS,
+    CAPABILITY_COMMERCE_METRICS,
+    CAPABILITY_FILE_IMPORT,
+    CAPABILITY_INVENTORY_METRICS,
+    CAPABILITY_MANUAL_PAYLOAD,
+    CAPABILITY_SHEET_IMPORT,
+)
 
 RUNTIME_MODE_PREVIEW = "preview"
 RUNTIME_MODE_MANUAL = "manual"
@@ -154,6 +163,16 @@ class ConnectorScopeValidationIssue:
     code: str
     secret_name: str
     scope: str
+    message: str
+    severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorCapabilityValidationIssue:
+    """Deterministic diagnostic for connector capability/mode policy drift."""
+
+    code: str
+    capability: str
     message: str
     severity: str = SEVERITY_ERROR
 
@@ -387,6 +406,60 @@ class ConnectorSpec:
                         ),
                     )
                 )
+        return issues
+
+    def validate_capability_contract(self) -> list[ConnectorCapabilityValidationIssue]:
+        """Certify that connector capabilities match registry execution metadata.
+
+        Capabilities are the connector-platform contract consumed by compiled
+        runtimes and operator surfaces. This check keeps new connector specs from
+        advertising unreviewed capabilities, daily execution without any metric
+        envelope, or forced/scheduled runtime modes without the daily-report
+        capability that current executor paths actually implement.
+        """
+
+        assert self.executor is not None  # set in __post_init__
+        issues: list[ConnectorCapabilityValidationIssue] = []
+        known_capabilities = set(KNOWN_CONNECTOR_CAPABILITIES)
+        for capability in self.capabilities:
+            if capability not in known_capabilities:
+                issues.append(
+                    ConnectorCapabilityValidationIssue(
+                        code="unknown_capability",
+                        capability=capability,
+                        message=(
+                            f"{self.connector_type} connector declares unknown capability {capability}"
+                        ),
+                    )
+                )
+
+        if CAPABILITY_DAILY_REPORT in self.capabilities and not self.emitted_metric_families:
+            issues.append(
+                ConnectorCapabilityValidationIssue(
+                    code="daily_report_missing_metric_families",
+                    capability=CAPABILITY_DAILY_REPORT,
+                    message=(
+                        f"{self.connector_type} connector declares daily_report without "
+                        "emitted metric families"
+                    ),
+                )
+            )
+
+        daily_modes = {RUNTIME_MODE_FORCED, RUNTIME_MODE_SCHEDULED}
+        if (
+            CAPABILITY_DAILY_REPORT not in self.capabilities
+            and daily_modes.intersection(self.executor.supported_runtime_modes)
+        ):
+            issues.append(
+                ConnectorCapabilityValidationIssue(
+                    code="scheduled_runtime_without_daily_report_capability",
+                    capability=CAPABILITY_DAILY_REPORT,
+                    message=(
+                        f"{self.connector_type} connector supports forced/scheduled runtime "
+                        "without daily_report capability"
+                    ),
+                )
+            )
         return issues
 
     def load_report_factory(self):
