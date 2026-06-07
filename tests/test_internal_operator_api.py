@@ -656,7 +656,7 @@ def test_internal_case_action_collapses_secret_shaped_authenticated_actor_before
         headers={
             **AUTH,
             "X-Orvo-Operator": "operator:juan access_token=raw_action_actor_secret",
-            "X-Idempotency-Key": "case-action-redacted-actor",
+            "X-Idempotency-Key": "case-action:artemea:redacted-actor",
         },
         json={"action_key": "add_comment", "comment": "Revisado por operaciones"},
     )

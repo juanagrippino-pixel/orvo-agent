@@ -57,7 +57,7 @@ This is intentionally **not** Envoy, Keycloak, Redis, or a new network gateway. 
 - decision code, HTTP status code, allowed/denied state, idempotency-required/present booleans;
 - `provenance_ref`, a deterministic short reference derived from the redacted telemetry payload for ledger/log correlation.
 
-`GatewayPolicyCertificationReport` is schema-versioned as `2026-06-06.gateway-policy-certification.v1` and gives route owners a static, self-service quality gate before adding or promoting gateway policies. It reports route counts, enforced-route counts, mutation counts, and deterministic findings. Current certification errors cover enforced mutating routes that forgot `idempotency_required=true`, route keys whose prefix does not match the declared surface, non-absolute or non-business-scoped path templates, and missing audit event names. Certification does not replace runtime authorization or policy evaluation; it is a developer-platform preflight for route metadata.
+`GatewayPolicyCertificationReport` is schema-versioned as `2026-06-06.gateway-policy-certification.v1` and gives route owners a static, self-service quality gate before adding or promoting gateway policies. It reports route counts, enforced-route counts, mutation counts, and deterministic findings. Current certification errors cover enforced mutating routes that forgot `idempotency_required=true`, enforced routes without explicit required permissions, route keys whose prefix does not match the declared surface, non-absolute or non-business-scoped path templates, missing audit event names, and empty/whitespace/secret-shaped rate-limit bucket names. Certification does not replace runtime authorization or policy evaluation; it is a developer-platform preflight for route metadata.
 
 ## Initial route policies
 
@@ -93,7 +93,7 @@ Required tests live in `tests/contracts/test_gateway_policy_contract.py` and pro
 - the internal case queue HTTP route enforces `operator_api.case_queue.read` before store access, the internal service-catalog route enforces `operator_api.service_catalog.read` before projection, and the internal case-action HTTP route enforces `operator_api.case_action.mutate` before mutation and records redacted denied gateway decisions in operator audit;
 - allowed decisions emit stable audit metadata, redacted request/trace provenance identifiers, and redacted rate-limit keys;
 - decisions emit schema-versioned gateway telemetry events with deterministic `provenance_ref` values and no raw idempotency-key values;
-- gateway policy certification reports accept the default registry and flag unsafe route metadata before promotion;
+- gateway policy certification reports accept the default registry and flag unsafe route metadata before promotion, including missing enforced-route permissions and unsafe rate-limit bucket names;
 - actor/request identifiers are redacted before decision envelopes can be projected into logs, ledgers, or API diagnostics;
 - idempotency key values never appear in decision envelopes or audit events;
 - role-derived permissions allow operator case mutation while reserving runtime force-run permission for admin principals;

@@ -365,6 +365,22 @@ def _certification_findings_for_policy(policy: GatewayRoutePolicy) -> list[Gatew
                 message="Route policy must declare an audit event type.",
             )
         )
+    if policy.enforcement_state == "enforced" and not policy.required_permissions:
+        findings.append(
+            _certification_finding(
+                policy,
+                code="missing_required_permissions",
+                message="Enforced routes must declare required permissions.",
+            )
+        )
+    if _rate_limit_bucket_is_unsafe(policy.rate_limit.bucket):
+        findings.append(
+            _certification_finding(
+                policy,
+                code="invalid_rate_limit_bucket",
+                message="Rate-limit bucket must be non-empty, whitespace-free, and secret-safe.",
+            )
+        )
     if (
         policy.enforcement_state == "enforced"
         and policy.method in _MUTATING_METHODS
@@ -378,6 +394,14 @@ def _certification_findings_for_policy(policy: GatewayRoutePolicy) -> list[Gatew
             )
         )
     return findings
+
+
+def _rate_limit_bucket_is_unsafe(bucket: str) -> bool:
+    if not bucket.strip():
+        return True
+    if any(character.isspace() for character in bucket):
+        return True
+    return redact_text(bucket) != bucket
 
 
 def _certification_finding(

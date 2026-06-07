@@ -163,6 +163,41 @@ def test_gateway_policy_certification_flags_misdeclared_route_metadata():
     ]
 
 
+def test_gateway_policy_certification_flags_missing_auth_and_unsafe_rate_limit_metadata():
+    from app.brain.gateway_policy import (
+        GatewayPolicyRegistry,
+        GatewayRateLimitPolicy,
+        GatewayRoutePolicy,
+        certify_gateway_policy_registry,
+    )
+
+    report = certify_gateway_policy_registry(
+        GatewayPolicyRegistry(
+            (
+                GatewayRoutePolicy(
+                    route_key="operator_api.missing_auth.read",
+                    method="GET",
+                    path_template="/internal/brain/businesses/{business_id}/missing-auth",
+                    surface="operator_api",
+                    required_permissions=(),
+                    rate_limit=GatewayRateLimitPolicy(bucket="access_token=raw_gateway_secret"),
+                    audit_event_type="operator_missing_auth_requested",
+                    enforcement_state="enforced",
+                ),
+            )
+        )
+    )
+
+    assert report.ok is False
+    assert [finding.code for finding in report.findings] == [
+        "missing_required_permissions",
+        "invalid_rate_limit_bucket",
+    ]
+    serialized = repr(report.model_dump())
+    assert "raw_gateway_secret" not in serialized
+    assert "access_token=raw_gateway_secret" not in serialized
+
+
 def test_gateway_policy_evaluation_requires_auth_business_scope_permission_and_idempotency():
     from app.brain.gateway_policy import (
         GatewayPrincipal,
