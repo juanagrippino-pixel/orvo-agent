@@ -130,6 +130,51 @@ def test_secret_requirement_metadata_exposes_provisioning_contract_without_value
     assert "secret://" not in serialized
 
 
+def test_connector_scope_certification_flags_secret_scopes_outside_connector_scope_policy():
+    from app.brain.connector_registry import (
+        ConnectorScopeMetadata,
+        ConnectorSpec,
+        SecretRequirement,
+    )
+
+    spec = ConnectorSpec(
+        connector_type="misconfigured_shop",
+        display_name="Misconfigured shop",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report",),
+        required_secret_refs=(
+            SecretRequirement(
+                name="access_token",
+                provider="shop_oauth",
+                scopes=("orders.read", "products.read"),
+            ),
+        ),
+        scopes=ConnectorScopeMetadata(required=("orders.read",)),
+    )
+
+    issues = spec.validate_scope_requirements()
+
+    assert [
+        (issue.code, issue.secret_name, issue.scope, issue.severity) for issue in issues
+    ] == [
+        ("secret_scope_not_required", "access_token", "products.read", "error"),
+    ]
+    assert issues[0].message == (
+        "misconfigured_shop secret access_token requires scope products.read "
+        "outside connector scope policy"
+    )
+
+
+def test_default_secret_requirement_scopes_are_declared_by_connector_scope_policy():
+    from app.brain.connector_registry import list_connector_specs
+
+    assert {
+        spec.connector_type: spec.validate_scope_requirements()
+        for spec in list_connector_specs()
+    } == {spec.connector_type: [] for spec in list_connector_specs()}
+
+
 def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import get_connector_spec
