@@ -21,9 +21,11 @@ from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
     allowed_work_item_query_sort_fields,
+    case_acknowledgment_due_at,
     case_issue_type,
     case_priority_bracket,
     case_project_key,
+    case_resolution_due_at,
     case_status_category,
     work_item_query_field_spec,
 )
@@ -346,6 +348,10 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_status_category(case)
     if field == "priority_bracket":
         return case_priority_bracket(case)
+    if field == "acknowledgment_due_at":
+        return case_acknowledgment_due_at(case)
+    if field == "resolution_due_at":
+        return case_resolution_due_at(case)
     return getattr(case, field)
 
 
