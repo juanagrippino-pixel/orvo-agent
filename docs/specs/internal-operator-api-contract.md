@@ -94,9 +94,10 @@ GET /internal/brain/businesses/{business_id}/service-management/cases?sort=sla_u
 
 Read-only Jira Service Management-style projection over canonical Operational
 Cases. Allowed filters are `sla_status`, `service_record_type`, `owner_status`,
-`escalation_reason`, and `needs_escalation`. Allowed sort modes are `priority`
-(default, matching canonical case queue order) and `sla_urgency` (breached SLA
-first, then nearest active due date, with deterministic priority/opened/case-id
+`escalation_reason`, and `needs_escalation`; `sla_status` supports `breached`,
+`at_risk`, `on_track`, `paused`, and `completed`. Allowed sort modes are `priority`
+(default, matching canonical case queue order) and `sla_urgency` (breached and
+at-risk SLA first, then nearest active due date, with deterministic priority/opened/case-id
 tie-breakers). This endpoint must not mutate case lifecycle, priority, SLA clocks,
 or escalation state.
 

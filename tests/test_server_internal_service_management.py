@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -338,6 +338,40 @@ def test_internal_service_management_cases_endpoint_rejects_invalid_sla_status(_
     body = response.get_json()
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_sla_status"
+
+
+def test_internal_service_management_cases_endpoint_filters_by_at_risk_sla_status(_isolate_db):
+    from server import app
+
+    now = datetime.now(timezone.utc)
+    with closing(sqlite3.connect(str(_isolate_db))) as conn:
+        store = SQLiteOperationalCaseStore(conn)
+        at_risk = store.upsert_detection(
+            _detection(case_type="sales_drop", run_id="run-http-at-risk"),
+            detected_at=now - timedelta(hours=3, minutes=50),
+        )
+        store.upsert_detection(
+            _detection(case_type="data_stale", run_id="run-http-on-track"),
+            detected_at=now - timedelta(minutes=30),
+        )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/service-management/cases",
+        headers=AUTH,
+        query_string={"sla_status": "at_risk"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    data = body["data"]
+    assert data["filters"] == {"sla_status": "at_risk"}
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["unfiltered_total"] == 2
+    assert [row["case_id"] for row in data["service_cases"]] == [at_risk.case_id]
+    assert data["service_cases"][0]["sla_status"]["code"] == "at_risk"
+    assert data["by_sla_status"] == {"at_risk": 1, "on_track": 1}
 
 
 def test_internal_service_management_cases_endpoint_rejects_invalid_service_record_type(_isolate_db):
