@@ -177,6 +177,71 @@ def test_suggested_actions_returns_scoped_actionable_cases_with_registered_actio
     assert resolved not in returned_case_ids
 
 
+def test_suggested_actions_filters_by_registered_action_key(_isolate_db):
+    from server import app
+
+    confirm_only = _seed_case(
+        _isolate_db,
+        opened_hours_ago=1,
+        run_id="run-confirm",
+        dedupe_suffix="suggested/actions/confirm",
+        priority=90,
+        suggested_action_keys=["confirm_stock"],
+    )
+    pause_and_confirm = _seed_case(
+        _isolate_db,
+        opened_hours_ago=2,
+        run_id="run-pause",
+        dedupe_suffix="suggested/actions/pause",
+        priority=70,
+        suggested_action_keys=["pause_promotion", "confirm_stock"],
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/suggested-actions",
+        headers=AUTH_WITH_SCOPE,
+        query_string={"action_key": "pause_promotion"},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["filters"] == {"action_key": "pause_promotion"}
+    assert data["suggested_total"] == 1
+    assert data["count"] == 1
+    assert data["cases"][0]["case_id"] == pause_and_confirm
+    assert data["cases"][0]["suggested_action_keys"] == ["pause_promotion"]
+    assert [action["action_key"] for action in data["cases"][0]["suggested_actions"]] == ["pause_promotion"]
+    returned_case_ids = {case["case_id"] for case in data["cases"]}
+    assert confirm_only not in returned_case_ids
+
+
+def test_suggested_actions_rejects_unknown_action_key_without_echoing_secret(_isolate_db):
+    from server import app
+
+    _seed_case(
+        _isolate_db,
+        opened_hours_ago=1,
+        run_id="run-secret-query",
+        dedupe_suffix="suggested/actions/secret-query",
+        suggested_action_keys=["confirm_stock"],
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/suggested-actions",
+        headers=AUTH_WITH_SCOPE,
+        query_string={"action_key": "confirm_stock access_token=raw_action_filter_secret"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "unknown_suggested_action_key"
+    assert body["redaction_applied"] is True
+    assert "raw_action_filter_secret" not in str(body)
+
+
 def test_suggested_actions_requires_internal_auth(_isolate_db):
     from server import app
 

@@ -83,7 +83,7 @@ GET /internal/brain/businesses/{business_id}/cases/recently-updated
 GET /internal/brain/businesses/{business_id}/cases/recently-reopened
 GET /internal/brain/businesses/{business_id}/cases/recently-resolved
 GET /internal/brain/businesses/{business_id}/cases/recently-dismissed
-GET /internal/brain/businesses/{business_id}/cases/suggested-actions
+GET /internal/brain/businesses/{business_id}/cases/suggested-actions?action_key=confirm_stock
 GET /internal/brain/businesses/{business_id}/cases/stagnation
 GET /internal/brain/businesses/{business_id}/cases/stagnation/by-source-connector
 GET /internal/brain/businesses/{business_id}/cases/stagnation/by-priority-bracket
@@ -111,8 +111,10 @@ redacted latest-event summary/actor context, and does not infer workflow state
 from API output. The
 `suggested-actions` endpoint is a read-only,
 actionable-case projection that filters `suggested_action_keys` through the
-registered action catalog, suppresses invented keys, and redacts case titles and
-entity scope at the API boundary. The `stagnation` endpoints are read-only,
+registered action catalog, suppresses invented keys, optionally narrows the
+queue by a registered `action_key`, rejects unknown action-key filters with a
+safe redacted `400` envelope, and redacts case titles and entity scope at the
+API boundary. The `stagnation` endpoints are read-only,
 business-scoped queue-health projections over canonical actionable cases; the
 `by-source-connector` split groups each idle bucket by the deterministic source
 connector derived from evidence snapshots so operators can spot connector-skewed

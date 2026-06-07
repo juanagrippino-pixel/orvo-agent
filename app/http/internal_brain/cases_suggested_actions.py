@@ -18,6 +18,7 @@ def register_case_suggested_action_routes(app):
                     case_store,
                     business_id=business_id,
                     limit=request.args.get("limit"),
+                    action_key=request.args.get("action_key"),
                 ),
             ),
         )
