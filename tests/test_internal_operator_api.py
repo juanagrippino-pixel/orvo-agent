@@ -3595,6 +3595,43 @@ def test_internal_endpoints_audit_missing_bearer_token_attempt(monkeypatch, tmp_
     }
 
 
+def test_internal_endpoints_audit_basic_authorization_attempt_without_credential_tail(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+    basic_credentials = "cmF3X2Jhc2ljX2" + "F1ZGl0X3NlY3JldA=="
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            "Authorization": f"Basic {basic_credentials}",
+            "X-Orvo-Operator": "operator:basic access_token=raw_basic_actor_secret",
+            "X-Request-ID": "req-basic-auth-denied",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "unauthorized"
+    raw_body = response.get_data(as_text=True)
+    assert basic_credentials not in raw_body
+    assert "raw_basic_actor_secret" not in raw_body
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authentication.denied"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["request_id"] == "req-basic-auth-denied"
+    assert event["data"] == {
+        "status": "denied",
+        "reason": "invalid_internal_token",
+        "method": "GET",
+        "header_present": True,
+        "scheme": "Basic",
+    }
+    serialized = json.dumps(event, sort_keys=True)
+    assert basic_credentials not in serialized
+    assert "raw_basic_actor_secret" not in serialized
+
+
 def _audit_events(db_path) -> list[dict]:
     conn = sqlite3.connect(db_path)
     rows = conn.execute(
