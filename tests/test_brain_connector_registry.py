@@ -175,6 +175,57 @@ def test_default_secret_requirement_scopes_are_declared_by_connector_scope_polic
     } == {spec.connector_type: [] for spec in list_connector_specs()}
 
 
+def test_connector_capability_certification_flags_unknown_and_drifted_daily_specs():
+    from app.brain.connector_registry import ConnectorExecutorMetadata, ConnectorSpec
+
+    spec = ConnectorSpec(
+        connector_type="misconfigured_daily",
+        display_name="Misconfigured daily connector",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report", "new_unreviewed_capability"),
+        emitted_metric_families=(),
+    )
+
+    issues = spec.validate_capability_contract()
+
+    assert [(issue.code, issue.capability, issue.severity) for issue in issues] == [
+        ("unknown_capability", "new_unreviewed_capability", "error"),
+        ("daily_report_missing_metric_families", "daily_report", "error"),
+    ]
+    assert issues[0].message == (
+        "misconfigured_daily connector declares unknown capability new_unreviewed_capability"
+    )
+
+    scheduled_non_daily = ConnectorSpec(
+        connector_type="misconfigured_manual",
+        display_name="Misconfigured manual connector",
+        adapter_module="app.brain.adapters.sample",
+        report_factory="build_daily_report_from_payload",
+        capabilities=("manual_payload",),
+        emitted_metric_families=("manual.payload",),
+        executor=ConnectorExecutorMetadata(
+            adapter_module="app.brain.adapters.sample",
+            report_factory="build_daily_report_from_payload",
+            supported_runtime_modes=("scheduled",),
+        ),
+    )
+
+    assert [
+        (issue.code, issue.capability, issue.severity)
+        for issue in scheduled_non_daily.validate_capability_contract()
+    ] == [("scheduled_runtime_without_daily_report_capability", "daily_report", "error")]
+
+
+def test_default_connector_capability_contracts_are_certified():
+    from app.brain.connector_registry import list_connector_specs
+
+    assert {
+        spec.connector_type: spec.validate_capability_contract()
+        for spec in list_connector_specs()
+    } == {spec.connector_type: [] for spec in list_connector_specs()}
+
+
 def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import get_connector_spec
