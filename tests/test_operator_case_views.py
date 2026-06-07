@@ -961,6 +961,43 @@ def test_internal_case_facets_reject_business_scope_and_redact_bad_field(monkeyp
     assert "raw_facet_secret" not in secret_field.get_data(as_text=True)
 
 
+def test_internal_case_query_fields_exposes_canonical_registry_without_business_scope(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-query-fields", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["readonly"] is True
+    assert body["data"]["scope"] == {
+        "business_scope_source": "route",
+        "query_controlled_business_scope": False,
+    }
+    fields = {field["field"]: field for field in body["data"]["fields"]}
+    assert "business_id" not in fields
+    assert fields["status"]["allowed_values"] == ["acknowledged", "dismissed", "in_progress", "open", "resolved"]
+    assert fields["priority_score"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
+    assert fields["priority_score"]["sortable"] is True
+    assert fields["source_connector"]["source"] == "evidence_projection"
+    assert body["data"]["sort_fields"] == ["opened_at", "priority_score", "updated_at"]
+    assert body["redaction_applied"] is True
+
+
+def test_internal_case_query_fields_enforces_business_grants_without_echoing_secret_header(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-query-fields",
+        headers={**AUTH, "X-Orvo-Businesses": "other,access_token=raw_query_field_secret"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "forbidden"
+    assert "raw_query_field_secret" not in response.get_data(as_text=True)
+
+
 def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 
