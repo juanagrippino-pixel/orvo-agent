@@ -707,6 +707,8 @@ class _OperationalCaseMutations:
                 update["resolved_at"] = None
                 update["dismissed_at"] = None
                 update["acknowledged_at"] = None
+                update["assigned_at"] = None
+                update["assignee_ref"] = None
             case = existing.model_copy(update=update, deep=True)
             case = OperationalCase.model_validate(case.model_dump())
         self._persist(case)
