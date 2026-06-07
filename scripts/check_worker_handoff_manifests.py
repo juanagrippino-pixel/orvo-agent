@@ -185,20 +185,33 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _git_commit_exists(repo_root: Path, revision: str) -> bool:
+def _git_resolve_commit(repo_root: Path, revision: str) -> str | None:
     if not revision:
-        return False
-    return _git(repo_root, "cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+        return None
+    result = _git(repo_root, "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}")
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _git_commit_exists(repo_root: Path, revision: str) -> bool:
+    return _git_resolve_commit(repo_root, revision) is not None
+
+
+def _git_branch_head(repo_root: Path, branch: str) -> str | None:
+    if not branch:
+        return None
+    local = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}")
+    if local.returncode == 0:
+        return local.stdout.strip()
+    remote = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}")
+    if remote.returncode == 0:
+        return remote.stdout.strip()
+    return None
 
 
 def _git_branch_exists(repo_root: Path, branch: str) -> bool:
-    if not branch:
-        return False
-    local = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
-    if local.returncode == 0:
-        return True
-    remote = _git(repo_root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
-    return remote.returncode == 0
+    return _git_branch_head(repo_root, branch) is not None
 
 
 def _changed_files_between(repo_root: Path, base_sha: str, head_sha: str) -> tuple[str, ...] | None:
@@ -244,6 +257,14 @@ def verify_manifest_git_claims(
     head_exists = _git_commit_exists(repo_root, head_sha)
     if not head_exists:
         problems.append(f"head_sha does not resolve to a commit: {head_sha}")
+
+    branch_head = _git_branch_head(repo_root, branch)
+    resolved_head = _git_resolve_commit(repo_root, head_sha)
+    if branch_head and resolved_head and branch_head != resolved_head:
+        problems.append(
+            f"head_sha does not match branch head for {branch}: "
+            f"manifest {head_sha}, branch {branch_head}"
+        )
 
     if base_exists and head_exists:
         changed_files = _changed_files_between(repo_root, base_sha, head_sha)

@@ -84,7 +84,7 @@ A reviewer/integration controller must verify:
 
 1. `worktree_path` exists or branch exists remotely/locally.
 2. `git status --short` matches manifest status.
-3. `head_sha` exists if claimed.
+3. `head_sha` exists if claimed and matches the current local/origin branch head when `branch` is present.
 4. Files changed match `git diff --name-only base_sha...head_sha` or current dirty state.
 5. Test commands either passed or have explicit block reasons.
 6. Secret check is credible for the files touched.

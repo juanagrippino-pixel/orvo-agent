@@ -169,6 +169,23 @@ def test_verify_manifest_git_claims_accepts_existing_head_and_exact_diff(tmp_pat
     assert result.problems == ()
 
 
+def test_verify_manifest_git_claims_rejects_head_sha_that_is_not_branch_head(tmp_path: Path) -> None:
+    repo, manifest_path = _make_git_repo_with_manifest(tmp_path)
+    stale_head = _run_git(repo, "rev-parse", "HEAD")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "note.md").write_text("newer branch head\n", encoding="utf-8")
+    _run_git(repo, "add", "docs/note.md")
+    _run_git(repo, "commit", "-m", "advance branch head")
+
+    result = verify_manifest_git_claims(parse_manifest(manifest_path), repo_root=repo)
+
+    assert result.passed is False
+    assert result.problems == (
+        "head_sha does not match branch head for codex/sample-guard: "
+        f"manifest {stale_head}, branch {_run_git(repo, 'rev-parse', 'HEAD')}",
+    )
+
+
 def test_verify_manifest_git_claims_rejects_files_changed_that_do_not_match_diff(tmp_path: Path) -> None:
     repo, manifest_path = _make_git_repo_with_manifest(tmp_path, omitted_file="tests/test_guard.py")
 
