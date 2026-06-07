@@ -83,6 +83,7 @@ payloads.
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
+GET /internal/brain/businesses/{business_id}/case-query-fields
 GET /internal/brain/businesses/{business_id}/case-views
 GET /internal/brain/businesses/{business_id}/case-views/{view_id}/cases
 GET /internal/brain/businesses/{business_id}/case-views/{view_id}/export
@@ -95,6 +96,10 @@ mutation with a stable error envelope and redacted audit event. Valid keys are
 reserved in the durable workflow action ledger before the case mutation, duplicate
 completed requests replay the current case with `data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope.
+`case-query-fields` is a read-only metadata projection for operator UIs and saved-view
+builders: it returns the canonical WorkItem/OperationalCase query-field registry
+and sortable fields, explicitly marks route-owned business scoping, and must not
+make `business_id` caller-queryable.
 Built-in case views are read-only projections over the canonical Operational Case
 store; view execution, exports, and summaries must remain route-scoped by
 `business_id`, use allowlisted JQL-lite definitions, and return redacted
