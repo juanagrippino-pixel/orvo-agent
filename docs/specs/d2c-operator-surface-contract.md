@@ -113,6 +113,7 @@ Minimum additional fields per case:
   "sla_status": {
     "code": "paused",
     "label_es": "SLA pausado",
+    "active_clock": "resolution",
     "active_policy_key": "resolution_warning_1440m",
     "due_at": "2026-05-25T08:00:00Z",
     "remaining_seconds": 82800,
@@ -147,7 +148,7 @@ Projection rules:
 - map case families to Atlassian-like record labels (`incident`, `service_request`, `problem`, `change`) deterministically;
 - derive `waiting_owner` and `waiting_external` from case metadata only for active `acknowledged`/`in_progress` cases;
 - include first-response and resolution SLA clocks as deterministic UTC timers with both `remaining_seconds` and `overdue_seconds`; terminal `resolved` and `dismissed` cases must stop open SLA clocks at their terminal timestamp;
-- expose `sla_status` as a read-only queue summary over those clocks (`breached`, `at_risk`, `on_track`, `paused`, `completed`) plus `remaining_seconds`, `overdue_seconds`, and `by_sla_status` counts across the full scoped result set; `at_risk` means the next active SLA clock is inside the deterministic 15-minute near-due window but not breached;
+- expose `sla_status` as a read-only queue summary over those clocks (`breached`, `at_risk`, `on_track`, `paused`, `completed`) plus `active_clock` (`first_response`, `resolution`, or `null` when completed), `remaining_seconds`, `overdue_seconds`, and `by_sla_status` counts across the full scoped result set; `at_risk` means the next active SLA clock is inside the deterministic 15-minute near-due window but not breached;
 - support the read-only `sla_status`, `service_record_type`, `owner_status`, `escalation_reason`, and boolean `needs_escalation` query filters on the service-management endpoint so operators can open deterministic SLA, incident, request, problem, change, waiting-owner, waiting-external, escalation-reason, or all-escalation queues without changing case lifecycle state; `total` counts the filtered queue and `unfiltered_total` preserves the full scoped case count;
 - expose deterministic `needs_escalation`, `escalation_reasons`, and `by_escalation_reason` counts for unacknowledged critical cases, active SLA breaches, and active waiting-on-owner/external blockers without changing priority or lifecycle state;
 - redact secret-shaped values at the projection boundary;

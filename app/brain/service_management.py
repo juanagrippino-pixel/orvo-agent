@@ -250,20 +250,35 @@ def _sla_projection(case: OperationalCase, *, owner_status: dict[str, str], refe
 def _sla_status(sla: dict[str, Any]) -> dict[str, Any]:
     """Summarize active SLA clocks into one owner/operator queue state."""
 
-    clocks = [sla["first_response"], sla["resolution"]]
-    active_clocks = [clock for clock in clocks if not clock["completed"] and not clock.get("paused")]
-    breached_clocks = [clock for clock in active_clocks if clock["breached"]]
+    clocks = [("first_response", sla["first_response"]), ("resolution", sla["resolution"])]
+    active_clocks = [
+        (clock_name, clock)
+        for clock_name, clock in clocks
+        if not clock["completed"] and not clock.get("paused")
+    ]
+    breached_clocks = [(clock_name, clock) for clock_name, clock in active_clocks if clock["breached"]]
     at_risk_clocks = [
-        clock
-        for clock in active_clocks
+        (clock_name, clock)
+        for clock_name, clock in active_clocks
         if not clock["breached"] and clock["remaining_seconds"] <= _SLA_AT_RISK_WINDOW_SECONDS
     ]
-    paused_clocks = [clock for clock in clocks if not clock["completed"] and clock.get("paused")]
+    paused_clocks = [
+        (clock_name, clock)
+        for clock_name, clock in clocks
+        if not clock["completed"] and clock.get("paused")
+    ]
 
-    def _clock_payload(*, code: str, label_es: str, clock: dict[str, Any] | None) -> dict[str, Any]:
+    def _clock_payload(
+        *,
+        code: str,
+        label_es: str,
+        clock_entry: tuple[str, dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        clock_name, clock = clock_entry if clock_entry is not None else (None, None)
         return {
             "code": code,
             "label_es": label_es,
+            "active_clock": clock_name,
             "active_policy_key": clock["policy_key"] if clock is not None else None,
             "due_at": clock["due_at"] if clock is not None else None,
             "remaining_seconds": clock["remaining_seconds"] if clock is not None else None,
@@ -271,18 +286,18 @@ def _sla_status(sla: dict[str, Any]) -> dict[str, Any]:
         }
 
     if breached_clocks:
-        breached = min(breached_clocks, key=lambda clock: clock["due_at"])
-        return _clock_payload(code="breached", label_es="SLA vencido", clock=breached)
+        breached = min(breached_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="breached", label_es="SLA vencido", clock_entry=breached)
     if at_risk_clocks:
-        at_risk = min(at_risk_clocks, key=lambda clock: clock["due_at"])
-        return _clock_payload(code="at_risk", label_es="SLA en riesgo", clock=at_risk)
+        at_risk = min(at_risk_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="at_risk", label_es="SLA en riesgo", clock_entry=at_risk)
     if active_clocks:
-        next_clock = min(active_clocks, key=lambda clock: clock["due_at"])
-        return _clock_payload(code="on_track", label_es="SLA en curso", clock=next_clock)
+        next_clock = min(active_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="on_track", label_es="SLA en curso", clock_entry=next_clock)
     if paused_clocks:
-        paused = min(paused_clocks, key=lambda clock: clock["due_at"])
-        return _clock_payload(code="paused", label_es="SLA pausado", clock=paused)
-    return _clock_payload(code="completed", label_es="SLA completado", clock=None)
+        paused = min(paused_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="paused", label_es="SLA pausado", clock_entry=paused)
+    return _clock_payload(code="completed", label_es="SLA completado", clock_entry=None)
 
 
 def _escalation_reasons(
