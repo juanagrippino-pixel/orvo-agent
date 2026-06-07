@@ -39,6 +39,7 @@ def _case_detection(
     source_label: str = "Tiendanube access_token=raw_snapshot_secret",
     freshness_state: str = "fresh",
     entity_scope: dict[str, str] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> OperationalCaseDetection:
     scope = entity_scope or {"kind": "business", "id": "monitored", "label": "Monitoreado"}
     return OperationalCaseDetection(
@@ -78,7 +79,7 @@ def _case_detection(
                 metadata={"source": "test", "access_token": "raw_snapshot_secret"},
             )
         ],
-        metadata={"source": "test"},
+        metadata={"source": "test", **(metadata or {})},
     )
 
 
@@ -321,6 +322,70 @@ def test_internal_owner_case_brief_preview_is_read_only_scoped_and_redacted(monk
     assert critical_case.case_id in data["text"]
     assert warning_case.case_id not in data["text"]
     assert resolved_case.case_id not in data["text"]
+
+
+def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_action_keys(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(
+        db_path,
+        _case_detection(
+            metadata={
+                "suggested_action_keys": [
+                    "confirm_stock",
+                    "delete_everything",
+                    "check_storefront",
+                    "confirm_stock",
+                    "access_token=raw_owner_action_secret",
+                ],
+            },
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-other",
+            metadata={"suggested_action_keys": ["refresh_credentials"]},
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview?business_name=Artemea&max_cases=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_owner_action_secret" not in raw_body
+    assert "delete_everything" not in raw_body
+    assert "check_storefront" not in raw_body
+    body = response.get_json()
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["case_ids"] == [case.case_id]
+    assert data["suggested_action_keys"] == ["confirm_stock"]
+    assert data["displayed_cases"] == [
+        {
+            "case_id": case.case_id,
+            "case_type": "stockout_risk",
+            "suggested_action_keys": ["confirm_stock"],
+            "suggested_actions": [
+                {
+                    "action_key": "confirm_stock",
+                    "label": "Confirm stock",
+                    "mode": "suggestion_only",
+                    "api_enabled": False,
+                    "operator_executable": False,
+                    "status_effect": None,
+                    "requires_reason": False,
+                    "requires_comment": False,
+                    "approval_required": False,
+                    "disabled_reason": "api_disabled",
+                    "case_families": ["stockout_risk"],
+                }
+            ],
+        }
+    ]
 
 
 def test_internal_owner_case_brief_preview_requires_business_scope(monkeypatch, tmp_path):

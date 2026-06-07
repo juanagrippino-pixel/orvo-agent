@@ -12,6 +12,7 @@ from app.brain.reporting import compose_owner_case_brief, order_owner_case_brief
 from app.brain.security.redaction import redact_secrets, redact_text
 
 from .common import OperatorAPIError, parse_limit
+from .projections import _case_suggested_action_keys, _case_suggested_actions
 
 
 def _parse_report_date(value: str | None) -> date | None:
@@ -55,6 +56,29 @@ def _owner_brief_evidence_freshness(
     }
 
 
+def _owner_brief_displayed_cases(cases: list[OperationalCase]) -> list[dict[str, Any]]:
+    """Return whitelisted action context for cases shown in owner brief text."""
+
+    return [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "suggested_action_keys": _case_suggested_action_keys(case),
+            "suggested_actions": _case_suggested_actions(case),
+        }
+        for case in cases
+    ]
+
+
+def _owner_brief_suggested_action_keys(cases: list[OperationalCase]) -> list[str]:
+    keys: list[str] = []
+    for case in cases:
+        for action_key in _case_suggested_action_keys(case):
+            if action_key not in keys:
+                keys.append(action_key)
+    return keys
+
+
 def preview_owner_case_brief(
     store: OperationalCaseStore,
     *,
@@ -93,6 +117,8 @@ def preview_owner_case_brief(
         "displayed_case_count": len(visible),
         "truncated": len(actionable) > len(visible),
         "case_ids": [case.case_id for case in visible],
+        "displayed_cases": _owner_brief_displayed_cases(visible),
+        "suggested_action_keys": _owner_brief_suggested_action_keys(visible),
         "evidence_freshness": _owner_brief_evidence_freshness(visible=visible, actionable=actionable),
         "text": text,
     }

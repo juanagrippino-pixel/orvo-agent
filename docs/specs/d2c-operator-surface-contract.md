@@ -31,6 +31,11 @@ A delivered brief should include:
 5. one or more suggested next actions from allowed action keys;
 6. concise language in direct Spanish.
 
+Internal preview/projection APIs must also expose the displayed case IDs and their
+registered `suggested_action_keys`/action catalog projections so operators can
+verify that owner-facing next-action copy is backed by canonical action keys, not
+invented by the surface.
+
 ### Example shape
 
 ```text
