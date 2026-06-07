@@ -363,6 +363,49 @@ def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_timeline_returns_tenant_scoped_filter_totals_and_redacted_events(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    conn = sqlite3.connect(db_path)
+    store = SQLiteOperationalCaseStore(conn)
+    store.add_comment(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator access_token=raw_timeline_http_secret",
+        comment="Investigating api_key=raw_timeline_http_secret",
+        commented_at=_utc(9),
+    )
+    store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="Picked up",
+        transitioned_at=_utc(10),
+    )
+    conn.close()
+
+    response = client.get(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/timeline?event_type=operator_comment",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_timeline_http_secret" not in raw_body
+    body = response.get_json()
+    timeline = body["data"]
+    assert timeline["case_id"] == case.case_id
+    assert timeline["filters"] == {"event_type": "operator_comment", "actor_type": None, "actor_ref": None}
+    assert timeline["total"] == 1
+    assert timeline["timeline_total"] == 3
+    assert timeline["totals_by_event_type"] == {"case_opened": 1, "operator_comment": 1, "status_changed": 1}
+    assert timeline["totals_by_actor_type"] == {"operator": 2, "system": 1}
+    assert timeline["events"][0]["actor_ref"] == "operator access_token=[REDACTED]"
+    assert "[REDACTED]" in timeline["events"][0]["summary"]
+    assert body["redaction_applied"] is True
+
+
 def test_internal_case_detail_cannot_cross_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     other_case = _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))

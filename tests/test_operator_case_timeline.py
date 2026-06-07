@@ -98,6 +98,14 @@ def test_list_case_timeline_filters_by_event_type():
     assert result["filters"]["event_type"] == "status_changed"
     assert result["count"] == 2
     assert result["total"] == 2
+    assert result["timeline_total"] == 5
+    assert result["totals_by_event_type"] == {
+        "case_opened": 1,
+        "case_updated": 1,
+        "operator_comment": 1,
+        "status_changed": 2,
+    }
+    assert result["totals_by_actor_type"] == {"operator": 3, "system": 2}
     assert all(event["event_type"] == "status_changed" for event in result["events"])
 
 

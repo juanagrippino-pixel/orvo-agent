@@ -33,6 +33,16 @@ def get_scoped_case(store: OperationalCaseStore, *, business_id: str, case_id: s
 def get_case_projection(store: OperationalCaseStore, *, business_id: str, case_id: str) -> dict[str, Any]:
     return {"case": case_detail(get_scoped_case(store, business_id=business_id, case_id=case_id))}
 
+
+def _timeline_counts(events: list[Any], attr: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for event in events:
+        key = getattr(event, attr, None)
+        if isinstance(key, str) and key:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def list_case_timeline(
     store: OperationalCaseStore,
     *,
@@ -48,7 +58,11 @@ def list_case_timeline(
     parsed_actor_ref = parse_timeline_actor_ref(actor_ref)
     parsed_limit = parse_limit(limit)
     case = get_scoped_case(store, business_id=business_id, case_id=case_id)
-    events = list(case.timeline)
+    timeline_events = list(case.timeline)
+    timeline_total = len(timeline_events)
+    totals_by_event_type = _timeline_counts(timeline_events, "event_type")
+    totals_by_actor_type = _timeline_counts(timeline_events, "actor_type")
+    events = list(timeline_events)
     if parsed_event_type is not None:
         events = [event for event in events if event.event_type == parsed_event_type]
     if parsed_actor_type is not None:
@@ -70,6 +84,9 @@ def list_case_timeline(
             "limit": parsed_limit,
             "count": len(limited),
             "total": total,
+            "timeline_total": timeline_total,
+            "totals_by_event_type": totals_by_event_type,
+            "totals_by_actor_type": totals_by_actor_type,
         }
     )
 
