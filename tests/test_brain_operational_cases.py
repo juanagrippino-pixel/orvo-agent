@@ -875,6 +875,52 @@ def test_recurrence_clears_ack_state_preserves_full_audit_timeline_and_supports_
         ], f"{label}: full recurrence cycle must accumulate audit events without dropping any"
 
 
+def test_recurrence_clears_stale_assignment_for_fresh_triage(conn):
+    """A reopened WorkItem must not inherit an assignee from a completed occurrence."""
+
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run-1"), detected_at=utc_dt(8))
+        assigned = store.assign_case(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="juan",
+            assignee_ref="ops:stock-team",
+            assigned_at=utc_dt(8, 30),
+        )
+        assert assigned.assignee_ref == "ops:stock-team", f"{label}: precondition must assign the first occurrence"
+        store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+        store.transition_case(
+            opened.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Stock repuesto",
+            transitioned_at=utc_dt(10),
+        )
+
+        reopened = store.upsert_detection(
+            make_stockout_detection(run_id=f"{label}-run-2", evidence_ref="evidence://tn/stock/2026-05-26"),
+            detected_at=utc_dt(11),
+        )
+
+        assert reopened.status == "open", f"{label}: recurrence must reopen the case"
+        assert reopened.assignee_ref is None, f"{label}: recurrence must clear stale assignee_ref for retriage"
+        assert reopened.assigned_at is None, f"{label}: recurrence must clear stale assigned_at for retriage"
+        assert reopened.timeline[-1].event_type == "case_reopened"
+        assert reopened.timeline[-1].metadata["from_status"] == "resolved"
+        assert reopened.timeline[-1].metadata["to_status"] == "open"
+
+
 def test_open_case_queue_orders_by_priority_then_age():
     store = InMemoryOperationalCaseStore()
     warning = make_stockout_detection(run_id="run-1")
