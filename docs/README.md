@@ -60,7 +60,7 @@ Start here:
 - [`docs/organization/d2c-worker-task-packets.md`](organization/d2c-worker-task-packets.md)
 - [`docs/specs/integration-train-contract.md`](specs/integration-train-contract.md) — current integration order and next recommendations.
 - [`docs/ops/2026-05-31-integration-train.md`](ops/2026-05-31-integration-train.md) — historical blocked-run record with supersession note; use the integration-train contract for current queue state.
-- [`docs/architecture-reviews/2026-06-06-arb-review-c69b03e.md`](architecture-reviews/2026-06-06-arb-review-c69b03e.md) — latest ARB branch disposition and architecture risks; read with the integration-train contract because WorkItem query-field registry work landed after that ARB baseline.
+- [`docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md`](architecture-reviews/2026-06-07-arb-review-ca6c078.md) — latest ARB branch disposition and architecture risks; read with the integration-train contract because helper-level idempotency and Basic-auth audit redaction landed after that ARB baseline.
 - [`docs/ops/latest-autonomous-board-report.md`](ops/latest-autonomous-board-report.md) — latest executive board report for shipped commits, active blockers, and near-term integration order.
 - [`docs/ops/d2c-pilot-readiness-checklist.md`](ops/d2c-pilot-readiness-checklist.md)
 - [`docs/ops/d2c-pilot-runbook.md`](ops/d2c-pilot-runbook.md)

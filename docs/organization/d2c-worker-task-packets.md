@@ -628,11 +628,11 @@ Current source-of-truth check:
 - `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `status_category`, `assignee_ref`, and `priority_bracket`.
-- `docs/architecture-reviews/2026-06-06-arb-review-c69b03e.md` remains the latest ARB input: future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
+- `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md` is the latest ARB input, and `docs/specs/integration-train-contract.md` records the post-ARB idempotency/audit-redaction baseline. Future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
 
 Read:
 
-- `docs/architecture-reviews/2026-06-06-arb-review.md`
+- `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md`
 - `docs/specs/internal-operator-api-contract.md`
 - `docs/specs/integration-train-contract.md`
 - `docs/specs/testing-invariant-matrix.md`
