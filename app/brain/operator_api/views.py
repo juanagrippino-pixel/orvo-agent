@@ -38,6 +38,32 @@ def list_builtin_case_views(
     data["include_totals"] = True
     return data
 
+
+def describe_case_query_fields() -> dict[str, Any]:
+    """Expose the canonical read-only case query field registry for operator UIs.
+
+    Tenant/business scope remains owned by the route and auth context, not by
+    caller-supplied JQL. This keeps UI autocomplete and saved-view builders tied
+    to the same allowlist used by parser/execution paths without introducing a
+    second query vocabulary.
+    """
+
+    from app.brain.work_items import (
+        allowed_case_query_sort_fields,
+        operational_case_query_field_definitions,
+    )
+
+    return {
+        "readonly": True,
+        "scope": {
+            "business_scope_source": "route",
+            "query_controlled_business_scope": False,
+        },
+        "fields": operational_case_query_field_definitions(),
+        "sort_fields": sorted(allowed_case_query_sort_fields()),
+    }
+
+
 def execute_builtin_case_view(
     store: OperationalCaseStore,
     *,
