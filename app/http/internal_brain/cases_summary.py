@@ -34,6 +34,19 @@ def register_case_summary_routes(app):
             ),
         )
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/query-summary")
+    def internal_brain_cases_query_summary(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_query(
+                    case_store,
+                    business_id=business_id,
+                    jql=request.args.get("jql"),
+                ),
+            ),
+        )
 
     @app.get("/internal/brain/businesses/<business_id>/case-actions")
     def internal_brain_case_actions(business_id: str):

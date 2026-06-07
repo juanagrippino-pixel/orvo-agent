@@ -113,4 +113,15 @@ def summarize_case_view(
     return summarize_builtin_case_view(store, business_id=business_id, view_id=view_id)
 
 
+def summarize_case_query(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    jql: str | None,
+) -> dict[str, Any]:
+    from app.brain.operator_views import summarize_case_query_facets
+
+    return summarize_case_query_facets(store, business_id=business_id, jql=jql)
+
+
 __all__ = [name for name in globals() if not name.startswith("__")]

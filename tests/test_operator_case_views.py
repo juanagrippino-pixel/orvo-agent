@@ -1244,3 +1244,113 @@ def test_internal_case_view_summary_rejects_unknown_view_without_echoing_secret(
     assert response.status_code == 404
     assert response.get_json()["error"]["code"] == "case_view_not_found"
     assert "raw_summary_secret" not in response.get_data(as_text=True)
+
+
+def test_internal_case_query_summary_returns_scoped_facets_without_cases(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    open_case = _seed_case(
+        db_path,
+        _case_detection_with_source(source="tiendanube", run_id="run-query-open", priority=95),
+    )
+    acknowledged = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-query-ack-stale",
+            freshness_state="stale",
+            dedupe_suffix="stockout_risk/sku/QUERY_ACK/inventory.on_hand/daily",
+            priority=70,
+        ),
+    )
+    resolved = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-query-resolved",
+            dedupe_suffix="stockout_risk/sku/QUERY_RESOLVED/inventory.on_hand/daily",
+            priority=80,
+        ),
+    )
+    _seed_case(db_path, _case_detection_with_source(source="meta_ads", run_id="run-query-other", business_id="other"))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.assign_case(
+        acknowledged.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        assignee_ref="operator:ana",
+    )
+    store.transition_case(
+        acknowledged.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:ana",
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="fixture complete",
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/query-summary",
+        query_string={"jql": "status IN (open, acknowledged) AND case_type = stockout_risk"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["jql"] == "status IN (open, acknowledged) AND case_type = stockout_risk"
+    assert body["data"]["normalized_jql"] == (
+        "status IN (open, acknowledged) AND case_type = stockout_risk "
+        "ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert body["data"]["summary"] == {
+        "total": 2,
+        "status_counts": {"acknowledged": 1, "open": 1},
+        "status_category_counts": {"in_progress": 1, "to_do": 1},
+        "severity_counts": {"critical": 2},
+        "case_type_counts": {"stockout_risk": 2},
+        "priority_bracket_counts": {"high": 1, "medium": 1},
+        "evidence_count_total": 2,
+        "evidence_count_distribution": {"1": 2},
+        "source_connector_counts": {"meta_ads": 1, "tiendanube": 1},
+        "freshness_state_counts": {"fresh": 1, "stale": 1},
+        "degraded_total": 1,
+        "unassigned_total": 1,
+    }
+    assert "cases" not in body["data"]
+    raw_response = response.get_data(as_text=True)
+    assert open_case.case_id not in raw_response
+    assert acknowledged.case_id not in raw_response
+    assert resolved.case_id not in raw_response
+    assert body["redaction_applied"] is True
+
+
+def test_internal_case_query_summary_rejects_unsafe_jql_without_echoing_secret(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/query-summary",
+        query_string={"jql": "status = open OR access_token=raw_query_summary_secret"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_jql"
+    assert "raw_query_summary_secret" not in response.get_data(as_text=True)
