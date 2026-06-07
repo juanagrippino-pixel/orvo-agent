@@ -663,7 +663,7 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     detail = body["data"]["case"]
     assert detail["status"] == "open"
     assert detail["timeline"][-1]["event_type"] == "operator_comment"
-    assert detail["timeline"][-1]["actor_ref"] == "operator access_token=[REDACTED]"
+    assert detail["timeline"][-1]["actor_ref"] == "[REDACTED]"
 
     connection = sqlite3.connect(db_path)
     reloaded = SQLiteOperationalCaseStore(connection).get_case(case.case_id)
@@ -671,6 +671,6 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     assert reloaded is not None
     assert reloaded.status == "open"
     assert reloaded.timeline[-1].event_type == "operator_comment"
-    assert reloaded.timeline[-1].actor_ref == "operator access_token=[REDACTED]"
+    assert reloaded.timeline[-1].actor_ref == "[REDACTED]"
     assert_no_raw_comment_secret(reloaded.model_dump_json())
     assert_no_raw_actor_secret(reloaded.model_dump_json())
