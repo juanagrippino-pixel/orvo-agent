@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from flask import request
 
 from app.brain.operator_api import *  # noqa: F401,F403
-from app.brain.operator_auth import CASE_ACTION_PERMISSION
+from app.brain.operator_auth import CASE_ACTION_PERMISSION, safe_internal_operator_actor_ref
 from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
 
 from .common import (
@@ -96,7 +96,7 @@ def register_dashboard_view_routes(app):
     def internal_brain_case_action(business_id: str, case_id: str):
         raw_payload = request.get_json(silent=True)
         payload = raw_payload if isinstance(raw_payload, dict) else {}
-        actor_ref = request.headers.get("X-Orvo-Operator", "")
+        actor_ref = safe_internal_operator_actor_ref(request.headers.get("X-Orvo-Operator", ""))
 
         def _handle(case_store, run_ledger):
             permission_error = _require_internal_header_permission(business_id, CASE_ACTION_PERMISSION)

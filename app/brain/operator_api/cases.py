@@ -111,6 +111,46 @@ def summarize_case_queue(store: OperationalCaseStore, *, business_id: str) -> di
         }
     )
 
+def summarize_case_queue_by_severity(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Severity-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but returns lifecycle, actionable, and
+    actionable-degraded counts grouped by ``case.severity``. This gives internal
+    operator surfaces a stable, tenant-scoped endpoint for severity backlog
+    widgets without scraping the aggregate summary response.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_severity: dict[str, int] = {}
+    actionable_by_severity: dict[str, int] = {}
+    actionable_degraded_by_severity: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        severity = case.severity
+        totals_by_severity[severity] = totals_by_severity.get(severity, 0) + 1
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_severity[severity] = (
+                actionable_by_severity.get(severity, 0) + 1
+            )
+            if _is_degraded(case):
+                actionable_degraded_by_severity[severity] = (
+                    actionable_degraded_by_severity.get(severity, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_severity": totals_by_severity,
+            "actionable_by_severity": actionable_by_severity,
+            "actionable_degraded_by_severity": actionable_degraded_by_severity,
+        }
+    )
+
+
 def summarize_case_queue_by_priority_bracket(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
