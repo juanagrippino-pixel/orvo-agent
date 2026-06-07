@@ -27,32 +27,31 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ### 2026-06-07 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `a8c27da` (`merge: safe internal error codes`). This supersedes the 2026-06-05 checkpoint and the 2026-06-06 Architecture Review Board recommendation that still treated connector resolved-secret bindings, WorkItem priority/query-field semantics, safe actor refs, and safe internal error codes as pending.
+The current repository `HEAD` before this reconciliation is `67a8e27` (`merge: basic auth audit redaction invariant`). This supersedes the 2026-06-06 checkpoint and the 2026-06-07 Architecture Review Board recommendation that still treated helper-level case-action idempotency and Basic-auth audit redaction as pending/redundancy-check items.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
-- WorkItem remains projection-only: `app/brain/work_items.py` derives project keys, work item IDs, issue types, workflow/status definitions, status categories, and priority brackets without a separate WorkItem store.
-- WorkItem priority semantics are now centralized: `priority_bracket_for_score()`, `case_priority_bracket()`, `allowed_priority_brackets()`, and `operational_case_priority_definitions()` define the `low` / `medium` / `high` cutoffs; `app/brain/operator_api/common.py` delegates `_classify_priority_bracket()` to that registry.
-- WorkItem query-field semantics are now centralized near the projection helpers: `app/brain/work_items.py` exposes `WorkItemQueryFieldDefinition`, `work_item_query_field_spec()`, `work_item_query_field_definitions()`, and `allowed_work_item_query_sort_fields()`; `app/brain/operator_views.py` imports that registry instead of owning a local `_FIELD_SPECS` allowlist.
-- Connector secret-boundary hardening is now baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and `tests/contracts/test_connector_registry_contract.py` asserts forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
-- Trust/Admin small hardening deltas are now baseline: `app/brain/operator_auth.py` exposes `safe_internal_operator_actor_ref()` for authenticated operator principals, `app/brain/operator_audit.py` collapses secret-shaped top-level audit identifiers, and `app/http/internal_brain/common.py` allowlists internal error-code shapes before JSON envelope output.
-- Internal operator analytics continue to use thin route wrappers and shared service helpers; the current branch adds another resolution-latency severity endpoint while preserving route-level delegation.
-- Manual case actions reserve a workflow/action ledger row before mutation at the internal HTTP boundary; missing `X-Idempotency-Key` headers fail before case mutation with a stable envelope and redacted audit event. The transport-agnostic helper still exposes a direct-mutation fallback for non-HTTP/internal callers.
+- WorkItem remains projection-only: `app/brain/work_items.py` derives project keys, work item IDs, issue types, workflow/status definitions, status categories, priority brackets, and query-field definitions without a separate WorkItem store.
+- WorkItem query/search vocabulary is centralized near the projection helpers: `work_item_query_field_spec()`, `work_item_query_field_definitions()`, and `allowed_work_item_query_sort_fields()` are the source for JQL-lite/view/sort fields; broad search or dashboard branches must extend this registry instead of adding endpoint-local field semantics.
+- Connector secret-boundary hardening is now baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and connector contract tests assert forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
+- Trust/Admin hardening now includes safe actor refs, safe internal error codes/messages, audit-business scoping for secret-shaped tenant IDs, and the Basic-auth audit redaction invariant. `app/brain/operator_audit.py` collapses secret-shaped top-level audit identifiers before persistence and returns redacted audit payloads.
+- Manual case actions now require idempotency at both the HTTP boundary and the shared helper boundary. `apply_case_action_with_idempotency()` calls `require_case_action_idempotency_key()` before validation, ledger reservation, or mutation, so non-HTTP/internal callers cannot accidentally bypass the ledgered idempotency path.
+- Internal operator analytics continue to use thin route wrappers and shared service helpers. The current baseline includes severity-split summary/resolution-latency/acknowledgment-latency/handling-latency projections while keeping `OperationalCase` as the source of truth.
 - Workflow planning/approval/execution queues remain projection-only: queue views still report execution disabled / `side_effects_executed = 0`; broad workflow execution remains blocked until durable audit, RBAC, provider idempotency, retry/failure semantics, and approval gates are all enforced.
 - `channel_mix_shift` is still present in type/projection mappings but absent from `CASE_FAMILY_METRICS`; `DETECTABLE_OPERATIONAL_CASE_TYPES` and `OWNER_FACING_OPERATIONAL_CASE_TYPES` continue deriving from `CASE_FAMILY_METRICS`, so the family remains deferred/internal until Packet N promotes it.
 
-Recommended order:
+Recommended order from this checkpoint:
 
-1. **Keep manual case-action idempotency enforced while continuing workflow hardening**
-   - Guard the `POST /internal/brain/businesses/<business_id>/cases/<case_id>/actions` route-boundary requirement: every successful mutation request carries a safe `X-Idempotency-Key`, reserves before mutation, and replays/skips duplicates without a second side effect.
-   - Gate: missing/blank/secret-shaped keys fail before mutation with redacted stable envelopes/audit events; duplicate or racing keyed requests cannot apply the same side effect twice.
+1. **Protect the now-baseline case-action idempotency invariant**
+   - Treat `codex/eng-factory-required-case-action-idempotency-20260606` and duplicate QA idempotency branches as integrated/superseded unless patch-id review finds a unique regression test.
+   - Gate: every successful mutating case-action path carries a safe idempotency key, reserves before mutation, replays/skips duplicates without a second side effect, and fails missing/blank/secret-shaped keys before ledger writes or case mutation.
 
 2. **Keep WorkItem query-field registry as the only JQL/search vocabulary source**
    - Future JQL-lite/view/facet fields must be added through the canonical WorkItem/OperationalCase query-field registry near the projection helpers, while keeping metric keys in the semantic metric registry.
-   - Gate: built-in views and the JQL parser continue importing the same allowlisted field definitions; future dashboard/search filters must either reuse existing WorkItem helpers (for example priority brackets) or extend the registry first. No SQL translation, persisted saved views, or tenant-custom schemas are introduced.
+   - Gate: built-in views and the JQL parser continue importing the same allowlisted field definitions; future dashboard/search filters must either reuse existing WorkItem helpers or extend the registry first. No SQL translation, persisted saved views, or tenant-custom schemas are introduced.
 
-3. **Trust/Admin patch-id review after safe actor/error-code hardening**
-   - Treat safe actor refs and safe internal error codes as integrated. Future Trust/Admin merges must patch-id against those commits instead of reintroducing duplicate implementations or conflicting envelope shapes.
+3. **Trust/Admin patch-id review after safe actor/error-code/Basic-auth hardening**
+   - Treat safe actor refs, safe internal error codes, and Basic-auth audit redaction as integrated. Future Trust/Admin merges must patch-id against those commits instead of reintroducing duplicate implementations or conflicting envelope/audit shapes.
    - Gate: every internal endpoint keeps auth, business scoping, redacted envelopes, route-level permission checks for reads/writes/admin where applicable, and audit identifiers that collapse secret-shaped top-level IDs before persistence.
 
 4. **Connector-platform hardening after resolved-secret bindings**
@@ -77,7 +76,7 @@ Recommended order:
 
 9. **Pilot lead execution and pilot-readiness docs after core gates**
    - Use the first-10 lead-build and fulfillment-backlog research packets for outbound learning, but keep the sellable promise constrained to Tiendanube-backed cases/evidence already covered by the PRD and pilot checklist.
-   - Update the Tiendanube/WhatsApp-first pilot checklist only after required manual idempotency, WorkItem query-field registry, connector-platform hardening, and operator-surface deltas are integrated.
+   - Update the Tiendanube/WhatsApp-first pilot checklist only after connector-platform hardening and operator-surface deltas are integrated; manual idempotency and WorkItem query-field registry gates are already baseline and must stay green.
    - Gate: docs link validation, secret scan, and one dry-run/operator-report artifact; keep WhatsApp as projection/delivery, not source of truth.
 
 Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, evidence, and WorkItem projections and until workflow execution and gateway enforcement are explicitly implemented rather than manifest/projection-only.

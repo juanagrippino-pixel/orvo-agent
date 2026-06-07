@@ -2172,6 +2172,94 @@ def test_internal_case_acknowledgment_latency_histogram_returns_scoped_envelope(
     }
 
 
+def test_internal_case_acknowledgment_latency_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    critical = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-critical-ack-severity",
+            severity="critical",
+            dedupe_suffix="stockout_risk/product/sku-critical-ack-severity/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        critical.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(minutes=30),
+    )
+    warning = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            severity="warning",
+            priority=70,
+            run_id="run-artemea-warning-ack-severity",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        warning.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(hours=8),
+    )
+    other = store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            severity="critical",
+            run_id="run-other-ack-severity",
+            dedupe_suffix="stockout_risk/product/sku-other-ack-severity/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        other.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=opened_at + timedelta(days=8),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/acknowledgment-latency/by-severity",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["acknowledged_total"] == 2
+    assert data["by_acknowledgment_bucket"] == {
+        "under_1h": 1,
+        "under_6h": 0,
+        "under_24h": 1,
+        "under_7d": 0,
+        "over_7d": 0,
+    }
+    assert data["by_acknowledgment_bucket_severity"] == {
+        "under_1h": {"critical": 1},
+        "under_6h": {},
+        "under_24h": {"warning": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }
+    assert data["fastest_acknowledged"]["case_id"] == critical.case_id
+    assert data["slowest_acknowledged"]["case_id"] == warning.case_id
+    assert "run-other-ack-severity" not in str(data)
+
+
 def test_internal_case_acknowledgment_latency_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
@@ -3878,6 +3966,43 @@ def test_internal_endpoints_audit_missing_bearer_token_attempt(monkeypatch, tmp_
         "header_present": False,
         "scheme": None,
     }
+
+
+def test_internal_endpoints_audit_basic_authorization_attempt_without_credential_tail(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+    basic_credentials = "cmF3X2Jhc2ljX2" + "F1ZGl0X3NlY3JldA=="
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            "Authorization": f"Basic {basic_credentials}",
+            "X-Orvo-Operator": "operator:basic access_token=raw_basic_actor_secret",
+            "X-Request-ID": "req-basic-auth-denied",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["code"] == "unauthorized"
+    raw_body = response.get_data(as_text=True)
+    assert basic_credentials not in raw_body
+    assert "raw_basic_actor_secret" not in raw_body
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authentication.denied"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["request_id"] == "req-basic-auth-denied"
+    assert event["data"] == {
+        "status": "denied",
+        "reason": "invalid_internal_token",
+        "method": "GET",
+        "header_present": True,
+        "scheme": "Basic",
+    }
+    serialized = json.dumps(event, sort_keys=True)
+    assert basic_credentials not in serialized
+    assert "raw_basic_actor_secret" not in serialized
 
 
 def _audit_events(db_path) -> list[dict]:

@@ -26,6 +26,7 @@ _SECRET_KEY_PARTS = (
 )
 _SAFE_SECRET_CONTRACT_KEYS = {"secret_param_names", "legacy_secret_param_names"}
 _SAFE_SECRET_REF_KEYS = {"secret_refs"}
+_SAFE_OPERATIONAL_SECRET_NAMED_KEYS = {"legacy_token_scoped"}
 
 
 _BEARER_RE = re.compile(r"Bearer\s+[^\s,;]+", flags=re.IGNORECASE)
@@ -198,7 +199,10 @@ def redact_secrets(value: Any) -> Any:
             normalized_key = key.lower().replace("-", "_")
             if normalized_key in _SAFE_SECRET_REF_KEYS:
                 redacted[key] = _redact_secret_refs(raw_value)
-            elif normalized_key in _SAFE_SECRET_CONTRACT_KEYS:
+            elif (
+                normalized_key in _SAFE_SECRET_CONTRACT_KEYS
+                or normalized_key in _SAFE_OPERATIONAL_SECRET_NAMED_KEYS
+            ):
                 redacted[key] = redact_secrets(raw_value)
             else:
                 redacted[key] = "[REDACTED]" if is_secret_key(key) else redact_secrets(raw_value)

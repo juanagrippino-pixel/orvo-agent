@@ -59,8 +59,8 @@ def _internal_success(business_id: str, data: dict, *, warnings: list[str] | Non
             "ok": True,
             "business_id": _safe_internal_business_id(business_id),
             "request_id": _internal_request_id(),
-            "data": data,
-            "warnings": warnings or [],
+            "data": redact_secrets(data),
+            "warnings": redact_secrets(warnings or []),
             "redaction_applied": True,
         }
     )

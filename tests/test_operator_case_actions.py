@@ -11,8 +11,9 @@ from app.brain.operational_cases import (
     OperationalCaseDetection,
     SQLiteOperationalCaseStore,
 )
-from app.brain.operator_api import OperatorAPIError, apply_case_action
+from app.brain.operator_api import OperatorAPIError, apply_case_action, apply_case_action_with_idempotency
 from app.brain.storage import init_schema
+from app.brain.workflow_action_ledger import InMemoryWorkflowActionLedgerStore
 
 AUTH = {
     "Authorization": "Bearer test-internal-token",
@@ -214,6 +215,72 @@ def test_apply_case_action_add_comment_rejects_missing_blank_or_non_string_comme
     assert exc.value.code == "invalid_comment"
     assert exc.value.status_code == 400
     assert len(store.get_case(opened.case_id).timeline) == len(opened.timeline)
+
+
+def test_apply_case_action_with_idempotency_requires_key_before_mutation_or_ledger():
+    store = InMemoryOperationalCaseStore()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    original_timeline_length = len(opened.timeline)
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action_with_idempotency(
+            store,
+            ledger,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="acknowledge_case",
+            actor_ref="operator@example.com",
+            reason="valid mutation must not run",
+        )
+
+    assert exc.value.code == "missing_idempotency_key"
+    assert exc.value.status_code == 400
+    assert ledger.list_actions(business_id="artemea") == []
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == original_timeline_length
+
+
+def test_apply_case_action_with_idempotency_failed_existing_key_blocks_replay_and_mutation():
+    store = InMemoryOperationalCaseStore()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    original_timeline_length = len(opened.timeline)
+    ledger.record_planned_action(
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="acknowledge_case",
+        idempotency_key="case-action-failed-replay",
+        execution_state="failed",
+        approval_required=False,
+        source="manual_operator",
+        actor_ref="operator@example.com",
+        params={"reason": "previous execution failed before retry"},
+    )
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action_with_idempotency(
+            store,
+            ledger,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="acknowledge_case",
+            idempotency_key="case-action-failed-replay",
+            actor_ref="operator@example.com",
+            reason="retry must not mutate after failed ledger state",
+        )
+
+    assert exc.value.code == "idempotency_key_not_replayable"
+    assert exc.value.status_code == 409
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == original_timeline_length
+    actions = ledger.list_actions(business_id="artemea")
+    assert len(actions) == 1
+    assert actions[0].execution_state == "failed"
 
 
 @pytest.mark.parametrize(
