@@ -564,7 +564,7 @@ def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(m
     duplicate = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
         headers=headers,
-        json={"action_key": "acknowledge_case", "reason": "Duplicate retry should not add timeline"},
+        json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
     )
 
     assert duplicate.status_code == 200

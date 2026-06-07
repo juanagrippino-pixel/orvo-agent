@@ -178,6 +178,48 @@ def test_apply_case_action_add_comment_returns_case_detail_with_redacted_comment
     assert_no_raw_comment_secret(str(result))
 
 
+def test_apply_case_action_with_idempotency_rejects_reused_key_with_different_payload_without_mutation():
+    """Manual idempotency keys must replay the same request, not mask payload drift."""
+
+    store = InMemoryOperationalCaseStore()
+    action_ledger = InMemoryWorkflowActionLedgerStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    first = apply_case_action_with_idempotency(
+        store,
+        action_ledger,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="add_comment",
+        idempotency_key="case-action-comment-1",
+        actor_ref="operator@example.com",
+        comment="First supplier note",
+    )
+
+    assert first["action"]["status"] == "executed"
+    timeline_count_after_first = len(first["case"]["timeline"])
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action_with_idempotency(
+            store,
+            action_ledger,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="add_comment",
+            idempotency_key="case-action-comment-1",
+            actor_ref="operator@example.com",
+            comment="Different supplier note must not be accepted as a replay",
+        )
+
+    assert exc.value.code == "idempotency_key_conflict"
+    assert exc.value.status_code == 409
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert len(reloaded.timeline) == timeline_count_after_first
+    assert reloaded.timeline[-1].summary == "First supplier note"
+    assert len(action_ledger.list_actions(business_id="artemea")) == 1
+
+
 def test_apply_case_action_add_comment_strips_actor_ref_before_persisting_timeline_event():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))
