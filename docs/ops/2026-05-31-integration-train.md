@@ -1,5 +1,56 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-07 08:23 UTC
+
+Status: **No implementation branch promoted; idempotency helper-hardening branch conflicted and was preserved**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after docs preservation: `d5f16ed` (`docs: add architecture review 2026-06-07`)
+
+Preflight notes:
+
+- The canonical worktree initially contained an untracked Architecture Review Board deliverable, `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md`, left by the prior read-only ARB cron job.
+- The report was inspected as a legitimate architecture deliverable and committed before integration work: `d5f16ed`.
+- `git fetch --all --prune` completed successfully; canonical worktree was clean before the merge attempt.
+
+Inventory summary:
+
+- `git branch --no-merged feat/orvo-brain-control-plane` reports 69 local unmerged branches after excluding the canonical branch.
+- Bucketed inventory: 18 `codex/*`, 13 `codex/eng-factory-*`, 17 `codex/qa-*`, 7 `qa/*`, 7 `docs/*`, and 7 other local branches.
+- Recent ARB review marks the current baseline merge-ready, but recommends staged rebase for high-value branches rather than wholesale platform/operator-surface merges.
+
+Candidate attempted:
+
+- Branch: `codex/eng-factory-required-case-action-idempotency-20260606`
+- Head: `03d16fd` (`codex: require idempotency for case actions`)
+- Worker worktree: `/root/orvo-agent-worktrees/eng-factory-required-case-action-idempotency-20260606`
+- Worker status before test: clean.
+- Worker focused suite: `pytest tests/test_internal_operator_api.py tests/test_operator_case_actions.py -q` -> `122 passed in 9.20s`.
+- Architecture disposition: aligned with ARB finding that service-level manual case action idempotency must fail closed, not rely only on HTTP boundary enforcement.
+
+Result:
+
+- Merge attempt into `feat/orvo-brain-control-plane` was stopped and aborted due to conflicts in test files.
+- Conflict files from `git merge`:
+  - `tests/test_internal_operator_api.py`
+  - `tests/test_operator_case_actions.py`
+- `git merge-tree` also reports both-side changes in `app/brain/operator_api/actions.py`, but the visible conflict markers were confined to adjacent test expectations/idempotency-key fixture strings.
+- Source branch was preserved; canonical worktree was restored clean with `git merge --abort`.
+
+Required fix before retry:
+
+- Rebase `codex/eng-factory-required-case-action-idempotency-20260606` on top of `d5f16ed+` and preserve both current canonical idempotency tests and the helper-level `missing_idempotency_key` invariant.
+- Resolve adjacent fixture-key conflicts without weakening existing redaction/actor/RBAC route tests.
+- Re-run `pytest tests/test_internal_operator_api.py tests/test_operator_case_actions.py -q`, then `pytest -q`, before promotion.
+
+Current next integration order:
+
+1. **Idempotency helper hardening repair:** retry `codex/eng-factory-required-case-action-idempotency-20260606` only after the small test conflicts are rebased/resolved and the branch proves the service helper fails closed before mutation/ledger writes.
+2. **Trust/Admin/Security redaction guards:** inspect `codex/trust-admin-security` and `codex/qa-redteam-operator-audit-redaction-20260607` for unique, non-duplicative audit/export redaction coverage after current safe-envelope commits.
+3. **Connector-platform reconcile:** review `codex/connector-platform` / `codex/eng-factory-connector-platform-reconcile-20260606` selectively for registry-driven runtime filtering and secret-scope certification only; avoid wholesale runtime rewrites.
+4. **Work Management SLA/activity slices:** decompose `codex/work-management` into small Jira-like WorkItem/OperationalCase invariants, especially SLA due/activity fields, evidence lineage, and transition boundaries.
+5. **Hold/split broad branches:** keep `codex/operator-surfaces`, `codex/search-analytics`, `codex/workflow-automation`, `codex/service-management`, and `codex/edge-developer-platform` behind rebase/decomposition review.
+
 ## Release integration update — 2026-06-06 15:59 UTC
 
 Status: **No branch promoted; first safe-looking QA invariant conflicted and was preserved**.
