@@ -5,6 +5,7 @@ from app.brain.operator_api import (
     summarize_case_resolution_latency_histogram_by_case_type,
     summarize_case_resolution_latency_histogram_by_entity_kind,
     summarize_case_resolution_latency_histogram_by_priority_bracket,
+    summarize_case_resolution_latency_histogram_by_severity,
     summarize_case_resolution_latency_histogram_by_source_connector,
 )
 
@@ -31,7 +32,7 @@ def register_case_resolution_latency_routes(app):
             business_id,
             lambda case_store, run_ledger: _internal_success(
                 business_id,
-                summarize_case_resolution_latency_histogram(
+                summarize_case_resolution_latency_histogram_by_severity(
                     case_store,
                     business_id=business_id,
                 ),
