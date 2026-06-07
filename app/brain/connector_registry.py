@@ -695,30 +695,53 @@ class ConnectorSpec:
         emit concrete event types under those families, such as
         ``connector.execution.succeeded``. This deterministic certification check
         flags event types outside the connector's declared envelope without
-        inventing connector-specific event registries.
+        inventing connector-specific event registries. Health outcome events are
+        additionally checked against the spec's health-state taxonomy so
+        connector-health logs cannot drift beyond declared runtime states.
         """
 
         allowed_families = tuple(self.emitted_event_families)
+        allowed_health_states = tuple(self.health.allowed_states)
         issues: list[ConnectorEventValidationIssue] = []
         for index, event in enumerate(events):
             event_type = _event_type_value(event)
-            if any(
+            is_in_declared_family = any(
                 event_type == family or event_type.startswith(f"{family}.")
                 for family in allowed_families
-            ):
-                continue
-            issues.append(
-                ConnectorEventValidationIssue(
-                    code="undeclared_event_family",
-                    event_type=event_type,
-                    index=index,
-                    message=(
-                        f"{self.connector_type} connector emitted event {event_type} "
-                        "outside declared event families: "
-                        + ", ".join(allowed_families)
-                    ),
-                )
             )
+            if not is_in_declared_family:
+                issues.append(
+                    ConnectorEventValidationIssue(
+                        code="undeclared_event_family",
+                        event_type=event_type,
+                        index=index,
+                        message=(
+                            f"{self.connector_type} connector emitted event {event_type} "
+                            "outside declared event families: "
+                            + ", ".join(allowed_families)
+                        ),
+                    )
+                )
+                continue
+            health_prefix = f"{EVENT_FAMILY_CONNECTOR_HEALTH}."
+            if (
+                EVENT_FAMILY_CONNECTOR_HEALTH in allowed_families
+                and event_type.startswith(health_prefix)
+            ):
+                health_state = event_type.removeprefix(health_prefix)
+                if health_state not in allowed_health_states:
+                    issues.append(
+                        ConnectorEventValidationIssue(
+                            code="undeclared_health_state",
+                            event_type=event_type,
+                            index=index,
+                            message=(
+                                f"{self.connector_type} connector emitted health state "
+                                f"{health_state} outside declared health states: "
+                                + ", ".join(allowed_health_states)
+                            ),
+                        )
+                    )
         return issues
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:
