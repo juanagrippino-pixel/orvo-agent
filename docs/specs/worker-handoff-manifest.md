@@ -84,7 +84,7 @@ A reviewer/integration controller must verify:
 
 1. `worktree_path` exists or branch exists remotely/locally.
 2. `git status --short` matches manifest status.
-3. `head_sha` exists if claimed.
+3. `head_sha` exists if claimed and matches the current local/origin branch head when `branch` is present, except for a later manifest-only bookkeeping commit.
 4. Files changed match `git diff --name-only base_sha...head_sha` or current dirty state.
 5. Test commands either passed or have explicit block reasons.
 6. Secret check is credible for the files touched.
@@ -105,4 +105,4 @@ For a single committed worker manifest with real `base_sha` and `head_sha` value
 python scripts/check_worker_handoff_manifests.py --verify-git docs/workers/<task-id>.md
 ```
 
-The git check verifies that the worktree path still exists or the branch is present locally/remotely, that `base_sha` and committed `head_sha` resolve to commits, and that `files_changed` exactly matches `git diff --name-only base_sha...head_sha`. Use it on specific manifests first because older durable manifests may contain human placeholders or intentionally dirty `head_sha: uncommitted` handoffs.
+The git check verifies that the worktree path still exists or the branch is present locally/remotely, that `base_sha` and committed `head_sha` resolve to commits, that committed `head_sha` still matches the local/origin branch head when the branch exists unless the branch advanced only by the manifest file itself, and that `files_changed` exactly matches `git diff --name-only base_sha...head_sha`. Use it on specific manifests first because older durable manifests may contain human placeholders or intentionally dirty `head_sha: uncommitted` handoffs.
