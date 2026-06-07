@@ -2103,6 +2103,48 @@ def test_internal_case_acknowledgment_latency_by_severity_returns_scoped_envelop
     assert "run-other-ack-severity" not in str(data)
 
 
+def test_internal_case_acknowledgment_latency_by_severity_redacts_secret_business_id_in_data(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    secret_business_id = "artemea access_token=raw_business_secret"
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    case = store.upsert_detection(
+        _case_detection(
+            business_id=secret_business_id,
+            run_id="run-secret-business-ack-severity",
+            dedupe_suffix="stockout_risk/product/sku-secret-business/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(minutes=30),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea%20access_token=raw_business_secret/cases/acknowledgment-latency/by-severity",
+        headers={**AUTH, "X-Request-ID": "req-secret-business-latency"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_business_secret" not in raw_body
+    body = response.get_json()
+    assert body["business_id"] == "[REDACTED]"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea access_token=[REDACTED]"
+    assert data["acknowledged_total"] == 1
+    assert data["by_acknowledgment_bucket_severity"]["under_1h"] == {"critical": 1}
+    assert data["fastest_acknowledged"]["case_id"] == case.case_id
+
+
 def test_internal_case_acknowledgment_latency_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
