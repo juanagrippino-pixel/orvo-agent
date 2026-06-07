@@ -447,6 +447,44 @@ def test_service_management_projection_summarizes_next_sla_status_and_counts():
     }
 
 
+def test_service_management_projection_marks_active_sla_at_risk_near_due():
+    store = InMemoryOperationalCaseStore()
+    at_risk = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="summary-at-risk/business/monitored/inventory/daily",
+            severity="critical",
+            priority=90,
+            run_id="run-sla-at-risk",
+        ),
+        detected_at=NOW - timedelta(minutes=50),
+    )
+    on_track = store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="summary-at-risk-on-track/channel/all/revenue/daily",
+            severity="warning",
+            priority=70,
+            run_id="run-sla-at-risk-on-track",
+        ),
+        detected_at=NOW - timedelta(hours=1),
+    )
+
+    result = list_service_management_cases(store, business_id="artemea", now=NOW, limit=10)
+    by_id = {item["case_id"]: item for item in result["service_cases"]}
+
+    assert by_id[at_risk.case_id]["sla_status"] == {
+        "code": "at_risk",
+        "label_es": "SLA en riesgo",
+        "active_policy_key": "first_response_critical_60m",
+        "due_at": "2026-05-24T12:10:00Z",
+        "remaining_seconds": 600,
+        "overdue_seconds": 0,
+    }
+    assert by_id[on_track.case_id]["sla_status"]["code"] == "on_track"
+    assert result["by_sla_status"] == {"at_risk": 1, "on_track": 1}
+
+
 def test_list_service_management_cases_filters_by_sla_status_before_limit():
     store = InMemoryOperationalCaseStore()
     breached = store.upsert_detection(
@@ -484,6 +522,45 @@ def test_list_service_management_cases_filters_by_sla_status_before_limit():
     assert result["count"] == 1
     assert [item["case_id"] for item in result["service_cases"]] == [breached.case_id]
     assert result["by_sla_status"] == {"breached": 1, "on_track": 1}
+
+
+def test_list_service_management_cases_filters_by_at_risk_sla_status_before_limit():
+    store = InMemoryOperationalCaseStore()
+    at_risk = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="filter-at-risk/business/monitored/inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-filter-at-risk",
+        ),
+        detected_at=NOW - timedelta(minutes=50),
+    )
+    store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="filter-at-risk-on-track/channel/all/revenue/daily",
+            severity="warning",
+            priority=70,
+            run_id="run-filter-at-risk-on-track",
+        ),
+        detected_at=NOW - timedelta(hours=1),
+    )
+
+    result = list_service_management_cases(
+        store,
+        business_id="artemea",
+        now=NOW,
+        limit=1,
+        sla_status="at_risk",
+    )
+
+    assert result["filters"] == {"sla_status": "at_risk"}
+    assert result["total"] == 1
+    assert result["unfiltered_total"] == 2
+    assert result["count"] == 1
+    assert [item["case_id"] for item in result["service_cases"]] == [at_risk.case_id]
+    assert result["by_sla_status"] == {"at_risk": 1, "on_track": 1}
 
 
 def test_list_service_management_cases_filters_by_service_record_type_before_limit():
@@ -713,22 +790,40 @@ def test_list_service_management_cases_can_sort_by_sla_urgency_before_limit():
         ),
         detected_at=NOW - timedelta(hours=5),
     )
+    at_risk_lower_priority = store.upsert_detection(
+        _detection(
+            case_type="stockout_risk",
+            dedupe_suffix="sort-sla-at-risk/business/monitored/inventory/daily",
+            severity="critical",
+            priority=80,
+            run_id="run-sort-sla-at-risk",
+        ),
+        detected_at=NOW - timedelta(minutes=50),
+    )
 
     default_result = list_service_management_cases(store, business_id="artemea", now=NOW, limit=1)
     sla_sorted = list_service_management_cases(
         store,
         business_id="artemea",
         now=NOW,
-        limit=1,
+        limit=3,
         sort_by="sla_urgency",
     )
 
     assert [item["case_id"] for item in default_result["service_cases"]] == [high_priority_on_track.case_id]
     assert sla_sorted["sort_by"] == "sla_urgency"
-    assert sla_sorted["total"] == 2
-    assert sla_sorted["count"] == 1
-    assert [item["case_id"] for item in sla_sorted["service_cases"]] == [breached_lower_priority.case_id]
-    assert sla_sorted["service_cases"][0]["sla_status"]["code"] == "breached"
+    assert sla_sorted["total"] == 3
+    assert sla_sorted["count"] == 3
+    assert [item["case_id"] for item in sla_sorted["service_cases"]] == [
+        breached_lower_priority.case_id,
+        at_risk_lower_priority.case_id,
+        high_priority_on_track.case_id,
+    ]
+    assert [item["sla_status"]["code"] for item in sla_sorted["service_cases"]] == [
+        "breached",
+        "at_risk",
+        "on_track",
+    ]
 
 
 def test_list_service_management_cases_rejects_unknown_sla_status_filter():

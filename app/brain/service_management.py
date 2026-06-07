@@ -82,7 +82,11 @@ _RESOLUTION_TARGET_SECONDS: dict[str, int] = {
     "info": 72 * 60 * 60,
 }
 
-ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES = frozenset({"breached", "on_track", "paused", "completed"})
+_SLA_AT_RISK_WINDOW_SECONDS = 15 * 60
+
+ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES = frozenset(
+    {"breached", "at_risk", "on_track", "paused", "completed"}
+)
 ALLOWED_SERVICE_MANAGEMENT_SORTS = frozenset({"priority", "sla_urgency"})
 
 
@@ -249,6 +253,11 @@ def _sla_status(sla: dict[str, Any]) -> dict[str, Any]:
     clocks = [sla["first_response"], sla["resolution"]]
     active_clocks = [clock for clock in clocks if not clock["completed"] and not clock.get("paused")]
     breached_clocks = [clock for clock in active_clocks if clock["breached"]]
+    at_risk_clocks = [
+        clock
+        for clock in active_clocks
+        if not clock["breached"] and clock["remaining_seconds"] <= _SLA_AT_RISK_WINDOW_SECONDS
+    ]
     paused_clocks = [clock for clock in clocks if not clock["completed"] and clock.get("paused")]
 
     def _clock_payload(*, code: str, label_es: str, clock: dict[str, Any] | None) -> dict[str, Any]:
@@ -264,6 +273,9 @@ def _sla_status(sla: dict[str, Any]) -> dict[str, Any]:
     if breached_clocks:
         breached = min(breached_clocks, key=lambda clock: clock["due_at"])
         return _clock_payload(code="breached", label_es="SLA vencido", clock=breached)
+    if at_risk_clocks:
+        at_risk = min(at_risk_clocks, key=lambda clock: clock["due_at"])
+        return _clock_payload(code="at_risk", label_es="SLA en riesgo", clock=at_risk)
     if active_clocks:
         next_clock = min(active_clocks, key=lambda clock: clock["due_at"])
         return _clock_payload(code="on_track", label_es="SLA en curso", clock=next_clock)
@@ -335,7 +347,7 @@ def _sort_service_management_rows(rows: list[dict[str, Any]], *, sort_by: str) -
     if sort_by == "priority":
         return rows
 
-    status_rank = {"breached": 0, "on_track": 1, "paused": 2, "completed": 3}
+    status_rank = {"breached": 0, "at_risk": 1, "on_track": 2, "paused": 3, "completed": 4}
     far_future = "9999-12-31T23:59:59Z"
 
     return sorted(
