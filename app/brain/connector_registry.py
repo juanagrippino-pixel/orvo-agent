@@ -148,6 +148,17 @@ class ConnectorEventValidationIssue:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectorScopeValidationIssue:
+    """Deterministic diagnostic for connector least-privilege scope policy."""
+
+    code: str
+    secret_name: str
+    scope: str
+    message: str
+    severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectorFactoryParam:
     """Declarative binding from connector/runtime context to adapter kwargs.
 
@@ -349,6 +360,34 @@ class ConnectorSpec:
         """
 
         return [secret.metadata() for secret in self.required_secret_refs]
+
+    def validate_scope_requirements(self) -> list[ConnectorScopeValidationIssue]:
+        """Certify that secret provisioning scopes are declared by the connector policy.
+
+        Secret requirements can carry provider-specific OAuth/API scopes. Those
+        scopes must be represented in the connector's least-privilege scope
+        policy so runtime/operator surfaces do not under-report the permissions
+        needed to provision the connector.
+        """
+
+        declared_scopes = set(self.scopes.required)
+        issues: list[ConnectorScopeValidationIssue] = []
+        for secret in self.required_secret_refs:
+            for scope in secret.scopes:
+                if scope in declared_scopes:
+                    continue
+                issues.append(
+                    ConnectorScopeValidationIssue(
+                        code="secret_scope_not_required",
+                        secret_name=secret.name,
+                        scope=scope,
+                        message=(
+                            f"{self.connector_type} secret {secret.name} requires scope {scope} "
+                            "outside connector scope policy"
+                        ),
+                    )
+                )
+        return issues
 
     def load_report_factory(self):
         """Import the configured report-builder callable from executor metadata."""
