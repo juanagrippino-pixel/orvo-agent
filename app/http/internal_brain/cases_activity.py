@@ -29,7 +29,7 @@ def register_case_activity_routes(app):
             business_id,
             lambda case_store, run_ledger: _internal_success(
                 business_id,
-                summarize_case_acknowledgment_latency_histogram(
+                summarize_case_acknowledgment_latency_histogram_by_severity(
                     case_store,
                     business_id=business_id,
                 ),
