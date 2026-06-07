@@ -32,6 +32,7 @@ WorkflowConditionField = Literal[
     "status_category",
     "min_priority_score",
     "min_case_age_minutes",
+    "max_case_age_minutes",
     "degraded",
     "source_connector",
     "entity_kind",
@@ -143,6 +144,8 @@ def _condition_actual(case: OperationalCase, field_name: str, now: datetime) -> 
         return case.priority_score
     if field_name == "min_case_age_minutes":
         return _case_age_minutes(case, now)
+    if field_name == "max_case_age_minutes":
+        return _case_age_minutes(case, now)
     if field_name == "degraded":
         return is_case_degraded(case)
     if field_name == "source_connector":
@@ -150,6 +153,22 @@ def _condition_actual(case: OperationalCase, field_name: str, now: datetime) -> 
     if field_name == "entity_kind":
         return entity_kind(case)
     raise WorkflowAutomationError("unsupported_workflow_condition", f"unsupported workflow condition field: {field_name}")
+
+
+def _non_negative_int_condition_value(condition: CaseWorkflowCondition) -> int:
+    try:
+        condition_value = int(condition.value)
+    except (TypeError, ValueError) as exc:
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            f"{condition.field} condition value must be a non-negative integer",
+        ) from exc
+    if condition_value < 0:
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            f"{condition.field} condition value must be a non-negative integer",
+        )
+    return condition_value
 
 
 def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
@@ -162,19 +181,11 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
                 "min_priority_score condition value must be an integer",
             ) from exc
     if condition.field == "min_case_age_minutes":
-        try:
-            minimum_age_minutes = int(condition.value)
-        except (TypeError, ValueError) as exc:
-            raise WorkflowAutomationError(
-                "invalid_workflow_condition",
-                "min_case_age_minutes condition value must be a non-negative integer",
-            ) from exc
-        if minimum_age_minutes < 0:
-            raise WorkflowAutomationError(
-                "invalid_workflow_condition",
-                "min_case_age_minutes condition value must be a non-negative integer",
-            )
+        minimum_age_minutes = _non_negative_int_condition_value(condition)
         return int(actual) >= minimum_age_minutes
+    if condition.field == "max_case_age_minutes":
+        maximum_age_minutes = _non_negative_int_condition_value(condition)
+        return int(actual) <= maximum_age_minutes
     if condition.field == "source_connector":
         if not _is_non_empty_string(condition.value):
             raise WorkflowAutomationError(
