@@ -79,6 +79,22 @@ def test_redact_secrets_preserves_safe_connector_reference_metadata_without_raw_
     assert "raw_ref_query" not in rendered
 
 
+def test_redact_secrets_preserves_safe_operational_token_named_flags():
+    from app.brain.security.redaction import redact_secrets
+
+    redacted = redact_secrets(
+        {
+            "legacy_token_scoped": True,
+            "nested": {"legacy_token_scoped": False},
+            "legacy_token_scoped_note": "raw_legacy_token_secret",
+        }
+    )
+
+    assert redacted["legacy_token_scoped"] is True
+    assert redacted["nested"]["legacy_token_scoped"] is False
+    assert redacted["legacy_token_scoped_note"] == "[REDACTED]"
+
+
 def test_redact_text_removes_multi_token_basic_authorization_headers():
     from app.brain.security.redaction import redact_text
 
