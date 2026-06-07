@@ -1177,6 +1177,150 @@ def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch
     assert summary["by_severity"] == {}
 
 
+def test_internal_case_metric_registry_issues_summary_returns_scoped_redacted_counts(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    def detection_with_metric_issues(*, business_id: str = "artemea", run_id: str = "run-metric-issue"):
+        detection = _case_detection(business_id=business_id, run_id=run_id)
+        return detection.model_copy(
+            update={
+                "metadata": {
+                    **detection.metadata,
+                    "metric_registry_mode": "advisory",
+                    "metric_registry_issues": [
+                        {
+                            "code": "unknown_metric",
+                            "key": "commerce.unknown_metric",
+                            "message": "Metric access_token=raw_metric_secret is not registered",
+                            "severity": "warning",
+                            "index": 2,
+                        },
+                        {
+                            "code": "unit_mismatch",
+                            "key": "commerce.revenue.gross",
+                            "message": "Expected money for commerce.revenue.gross",
+                            "severity": "warning",
+                        },
+                    ],
+                }
+            },
+            deep=True,
+        )
+
+    actionable = _seed_case(db_path, detection_with_metric_issues(run_id="run-artemea-actionable"))
+    terminal = _seed_case(
+        db_path,
+        detection_with_metric_issues(run_id="run-artemea-terminal").model_copy(
+            update={"dedupe_key": "artemea/stockout_risk/business/terminal/commerce.inventory/daily"},
+            deep=True,
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-artemea-clean",
+            dedupe_suffix="stockout_risk/business/clean/commerce.inventory/daily",
+        ),
+    )
+    _seed_case(db_path, detection_with_metric_issues(business_id="other", run_id="run-other-issue"))
+    with sqlite3.connect(db_path) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        store.transition_case(
+            terminal.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            transitioned_at=_utc(9),
+        )
+        store.transition_case(
+            terminal.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            reason="Resolved registry advisory",
+            transitioned_at=_utc(10),
+        )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/metric-registry-issues/summary",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["total_cases"] == 3
+    assert data["cases_with_metric_registry_issues"] == 2
+    assert data["actionable_cases_with_metric_registry_issues"] == 1
+    assert data["issue_total"] == 4
+    assert data["actionable_issue_total"] == 2
+    assert data["by_code"] == {"unknown_metric": 2, "unit_mismatch": 2}
+    assert data["actionable_by_code"] == {"unknown_metric": 1, "unit_mismatch": 1}
+    assert data["by_metric_key"] == [
+        {"metric_key": "commerce.revenue.gross", "count": 2},
+        {"metric_key": "commerce.unknown_metric", "count": 2},
+    ]
+    assert data["by_case_type"] == {"stockout_risk": 2}
+    assert data["issue_cases"] == [
+        {
+            "case_id": actionable.case_id,
+            "case_type": "stockout_risk",
+            "status": "open",
+            "severity": "critical",
+            "priority_score": 100,
+            "latest_run_id": "run-artemea-actionable",
+            "issue_count": 2,
+            "issues": [
+                {
+                    "code": "unknown_metric",
+                    "key": "commerce.unknown_metric",
+                    "message": "Metric access_token=[REDACTED] is not registered",
+                    "severity": "warning",
+                    "index": 2,
+                },
+                {
+                    "code": "unit_mismatch",
+                    "key": "commerce.revenue.gross",
+                    "message": "Expected money for commerce.revenue.gross",
+                    "severity": "warning",
+                    "index": None,
+                },
+            ],
+        },
+        {
+            "case_id": terminal.case_id,
+            "case_type": "stockout_risk",
+            "status": "resolved",
+            "severity": "critical",
+            "priority_score": 100,
+            "latest_run_id": "run-artemea-terminal",
+            "issue_count": 2,
+            "issues": [
+                {
+                    "code": "unknown_metric",
+                    "key": "commerce.unknown_metric",
+                    "message": "Metric access_token=[REDACTED] is not registered",
+                    "severity": "warning",
+                    "index": 2,
+                },
+                {
+                    "code": "unit_mismatch",
+                    "key": "commerce.revenue.gross",
+                    "message": "Expected money for commerce.revenue.gross",
+                    "severity": "warning",
+                    "index": None,
+                },
+            ],
+        },
+    ]
+
+
+
 def test_internal_case_queue_summary_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-artemea-critical", severity="critical"))

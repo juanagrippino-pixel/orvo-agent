@@ -8,6 +8,7 @@ module.
 from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 from .cases import *  # noqa: F401,F403
+from .metric_registry_issues import *  # noqa: F401,F403
 from .aging import *  # noqa: F401,F403
 from .stagnation_core import *  # noqa: F401,F403
 from .stagnation_splits import *  # noqa: F401,F403

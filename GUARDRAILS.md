@@ -119,6 +119,7 @@ All listed routes returned `200` in the seeded snapshot unless otherwise noted. 
 | GET | `/internal/brain/businesses/<business_id>/cases/summary/by-case-type` | `internal_brain_cases_summary_by_case_type` | `actionable_by_case_type`, `actionable_degraded_by_case_type`, `actionable_total`, `business_id`, `total`, `totals_by_case_type` |
 | GET | `/internal/brain/businesses/<business_id>/cases/summary/by-entity-kind` | `internal_brain_cases_summary_by_entity_kind` | `actionable_by_entity_kind`, `actionable_degraded_by_entity_kind`, `actionable_total`, `business_id`, `total`, `totals_by_entity_kind` |
 | GET | `/internal/brain/businesses/<business_id>/cases/summary/by-source-connector` | `internal_brain_cases_summary_by_source_connector` | `actionable_by_source_connector`, `actionable_degraded_by_source_connector`, `actionable_total`, `business_id`, `total`, `totals_by_source_connector` |
+| GET | `/internal/brain/businesses/<business_id>/cases/metric-registry-issues/summary` | `internal_brain_cases_metric_registry_issues_summary` | `actionable_by_code`, `actionable_cases_with_metric_registry_issues`, `actionable_issue_total`, `business_id`, `by_case_type`, `by_code`, `by_metric_key`, `cases_with_metric_registry_issues`, `issue_cases`, `issue_total`, `total_cases` |
 | GET | `/internal/brain/businesses/<business_id>/cases/aging` | `internal_brain_cases_aging` | `actionable_total`, `business_id`, `by_age_bucket`, `by_age_bucket_severity`, `now`, `oldest_actionable` |
 | GET | `/internal/brain/businesses/<business_id>/cases/aging/by-priority-bracket` | `internal_brain_cases_aging_by_priority_bracket` | `actionable_total`, `business_id`, `by_age_bucket`, `by_age_bucket_priority_bracket`, `now`, `oldest_actionable` |
 | GET | `/internal/brain/businesses/<business_id>/cases/aging/by-case-type` | `internal_brain_cases_aging_by_case_type` | `actionable_total`, `business_id`, `by_age_bucket`, `by_age_bucket_case_type`, `now`, `oldest_actionable` |
@@ -152,18 +153,19 @@ All listed routes returned `200` in the seeded snapshot unless otherwise noted. 
 1. `/cases`
 2. `/case-actions`
 3. `/cases/summary...`
-4. `/cases/aging...`
-5. `/cases/stagnation...`
-6. `/workflow/throughput...`
-7. `/cases/top...`
-8. `/cases/recently...`
-9. `/dashboard`
-10. `/case-views...`
-11. `/cases/<case_id>`
-12. `/cases/<case_id>/timeline`
-13. `/cases/<case_id>/actions`
-14. `/runs...`
-15. `/whatsapp/delivery-statuses`
+4. `/cases/metric-registry-issues/summary`
+5. `/cases/aging...`
+6. `/cases/stagnation...`
+7. `/workflow/throughput...`
+8. `/cases/top...`
+9. `/cases/recently...`
+10. `/dashboard`
+11. `/case-views...`
+12. `/cases/<case_id>`
+13. `/cases/<case_id>/timeline`
+14. `/cases/<case_id>/actions`
+15. `/runs...`
+16. `/whatsapp/delivery-statuses`
 
 ## Domain boundary snapshot before Phase 1
 

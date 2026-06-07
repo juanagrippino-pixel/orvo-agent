@@ -76,7 +76,13 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
+GET /internal/brain/businesses/{business_id}/cases/metric-registry-issues/summary
 ```
+
+Metric-registry issue summaries are read-only projections over canonical
+`OperationalCase.metadata.metric_registry_issues` advisory diagnostics. They
+must stay business-scoped, redacted at the API boundary, and must not scrape
+report text or recompute detections outside the semantic metric registry.
 
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
