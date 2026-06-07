@@ -405,6 +405,7 @@ def summarize_case_query_facets(
 
 
 def _case_analytics_summary(matching: list[OperationalCase]) -> dict[str, Any]:
+    unassigned_total = sum(1 for case in matching if case.assignee_ref is None)
     return {
         "total": len(matching),
         "status_counts": _sorted_counts(case.status for case in matching),
@@ -423,8 +424,20 @@ def _case_analytics_summary(matching: list[OperationalCase]) -> dict[str, Any]:
             state for case in matching for state in _case_freshness_states(case)
         ),
         "degraded_total": sum(1 for case in matching if is_case_degraded(case)),
-        "unassigned_total": sum(1 for case in matching if case.assignee_ref is None),
+        "assigned_total": len(matching) - unassigned_total,
+        "unassigned_total": unassigned_total,
+        "assignee_counts": _assignee_counts(matching),
     }
+
+
+def _assignee_counts(matching: list[OperationalCase]) -> list[dict[str, Any]]:
+    counts: dict[str | None, int] = {}
+    for case in matching:
+        counts[case.assignee_ref] = counts.get(case.assignee_ref, 0) + 1
+    return [
+        {"assignee_ref": assignee_ref, "total": counts[assignee_ref]}
+        for assignee_ref in sorted(counts, key=lambda value: (value is None, str(value)))
+    ]
 
 
 def _sorted_counts(values) -> dict[str, int]:
