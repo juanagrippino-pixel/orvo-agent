@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from app.brain.action_catalog import ActionDefinition as WorkflowActionDefinition
 from app.brain.action_catalog import workflow_action_registry
-from app.brain.operational_cases import OperationalCase
+from app.brain.operational_cases import ACTIONABLE_OPERATIONAL_CASE_STATUSES, OperationalCase
 from app.brain.operator_case_projections import entity_kind, is_case_degraded, source_connectors
 from app.brain.work_items import case_status_category
 from app.brain.security.redaction import redact_secrets, redact_text
@@ -30,6 +30,7 @@ WorkflowConditionField = Literal[
     "case_type",
     "severity",
     "status_category",
+    "actionable",
     "assigned",
     "min_priority_score",
     "min_case_age_minutes",
@@ -141,6 +142,8 @@ def _condition_actual(case: OperationalCase, field_name: str, now: datetime) -> 
         return case.severity
     if field_name == "status_category":
         return case_status_category(case)
+    if field_name == "actionable":
+        return case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES
     if field_name == "assigned":
         return case.assignee_ref is not None
     if field_name == "min_priority_score":
@@ -203,10 +206,10 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
             "invalid_workflow_condition",
             "entity_kind condition value must be a non-empty string",
         )
-    if condition.field == "assigned" and not isinstance(condition.value, bool):
+    if condition.field in {"actionable", "assigned"} and not isinstance(condition.value, bool):
         raise WorkflowAutomationError(
             "invalid_workflow_condition",
-            "assigned condition value must be a boolean",
+            f"{condition.field} condition value must be a boolean",
         )
     return actual == condition.value
 

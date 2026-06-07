@@ -477,6 +477,88 @@ def test_simulate_case_workflow_matches_status_category_condition_without_side_e
     assert len(ledger.list_actions(business_id="artemea")) == 1
 
 
+def test_simulate_case_workflow_matches_actionable_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="actionable-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="actionable", value=True)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Actionable case needs follow-up"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 4), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "actionable", "expected": True, "actual": True, "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actionable_rule_for_terminal_case_without_ledger_write():
+    store, case = seed_case()
+    case = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana token=raw_terminal_actor_secret",
+        transitioned_at=utc(13, 5),
+    )
+    case = store.transition_case(
+        case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana token=raw_terminal_actor_secret",
+        reason="Resolved after stock check Authorization: Basic raw_terminal_reason_secret",
+        transitioned_at=utc(13, 6),
+    )
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="actionable-only-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="actionable", value=True)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Do not run for done cases"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 7), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "actionable", "expected": True, "actual": False, "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "actionable", "expected": True, "actual": False}
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+    assert "raw_terminal" not in str(result)
+
+
+@pytest.mark.parametrize("condition_value", ["true", 1, None])
+def test_simulate_case_workflow_rejects_invalid_actionable_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-actionable-condition",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="actionable", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid actionable gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(13, 8))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "actionable" in exc.value.message
+
+
 def test_simulate_case_workflow_matches_unassigned_condition_without_side_effects():
     _, case = seed_case()
     ledger = InMemoryWorkflowActionLedgerStore()
