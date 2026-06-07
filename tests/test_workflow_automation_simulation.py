@@ -477,6 +477,80 @@ def test_simulate_case_workflow_matches_status_category_condition_without_side_e
     assert len(ledger.list_actions(business_id="artemea")) == 1
 
 
+def test_simulate_case_workflow_matches_unassigned_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="assign-unowned-critical-stock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="assigned", value=False)],
+        actions=[WorkflowAction(action_key="assign_owner", params={"assignee_ref": "operator:ana"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 40), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "assigned", "expected": False, "actual": False, "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "assign_owner"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_unassigned_rule_for_assigned_case_without_leaking_owner():
+    store, case = seed_case()
+    case = store.assign_case(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        assignee_ref="operator token=raw_assignee_secret",
+        assigned_at=utc(13, 45),
+    )
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="assign-only-if-unowned",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="assigned", value=False)],
+        actions=[WorkflowAction(action_key="assign_owner", params={"assignee_ref": "operator:bruno"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 50), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "assigned", "expected": False, "actual": True, "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "assigned", "expected": False, "actual": True}
+    ]
+    assert ledger.list_actions(business_id="artemea") == []
+    assert "raw_assignee_secret" not in str(result)
+
+
+@pytest.mark.parametrize("condition_value", ["false", 0, None])
+def test_simulate_case_workflow_rejects_invalid_assigned_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-assigned-condition",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="assigned", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid assigned gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(13, 55))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "assigned" in exc.value.message
+
+
 def test_simulate_case_workflow_matches_min_case_age_minutes_condition_without_side_effects():
     _, case = seed_case()
     ledger = InMemoryWorkflowActionLedgerStore()
