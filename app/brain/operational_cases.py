@@ -8,6 +8,7 @@ surfaces are projections of this state, not owners of lifecycle.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -65,6 +66,7 @@ _CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]
     "resolved": set(),
     "dismissed": set(),
 }
+_SAFE_CONNECTOR_IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 
 
 class OperationalCaseStatusError(ValueError):
@@ -129,6 +131,23 @@ def _load_operational_case_json(value: str) -> "OperationalCase":
 def _safe_metadata(value: Any) -> dict[str, Any]:
     redacted = redact_secrets(value or {})
     return redacted if isinstance(redacted, dict) else {}
+
+
+def _safe_connector_identifier(value: str | None) -> str:
+    """Return a connector identifier safe for canonical case keys and scopes.
+
+    Connector types normally come from the registry (``tiendanube``, ``csv``,
+    etc.), but failure paths may pass caller-controlled strings. Dedupe keys and
+    entity ids are durable canonical fields, so collapse secret-shaped values
+    rather than keeping a redacted prefix plus credential context.
+    """
+
+    candidate = str(value or "unknown").strip() or "unknown"
+    redacted = redact_text(candidate) or "[REDACTED]"
+    if redacted != candidate:
+        return "[REDACTED]"
+    normalized = _SAFE_CONNECTOR_IDENTIFIER_RE.sub("_", candidate).strip("_")
+    return normalized or "unknown"
 
 
 class OperationalCaseEvidenceMetric(BaseModel):
@@ -1105,18 +1124,19 @@ def make_data_stale_detection(
 ) -> OperationalCaseDetection:
     """Build the catalog-backed data_stale case for failed/stale connector execution."""
 
+    safe_connector_type = _safe_connector_identifier(connector_type)
     return OperationalCaseDetection(
         business_id=business_id,
         case_type="data_stale",
-        dedupe_key=f"{business_id}/data_stale/connector/{connector_type}/runtime.freshness/daily",
-        title=f"Datos stale o fallidos: {connector_type}",
+        dedupe_key=f"{business_id}/data_stale/connector/{safe_connector_type}/runtime.freshness/daily",
+        title=f"Datos stale o fallidos: {safe_connector_type}",
         severity="warning",
         priority_score=80,
-        entity_scope={"kind": "connector", "id": connector_type, "label": connector_type},
-        evidence_refs=[f"evidence://{connector_type}/{run_id or 'unknown-run'}/data_stale"],
+        entity_scope={"kind": "connector", "id": safe_connector_type, "label": safe_connector_type},
+        evidence_refs=[f"evidence://{safe_connector_type}/{run_id or 'unknown-run'}/data_stale"],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/failure"] if run_id else [],
-        metadata={"connector_type": connector_type, "error_summary": error_summary},
+        metadata={"connector_type": safe_connector_type, "error_summary": error_summary},
     )
 
 
