@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -58,6 +59,31 @@ def _read_status_rows(db_path):
     ).fetchall()
     conn.close()
     return rows
+
+
+def _read_audit_events(db_path):
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    rows = conn.execute(
+        """
+        SELECT business_id, actor_ref, event_type, target_type, target_id, request_id, data
+        FROM operator_audit_events
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "business_id": business_id,
+            "actor_ref": actor_ref,
+            "event_type": event_type,
+            "target_type": target_type,
+            "target_id": target_id,
+            "request_id": request_id,
+            "data": json.loads(data or "{}"),
+        }
+        for business_id, actor_ref, event_type, target_type, target_id, request_id, data in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +226,30 @@ def test_internal_delivery_statuses_rejects_unknown_operator_role(monkeypatch, t
     assert body["business_id"] == "whatsapp"
     assert body["error"]["code"] == "forbidden"
     assert body["redaction_applied"] is True
+
+
+def test_internal_delivery_statuses_audits_authorization_denials(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    headers = {
+        **AUTH,
+        "X-Orvo-Role": "superuser",
+        "X-Request-ID": "req-delivery-status-denied",
+    }
+
+    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=headers)
+
+    assert response.status_code == 403
+    events = _read_audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "whatsapp"
+    assert event["actor_ref"] == "operator:juan"
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "whatsapp"
+    assert event["request_id"] == "req-delivery-status-denied"
+    assert event["data"]["reason"] == "unknown_operator_role"
+    assert event["data"]["permission"] == "role:known"
 
 
 def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path):
