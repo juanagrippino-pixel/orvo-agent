@@ -1,3 +1,5 @@
+import json
+import sys
 from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
@@ -7,6 +9,7 @@ from pydantic import ValidationError
 from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
+from app.brain.pipeline import PipelineConnectorError, run_enabled_connectors_daily_report_pipeline
 from app.brain.run_ledger import InMemoryRunLedger
 from app.brain.operational_cases import InMemoryOperationalCaseStore
 import scripts.run_orvo_brain_reports as reports_script
@@ -579,3 +582,97 @@ def test_force_report_csv_requires_csv_path():
                 )
             ],
         )
+
+
+def test_enabled_connectors_pipeline_failure_carries_business_id():
+    class FailingTiendanubeHTTPClient:
+        def get(self, url, headers=None, params=None):
+            raise RuntimeError("401 access_token=raw_failure_secret")
+
+    with pytest.raises(PipelineConnectorError) as raised:
+        run_enabled_connectors_daily_report_pipeline(
+            business=make_tiendanube_business(),
+            report_date=date(2026, 5, 19),
+            connector_types=["tiendanube"],
+            delivery_client=MagicMock(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            tiendanube_http_client=FailingTiendanubeHTTPClient(),
+        )
+
+    assert raised.value.business_id == "demo-shop"
+    assert raised.value.connector_type == "tiendanube"
+    assert raised.value.connector_id == "demo-tiendanube"
+
+
+def test_main_force_connector_failure_exits_with_terminal_redacted_failure(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "orvo_brain.sqlite3"
+    conn, config_store, *_ = reports_script.open_runtime(str(db_path))
+    config_store.save_business_config(make_tiendanube_business())
+    conn.close()
+
+    def failing_pipeline(**kwargs):
+        raise RuntimeError("401 Unauthorized access_token=raw_failure_secret")
+
+    monkeypatch.setattr(reports_script, "run_tiendanube_daily_report_pipeline", failing_pipeline)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_orvo_brain_reports.py",
+            "--db", str(db_path),
+            "--business-id", "demo-shop",
+            "--report-date", "2026-05-19",
+            "--dry-run",
+            "--force",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        reports_script.main()
+
+    assert raised.value.code == 1
+    out = capsys.readouterr().out
+    assert "raw_failure_secret" not in out
+    payload = json.loads(out)
+    assert payload["status"] == "failed"
+    [failure] = payload["results"]
+    assert failure["status"] == "failed"
+    assert failure["business_id"] == "demo-shop"
+    assert "[REDACTED]" in failure["error_summary"]
+    assert failure["data_stale_cases"]
+    assert all(case["case_type"] == "data_stale" for case in failure["data_stale_cases"])
+    assert any(
+        case["dedupe_key"] == "demo-shop/data_stale/connector/tiendanube/runtime.freshness/daily"
+        for case in failure["data_stale_cases"]
+    )
+
+
+def test_main_scheduled_connector_failure_exits_with_terminal_redacted_failure(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "orvo_brain.sqlite3"
+    conn, config_store, *_ = reports_script.open_runtime(str(db_path))
+    config_store.save_business_config(make_tiendanube_business())
+    conn.close()
+
+    def failing_due_reports(**kwargs):
+        raise PipelineConnectorError(
+            connector_type="tiendanube",
+            connector_id="demo-tiendanube",
+            business_id="demo-shop",
+            original_exception=RuntimeError("401 access_token=raw_failure_secret"),
+        )
+
+    monkeypatch.setattr(reports_script, "run_due_daily_reports", failing_due_reports)
+    monkeypatch.setattr(sys, "argv", ["run_orvo_brain_reports.py", "--db", str(db_path), "--dry-run"])
+
+    with pytest.raises(SystemExit) as raised:
+        reports_script.main()
+
+    assert raised.value.code == 1
+    out = capsys.readouterr().out
+    assert "raw_failure_secret" not in out
+    payload = json.loads(out)
+    assert payload["status"] == "failed"
+    [failure] = payload["results"]
+    assert failure["business_id"] == "demo-shop"
+    assert "[REDACTED]" in failure["error_summary"]
+    assert failure["data_stale_cases"] == []

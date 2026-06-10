@@ -34,11 +34,13 @@ class PipelineConnectorError(RuntimeError):
         *,
         connector_type: str,
         connector_id: str | None = None,
+        business_id: str | None = None,
         original_exception: BaseException,
     ) -> None:
         super().__init__(str(original_exception))
         self.connector_type = connector_type
         self.connector_id = connector_id
+        self.business_id = business_id
         self.original_exception = original_exception
 
 
@@ -304,6 +306,7 @@ def run_enabled_connectors_daily_report_pipeline(
             raise PipelineConnectorError(
                 connector_type=connector_type,
                 connector_id=connector.connector_id if connector is not None else None,
+                business_id=business.business_id,
                 original_exception=exc,
             ) from exc
     report = merge_daily_reports(reports, business=business)
