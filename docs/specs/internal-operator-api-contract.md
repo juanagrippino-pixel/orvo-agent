@@ -77,29 +77,33 @@ returns aggregate counts only (status, trigger type, connector/dispatch status,
 and case-opened/updated totals), not raw run IDs, artifacts, or connector
 payloads.
 
-### Cases and built-in case views
+### Cases, query fields, and built-in case views
 
 ```http
 GET /internal/brain/businesses/{business_id}/cases
-GET /internal/brain/businesses/{business_id}/cases/query-summary?jql=status%20IN%20(open,%20acknowledged)
-GET /internal/brain/businesses/{business_id}/cases/{case_id}
+GET /internal/brain/businesses/{business_id}/cases/query-summary?jql=...
 GET /internal/brain/businesses/{business_id}/cases/facets
-POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 GET /internal/brain/businesses/{business_id}/case-query-fields
 GET /internal/brain/businesses/{business_id}/case-views
 GET /internal/brain/businesses/{business_id}/case-views/{view_id}/cases
-GET /internal/brain/businesses/{business_id}/case-views/{view_id}/export
 GET /internal/brain/businesses/{business_id}/case-views/{view_id}/summary
+GET /internal/brain/businesses/{business_id}/case-views/{view_id}/export
+GET /internal/brain/businesses/{business_id}/cases/{case_id}
+POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
 
 Case queue and detail projections include WorkItem envelope fields derived from
 `OperationalCase`, including `project_key`, `issue_type`, `release_state`,
-`status_category`, and `work_item_id`. JQL-lite and case facets are read-only,
-route-scoped projections over the canonical WorkItem field registry; supported
-fields include `project`, `issue_type`, `release_state`, `status_category`,
-`assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. The
-API must reject unsupported fields/operators/values instead of translating user
-input into SQL or allowing query text to own business scope.
+`status_category`, and `work_item_id`. Case queries must use the canonical
+allowlisted query-field registry; supported fields include `project`,
+`issue_type`, `release_state`, `status_category`, `assignee_ref`,
+`priority_bracket`, `source_connector`, and `degraded`. The `case-query-fields`
+response exposes route-owned business scope metadata plus `sort_fields` and
+`facet_fields`; callers must not supply tenant/business scope inside JQL. Query
+summaries and built-in view summaries are aggregate projections only and must
+not return raw case rows. The API must reject unsupported fields/operators/values
+instead of translating user input into SQL or allowing query text to own business
+scope.
 
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
@@ -107,10 +111,7 @@ mutation with a stable error envelope and redacted audit event. Valid keys are
 reserved in the durable workflow action ledger before the case mutation, duplicate
 completed requests replay the current case with `data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope.
-`case-query-fields` is a read-only metadata projection for operator UIs and saved-view
-builders: it returns the canonical WorkItem/OperationalCase query-field registry
-and sortable fields, explicitly marks route-owned business scoping, and must not
-make `business_id` caller-queryable.
+
 Built-in case views are read-only projections over the canonical Operational Case
 store; view execution, exports, and summaries must remain route-scoped by
 `business_id`, use allowlisted JQL-lite definitions, and return redacted
