@@ -214,6 +214,8 @@ def _parse_clause(text: str) -> CaseJQLClause:
     if in_match is not None:
         field = in_match.group(1)
         raw_values = [value.strip() for value in in_match.group(2).split(",") if value.strip()]
+        if not raw_values:
+            raise OperatorAPIError("invalid_jql", "JQL IN clauses require at least one value", status_code=400)
         if len(raw_values) > _MAX_IN_VALUES:
             raise OperatorAPIError("jql_clause_limit_exceeded", "JQL IN value limit exceeded", status_code=400)
         spec = _field_spec(field)

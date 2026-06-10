@@ -68,6 +68,10 @@ def test_parse_case_jql_supports_source_connector_allowlist_filter():
         parse_case_jql("source_connector > tiendanube")
     assert unsupported_operator.value.code == "unsupported_jql_operator"
 
+    with pytest.raises(OperatorAPIError) as empty_in_list:
+        parse_case_jql("source_connector IN ()")
+    assert empty_in_list.value.code == "invalid_jql"
+
     with pytest.raises(OperatorAPIError) as sql_shape:
         parse_case_jql("source_connector = meta_ads; DROP TABLE operational_cases")
     assert sql_shape.value.code == "invalid_jql"
