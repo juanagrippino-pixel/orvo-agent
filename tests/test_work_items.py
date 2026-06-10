@@ -465,6 +465,57 @@ def test_resolution_sla_stops_at_terminal_status_when_closed_late(tmp_path):
     assert projection["resolution_sla_status"] == "breached"
 
 
+def test_case_work_item_projection_exposes_done_timestamps_for_terminal_paths(tmp_path):
+    db_path = tmp_path / "work-item-done-timestamps.sqlite3"
+    dismissed_case = _seed_case(db_path, _case_detection(run_id="run-work-item-dismissed", priority=50))
+    resolved_seed = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-work-item-resolved",
+            priority=50,
+            dedupe_suffix="stockout_risk/business/resolved-terminal/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "resolved-terminal", "label": "Resolved terminal"},
+        ),
+    )
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    dismissed = store.transition_case(
+        dismissed_case.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Duplicate alert",
+        transitioned_at=datetime(2026, 5, 24, 10, 30, tzinfo=timezone.utc),
+    )
+    acknowledged = store.transition_case(
+        resolved_seed.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=datetime(2026, 5, 24, 11, 0, tzinfo=timezone.utc),
+    )
+    resolved = store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Restocked",
+        transitioned_at=datetime(2026, 5, 24, 12, 0, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    dismissed_projection = case_work_item_projection(dismissed)
+    resolved_projection = case_work_item_projection(resolved)
+
+    assert dismissed_projection["resolved_at"] is None
+    assert dismissed_projection["dismissed_at"] == "2026-05-24T10:30:00Z"
+    assert dismissed_projection["terminal_at"] == "2026-05-24T10:30:00Z"
+    assert resolved_projection["resolved_at"] == "2026-05-24T12:00:00Z"
+    assert resolved_projection["dismissed_at"] is None
+    assert resolved_projection["terminal_at"] == "2026-05-24T12:00:00Z"
+
+
 def test_issue_type_definitions_expose_owner_visibility_and_metric_gates():
     definitions = {definition["issue_type"]: definition for definition in operational_case_issue_type_definitions()}
 
@@ -589,6 +640,20 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
         "sortable": True,
     }
+    assert fields["dismissed_at"] == {
+        "field": "dismissed_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+    }
+    assert fields["terminal_at"] == {
+        "field": "terminal_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
@@ -596,9 +661,11 @@ def test_query_field_registry_is_canonical_work_item_semantics():
     assert allowed_work_item_query_sort_fields() == {
         "acknowledgment_due_at",
         "comment_count",
+        "dismissed_at",
         "last_commented_at",
         "opened_at",
         "priority_score",
         "resolution_due_at",
+        "terminal_at",
         "updated_at",
     }

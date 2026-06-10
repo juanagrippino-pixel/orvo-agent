@@ -29,6 +29,7 @@ from app.brain.work_items import (
     case_project_key,
     case_resolution_due_at,
     case_status_category,
+    case_terminal_datetime,
     work_item_query_field_spec,
 )
 
@@ -360,6 +361,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_comment_count(case)
     if field == "last_commented_at":
         return case_last_commented_datetime(case)
+    if field == "terminal_at":
+        return case_terminal_datetime(case)
     return getattr(case, field)
 
 

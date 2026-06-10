@@ -93,6 +93,8 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("opened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("updated_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("resolved_at", "datetime", allowed_operators=_RANGE_OPERATORS),
+    WorkItemQueryFieldDefinition("dismissed_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("terminal_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("acknowledgment_due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("resolution_due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("comment_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
@@ -299,6 +301,16 @@ def case_resolution_due_at(case: OperationalCase) -> datetime:
     return case_sla_started_at(case) + timedelta(minutes=resolution_sla_minutes_for_priority_score(case.priority_score))
 
 
+def case_terminal_datetime(case: OperationalCase) -> datetime | None:
+    """Return the canonical done timestamp for resolved or dismissed WorkItems."""
+
+    if case.resolved_at is not None:
+        return case.resolved_at
+    if case.dismissed_at is not None:
+        return case.dismissed_at
+    return None
+
+
 def _acknowledgment_sla_comparison_time(case: OperationalCase, *, as_of: datetime) -> datetime:
     """Return the timestamp that stops the first-ack SLA clock.
 
@@ -370,6 +382,7 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
 
     effective_as_of = _as_utc(as_of) if as_of is not None else datetime.now(tz=timezone.utc)
     case_latest_evidence_at = latest_evidence_at(case)
+    terminal_at = case_terminal_datetime(case)
 
     return {
         "work_item_id": case_work_item_id(case),
@@ -398,6 +411,8 @@ def case_work_item_projection(case: OperationalCase, *, as_of: datetime | None =
         "acknowledgment_sla_breached": case_acknowledgment_sla_breached(case, as_of=effective_as_of),
         "acknowledgment_sla_status": case_acknowledgment_sla_status(case, as_of=effective_as_of),
         "resolved_at": _iso_utc(case.resolved_at) if case.resolved_at is not None else None,
+        "dismissed_at": _iso_utc(case.dismissed_at) if case.dismissed_at is not None else None,
+        "terminal_at": _iso_utc(terminal_at) if terminal_at is not None else None,
         "resolution_sla_minutes": resolution_sla_minutes_for_priority_score(case.priority_score),
         "resolution_due_at": _iso_utc(case_resolution_due_at(case)),
         "resolution_sla_breached": case_resolution_sla_breached(case, as_of=effective_as_of),

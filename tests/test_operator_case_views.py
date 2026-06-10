@@ -116,6 +116,9 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("comment_count >= 1 ORDER BY last_commented_at DESC").normalized == (
         "comment_count >= 1 ORDER BY last_commented_at DESC"
     )
+    assert parse_case_jql("terminal_at >= 2026-05-24T10:00:00Z ORDER BY terminal_at ASC").normalized == (
+        "terminal_at >= 2026-05-24T10:00:00+00:00 ORDER BY terminal_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
@@ -187,6 +190,87 @@ def test_internal_case_queue_filters_and_sorts_by_comment_activity(monkeypatch, 
         "2026-05-24T10:00:00Z",
         "2026-05-24T09:00:00Z",
     ]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_filters_and_sorts_by_done_timestamp(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    dismissed_seed = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-terminal-dismissed",
+            dedupe_suffix="stockout_risk/sku/TERMINAL-DISMISSED/commerce.inventory/daily",
+            priority=70,
+            title="Dismissed terminal",
+        ),
+    )
+    resolved_seed = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-terminal-resolved",
+            dedupe_suffix="stockout_risk/sku/TERMINAL-RESOLVED/commerce.inventory/daily",
+            priority=65,
+            title="Resolved terminal",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-terminal-open",
+            dedupe_suffix="stockout_risk/sku/TERMINAL-OPEN/commerce.inventory/daily",
+            priority=100,
+            title="Open should not match terminal filter",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-terminal-other", business_id="other"))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    dismissed = store.transition_case(
+        dismissed_seed.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Duplicate alert",
+        transitioned_at=_utc(10),
+    )
+    acknowledged = store.transition_case(
+        resolved_seed.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=_utc(9),
+    )
+    resolved = store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Restocked",
+        transitioned_at=_utc(11),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "terminal_at >= 2026-05-24T10:00:00Z ORDER BY terminal_at ASC"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        "terminal_at >= 2026-05-24T10:00:00+00:00 ORDER BY terminal_at ASC"
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [dismissed.case_id, resolved.case_id]
+    assert [case["work_item"]["terminal_at"] for case in body["data"]["cases"]] == [
+        "2026-05-24T10:00:00Z",
+        "2026-05-24T11:00:00Z",
+    ]
+    assert body["data"]["cases"][0]["work_item"]["dismissed_at"] == "2026-05-24T10:00:00Z"
+    assert body["data"]["cases"][1]["work_item"]["resolved_at"] == "2026-05-24T11:00:00Z"
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
