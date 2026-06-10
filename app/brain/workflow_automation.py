@@ -17,13 +17,28 @@ from typing import Any, Literal
 
 from app.brain.action_catalog import ActionDefinition as WorkflowActionDefinition
 from app.brain.action_catalog import workflow_action_registry
-from app.brain.operational_cases import OperationalCase
+from app.brain.operational_cases import ACTIONABLE_OPERATIONAL_CASE_STATUSES, OperationalCase
+from app.brain.operator_case_projections import entity_kind, is_case_degraded, source_connectors
+from app.brain.work_items import case_status_category
 from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.workflow_action_ledger import WorkflowActionLedgerStore
 
 WorkflowTrigger = Literal["case_opened", "case_updated", "manual"]
 WORKFLOW_TRIGGER_VALUES = {"case_opened", "case_updated", "manual"}
-WorkflowConditionField = Literal["status", "case_type", "severity", "min_priority_score", "degraded"]
+WorkflowConditionField = Literal[
+    "status",
+    "case_type",
+    "severity",
+    "status_category",
+    "actionable",
+    "assigned",
+    "min_priority_score",
+    "min_case_age_minutes",
+    "max_case_age_minutes",
+    "degraded",
+    "source_connector",
+    "entity_kind",
+]
 WorkflowActionMode = Literal["manual", "suggestion", "approval_required"]
 WorkflowSideEffect = Literal["none", "case_transition", "case_comment", "operator_request", "external"]
 
@@ -112,22 +127,54 @@ def make_workflow_idempotency_key(
     return f"workflow/{business_id}/{rule_id}/{case_id}/{action_key}/{digest}"
 
 
-def _is_case_degraded(case: OperationalCase) -> bool:
-    return any(snapshot.freshness_state in {"stale", "degraded", "missing"} for snapshot in case.evidence_snapshots)
+def _case_age_minutes(case: OperationalCase, now: datetime) -> int:
+    opened_at = case.opened_at.astimezone(timezone.utc)
+    age_seconds = (now.astimezone(timezone.utc) - opened_at).total_seconds()
+    return max(0, int(age_seconds // 60))
 
 
-def _condition_actual(case: OperationalCase, field_name: str) -> Any:
+def _condition_actual(case: OperationalCase, field_name: str, now: datetime) -> Any:
     if field_name == "status":
         return case.status
     if field_name == "case_type":
         return case.case_type
     if field_name == "severity":
         return case.severity
+    if field_name == "status_category":
+        return case_status_category(case)
+    if field_name == "actionable":
+        return case.status in ACTIONABLE_OPERATIONAL_CASE_STATUSES
+    if field_name == "assigned":
+        return case.assignee_ref is not None
     if field_name == "min_priority_score":
         return case.priority_score
+    if field_name == "min_case_age_minutes":
+        return _case_age_minutes(case, now)
+    if field_name == "max_case_age_minutes":
+        return _case_age_minutes(case, now)
     if field_name == "degraded":
-        return _is_case_degraded(case)
+        return is_case_degraded(case)
+    if field_name == "source_connector":
+        return source_connectors(case)
+    if field_name == "entity_kind":
+        return entity_kind(case)
     raise WorkflowAutomationError("unsupported_workflow_condition", f"unsupported workflow condition field: {field_name}")
+
+
+def _non_negative_int_condition_value(condition: CaseWorkflowCondition) -> int:
+    try:
+        condition_value = int(condition.value)
+    except (TypeError, ValueError) as exc:
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            f"{condition.field} condition value must be a non-negative integer",
+        ) from exc
+    if condition_value < 0:
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            f"{condition.field} condition value must be a non-negative integer",
+        )
+    return condition_value
 
 
 def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
@@ -139,6 +186,31 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
                 "invalid_workflow_condition",
                 "min_priority_score condition value must be an integer",
             ) from exc
+    if condition.field == "min_case_age_minutes":
+        minimum_age_minutes = _non_negative_int_condition_value(condition)
+        return int(actual) >= minimum_age_minutes
+    if condition.field == "max_case_age_minutes":
+        maximum_age_minutes = _non_negative_int_condition_value(condition)
+        return int(actual) <= maximum_age_minutes
+    if condition.field == "source_connector":
+        if not _is_non_empty_string(condition.value):
+            raise WorkflowAutomationError(
+                "invalid_workflow_condition",
+                "source_connector condition value must be a non-empty string",
+            )
+        if not isinstance(actual, list):
+            return False
+        return condition.value in actual
+    if condition.field == "entity_kind" and not _is_non_empty_string(condition.value):
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            "entity_kind condition value must be a non-empty string",
+        )
+    if condition.field in {"actionable", "assigned"} and not isinstance(condition.value, bool):
+        raise WorkflowAutomationError(
+            "invalid_workflow_condition",
+            f"{condition.field} condition value must be a boolean",
+        )
     return actual == condition.value
 
 
@@ -163,8 +235,8 @@ def _missing_required_action_params(
     return missing
 
 
-def _condition_projection(case: OperationalCase, condition: CaseWorkflowCondition) -> dict[str, Any]:
-    actual = _condition_actual(case, condition.field)
+def _condition_projection(case: OperationalCase, condition: CaseWorkflowCondition, now: datetime) -> dict[str, Any]:
+    actual = _condition_actual(case, condition.field, now)
     return redact_secrets(
         {
             "field": condition.field,
@@ -173,6 +245,50 @@ def _condition_projection(case: OperationalCase, condition: CaseWorkflowConditio
             "matched": _condition_matches(condition, actual),
         }
     )
+
+
+def _trigger_match_projection(rule_trigger: WorkflowTrigger, event_trigger: WorkflowTrigger | None) -> dict[str, Any]:
+    actual_trigger = event_trigger or rule_trigger
+    if actual_trigger not in WORKFLOW_TRIGGER_VALUES:
+        raise WorkflowAutomationError(
+            "unsupported_workflow_event_trigger",
+            f"unsupported workflow event trigger: {actual_trigger}",
+        )
+    return {
+        "expected": rule_trigger,
+        "actual": actual_trigger,
+        "matched": actual_trigger == rule_trigger,
+    }
+
+
+def _non_match_reasons(
+    trigger_match: dict[str, Any],
+    condition_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return redacted deterministic reasons why a dry-run did not match."""
+
+    reasons: list[dict[str, Any]] = []
+    if not trigger_match.get("matched"):
+        reasons.append(
+            {
+                "type": "trigger_mismatch",
+                "expected": trigger_match.get("expected"),
+                "actual": trigger_match.get("actual"),
+            }
+        )
+    for result in condition_results:
+        if result.get("matched"):
+            continue
+        reasons.append(
+            {
+                "type": "condition_mismatch",
+                "field": result.get("field"),
+                "expected": result.get("expected"),
+                "actual": result.get("actual"),
+            }
+        )
+    redacted = redact_secrets(reasons)
+    return redacted if isinstance(redacted, list) else reasons
 
 
 def _validate_rule(rule: WorkflowRule, case: OperationalCase) -> None:
@@ -369,19 +485,24 @@ def simulate_case_workflow(
     now: datetime | None = None,
     action_ledger: WorkflowActionLedgerStore | None = None,
     actor_ref: str | None = None,
+    event_trigger: WorkflowTrigger | None = None,
 ) -> dict[str, Any]:
     """Dry-run a workflow rule against one canonical Operational Case.
 
     The function validates action keys before evaluating conditions so invented
     LLM/copy-layer actions fail closed even when the rule would not match. The
     returned projection is redacted and contains deterministic idempotency/audit
-    handles, but ``side_effects_executed`` is always zero.
+    handles, but ``side_effects_executed`` is always zero. When ``event_trigger``
+    is provided, trigger mismatches are projected as non-matches and do not write
+    planned actions to the ledger.
     """
 
     _validate_rule(rule, case)
     generated_at = _now_utc() if now is None else now.astimezone(timezone.utc)
-    condition_results = [_condition_projection(case, condition) for condition in rule.conditions]
-    matched = all(result["matched"] for result in condition_results)
+    trigger_match = _trigger_match_projection(rule.trigger, event_trigger)
+    condition_results = [_condition_projection(case, condition, generated_at) for condition in rule.conditions]
+    matched = bool(trigger_match["matched"]) and all(result["matched"] for result in condition_results)
+    non_match_reasons = [] if matched else _non_match_reasons(trigger_match, condition_results)
     actions: list[dict[str, Any]] = []
     skipped_actions: list[dict[str, Any]] = []
     if matched:
@@ -397,6 +518,7 @@ def simulate_case_workflow(
             "rule_id": rule.rule_id,
             "business_id": rule.business_id,
             "trigger": rule.trigger,
+            "trigger_match": trigger_match,
             "case": {
                 "case_id": case.case_id,
                 "case_type": case.case_type,
@@ -407,6 +529,7 @@ def simulate_case_workflow(
             },
             "matched": matched,
             "conditions": condition_results,
+            "non_match_reasons": non_match_reasons,
             "actions": actions,
             "skipped_actions": skipped_actions,
             "side_effects_executed": 0,

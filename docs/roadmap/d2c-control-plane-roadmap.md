@@ -2,7 +2,7 @@
 
 Status: Working roadmap
 Date: 2026-05-24
-Last reconciled: 2026-06-06
+Last reconciled: 2026-06-10
 Related: `docs/plans/2026-05-24-d2c-control-plane-first-product.md`
 
 ## Priority rule
@@ -150,6 +150,32 @@ Exit criteria:
 - Backlog cases cite registered fulfillment metrics and redacted evidence refs only.
 - Stale Tiendanube data suppresses backlog and updates `data_stale`.
 - The Starter package can still launch without promising fulfillment monitoring.
+
+## Milestone 4B — Readiness-gated WhatsApp attention-backlog module
+
+Outcome: Orvo can safely decide whether a WhatsApp-heavy Tiendanube merchant is eligible for owner-facing `unanswered_conversations` cases, without being mistaken for an inbox, chatbot, or auto-reply product.
+
+Source-of-truth checkpoint:
+
+- `app/brain/semantics/metric_registry.py` registers `unanswered_conversations` metrics (`support.conversations.unanswered_count`, `support.conversations.oldest_unanswered_age_minutes`) with low-PII semantics and source restrictions.
+- `app/brain/operational_cases.py` includes `unanswered_conversations` in the registered owner-facing/detectable family set because it derives from `CASE_FAMILY_METRICS`.
+- The legacy report/Sheets/sample path can still emit a “Conversaciones sin responder” insight from `unanswered_conversations`; that compatibility path is not enough to sell a live WhatsApp backlog workflow. The Growth module requires the activation gates in `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md`.
+
+Deliverables:
+
+- structured inbox/API/source readiness checklist covering status, last inbound/outbound timestamps, assignment/team scope, and stable conversation refs;
+- deterministic suppression path that opens/updates `data_stale` or setup-required context when the WhatsApp/support source is missing, stale, or cannot prove unanswered state;
+- business-hours and SLA threshold policy before any owner-facing alert;
+- PII-safe evidence policy: counts, oldest age, channel/team, and safe refs only; no raw message bodies, phone numbers, customer names, addresses, or sensitive support text in WhatsApp briefs;
+- explicit resolver/team ownership and no-auto-reply/no-LLM-classification guardrails;
+- packaging copy that keeps Starter focused on Tiendanube truth and places conversation backlog monitoring in Growth only after the source gates pass.
+
+Exit criteria:
+
+- Backlog cases cite registered support-conversation metrics and redacted evidence refs only.
+- Stale or ambiguous WhatsApp/support evidence suppresses `unanswered_conversations` and updates `data_stale` or setup-required operator context.
+- Owner-facing briefs never expose raw customer-message content or imply Orvo will answer customers.
+- The first paid pilot can qualify WhatsApp pain without promising backlog monitoring until the approved source is live.
 
 ## Milestone 5 — Post-pilot revenue/ads wedge expansion
 
