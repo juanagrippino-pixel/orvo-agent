@@ -419,6 +419,16 @@ def test_registry_filters_enabled_connector_types_by_capability_and_runtime_mode
         ),
     ]
 
+    assert registry.enabled_connector_configs_for(
+        connectors,
+        capability=CAPABILITY_DAILY_REPORT,
+        runtime_mode="preview",
+    ) == (connectors[0], connectors[1], connectors[2])
+    assert registry.enabled_connector_configs_for(
+        connectors,
+        capability=CAPABILITY_DAILY_REPORT,
+        runtime_mode=RUNTIME_MODE_SCHEDULED,
+    ) == (connectors[1], connectors[2])
     assert registry.enabled_connector_types_for(
         connectors,
         capability=CAPABILITY_DAILY_REPORT,
