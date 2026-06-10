@@ -1,5 +1,56 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-10 21:36 UTC
+
+Status: **Workflow Automation approval/execution gate branch promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `cfb9d53` (`merge: integrate workflow automation gates`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully.
+- The canonical worktree initially contained an untracked Architecture Review Board deliverable, `docs/architecture-reviews/2026-06-10-review.md`, left by the prior read-only ARB cron job.
+- The report was inspected as a legitimate architecture deliverable and committed before implementation integration: `676403c` (`docs: add architecture review 2026-06-10`).
+- Canonical worktree was clean before the implementation merge.
+
+Promoted branch:
+
+- Branch: `codex/workflow-automation`
+- Head before merge: `59396a6` (`codex: add workflow actionable condition`)
+- Worker worktree: `/root/orvo-agent-worktrees/codex-workflow-automation`
+- Worker status before test: clean.
+- Worker focused suite: `pytest tests/test_workflow_automation_simulation.py -q` -> `58 passed in 1.57s`.
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- `workflow_execution_queue` now requires a catalog-defined approval-required action plus a matching approved approval request with matching ledger/business/case/action identity and `decided_at` before projecting `pending_execution`.
+- Workflow approval decisions/cancellations now require non-empty redacted actor/reason text and remain no-side-effect projections.
+- Workflow audit events are projected from canonical ledger/approval-request records with boundary redaction and `side_effects_executed: 0`.
+- Additional workflow conditions landed as deterministic service-layer checks: trigger matching, source connector, entity kind, status category, case age, freshness/degraded/actionable/assigned filters.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused canonical suite: `pytest tests/test_workflow_automation_simulation.py -q` -> `58 passed in 1.33s`.
+- Full canonical suite: `pytest -q` -> `1375 passed in 44.29s`.
+
+Review notes / risks:
+
+- Architecture alignment: merge preserves service-layer workflow logic, action-catalog reuse, ledger-backed approval gates, and no external side effects.
+- Remaining gate: workflow execution is still intentionally not implemented. Do not add a real executor until provider idempotency, execution-attempt ledger, RBAC, retry/failure semantics, and redacted external response audit are all present.
+- Branch state note: local `codex/workflow-automation` remains ahead/behind its remote due historical rebases; the promoted merge used local verified head `59396a6` and preserved the source worktree.
+
+Current next integration order:
+
+1. **Work Management workflow metadata:** rebase/review `codex/work-management` for Jira-like system reopen transitions, actor taxonomy, and WorkItem semantics now that workflow approval gating is canonical.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` against shipped safe actor refs, safe error codes, Basic-auth audit redaction, and delivery-status denial audit before merging only unique RBAC/audit hardening.
+3. **Search/Analytics field registry slices:** review `codex/search-analytics` only if it extends the canonical WorkItem/JQL/view vocabulary without duplicating endpoint-local KPI semantics.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening, not the stale broad remote branch.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into generic WorkItem/JQL/view/facet or internal-contract slices.
+
 ## Release integration update — 2026-06-07 08:23 UTC
 
 Status: **No implementation branch promoted; idempotency helper-hardening branch conflicted and was preserved**.
