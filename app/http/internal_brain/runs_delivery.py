@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from flask import request
 
 from app.brain.operator_api import *  # noqa: F401,F403
-from app.brain.operator_auth import CASE_ACTION_PERMISSION, INTERNAL_READ_PERMISSION
+from app.brain.operator_auth import INTERNAL_READ_PERMISSION, OPERATOR_AUDIT_READ_PERMISSION
 
 from .common import (
     _authorize_internal_operator,
     _internal_success,
     _internal_error,
-    _internal_principal_or_error,
     _require_internal_header_permission,
     _with_internal_stores,
 )
@@ -22,6 +19,31 @@ from contextlib import closing
 from app.brain.delivery_status import SQLiteWhatsAppDeliveryStatusStore
 from app.brain.storage import init_schema
 from .common import _internal_brain_db_path
+
+
+def _delivery_status_limit_or_error(business_id: str):
+    raw_limit = request.args.get("limit")
+    try:
+        limit = int(raw_limit) if raw_limit not in (None, "") else 50
+    except ValueError:
+        return None, _internal_error(business_id, "invalid_limit", "limit must be an integer", status_code=400)
+    if limit < 1:
+        return None, _internal_error(business_id, "invalid_limit", "limit must be positive", status_code=400)
+    return min(limit, 200), None
+
+
+def _delivery_status_success(business_id: str, *, event_business_id: str | None = None):
+    limit, limit_error = _delivery_status_limit_or_error(business_id)
+    if limit_error is not None:
+        return limit_error
+    assert limit is not None
+    with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+        init_schema(conn)
+        events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(
+            limit=limit,
+            business_id=event_business_id,
+        )
+    return _internal_success(business_id, {"events": redact_secrets(events)})
 
 
 def register_run_delivery_routes(app):
@@ -49,23 +71,27 @@ def register_run_delivery_routes(app):
             return auth_error
         permission_error = _require_internal_header_permission(
             business_id,
+            OPERATOR_AUDIT_READ_PERMISSION,
+            audit_denial=True,
+        )
+        if permission_error is not None:
+            return permission_error
+        return _delivery_status_success(business_id)
+
+
+    @app.get("/internal/brain/businesses/<business_id>/whatsapp/delivery-statuses")
+    def internal_brain_business_whatsapp_delivery_statuses(business_id: str):
+        auth_error = _authorize_internal_operator(business_id)
+        if auth_error is not None:
+            return auth_error
+        permission_error = _require_internal_header_permission(
+            business_id,
             INTERNAL_READ_PERMISSION,
             audit_denial=True,
         )
         if permission_error is not None:
             return permission_error
-        raw_limit = request.args.get("limit")
-        try:
-            limit = int(raw_limit) if raw_limit not in (None, "") else 50
-        except ValueError:
-            return _internal_error(business_id, "invalid_limit", "limit must be an integer", status_code=400)
-        if limit < 1:
-            return _internal_error(business_id, "invalid_limit", "limit must be positive", status_code=400)
-        limit = min(limit, 200)
-        with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
-            init_schema(conn)
-            events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(limit=limit)
-        return _internal_success(business_id, {"events": redact_secrets(events)})
+        return _delivery_status_success(business_id, event_business_id=business_id)
 
 
     @app.get("/internal/brain/businesses/<business_id>/runs/<run_id>")

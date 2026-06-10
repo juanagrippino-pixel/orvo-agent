@@ -116,19 +116,32 @@ class SQLiteWhatsAppDeliveryStatusStore:
             count += 1
         return count
 
-    def list_recent(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    def list_recent(self, *, limit: int = 50, business_id: str | None = None) -> list[dict[str, Any]]:
         if limit < 1:
             limit = 1
-        cursor = self._conn.execute(
-            """
-            SELECT provider, message_id, status, recipient_id, business_id,
-                   status_timestamp, created_at, data
-            FROM whatsapp_delivery_status_events
-            ORDER BY created_at DESC, message_id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
+        if business_id is None:
+            cursor = self._conn.execute(
+                """
+                SELECT provider, message_id, status, recipient_id, business_id,
+                       status_timestamp, created_at, data
+                FROM whatsapp_delivery_status_events
+                ORDER BY created_at DESC, message_id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        else:
+            cursor = self._conn.execute(
+                """
+                SELECT provider, message_id, status, recipient_id, business_id,
+                       status_timestamp, created_at, data
+                FROM whatsapp_delivery_status_events
+                WHERE business_id = ?
+                ORDER BY created_at DESC, message_id DESC
+                LIMIT ?
+                """,
+                (business_id, limit),
+            )
         rows = cursor.fetchall()
         result: list[dict[str, Any]] = []
         for row in rows:

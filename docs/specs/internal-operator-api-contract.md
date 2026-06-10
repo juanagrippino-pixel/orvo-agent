@@ -70,6 +70,23 @@ GET /internal/brain/businesses/{business_id}/runs/{run_id}
 
 Returns run status, connector outcomes, artifacts, dispatch status, cases opened/updated.
 
+### WhatsApp delivery status inspection
+
+```http
+GET /internal/brain/businesses/{business_id}/whatsapp/delivery-statuses
+GET /internal/brain/whatsapp/delivery-statuses
+```
+
+The business-scoped route is the preferred operator surface. It returns only
+delivery events whose durable `business_id` matches the route business, enforces
+standard internal read permission plus explicit `X-Orvo-Businesses` grants, and
+redacts provider error metadata at the API boundary.
+
+The global route is for cross-business internal administration only. It uses the
+legacy envelope `business_id = "whatsapp"`, but must require an admin-only
+permission before returning unscoped recent events; viewer/operator callers
+should use the business route instead.
+
 ### Cases
 
 ```http
@@ -201,6 +218,7 @@ Before exposing beyond local/dev:
 - internal envelopes and durable audit events redact secret-shaped `X-Request-ID` values;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
+- WhatsApp delivery-status inspection prefers the business-scoped route, filters by durable event `business_id`, rejects excluded business grants, and keeps the global route admin-only;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
 - case action rejects unknown action keys;
 - case action catalog is authenticated, tenant-scoped, redacted, and marks disabled catalog actions as not executable;

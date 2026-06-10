@@ -200,6 +200,40 @@ def test_store_redacts_token_like_strings_in_failed_error_metadata(store):
     assert "[REDACTED]" in serialized
 
 
+def test_store_list_recent_can_filter_by_business_id(store):
+    store.record_event(
+        WhatsAppDeliveryStatusEvent(
+            provider="meta_cloud",
+            message_id="wamid.artemea",
+            status="delivered",
+            business_id="artemea",
+            raw={},
+        )
+    )
+    store.record_event(
+        WhatsAppDeliveryStatusEvent(
+            provider="meta_cloud",
+            message_id="wamid.other",
+            status="read",
+            business_id="other-shop",
+            raw={},
+        )
+    )
+    store.record_event(
+        WhatsAppDeliveryStatusEvent(
+            provider="meta_cloud",
+            message_id="wamid.legacy-unscoped",
+            status="sent",
+            raw={},
+        )
+    )
+
+    recent = store.list_recent(limit=10, business_id="artemea")
+
+    assert [event["message_id"] for event in recent] == ["wamid.artemea"]
+    assert recent[0]["business_id"] == "artemea"
+
+
 def test_store_list_recent_orders_newest_first_and_respects_limit(store):
     for i in range(5):
         store.record_event(

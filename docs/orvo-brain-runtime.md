@@ -88,16 +88,19 @@ Orvo stores status events in the append-only SQLite table
 are deduplicated by `(provider, message_id, status, timestamp)`. Failed-status
 metadata is redacted before it is stored or exposed.
 
-Inspect recent delivery statuses through the internal operator API:
+Inspect recent delivery statuses through the tenant-scoped internal operator API:
 
 ```bash
 curl -sS \
   -H "Authorization: Bearer $ORVO_INTERNAL_OPERATOR_TOKEN" \
-  "https://<your-orvo-host>/internal/brain/whatsapp/delivery-statuses?limit=50"
+  -H "X-Orvo-Businesses: artemea" \
+  "https://<your-orvo-host>/internal/brain/businesses/artemea/whatsapp/delivery-statuses?limit=50"
 ```
 
 Use this endpoint to distinguish `accepted by Meta` from actually `sent`,
-`delivered`, `read`, or `failed`.
+`delivered`, `read`, or `failed`. The global
+`/internal/brain/whatsapp/delivery-statuses` inspection route is reserved for
+admin-only cross-business operations.
 
 ### Google Sheets (one of two auth modes)
 
@@ -624,11 +627,12 @@ Fix / diagnosis:
 1. Confirm the recipient opened a 24h conversation window, or use an approved
    template message for business-initiated conversations.
 2. Confirm the Meta app is subscribed to the WhatsApp `messages` webhook field.
-3. Query recent status events:
+3. Query recent tenant-scoped status events:
    ```bash
    curl -sS \
      -H "Authorization: Bearer $ORVO_INTERNAL_OPERATOR_TOKEN" \
-     "https://<your-orvo-host>/internal/brain/whatsapp/delivery-statuses?limit=20"
+     -H "X-Orvo-Businesses: artemea" \
+     "https://<your-orvo-host>/internal/brain/businesses/artemea/whatsapp/delivery-statuses?limit=20"
    ```
 4. If no status events appear, verify Meta's callback URL, `VERIFY_TOKEN`, and
    optional `WHATSAPP_APP_SECRET` signature validation.
