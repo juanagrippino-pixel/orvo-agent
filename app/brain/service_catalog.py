@@ -254,6 +254,7 @@ def default_service_catalog() -> ServiceCatalog:
                 dependencies=("connector_registry", "compiled_runtime", "run_ledger"),
                 runtime_surfaces=("developer_platform",),
                 observability_signals=(
+                    "operation_ref",
                     "business_id",
                     "connector_id",
                     "connector_type",

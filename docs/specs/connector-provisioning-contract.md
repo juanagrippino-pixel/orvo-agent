@@ -40,8 +40,10 @@ it remains intentionally local and deterministic:
 
 `compile_connector_provisioning_plan(...)` returns a `ConnectorProvisioningPlan`
 with schema version `2026-06-07.connector-provisioning.v1`, operation
-`connector.provision`, a boolean `ok`, an explicit `next_step`, a redacted
-connector manifest, validation issues, and a redacted audit event.
+`connector.provision`, a deterministic `operation_ref`, a boolean `ok`, an
+explicit `next_step`, a redacted connector manifest, validation issues, and a
+redacted audit event that carries the same `operation_ref` for future broker,
+ledger, or status polling correlation.
 
 ## Validation rules
 
@@ -57,7 +59,9 @@ The provisioning compiler MUST:
 6. include registry warnings such as `legacy_inline_secret` in the issue stream;
 7. treat any issue as blocking for self-service provisioning until the request is
    corrected;
-8. never echo raw secret values in the plan, public manifest, validation issues,
+8. compute a stable `connprov_<hash>` `operation_ref` from redacted provisioning
+   intent so repeated validation can be correlated without storing raw secrets;
+9. never echo raw secret values in the plan, public manifest, validation issues,
    or audit event.
 
 ## Redaction and secret boundary
@@ -97,8 +101,10 @@ WhatsApp reports as source of truth.
 ## Acceptance checks
 
 - A valid Tiendanube provisioning request with `store_id` and
-  `secret_refs.access_token = secret://...` returns `ok=true` and
-  `next_step=ready_for_config_save`.
+  `secret_refs.access_token = secret://...` returns `ok=true`, a stable
+  `connprov_...` `operation_ref`, and `next_step=ready_for_config_save`.
+- The same redacted provisioning intent yields the same `operation_ref`; changed
+  public config yields a different one.
 - Raw inline credential params and non-reference secret values are rejected and
   redacted.
 - Missing required params and strict unknown fields are reported by reusing the

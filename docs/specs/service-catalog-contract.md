@@ -57,7 +57,7 @@ The initial catalog covers the current Orvo Brain control-plane spine:
 5. `operational_cases` — WorkItem/OperationalCase lifecycle source of truth.
 6. `operator_api` — internal operator API projection layer.
 7. `gateway_policy` — shared auth, permission, rate-limit, idempotency, request/trace provenance, schema-versioned gateway telemetry, and audit-decision conventions for internal edges. Its catalog entry points at `docs/operability/gateway-policy-telemetry-runbook.md` so operators and reviewers can inspect policy decisions without exposing raw idempotency keys or credentials.
-8. `connector_provisioning` — side-effect-free self-service connector provisioning validation that reuses the connector registry, enforces `secret://` references, and emits redacted plans for developer/operator surfaces.
+8. `connector_provisioning` — side-effect-free self-service connector provisioning validation that reuses the connector registry, enforces `secret://` references, emits stable `operation_ref` correlation IDs, and emits redacted plans for developer/operator surfaces.
 9. `delivery_dispatch` — dispatch/idempotency boundary for report and owner brief delivery.
 10. `edge_developer_platform` — in-repo platform conventions and catalog contract.
 

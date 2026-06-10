@@ -8,6 +8,8 @@ secrets become durable control-plane data.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -84,6 +86,7 @@ class ConnectorProvisioningPlan(BaseModel):
 
     schema_version: str = CONNECTOR_PROVISIONING_SCHEMA_VERSION
     operation: ProvisioningOperation = "connector.provision"
+    operation_ref: str
     ok: bool
     next_step: ProvisioningNextStep
     business_id: str
@@ -97,6 +100,7 @@ class ConnectorProvisioningPlan(BaseModel):
         return {
             "schema_version": self.schema_version,
             "operation": self.operation,
+            "operation_ref": self.operation_ref,
             "ok": self.ok,
             "next_step": self.next_step,
             "business_id": self.business_id,
@@ -108,6 +112,25 @@ class ConnectorProvisioningPlan(BaseModel):
 
 def _redact_secret_refs(secret_refs: Mapping[str, str]) -> dict[str, Any]:
     return redact_secrets({"secret_refs": dict(secret_refs)}).get("secret_refs", {})
+
+
+def _provisioning_operation_ref(request: ConnectorProvisioningRequest) -> str:
+    """Return a stable, non-secret reference for this provisioning intent."""
+
+    payload = {
+        "schema_version": CONNECTOR_PROVISIONING_SCHEMA_VERSION,
+        "operation": "connector.provision",
+        "business_id": _safe_text(request.business_id),
+        "connector_id": _safe_text(request.connector_id),
+        "connector_type": _safe_text(request.connector_type),
+        "label": _safe_label(request.label),
+        "public_params": redact_secrets(request.params),
+        "secret_refs": _redact_secret_refs(request.secret_refs),
+        "strict": request.strict,
+    }
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+    return f"connprov_{digest}"
 
 
 def _safe_actor_id(actor_id: str) -> str:
@@ -211,8 +234,10 @@ def compile_connector_provisioning_plan(
     """
 
     connector_registry = registry or default_connector_registry()
+    operation_ref = _provisioning_operation_ref(request)
     audit_event = {
         "operation": "connector.provision.validate",
+        "operation_ref": operation_ref,
         "business_id": _safe_text(request.business_id),
         "connector_id": _safe_text(request.connector_id),
         "connector_type": _safe_text(request.connector_type),
@@ -229,6 +254,7 @@ def compile_connector_provisioning_plan(
             or "unknown connector type [REDACTED]",
         )
         return ConnectorProvisioningPlan(
+            operation_ref=operation_ref,
             ok=False,
             next_step="fix_validation_issues",
             business_id=_safe_text(request.business_id),
@@ -252,6 +278,7 @@ def compile_connector_provisioning_plan(
 
     ok = not issues
     return ConnectorProvisioningPlan(
+        operation_ref=operation_ref,
         ok=ok,
         next_step="ready_for_config_save" if ok else "fix_validation_issues",
         business_id=_safe_text(request.business_id),
