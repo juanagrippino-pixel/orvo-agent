@@ -17,6 +17,7 @@ from app.brain.security.redaction import redact_secrets
 from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerRecord,
     WorkflowActionLedgerStore,
+    WorkflowApprovalRequest,
 )
 
 
@@ -24,11 +25,45 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _is_pending_execution(record: WorkflowActionLedgerRecord) -> bool:
+def _approved_requests_by_id(
+    ledger: WorkflowActionLedgerStore,
+    *,
+    business_id: str,
+) -> dict[str, WorkflowApprovalRequest]:
+    return {
+        request.approval_request_id: request
+        for request in ledger.list_approval_requests(business_id=business_id)
+        if request.status == "approved"
+    }
+
+
+def _matches_approved_request(
+    record: WorkflowActionLedgerRecord,
+    request: WorkflowApprovalRequest | None,
+) -> bool:
     return (
-        record.action_key in ACTION_CATALOG
+        request is not None
+        and request.approval_request_id == record.approval_request_id
+        and request.ledger_id == record.ledger_id
+        and request.business_id == record.business_id
+        and request.case_id == record.case_id
+        and request.action_key == record.action_key
+        and request.status == "approved"
+    )
+
+
+def _is_pending_execution(
+    record: WorkflowActionLedgerRecord,
+    approved_requests_by_id: dict[str, WorkflowApprovalRequest],
+) -> bool:
+    definition = ACTION_CATALOG.get(record.action_key)
+    request = approved_requests_by_id.get(record.approval_request_id or "")
+    return (
+        definition is not None
+        and definition.requires_approval
         and record.approval_state == "approved"
         and record.execution_state == "pending_execution"
+        and _matches_approved_request(record, request)
     )
 
 
@@ -68,17 +103,19 @@ def list_workflow_execution_queue(
 ) -> dict[str, Any]:
     """Project approved actions waiting for a future executor.
 
-    Only records scoped to ``business_id`` with a registered action key,
-    ``approval_state=approved``, and ``execution_state=pending_execution`` are
-    returned. The projection is ordered deterministically by approval/update time
-    and ledger id, redacted at the service boundary, and explicitly declares
-    that execution is disabled with zero side effects.
+    Only records scoped to ``business_id`` with a registered approval-required
+    action key, ``approval_state=approved``, ``execution_state=pending_execution``,
+    and a matching approved approval request are returned. The projection is
+    ordered deterministically by approval/update time and ledger id, redacted at
+    the service boundary, and explicitly declares that execution is disabled
+    with zero side effects.
     """
 
+    approved_requests = _approved_requests_by_id(ledger, business_id=business_id)
     records = [
         record
         for record in ledger.list_actions(business_id=business_id)
-        if _is_pending_execution(record)
+        if _is_pending_execution(record, approved_requests)
     ]
     records.sort(key=lambda record: (record.updated_at, record.ledger_id))
     selected = records if limit is None else records[: max(limit, 0)]

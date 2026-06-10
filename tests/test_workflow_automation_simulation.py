@@ -781,6 +781,114 @@ def test_workflow_approval_queue_rejects_mismatched_ledger_backed_request_metada
     assert "pause_promotion" not in str(queue)
 
 
+def test_workflow_execution_queue_requires_matching_approved_approval_request_metadata():
+    valid_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/valid",
+        business_id="artemea",
+        case_id="case-valid",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution-queue/valid",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={
+            "target": "supplier-a",
+            "reason": "Approved",
+            "Authorization": "Basic raw_valid_queue_secret",
+        },
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/valid",
+        created_at=utc(20),
+        updated_at=utc(20, 10),
+    )
+    forged_without_decision = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/forged-pending",
+        business_id="artemea",
+        case_id="case-forged-pending",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution-queue/forged-pending",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-b", "reason": "Forged pending"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/forged-pending",
+        created_at=utc(20, 1),
+        updated_at=utc(20, 11),
+    )
+    forged_mismatched_request = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/forged-mismatch",
+        business_id="artemea",
+        case_id="case-forged-mismatch",
+        action_key="pause_promotion",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution-queue/forged-mismatch",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "campaign-a", "reason": "Forged mismatch"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/forged-mismatch",
+        created_at=utc(20, 2),
+        updated_at=utc(20, 12),
+    )
+    approved_valid_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/valid",
+        ledger_id=valid_record.ledger_id,
+        business_id="artemea",
+        case_id="case-valid",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(20),
+        decided_at=utc(20, 9),
+        decision_actor_ref="manager",
+        decision_reason="Approved with Authorization: Basic raw_decision_secret",
+    )
+    still_pending_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/forged-pending",
+        ledger_id=forged_without_decision.ledger_id,
+        business_id="artemea",
+        case_id="case-forged-pending",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="pending",
+        requested_at=utc(20, 1),
+    )
+    mismatched_approved_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/forged-mismatch",
+        ledger_id=forged_mismatched_request.ledger_id,
+        business_id="artemea",
+        case_id="case-other-than-record",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(20, 2),
+        decided_at=utc(20, 8),
+        decision_actor_ref="manager",
+        decision_reason="Approved different action/case",
+    )
+
+    class ForgedLedger(InMemoryWorkflowActionLedgerStore):
+        def list_actions(self, *, business_id: str):
+            return [valid_record, forged_without_decision, forged_mismatched_request]
+
+        def list_approval_requests(self, *, business_id: str):
+            return [approved_valid_request, still_pending_request, mismatched_approved_request]
+
+    queue = list_workflow_execution_queue(ForgedLedger(), business_id="artemea")
+
+    assert queue["total"] == 1
+    assert queue["returned"] == 1
+    assert [action["case_id"] for action in queue["actions"]] == ["case-valid"]
+    assert queue["actions"][0]["approval_request_id"] == approved_valid_request.approval_request_id
+    assert queue["actions"][0]["params"]["Authorization"] == "[REDACTED]"
+    assert "case-forged" not in str(queue)
+    assert "raw_" not in str(queue)
+
+
 @pytest.mark.parametrize(
     "store_factory",
     [
