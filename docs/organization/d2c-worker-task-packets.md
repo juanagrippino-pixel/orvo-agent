@@ -653,6 +653,45 @@ Acceptance:
 - metric values and aliases remain in `MetricRegistry`, not the WorkItem field registry;
 - SQL-looking input is still rejected before storage, route/context still owns business scope, and no writable saved views or tenant-custom fields are introduced.
 
+## Packet X — WhatsApp attention-backlog truth gates
+
+Goal: turn the registered `unanswered_conversations` case family into a readiness-gated Growth workflow for WhatsApp-heavy Tiendanube merchants without becoming an inbox, chatbot, or auto-reply feature.
+
+Dependency: dispatch after current metric registry, case evidence snapshot, data-stale suppression, and operator brief redaction tests are green. Do not combine with WhatsApp message sending, chatbot automation, broadcast/campaign tooling, helpdesk-ticket sync, or generic conversation-AI classification.
+
+Current source-of-truth check:
+
+- `app/brain/semantics/metric_registry.py` includes `unanswered_conversations` in `CASE_FAMILY_METRICS` with `support.conversations.unanswered_count` and `support.conversations.oldest_unanswered_age_minutes`.
+- `app/brain/operational_cases.py` includes the `unanswered_conversations` case type and derives owner-facing/detectable families from `CASE_FAMILY_METRICS`.
+- `app/brain/insights.py` still supports the legacy report insight from `unanswered_conversations`; that is compatibility behavior, not proof that a live WhatsApp/support connector is ready for owner-facing backlog cases.
+- `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md` packages this as a Growth/readiness-gated module, not a default Starter promise.
+
+Read:
+
+- `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md`
+- `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/operational-case-engine-contract.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
+- `docs/roadmap/d2c-control-plane-roadmap.md`
+
+Likely files:
+
+- WhatsApp/support connector or normalizer code only if a structured source can provide status and timestamps deterministically
+- `app/brain/operational_cases.py` only for source/freshness/suppression behavior, not lifecycle rewrites
+- `tests/test_brain_operational_cases.py`
+- focused connector fixture tests with synthetic/redacted conversation refs
+- owner-brief/operator API projection tests if the case becomes visible in briefs
+
+Acceptance:
+
+- cases open only when a structured source provides unanswered count, oldest unanswered age, channel/team scope, stable conversation refs, freshness, business-hours/SLA policy, and resolver/team ownership;
+- stale/missing/ambiguous WhatsApp/support evidence suppresses owner-facing backlog cases and opens/updates `data_stale` or setup-required operator context;
+- evidence snapshots and briefs use registered support-conversation metrics and redacted refs only; no raw message bodies, phone numbers, customer names, addresses, or sensitive support text are persisted or projected;
+- no WhatsApp replies, macros, coupons, delivery promises, refunds, ticket mutations, broadcast/campaign sends, or other customer-facing side effects are introduced;
+- no LLM decides whether a conversation is unanswered, urgent, angry, or sales-related unless deterministic source labels already exist and are evidenced;
+- package/demo copy remains Growth/readiness-gated and never describes Orvo as a WhatsApp inbox, chatbot, or helpdesk replacement.
+
 ## Packet output format
 
 Workers must report:
