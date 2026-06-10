@@ -288,6 +288,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
 
 
 def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_failure():
+    from app.brain.pipeline import PipelineAllConnectorsFailedError
     from app.brain.runner import run_due_daily_reports
 
     class FailingExecute:
@@ -307,10 +308,11 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
             return FailingSpreadsheets()
 
     delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.stale", error=None)
     run_ledger = InMemoryRunLedger()
     case_store = InMemoryOperationalCaseStore()
 
-    with pytest.raises(RuntimeError, match="raw_failure_secret"):
+    with pytest.raises(PipelineAllConnectorsFailedError) as raised:
         run_due_daily_reports(
             config_store=make_store(),
             idempotency_store=InMemoryIdempotencyStore(),
@@ -320,6 +322,8 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
             run_ledger=run_ledger,
             case_store=case_store,
         )
+    assert raised.value.business_id == "artemea"
+    assert "raw_failure_secret" not in str(raised.value)
 
     [run] = run_ledger.list_runs(business_id="artemea")
     assert run.status == "failed"
@@ -371,15 +375,16 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
         },
     }
     assert run.artifacts == []
-    assert run.dispatch_outcomes == []
+    assert [(out.channel, out.status, out.metadata.get("message_type")) for out in run.dispatch_outcomes] == [
+        ("whatsapp", "sent", "owner_case_brief")
+    ]
     assert run.summary_metadata["schedule_id"] == "artemea-daily-report"
     assert run.summary_metadata["report_type"] == "daily"
     assert "raw_failure_secret" not in run.model_dump_json()
-    delivery.send_text.assert_not_called()
+    delivery.send_text.assert_called_once()
 
 
 def test_run_due_daily_reports_records_exact_failed_connector_for_multi_connector_scheduled_failure(tmp_path):
-    from app.brain.pipeline import PipelineConnectorError
     from app.brain.runner import run_due_daily_reports
 
     store = InMemoryConfigStore()
@@ -416,43 +421,47 @@ def test_run_due_daily_reports_records_exact_failed_connector_for_multi_connecto
         )
     )
     delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="wamid.daily", error=None),
+        DeliveryResult(success=True, message_id="wamid.brief", error=None),
+    ]
     run_ledger = InMemoryRunLedger()
     case_store = InMemoryOperationalCaseStore()
 
-    with pytest.raises(PipelineConnectorError) as raised:
-        run_due_daily_reports(
-            config_store=store,
-            idempotency_store=InMemoryIdempotencyStore(),
-            delivery_client=delivery,
-            sheets_service=fake_sheets_service(),
-            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
-            run_ledger=run_ledger,
-            case_store=case_store,
-        )
-    assert raised.value.connector_type == "csv"
-    assert raised.value.connector_id == "csv-orders"
-    assert isinstance(raised.value.original_exception, FileNotFoundError)
+    [result] = run_due_daily_reports(
+        config_store=store,
+        idempotency_store=InMemoryIdempotencyStore(),
+        delivery_client=delivery,
+        sheets_service=fake_sheets_service(),
+        now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+        run_ledger=run_ledger,
+        case_store=case_store,
+    )
+    assert result.pipeline.dispatch.status == "sent"
+    assert result.pipeline.case_brief_dispatch is not None
+    assert result.pipeline.case_brief_dispatch.status == "sent"
 
     [run] = run_ledger.list_runs(business_id="artemea-multi-source")
-    assert run.status == "failed"
+    assert run.status == "partial"
     assert [(out.connector_id, out.connector_type, out.status) for out in run.connector_outcomes] == [
-        ("csv-orders", "csv", "failed")
+        ("sheet", "google_sheets", "succeeded"),
+        ("csv-orders", "csv", "failed"),
     ]
-    failed_connector = run.connector_outcomes[0]
+    failed_connector = run.connector_outcomes[1]
     assert failed_connector.error_summary is not None
     assert "missing.csv" in failed_connector.error_summary
     assert failed_connector.metadata["label"] == "CSV Orders"
     assert failed_connector.metadata["failure_stage"] == "pre_dispatch"
-    assert run.artifacts == []
-    assert run.dispatch_outcomes == []
+    assert run.artifacts[0].artifact_type == "daily_report"
+    assert [(out.channel, out.status, out.metadata.get("message_type")) for out in run.dispatch_outcomes] == [
+        ("whatsapp", "sent", "daily_report"),
+        ("whatsapp", "sent", "owner_case_brief"),
+    ]
     assert run.summary_metadata["schedule_id"] == "artemea-multi-source-daily-report"
     assert run.summary_metadata["report_type"] == "daily"
-    assert run.summary_metadata["cases_opened"] == 2
-    assert {case.entity_scope["id"] for case in case_store.list_cases(business_id="artemea-multi-source")} == {
-        "google_sheets",
-        "csv",
-    }
-    delivery.send_text.assert_not_called()
+    assert run.summary_metadata["partial_connector_failures"] == 1
+    assert "csv" in {case.entity_scope["id"] for case in case_store.list_cases(business_id="artemea-multi-source")}
+    assert delivery.send_text.call_count == 2
 
 
 def test_run_due_daily_reports_persists_operational_cases_and_links_ledger_artifact():

@@ -358,3 +358,53 @@ def test_connector_specific_pipeline_wrappers_reload_registry_factory_metadata(m
     assert captured["store_id"] == "123"
     assert captured["access_token"] == "tn_test_token"
     assert captured["include_stock"] is True
+
+
+def test_connector_pipeline_wraps_auth_failure_with_redacted_context(monkeypatch):
+    import pytest
+    import app.brain.pipeline as pipeline
+    from app.brain.adapters.tiendanube import TiendanubeAuthError
+    from app.brain.pipeline import PipelineConnectorError, PipelineConnectorFailure
+
+    def failing_tiendanube_report_factory(**kwargs):
+        raise TiendanubeAuthError("Tiendanube auth failed: HTTP 401 access_token=raw_tn_secret")
+
+    monkeypatch.setattr(
+        "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube",
+        failing_tiendanube_report_factory,
+    )
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491112345678",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="TN Artemea",
+                params={"store_id": "123", "access_token": "tn_test_token", "include_stock": True},
+            )
+        ],
+    )
+
+    with pytest.raises(PipelineConnectorError) as raised:
+        pipeline.run_tiendanube_daily_report_pipeline(
+            business=business,
+            report_date=date(2026, 5, 19),
+            delivery_client=MagicMock(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            http_client=object(),
+        )
+
+    error = raised.value
+    assert error.business_id == "artemea"
+    assert error.connector_type == "tiendanube"
+    assert error.connector_id == "tn-main"
+    assert "raw_tn_secret" not in str(error)
+    failure = PipelineConnectorFailure.from_error(error)
+    assert failure.connector_type == "tiendanube"
+    assert failure.connector_id == "tn-main"
+    assert "TiendanubeAuthError" in failure.error_summary
+    assert "raw_tn_secret" not in failure.model_dump_json()

@@ -30,7 +30,10 @@ class PipelineConnectorError(RuntimeError):
         business_id: str | None = None,
         original_exception: BaseException,
     ) -> None:
-        super().__init__(str(original_exception))
+        super().__init__(
+            redact_text(f"{type(original_exception).__name__}: {original_exception}")
+            or "[REDACTED]"
+        )
         self.connector_type = connector_type
         self.connector_id = connector_id
         self.business_id = business_id
@@ -59,6 +62,26 @@ class PipelineConnectorFailure(BaseModel):
             business_id=error.business_id,
             error_summary=f"{type(original).__name__}: {original}",
         )
+
+
+class PipelineAllConnectorsFailedError(RuntimeError):
+    """Raised after every attempted data connector failed without usable metrics."""
+
+    def __init__(
+        self,
+        *,
+        business_id: str,
+        connector_failures: list[PipelineConnectorFailure],
+    ) -> None:
+        summary = "; ".join(
+            f"{failure.connector_type}: {failure.error_summary}" for failure in connector_failures
+        )
+        super().__init__(
+            redact_text(f"All enabled data connectors failed for {business_id}: {summary}")
+            or "All enabled data connectors failed"
+        )
+        self.business_id = business_id
+        self.connector_failures = connector_failures
 
 
 class PipelineResult(BaseModel):
@@ -97,17 +120,28 @@ def run_connector_daily_report_pipeline(
     factory kwargs and callable loading come from ``ConnectorSpec`` metadata.
     """
 
-    report = _build_daily_report_for_connector_type(
-        connector_type=connector_type,
-        business=business,
-        report_date=report_date,
-        sheets_service=sheets_service,
-        tiendanube_http_client=tiendanube_http_client,
-        mercadolibre_http_client=mercadolibre_http_client,
-        meta_ads_http_client=meta_ads_http_client,
-        woocommerce_http_client=woocommerce_http_client,
-        secret_resolver=secret_resolver,
-    )
+    connector = _find_enabled_connector_for_type(business, connector_type)
+    try:
+        report = _build_daily_report_for_connector_type(
+            connector_type=connector_type,
+            business=business,
+            report_date=report_date,
+            sheets_service=sheets_service,
+            tiendanube_http_client=tiendanube_http_client,
+            mercadolibre_http_client=mercadolibre_http_client,
+            meta_ads_http_client=meta_ads_http_client,
+            woocommerce_http_client=woocommerce_http_client,
+            secret_resolver=secret_resolver,
+        )
+    except (ValueError, TypeError):
+        raise
+    except Exception as exc:
+        raise PipelineConnectorError(
+            connector_type=connector_type,
+            connector_id=connector.connector_id if connector is not None else None,
+            business_id=business.business_id,
+            original_exception=exc,
+        ) from exc
     dispatch = dispatch_daily_report(
         report=report,
         business=business,
@@ -304,16 +338,16 @@ def run_enabled_connectors_daily_report_pipeline(
     woocommerce_http_client=None,
     secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
-    """Build enabled connector reports, allowing Meta Ads failures to degrade to partial value.
+    """Build enabled connector reports while preserving typed failure evidence.
 
-    Meta Ads is a non-primary pilot signal for D2C operators. A Meta HTTP/API
-    failure must not suppress a usable Tiendanube report; the failure is carried
-    forward as audited partial connector evidence for the run ledger/case engine.
-    Other connector failures keep the existing fail-fast behavior.
+    Any connector auth/HTTP/runtime failure is carried forward as audited partial
+    connector evidence for the run ledger/case engine. Successful connectors may
+    still produce a report. If every attempted source fails, the pipeline raises a
+    redacted aggregate error with one failure record per connector instead of
+    inventing metrics or dispatching an empty report.
     """
 
     reports: list[DailyReport] = []
-    suppressed_meta_ads_errors: list[PipelineConnectorError] = []
     partial_connector_failures: list[PipelineConnectorFailure] = []
     for connector_type in connector_types:
         connector = _find_enabled_connector_for_type(business, connector_type)
@@ -332,11 +366,8 @@ def run_enabled_connectors_daily_report_pipeline(
                 )
             )
         except PipelineConnectorError as exc:
-            if connector_type == "meta_ads":
-                suppressed_meta_ads_errors.append(exc)
-                partial_connector_failures.append(PipelineConnectorFailure.from_error(exc))
-                continue
-            raise
+            partial_connector_failures.append(PipelineConnectorFailure.from_error(exc))
+            continue
         except SecretResolutionError:
             raise
         except Exception as exc:
@@ -346,13 +377,13 @@ def run_enabled_connectors_daily_report_pipeline(
                 business_id=business.business_id,
                 original_exception=exc,
             )
-            if connector_type == "meta_ads":
-                suppressed_meta_ads_errors.append(connector_error)
-                partial_connector_failures.append(PipelineConnectorFailure.from_error(connector_error))
-                continue
-            raise connector_error from exc
-    if not reports and suppressed_meta_ads_errors:
-        raise suppressed_meta_ads_errors[0]
+            partial_connector_failures.append(PipelineConnectorFailure.from_error(connector_error))
+            continue
+    if not reports and partial_connector_failures:
+        raise PipelineAllConnectorsFailedError(
+            business_id=business.business_id,
+            connector_failures=partial_connector_failures,
+        )
     report = merge_daily_reports(reports, business=business)
     dispatch = dispatch_daily_report(
         report=report,
