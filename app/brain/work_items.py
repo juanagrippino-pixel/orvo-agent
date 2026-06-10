@@ -39,6 +39,22 @@ _EQUALITY_OPERATORS = frozenset({"=", "!=", "IN"})
 _COMPARISON_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
 _BOOLEAN_OPERATORS = frozenset({"=", "!="})
 _CASE_QUERY_SORT_FIELDS = frozenset({"priority_score", "opened_at", "updated_at"})
+_CASE_QUERY_FACET_FIELDS = frozenset(
+    {
+        "assignee_ref",
+        "assigned",
+        "case_type",
+        "degraded",
+        "entity.kind",
+        "freshness_state",
+        "priority_bracket",
+        "severity",
+        "source_connector",
+        "status",
+        "status_category",
+    }
+)
+
 @dataclass(frozen=True)
 class WorkItemPriorityDefinition:
     bracket: str
@@ -283,6 +299,7 @@ def _query_field_definition(
         "allowed_values": sorted(allowed_values) if allowed_values is not None else None,
         "operators": _ordered_operators(operators),
         "sortable": field in _CASE_QUERY_SORT_FIELDS,
+        "facetable": field in _CASE_QUERY_FACET_FIELDS,
     }
 
 
@@ -359,6 +376,12 @@ def allowed_case_query_field_names() -> set[str]:
 
 def allowed_case_query_sort_fields() -> set[str]:
     return set(_CASE_QUERY_SORT_FIELDS)
+
+
+def allowed_case_query_facet_fields() -> set[str]:
+    """Return canonical fields safe for aggregate dashboard facets."""
+
+    return set(_CASE_QUERY_FACET_FIELDS)
 
 
 def classify_work_item_priority_bracket(priority_score: int) -> str:
