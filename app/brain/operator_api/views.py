@@ -49,6 +49,7 @@ def describe_case_query_fields() -> dict[str, Any]:
     """
 
     from app.brain.work_items import (
+        allowed_case_query_facet_fields,
         allowed_case_query_sort_fields,
         operational_case_query_field_definitions,
     )
@@ -61,6 +62,7 @@ def describe_case_query_fields() -> dict[str, Any]:
         },
         "fields": operational_case_query_field_definitions(),
         "sort_fields": sorted(allowed_case_query_sort_fields()),
+        "facet_fields": sorted(allowed_case_query_facet_fields()),
     }
 
 

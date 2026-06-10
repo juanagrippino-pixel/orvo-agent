@@ -906,10 +906,25 @@ def test_internal_case_query_fields_exposes_canonical_registry_without_business_
     fields = {field["field"]: field for field in body["data"]["fields"]}
     assert "business_id" not in fields
     assert fields["status"]["allowed_values"] == ["acknowledged", "dismissed", "in_progress", "open", "resolved"]
+    assert fields["status"]["facetable"] is True
     assert fields["priority_score"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
     assert fields["priority_score"]["sortable"] is True
+    assert fields["priority_score"]["facetable"] is False
     assert fields["source_connector"]["source"] == "evidence_projection"
     assert body["data"]["sort_fields"] == ["opened_at", "priority_score", "updated_at"]
+    assert body["data"]["facet_fields"] == [
+        "assigned",
+        "assignee_ref",
+        "case_type",
+        "degraded",
+        "entity.kind",
+        "freshness_state",
+        "priority_bracket",
+        "severity",
+        "source_connector",
+        "status",
+        "status_category",
+    ]
     assert body["redaction_applied"] is True
 
 

@@ -9,6 +9,7 @@ from app.brain.semantics import CASE_FAMILY_METRICS
 from app.brain.storage import init_schema
 from app.brain.work_items import (
     allowed_case_query_field_names,
+    allowed_case_query_facet_fields,
     allowed_case_query_sort_fields,
     allowed_priority_brackets,
     allowed_status_categories,
@@ -287,10 +288,25 @@ def test_work_item_query_field_registry_is_canonical_for_case_search_fields():
     assert allowed_case_query_field_names() == set(by_field)
     assert allowed_case_query_sort_fields() == {"priority_score", "opened_at", "updated_at"}
     assert allowed_case_query_sort_fields() <= allowed_case_query_field_names()
+    assert allowed_case_query_facet_fields() == {
+        "assignee_ref",
+        "assigned",
+        "case_type",
+        "degraded",
+        "entity.kind",
+        "freshness_state",
+        "priority_bracket",
+        "severity",
+        "source_connector",
+        "status",
+        "status_category",
+    }
+    assert allowed_case_query_facet_fields() <= allowed_case_query_field_names()
 
     assert by_field["status"]["source"] == "operational_case"
     assert by_field["status"]["allowed_values"] == ["acknowledged", "dismissed", "in_progress", "open", "resolved"]
     assert by_field["status"]["operators"] == ["=", "!=", "IN"]
+    assert by_field["status"]["facetable"] is True
     assert by_field["status_category"]["source"] == "work_item_projection"
     assert by_field["status_category"]["allowed_values"] == ["done", "in_progress", "to_do"]
     assert by_field["project"]["source"] == "work_item_projection"
@@ -301,6 +317,7 @@ def test_work_item_query_field_registry_is_canonical_for_case_search_fields():
     assert by_field["freshness_state"]["allowed_values"] == ["degraded", "fresh", "missing", "stale", "unknown"]
     assert by_field["priority_score"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
     assert by_field["priority_score"]["sortable"] is True
+    assert by_field["priority_score"]["facetable"] is False
     assert by_field["entity.label"]["operators"] == ["=", "!="]
 
 
