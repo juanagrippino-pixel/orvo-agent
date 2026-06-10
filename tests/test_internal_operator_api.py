@@ -873,6 +873,34 @@ def test_internal_case_action_catalog_requires_bearer_token(monkeypatch, tmp_pat
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_action_catalog_audits_business_scope_denials(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-actions",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "other, demo-secret access_token=raw_catalog_grant_secret",
+            "X-Request-ID": "req-catalog-business-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_catalog_grant_secret" not in raw_body
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-catalog-business-denied"
+    assert event["data"]["reason"] == "business_scope_denied"
+    assert event["data"]["permission"] == "business:access"
+    assert event["data"]["allowed_businesses"] == ["other", "[REDACTED]"]
+    assert "raw_catalog_grant_secret" not in json.dumps(event, sort_keys=True)
+
+
 def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor(monkeypatch, tmp_path):
     client, _ = _client(monkeypatch, tmp_path)
 
@@ -952,6 +980,34 @@ def test_internal_operator_session_projects_redacted_business_grants(monkeypatch
         "allowed_businesses": ["artemea", "[REDACTED]"],
     }
     assert body["redaction_applied"] is True
+
+
+def test_internal_operator_session_audits_business_scope_denials(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-session",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "other, demo-secret access_token=raw_session_grant_secret",
+            "X-Request-ID": "req-session-business-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_session_grant_secret" not in raw_body
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-session-business-denied"
+    assert event["data"]["reason"] == "business_scope_denied"
+    assert event["data"]["permission"] == "business:access"
+    assert event["data"]["allowed_businesses"] == ["other", "[REDACTED]"]
+    assert "raw_session_grant_secret" not in json.dumps(event, sort_keys=True)
 
 
 def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
