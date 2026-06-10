@@ -59,6 +59,13 @@ class FakeMetaAdsHTTPClient:
         return response
 
 
+class FailingMetaAdsHTTPClient:
+    def get(self, url, params=None):
+        response = MagicMock()
+        response.status_code = 400
+        response.json.return_value = {"error": {"message": "Bad request access_token=raw_meta_secret"}}
+        return response
+
 def make_tiendanube_business():
     return BusinessConfig(
         business_id="demo-shop",
@@ -286,6 +293,62 @@ def test_force_report_runs_all_enabled_daily_connectors_and_records_ledger():
         ("artemea-meta-ads", "meta_ads"),
     ]
     assert record.summary_metadata["connector_types"] == ["tiendanube", "meta_ads"]
+
+
+def test_force_report_keeps_tiendanube_value_when_meta_ads_http_400_opens_data_stale_case():
+    delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="dry-run-daily", error=None),
+        DeliveryResult(success=True, message_id="dry-run-brief", error=None),
+    ]
+    ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_and_meta_ads_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        meta_ads_http_client=FailingMetaAdsHTTPClient(),
+        run_ledger=ledger,
+        case_store=case_store,
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    evidence_sources = {ev.source for metric in result.report.metrics for ev in metric.evidence}
+    assert result.report.business_name == "ARTEMEA"
+    assert metrics["revenue_today"] == 1000.0
+    assert "ad_spend_today" not in metrics
+    assert evidence_sources == {"tiendanube"}
+    assert result.dispatch.status == "sent"
+    assert result.case_brief_dispatch is not None
+    assert result.case_brief_dispatch.status == "sent"
+    assert delivery.send_text.call_count == 2
+
+    [case] = case_store.list_cases(business_id="artemea")
+    assert case.case_type == "data_stale"
+    assert case.dedupe_key == "artemea/data_stale/connector/meta_ads/runtime.freshness/daily"
+    assert case.entity_scope["id"] == "meta_ads"
+    assert "raw_meta_secret" not in case.model_dump_json()
+
+    [record] = ledger.list_runs(business_id="artemea")
+    assert record.status == "partial"
+    assert [(out.connector_id, out.connector_type, out.status) for out in record.connector_outcomes] == [
+        ("artemea-tiendanube", "tiendanube", "succeeded"),
+        ("artemea-meta-ads", "meta_ads", "failed"),
+    ]
+    failed = record.connector_outcomes[1]
+    assert failed.error_summary is not None
+    assert "MetaAdsConnectionError" in failed.error_summary
+    assert "raw_meta_secret" not in record.model_dump_json()
+    assert record.summary_metadata["cases_opened"] == 1
+    assert record.summary_metadata["partial_connector_failures"] == 1
+    assert [out.metadata.get("message_type") for out in record.dispatch_outcomes] == [
+        "daily_report",
+        "owner_case_brief",
+    ]
 
 
 def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():
