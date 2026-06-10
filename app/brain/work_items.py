@@ -25,6 +25,7 @@ from app.brain.operational_cases import (
     operational_case_status_category,
     operational_case_status_transitions,
 )
+from app.brain.semantics import CASE_FAMILY_METRICS
 
 _PROJECT_KEY_MAX_LENGTH = 32
 _DEFAULT_CASE_TYPE_SCHEME_ID = "d2c-default-case-types"
@@ -41,6 +42,7 @@ class WorkItemPriorityDefinition:
 
 
 WorkItemQueryFieldValueType = Literal["bool", "enum", "int", "string", "datetime"]
+OperationalCaseIssueTypeReleaseState = Literal["promoted", "deferred", "internal_only"]
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,22 @@ def case_issue_type(case: OperationalCase) -> OperationalCaseType:
     return case.case_type
 
 
+def case_type_release_state(case_type: str) -> OperationalCaseIssueTypeReleaseState:
+    """Return the release state for an OperationalCase issue type.
+
+    The semantic registry remains the promotion gate. Case families with
+    ``CASE_FAMILY_METRICS`` evidence contracts are promoted; implemented future
+    catalog targets without evidence contracts stay deferred so operator/API
+    projections cannot accidentally present them as owner-facing/detectable.
+    """
+
+    if case_type in CASE_FAMILY_METRICS:
+        return "promoted"
+    if case_type in get_args(OperationalCaseType):
+        return "deferred"
+    return "internal_only"
+
+
 def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory:
     return operational_case_status_category(case.status)
 
@@ -213,6 +231,7 @@ def operational_case_issue_type_definitions() -> list[dict[str, str]]:
             "issue_type": case_type,
             "case_type": case_type,
             "scheme_id": _DEFAULT_CASE_TYPE_SCHEME_ID,
+            "release_state": case_type_release_state(case_type),
         }
         for case_type in get_args(OperationalCaseType)
     ]

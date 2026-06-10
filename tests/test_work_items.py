@@ -5,6 +5,7 @@ from typing import get_args
 import sqlite3
 
 from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCaseStore
+from app.brain.semantics import CASE_FAMILY_METRICS
 from app.brain.storage import init_schema
 from app.brain.work_items import (
     allowed_priority_brackets,
@@ -13,7 +14,9 @@ from app.brain.work_items import (
     case_priority_bracket,
     case_project_key,
     case_status_category,
+    case_type_release_state,
     case_work_item_projection,
+    operational_case_issue_type_definitions,
     operational_case_priority_definitions,
     operational_case_status_definitions,
     operational_case_workflow_definition,
@@ -74,6 +77,32 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
     assert case_priority_bracket(case) == "high"
+
+
+def test_issue_type_definitions_expose_release_state_from_semantic_registry():
+    definitions = {definition["case_type"]: definition for definition in operational_case_issue_type_definitions()}
+
+    assert case_type_release_state("stockout_risk") == "promoted"
+    assert case_type_release_state("channel_mix_shift") == "deferred"
+    assert definitions["stockout_risk"] == {
+        "issue_type": "stockout_risk",
+        "case_type": "stockout_risk",
+        "scheme_id": "d2c-default-case-types",
+        "release_state": "promoted",
+    }
+    assert definitions["channel_mix_shift"] == {
+        "issue_type": "channel_mix_shift",
+        "case_type": "channel_mix_shift",
+        "scheme_id": "d2c-default-case-types",
+        "release_state": "deferred",
+    }
+    promoted_case_types = {
+        definition["case_type"]
+        for definition in definitions.values()
+        if definition["release_state"] == "promoted"
+    }
+
+    assert promoted_case_types == set(CASE_FAMILY_METRICS)
 
 
 def test_priority_definitions_are_canonical_work_item_semantics(tmp_path):
