@@ -4177,6 +4177,49 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     assert denial["data"]["permission"] == "operator_audit:read"
 
 
+def test_internal_operator_audit_export_scopes_events_to_route_business(monkeypatch, tmp_path):
+    """Admin audit reads must not become a cross-tenant audit-log export."""
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    artemea_id = store.append_event(
+        business_id="artemea",
+        actor_ref="operator:artemea",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={"note": "visible artemea event"},
+    )
+    other_id = store.append_event(
+        business_id="other",
+        actor_ref="operator:other",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        data={"access_token": "raw_other_tenant_audit_secret"},
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "admin",
+            "X-Orvo-Operator": "admin:sol",
+            "X-Orvo-Businesses": "*",
+        },
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert other_id not in raw_body
+    assert "raw_other_tenant_audit_secret" not in raw_body
+    body = response.get_json()
+    assert body["data"]["count"] == 1
+    assert [event["event_id"] for event in body["data"]["events"]] == [artemea_id]
+    assert all(event["business_id"] == "artemea" for event in body["data"]["events"])
+
+
 def test_internal_operator_audit_export_orders_by_occurred_at_not_insert_order(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
