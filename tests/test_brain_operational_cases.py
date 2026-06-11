@@ -161,6 +161,30 @@ def test_owner_facing_actionable_cases_excludes_legacy_cases_without_evidence_sn
     assert [case.case_id for case in owner_cases] == [with_evidence.case_id]
 
 
+def test_owner_facing_actionable_cases_excludes_readiness_gated_families_even_with_evidence():
+    store = InMemoryOperationalCaseStore()
+    visible = store.upsert_detection(
+        make_stockout_detection(run_id="run-visible", snapshots=[make_stock_snapshot(run_id="run-visible")]),
+        detected_at=utc_dt(8),
+    )
+    readiness_gated = OperationalCase.model_validate(
+        {
+            **visible.model_dump(),
+            "case_id": "case-readiness-gated",
+            "case_type": "unanswered_conversations",
+            "dedupe_key": "artemea/unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            "title": "Conversaciones sin responder",
+            "priority_score": 100,
+        }
+    )
+
+    assert readiness_gated.evidence_snapshots
+
+    owner_cases = owner_facing_actionable_cases([readiness_gated, visible])
+
+    assert [case.case_id for case in owner_cases] == [visible.case_id]
+
+
 def test_detect_cases_from_report_synthesizes_minimal_evidence_snapshots():
     source = Evidence(source="tiendanube", label="Tiendanube")
     report = DailyReport(
