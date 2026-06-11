@@ -58,6 +58,22 @@ def register_run_delivery_routes(app):
                     business_id=business_id,
                     status=request.args.get("status"),
                     limit=request.args.get("limit"),
+                    dispatch_status=request.args.get("dispatch_status"),
+                ),
+            ),
+        )
+
+    @app.get("/internal/brain/businesses/<business_id>/runs/dispatch-status-summary")
+    def internal_brain_run_dispatch_status_summary(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_run_dispatch_statuses(
+                    run_ledger,
+                    business_id=business_id,
+                    status=request.args.get("status"),
+                    limit=request.args.get("limit"),
                 ),
             ),
         )

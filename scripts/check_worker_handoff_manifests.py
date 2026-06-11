@@ -208,10 +208,23 @@ def _changed_files_between(repo_root: Path, base_sha: str, head_sha: str) -> tup
     return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
 
 
+def _deleted_test_files_between(repo_root: Path, base_sha: str, head_sha: str) -> tuple[str, ...] | None:
+    result = _git(repo_root, "diff", "--name-status", f"{base_sha}...{head_sha}")
+    if result.returncode != 0:
+        return None
+    deleted: list[str] = []
+    for line in result.stdout.splitlines():
+        status, _, path = line.strip().partition("\t")
+        if status == "D" and path.startswith("tests/"):
+            deleted.append(path)
+    return tuple(deleted)
+
+
 def verify_manifest_git_claims(
     manifest: WorkerHandoffManifest,
     *,
     repo_root: Path = Path("."),
+    forbid_test_deletions: bool = False,
 ) -> WorkerHandoffManifestGitValidation:
     """Verify optional git-backed handoff claims for a parsed manifest.
 
@@ -265,6 +278,15 @@ def verify_manifest_git_claims(
                     parts.append(f"not present in diff: {', '.join(extra)}")
                 problems.append("; ".join(parts))
 
+        if forbid_test_deletions:
+            deleted_test_files = _deleted_test_files_between(repo_root, base_sha, head_sha)
+            if deleted_test_files is None:
+                problems.append("could not compute deleted test files base_sha...head_sha")
+            elif deleted_test_files:
+                problems.append(
+                    "test file deletion requires explicit review: " + ", ".join(deleted_test_files)
+                )
+
     return WorkerHandoffManifestGitValidation(path=manifest.path, problems=tuple(problems))
 
 
@@ -293,12 +315,17 @@ def verify_manifest_git_claim_paths(
     paths: Iterable[Path],
     *,
     repo_root: Path = Path("."),
+    forbid_test_deletions: bool = False,
 ) -> list[WorkerHandoffManifestGitValidation]:
     """Verify git-backed claims for all manifest paths and return failures."""
 
     failures: list[WorkerHandoffManifestGitValidation] = []
     for path in paths:
-        result = verify_manifest_git_claims(parse_manifest(path), repo_root=repo_root)
+        result = verify_manifest_git_claims(
+            parse_manifest(path),
+            repo_root=repo_root,
+            forbid_test_deletions=forbid_test_deletions,
+        )
         if not result.passed:
             failures.append(result)
     return failures
@@ -325,6 +352,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("."),
         help="Repository root for --verify-git; defaults to the current directory.",
     )
+    parser.add_argument(
+        "--forbid-test-deletions",
+        action="store_true",
+        help=(
+            "With --verify-git, fail manifests whose base_sha...head_sha diff deletes files under tests/. "
+            "Use this in integration gates so green suites cannot hide coverage regressions."
+        ),
+    )
     return parser
 
 
@@ -339,13 +374,22 @@ def _expand_paths(paths: Sequence[Path]) -> list[Path]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.forbid_test_deletions and not args.verify_git:
+        parser.error("--forbid-test-deletions requires --verify-git")
+
     manifest_paths = _expand_paths(args.paths)
     if not manifest_paths:
         parser.error("no worker handoff manifests found")
 
     shape_failures = validate_manifest_paths(manifest_paths)
     git_failures = (
-        verify_manifest_git_claim_paths(manifest_paths, repo_root=args.repo_root) if args.verify_git else []
+        verify_manifest_git_claim_paths(
+            manifest_paths,
+            repo_root=args.repo_root,
+            forbid_test_deletions=args.forbid_test_deletions,
+        )
+        if args.verify_git
+        else []
     )
     if shape_failures or git_failures:
         for failure in [*shape_failures, *git_failures]:
