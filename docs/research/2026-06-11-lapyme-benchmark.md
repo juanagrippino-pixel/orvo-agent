@@ -21,6 +21,30 @@ Core promise:
 - AI assistants: Claude/ChatGPT/Grok connector can query real data and create drafts/actions under permissions.
 - API: customers, suppliers, products, inventory, purchases, sales, collections, payments, reports, config.
 
+## Public stack signal from Tomas Malamud / La Pyme repost
+
+Reported stack from 2025:
+- Next.js: frontend + backend.
+- Supabase: Auth, DB, storage.
+- Trigger.dev: background jobs.
+- Vercel: hosting, observability, firewall, DNS, infra.
+- Resend: transactional + marketing email.
+- Ultracite: linter/formatter.
+- afipsdk: ARCA integration.
+- AI SDK: upcoming AI features.
+
+Technical interpretation for Orvo:
+- The stack is solid for a web-first SaaS ERP/control panel.
+- It validates that La Pyme is a real SaaS product with modern infra, not a simple no-code/bot wrapper.
+- Orvo should copy the **product operating-system direction**, not immediately migrate the current Python/Hermes control-plane core.
+- Keep Orvo's deterministic runtime in Python for now; introducing a full Next/Supabase/Vercel rewrite before MVP would slow execution.
+- Consider borrowing selectively:
+  - Next.js/Vercel for future operator/admin surface.
+  - Resend for lifecycle/customer emails.
+  - afipsdk for ARCA once the wedge reaches invoicing/accounting.
+  - Trigger.dev only if current scheduler/job orchestration becomes a bottleneck.
+  - AI SDK only for UI assistant surfaces, not for metric/state generation.
+
 ## Pricing signal
 
 Public monthly plans:
