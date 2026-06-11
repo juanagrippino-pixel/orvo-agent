@@ -496,6 +496,35 @@ def _dedupe_planned_actions(
     return actions, skipped_actions
 
 
+def _simulation_audit_event(
+    *,
+    rule: WorkflowRule,
+    case: OperationalCase,
+    trigger_match: dict[str, Any],
+    matched: bool,
+    actions: list[dict[str, Any]],
+    skipped_actions: list[dict[str, Any]],
+    actor_ref: str | None,
+    now: datetime,
+) -> dict[str, Any]:
+    event = {
+        "event_type": "workflow_rule_simulated",
+        "business_id": rule.business_id,
+        "rule_id": rule.rule_id,
+        "case_id": case.case_id,
+        "trigger_expected": trigger_match.get("expected"),
+        "trigger_actual": trigger_match.get("actual"),
+        "matched": matched,
+        "planned_action_count": len(actions),
+        "skipped_action_count": len(skipped_actions),
+        "side_effects_executed": 0,
+        "actor_ref": actor_ref,
+        "created_at": _iso(now),
+    }
+    redacted = redact_secrets(event)
+    return redacted if isinstance(redacted, dict) else event
+
+
 def simulate_case_workflow(
     rule: WorkflowRule,
     case: OperationalCase,
@@ -531,6 +560,16 @@ def simulate_case_workflow(
             action_ledger=action_ledger,
             actor_ref=actor_ref,
         )
+    audit_event = _simulation_audit_event(
+        rule=rule,
+        case=case,
+        trigger_match=trigger_match,
+        matched=matched,
+        actions=actions,
+        skipped_actions=skipped_actions,
+        actor_ref=actor_ref,
+        now=generated_at,
+    )
     return redact_secrets(
         {
             "rule_id": rule.rule_id,
@@ -550,6 +589,7 @@ def simulate_case_workflow(
             "non_match_reasons": non_match_reasons,
             "actions": actions,
             "skipped_actions": skipped_actions,
+            "audit_event": audit_event,
             "side_effects_executed": 0,
             "generated_at": _iso(generated_at),
         }
