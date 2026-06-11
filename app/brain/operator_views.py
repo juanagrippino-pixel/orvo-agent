@@ -533,6 +533,10 @@ def _ensure_operator(field: str, operator: str, spec: WorkItemQueryFieldDefiniti
 
 def _coerce_value(field: str, raw_value: str, spec: WorkItemQueryFieldDefinition) -> Any:
     value = _unquote(raw_value.strip())
+    if spec.value_type == "string":
+        if not re.fullmatch(r"[A-Za-z0-9_:\-+. ]+", value):
+            raise OperatorAPIError("invalid_jql", "JQL value contains unsupported characters", status_code=400)
+        return value
     if not re.fullmatch(r"[A-Za-z0-9_:\-+.]+", value):
         raise OperatorAPIError("invalid_jql", "JQL value contains unsupported characters", status_code=400)
     if spec.value_type == "enum":
@@ -571,6 +575,8 @@ def _format_value(value: Any) -> str:
         return value.isoformat()
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, str) and re.search(r"\s", value):
+        return f'"{value}"'
     return str(value)
 
 
