@@ -102,6 +102,7 @@ def parse_run_status(value: str | None) -> RunStatus | None:
         raise OperatorAPIError("invalid_run_status", f"unsupported run status: {value}", status_code=400)
     return value  # type: ignore[return-value]
 
+
 def normalize_operator_actor(actor_ref: Any, actor: Any) -> str:
     effective_actor_ref = actor_ref if actor_ref is not None else actor
     if effective_actor_ref is None:
@@ -111,7 +112,8 @@ def normalize_operator_actor(actor_ref: Any, actor: Any) -> str:
     normalized = effective_actor_ref.strip()
     if not normalized:
         raise OperatorAPIError("missing_operator_actor", "operator actor is required", status_code=400)
-    return normalized
+    return redact_text(normalized) or "[REDACTED]"
+
 
 def normalize_case_assignee(assignee_ref: Any, owner_ref: Any) -> str:
     effective_assignee_ref = assignee_ref if assignee_ref is not None else owner_ref
@@ -122,7 +124,7 @@ def normalize_case_assignee(assignee_ref: Any, owner_ref: Any) -> str:
     normalized = effective_assignee_ref.strip()
     if not normalized:
         raise OperatorAPIError("invalid_assignee_ref", "assignee_ref must be a non-empty string", status_code=400)
-    return normalized
+    return redact_text(normalized) or "[REDACTED]"
 
 _ACTIONABLE_STATUSES = ACTIONABLE_OPERATIONAL_CASE_STATUSES
 

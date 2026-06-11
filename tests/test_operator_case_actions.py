@@ -11,7 +11,13 @@ from app.brain.operational_cases import (
     OperationalCaseDetection,
     SQLiteOperationalCaseStore,
 )
-from app.brain.operator_api import OperatorAPIError, apply_case_action, apply_case_action_with_idempotency
+from app.brain.operator_api import (
+    OperatorAPIError,
+    apply_case_action,
+    apply_case_action_with_idempotency,
+    normalize_case_assignee,
+    normalize_operator_actor,
+)
 from app.brain.storage import init_schema
 from app.brain.workflow_action_ledger import InMemoryWorkflowActionLedgerStore
 
@@ -75,6 +81,20 @@ def assert_no_raw_comment_secret(serialized: str) -> None:
 
 def assert_no_raw_actor_secret(serialized: str) -> None:
     assert "raw_actor_secret" not in serialized
+
+
+def test_normalize_operator_actor_redacts_secret_shapes_before_store_or_ledger_use():
+    actor = normalize_operator_actor("operator access_token=raw_actor_secret", None)
+
+    assert actor == "operator access_token=[REDACTED]"
+    assert_no_raw_actor_secret(actor)
+
+
+def test_normalize_case_assignee_redacts_secret_shapes_before_store_or_ledger_use():
+    assignee = normalize_case_assignee("dueña api_key=raw_actor_secret", None)
+
+    assert assignee == "dueña api_key=[REDACTED]"
+    assert_no_raw_actor_secret(assignee)
 
 
 def test_timeline_actor_ref_is_redacted_for_comments_and_status_actions_before_persistence(conn):
