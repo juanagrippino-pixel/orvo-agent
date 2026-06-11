@@ -18,6 +18,7 @@ from app.brain.operator_auth import (
     audit_safe_business_values,
     audit_safe_operator_role,
     build_internal_operator_principal,
+    require_explicit_global_business_scope,
     require_internal_business_scope,
     require_internal_permission,
 )
@@ -235,7 +236,13 @@ def _record_internal_authorization_denial(*, business_id: str, actor_ref: str, e
     )
 
 
-def _internal_principal_or_error(business_id: str, permission: str, *, audit_denial: bool = False):
+def _internal_principal_or_error(
+    business_id: str,
+    permission: str,
+    *,
+    audit_denial: bool = False,
+    require_explicit_global_scope: bool = False,
+):
     actor_ref = request.headers.get("X-Orvo-Operator", "")
     try:
         principal = build_internal_operator_principal(
@@ -245,6 +252,8 @@ def _internal_principal_or_error(business_id: str, permission: str, *, audit_den
         )
         require_internal_business_scope(principal, business_id)
         require_internal_permission(principal, permission)
+        if require_explicit_global_scope:
+            require_explicit_global_business_scope(principal)
     except InternalOperatorAuthorizationError as exc:
         if audit_denial:
             _record_internal_authorization_denial(business_id=business_id, actor_ref=actor_ref or "anonymous", exc=exc)
