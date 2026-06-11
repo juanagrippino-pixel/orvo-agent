@@ -226,6 +226,69 @@ def test_default_connector_capability_contracts_are_certified():
     } == {spec.connector_type: [] for spec in list_connector_specs()}
 
 
+def test_connector_executor_certification_flags_unsafe_metadata_drift():
+    from app.brain.connector_registry import (
+        ConnectorExecutorMetadata,
+        ConnectorFactoryParam,
+        ConnectorSpec,
+        SecretRequirement,
+    )
+
+    spec = ConnectorSpec(
+        connector_type="drifty_executor",
+        display_name="Drifty executor",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders",),
+        required_config_fields=("store_id",),
+        optional_config_fields=("include_stock",),
+        required_secret_refs=(
+            SecretRequirement(
+                name="access_token",
+                provider="shop_oauth",
+                legacy_config_field="access_token",
+            ),
+        ),
+        legacy_secret_config_fields=("access_token",),
+        executor=ConnectorExecutorMetadata(
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="build_daily_report_from_csv_file",
+            supported_runtime_modes=("scheduled", "sideways"),
+            factory_params=(
+                ConnectorFactoryParam("store_id", "business_config", key="store_id"),
+                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+                ConnectorFactoryParam("warehouse_id", "connector_param", key="warehouse_id"),
+                ConnectorFactoryParam(
+                    "refresh_token",
+                    "resolved_secret_param",
+                    key="refresh_token",
+                ),
+            ),
+        ),
+    )
+
+    issues = spec.validate_executor_contract()
+
+    assert [(issue.code, issue.field, issue.value) for issue in issues] == [
+        ("unsupported_runtime_mode", "supported_runtime_modes", "sideways"),
+        ("unsupported_factory_param_source", "store_id", "business_config"),
+        ("secret_param_bound_as_public", "access_token", "access_token"),
+        ("undeclared_connector_param", "warehouse_id", "warehouse_id"),
+        ("undeclared_secret_param", "refresh_token", "refresh_token"),
+    ]
+    assert all(issue.severity == "error" for issue in issues)
+
+
+def test_default_connector_executor_contracts_are_certified():
+    from app.brain.connector_registry import list_connector_specs
+
+    assert {
+        spec.connector_type: spec.validate_executor_contract()
+        for spec in list_connector_specs()
+    } == {spec.connector_type: [] for spec in list_connector_specs()}
+
+
 def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import get_connector_spec

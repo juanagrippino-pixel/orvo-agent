@@ -67,6 +67,32 @@ EVENT_FAMILY_CONNECTOR_HEALTH = "connector.health"
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 
+ALLOWED_CONNECTOR_FACTORY_PARAM_SOURCES = (
+    "business_attr",
+    "report_date",
+    "connector_param",
+    "resolved_secret_param",
+    "connector_param_bool",
+    "connector_label",
+    "connector_param_or_label",
+    "service_binding",
+    "insight_thresholds",
+    "literal",
+)
+KNOWN_RUNTIME_MODES = (
+    RUNTIME_MODE_PREVIEW,
+    RUNTIME_MODE_MANUAL,
+    RUNTIME_MODE_FORCED,
+    RUNTIME_MODE_SCHEDULED,
+    RUNTIME_MODE_OPERATOR_TRIGGERED,
+    RUNTIME_MODE_HEALTH_CHECK,
+)
+PUBLIC_CONNECTOR_PARAM_SOURCES = (
+    "connector_param",
+    "connector_param_bool",
+    "connector_param_or_label",
+)
+
 
 def _metric_object_key(metric: object) -> str:
     """Extract a metric key from a Metric-shaped object or mapping."""
@@ -184,6 +210,17 @@ class ConnectorCapabilityValidationIssue:
 
     code: str
     capability: str
+    message: str
+    severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorExecutorValidationIssue:
+    """Deterministic diagnostic for unsafe executor metadata drift."""
+
+    code: str
+    field: str
+    value: str
     message: str
     severity: str = SEVERITY_ERROR
 
@@ -524,6 +561,96 @@ class ConnectorSpec:
                     ),
                 )
             )
+        return issues
+
+    def validate_executor_contract(self) -> list[ConnectorExecutorValidationIssue]:
+        """Certify that executor metadata is safe for registry-driven runtime use.
+
+        The runtime treats executor metadata as the source of truth for adapter
+        invocation. This check catches drift before execution: unsupported modes,
+        unsupported binding sources, public bindings to secret-backed params, and
+        connector-param bindings that were never declared in the registry.
+        """
+
+        assert self.executor is not None  # set in __post_init__
+        issues: list[ConnectorExecutorValidationIssue] = []
+        known_modes = set(KNOWN_RUNTIME_MODES)
+        allowed_sources = set(ALLOWED_CONNECTOR_FACTORY_PARAM_SOURCES)
+        public_sources = set(PUBLIC_CONNECTOR_PARAM_SOURCES)
+        declared_public_params = set(self.required_config_fields) | set(
+            self.optional_config_fields
+        )
+        declared_secret_params = set(self.legacy_secret_config_fields)
+
+        for mode in self.executor.supported_runtime_modes:
+            if mode not in known_modes:
+                issues.append(
+                    ConnectorExecutorValidationIssue(
+                        code="unsupported_runtime_mode",
+                        field="supported_runtime_modes",
+                        value=str(mode),
+                        message=(
+                            f"{self.connector_type} connector executor advertises "
+                            f"unsupported runtime mode {mode}"
+                        ),
+                    )
+                )
+
+        for binding in self.executor.factory_params:
+            key = binding.key or binding.argument
+            if binding.source not in allowed_sources:
+                issues.append(
+                    ConnectorExecutorValidationIssue(
+                        code="unsupported_factory_param_source",
+                        field=binding.argument,
+                        value=binding.source,
+                        message=(
+                            f"{self.connector_type} connector executor binding "
+                            f"{binding.argument} uses unsupported source {binding.source}"
+                        ),
+                    )
+                )
+                continue
+
+            if binding.source in public_sources:
+                if key in declared_secret_params:
+                    issues.append(
+                        ConnectorExecutorValidationIssue(
+                            code="secret_param_bound_as_public",
+                            field=binding.argument,
+                            value=key,
+                            message=(
+                                f"{self.connector_type} connector executor binding {binding.argument} "
+                                f"reads secret-backed param {key} as public config"
+                            ),
+                        )
+                    )
+                elif key not in declared_public_params:
+                    issues.append(
+                        ConnectorExecutorValidationIssue(
+                            code="undeclared_connector_param",
+                            field=binding.argument,
+                            value=key,
+                            message=(
+                                f"{self.connector_type} connector executor binding {binding.argument} "
+                                f"reads undeclared connector param {key}"
+                            ),
+                        )
+                    )
+
+            if binding.source == "resolved_secret_param" and key not in declared_secret_params:
+                issues.append(
+                    ConnectorExecutorValidationIssue(
+                        code="undeclared_secret_param",
+                        field=binding.argument,
+                        value=key,
+                        message=(
+                            f"{self.connector_type} connector executor binding {binding.argument} "
+                            f"resolves undeclared secret param {key}"
+                        ),
+                    )
+                )
+
         return issues
 
     def load_report_factory(self):
