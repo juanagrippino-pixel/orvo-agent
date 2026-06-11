@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.connector_registry import CAPABILITY_DAILY_REPORT, default_connector_registry
@@ -12,19 +12,12 @@ from app.brain.delivery import WhatsAppDeliveryClient
 from app.brain.dispatch import IdempotencyStore, ReportDispatchResult, dispatch_daily_report
 from app.brain.models import DailyReport
 from app.brain.report_merge_policy import merge_daily_reports
+from app.brain.security.redaction import redact_text
 from app.brain.secret_refs import (
     SecretResolutionError,
     SecretResolver,
     connector_with_resolved_secrets,
 )
-
-
-class PipelineResult(BaseModel):
-    report: DailyReport
-    dispatch: ReportDispatchResult
-    case_brief_dispatch: ReportDispatchResult | None = None
-    runtime_metadata: dict = Field(default_factory=dict)
-
 
 class PipelineConnectorError(RuntimeError):
     """Connector-scoped pipeline failure with exact attribution context."""
@@ -34,12 +27,46 @@ class PipelineConnectorError(RuntimeError):
         *,
         connector_type: str,
         connector_id: str | None = None,
+        business_id: str | None = None,
         original_exception: BaseException,
     ) -> None:
         super().__init__(str(original_exception))
         self.connector_type = connector_type
         self.connector_id = connector_id
+        self.business_id = business_id
         self.original_exception = original_exception
+
+
+class PipelineConnectorFailure(BaseModel):
+    """Audit-safe connector failure captured during a partial multi-connector run."""
+
+    connector_type: str
+    connector_id: str | None = None
+    business_id: str | None = None
+    error_summary: str
+
+    @field_validator("error_summary", mode="before")
+    @classmethod
+    def redact_error_summary(cls, value: str) -> str:
+        return redact_text(value) or "[REDACTED]"
+
+    @classmethod
+    def from_error(cls, error: PipelineConnectorError) -> "PipelineConnectorFailure":
+        original = error.original_exception
+        return cls(
+            connector_type=error.connector_type,
+            connector_id=error.connector_id,
+            business_id=error.business_id,
+            error_summary=f"{type(original).__name__}: {original}",
+        )
+
+
+class PipelineResult(BaseModel):
+    report: DailyReport
+    dispatch: ReportDispatchResult
+    case_brief_dispatch: ReportDispatchResult | None = None
+    runtime_metadata: dict = Field(default_factory=dict)
+    partial_connector_failures: list[PipelineConnectorFailure] = Field(default_factory=list)
 
 
 def _find_enabled_connector_for_type(business: BusinessConfig, connector_type: str) -> ConnectorConfig | None:
@@ -277,9 +304,17 @@ def run_enabled_connectors_daily_report_pipeline(
     woocommerce_http_client=None,
     secret_resolver: SecretResolver | None = None,
 ) -> PipelineResult:
-    """Build all enabled connector reports, merge metrics, then dispatch once."""
+    """Build enabled connector reports, allowing Meta Ads failures to degrade to partial value.
+
+    Meta Ads is a non-primary pilot signal for D2C operators. A Meta HTTP/API
+    failure must not suppress a usable Tiendanube report; the failure is carried
+    forward as audited partial connector evidence for the run ledger/case engine.
+    Other connector failures keep the existing fail-fast behavior.
+    """
 
     reports: list[DailyReport] = []
+    suppressed_meta_ads_errors: list[PipelineConnectorError] = []
+    partial_connector_failures: list[PipelineConnectorFailure] = []
     for connector_type in connector_types:
         connector = _find_enabled_connector_for_type(business, connector_type)
         try:
@@ -296,16 +331,28 @@ def run_enabled_connectors_daily_report_pipeline(
                     secret_resolver=secret_resolver,
                 )
             )
-        except PipelineConnectorError:
+        except PipelineConnectorError as exc:
+            if connector_type == "meta_ads":
+                suppressed_meta_ads_errors.append(exc)
+                partial_connector_failures.append(PipelineConnectorFailure.from_error(exc))
+                continue
             raise
         except SecretResolutionError:
             raise
         except Exception as exc:
-            raise PipelineConnectorError(
+            connector_error = PipelineConnectorError(
                 connector_type=connector_type,
                 connector_id=connector.connector_id if connector is not None else None,
+                business_id=business.business_id,
                 original_exception=exc,
-            ) from exc
+            )
+            if connector_type == "meta_ads":
+                suppressed_meta_ads_errors.append(connector_error)
+                partial_connector_failures.append(PipelineConnectorFailure.from_error(connector_error))
+                continue
+            raise connector_error from exc
+    if not reports and suppressed_meta_ads_errors:
+        raise suppressed_meta_ads_errors[0]
     report = merge_daily_reports(reports, business=business)
     dispatch = dispatch_daily_report(
         report=report,
@@ -313,4 +360,8 @@ def run_enabled_connectors_daily_report_pipeline(
         delivery_client=delivery_client,
         idempotency_store=idempotency_store,
     )
-    return PipelineResult(report=report, dispatch=dispatch)
+    return PipelineResult(
+        report=report,
+        dispatch=dispatch,
+        partial_connector_failures=partial_connector_failures,
+    )

@@ -52,6 +52,9 @@ RUNTIME_MODE_SCHEDULED = "scheduled"
 RUNTIME_MODE_OPERATOR_TRIGGERED = "operator_triggered"
 RUNTIME_MODE_HEALTH_CHECK = "health_check"
 
+EVENT_FAMILY_CONNECTOR_EXECUTION = "connector.execution"
+EVENT_FAMILY_CONNECTOR_HEALTH = "connector.health"
+
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 
@@ -68,6 +71,22 @@ def _metric_object_key(metric: object) -> str:
             "validate_emitted_metric_objects requires metrics with a non-empty string key"
         )
     return key
+
+
+def _event_type_value(event: object) -> str:
+    """Extract an event type from a string, Event-shaped object, or mapping."""
+
+    if isinstance(event, str):
+        event_type = event
+    elif isinstance(event, Mapping):
+        event_type = event.get("event_type")
+    else:
+        event_type = getattr(event, "event_type", None)
+    if not isinstance(event_type, str) or not event_type:
+        raise ValueError(
+            "validate_emitted_events requires events with a non-empty string event_type"
+        )
+    return event_type
 
 
 class UnknownConnectorError(ValueError):
@@ -99,6 +118,17 @@ class ConnectorValidationIssue:
     key: str
     message: str
     severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorEventValidationIssue:
+    """Deterministic advisory diagnostic for connector event certification."""
+
+    code: str
+    event_type: str
+    message: str
+    severity: str = SEVERITY_WARNING
+    index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +227,10 @@ class ConnectorSpec:
     report_factory: str
     capabilities: tuple[str, ...]
     emitted_metric_families: tuple[str, ...] = ()
+    emitted_event_families: tuple[str, ...] = (
+        EVENT_FAMILY_CONNECTOR_EXECUTION,
+        EVENT_FAMILY_CONNECTOR_HEALTH,
+    )
     required_config_fields: tuple[str, ...] = ()
     optional_config_fields: tuple[str, ...] = ()
     required_secret_refs: tuple[SecretRequirement, ...] = ()
@@ -551,6 +585,66 @@ class ConnectorSpec:
             *value_kind_issues,
             *money_currency_issues,
         ]
+
+    def validate_emitted_events(
+        self,
+        events: Iterable[object],
+    ) -> list[ConnectorEventValidationIssue]:
+        """Validate emitted connector event types against registry families.
+
+        Connector specs declare event *families* (for example
+        ``connector.execution`` and ``connector.health``). Runtime/adapters may
+        emit concrete event types under those families, such as
+        ``connector.execution.succeeded``. This deterministic certification check
+        flags event types outside the connector's declared envelope without
+        inventing connector-specific event registries. Health outcome events are
+        additionally checked against the spec's health-state taxonomy so
+        connector-health logs cannot drift beyond declared runtime states.
+        """
+
+        allowed_families = tuple(self.emitted_event_families)
+        allowed_health_states = tuple(self.health.allowed_states)
+        issues: list[ConnectorEventValidationIssue] = []
+        for index, event in enumerate(events):
+            event_type = _event_type_value(event)
+            is_in_declared_family = any(
+                event_type == family or event_type.startswith(f"{family}.")
+                for family in allowed_families
+            )
+            if not is_in_declared_family:
+                issues.append(
+                    ConnectorEventValidationIssue(
+                        code="undeclared_event_family",
+                        event_type=event_type,
+                        index=index,
+                        message=(
+                            f"{self.connector_type} connector emitted event {event_type} "
+                            "outside declared event families: "
+                            + ", ".join(allowed_families)
+                        ),
+                    )
+                )
+                continue
+            health_prefix = f"{EVENT_FAMILY_CONNECTOR_HEALTH}."
+            if (
+                EVENT_FAMILY_CONNECTOR_HEALTH in allowed_families
+                and event_type.startswith(health_prefix)
+            ):
+                health_state = event_type.removeprefix(health_prefix)
+                if health_state not in allowed_health_states:
+                    issues.append(
+                        ConnectorEventValidationIssue(
+                            code="undeclared_health_state",
+                            event_type=event_type,
+                            index=index,
+                            message=(
+                                f"{self.connector_type} connector emitted health state "
+                                f"{health_state} outside declared health states: "
+                                + ", ".join(allowed_health_states)
+                            ),
+                        )
+                    )
+        return issues
 
     def validate_params(self, params: Mapping[str, object]) -> list[str]:
         """Return legacy inline execution-param errors without logging credentials.
@@ -1044,3 +1138,16 @@ def validate_emitted_metric_objects_for_connector(
     return get_connector_spec(connector_type).validate_emitted_metric_objects(
         metrics, registry=registry
     )
+
+
+def validate_emitted_events_for_connector(
+    connector_type: str,
+    events: Iterable[object],
+) -> list[ConnectorEventValidationIssue]:
+    """Convenience wrapper around ``ConnectorSpec.validate_emitted_events``.
+
+    Raises ``UnknownConnectorError`` when ``connector_type`` is not registered
+    so callers cannot silently skip event-family certification.
+    """
+
+    return get_connector_spec(connector_type).validate_emitted_events(events)

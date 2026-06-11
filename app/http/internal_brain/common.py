@@ -18,6 +18,7 @@ from app.brain.operator_auth import (
     audit_safe_business_values,
     audit_safe_operator_role,
     build_internal_operator_principal,
+    require_explicit_global_business_scope,
     require_internal_business_scope,
     require_internal_permission,
 )
@@ -124,6 +125,12 @@ def _authorization_scheme(value: str) -> str | None:
     return redact_text(scheme) or "[REDACTED]"
 
 
+def _constant_time_text_equals(left: str, right: str) -> bool:
+    """Compare header strings without raising on non-ASCII probe values."""
+
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
 def _record_internal_authentication_denial(*, business_id: str, actor_ref: str, supplied_authorization: str):
     """Best-effort audit for failed internal bearer-token authentication.
 
@@ -165,7 +172,7 @@ def _authorize_internal_operator(business_id: str):
             status_code=503,
         )
     supplied = request.headers.get("Authorization", "")
-    if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+    if not _constant_time_text_equals(supplied, f"Bearer {expected}"):
         _record_internal_authentication_denial(
             business_id=business_id,
             actor_ref=request.headers.get("X-Orvo-Operator", ""),
@@ -235,7 +242,13 @@ def _record_internal_authorization_denial(*, business_id: str, actor_ref: str, e
     )
 
 
-def _internal_principal_or_error(business_id: str, permission: str, *, audit_denial: bool = False):
+def _internal_principal_or_error(
+    business_id: str,
+    permission: str,
+    *,
+    audit_denial: bool = False,
+    require_explicit_global_scope: bool = False,
+):
     actor_ref = request.headers.get("X-Orvo-Operator", "")
     try:
         principal = build_internal_operator_principal(
@@ -245,6 +258,8 @@ def _internal_principal_or_error(business_id: str, permission: str, *, audit_den
         )
         require_internal_business_scope(principal, business_id)
         require_internal_permission(principal, permission)
+        if require_explicit_global_scope:
+            require_explicit_global_business_scope(principal)
     except InternalOperatorAuthorizationError as exc:
         if audit_denial:
             _record_internal_authorization_denial(business_id=business_id, actor_ref=actor_ref or "anonymous", exc=exc)

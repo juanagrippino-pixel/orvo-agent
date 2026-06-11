@@ -772,7 +772,7 @@ def test_internal_case_action_idempotency_key_skips_duplicate_mutation_durably(m
     duplicate = client.post(
         f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
         headers=headers,
-        json={"action_key": "acknowledge_case", "reason": "Duplicate retry should not add timeline"},
+        json={"action_key": "acknowledge_case", "reason": "Estoy encima"},
     )
 
     assert duplicate.status_code == 200
@@ -1095,6 +1095,34 @@ def test_internal_case_action_catalog_has_single_route_binding(monkeypatch, tmp_
     assert [route.endpoint for route in routes] == ["internal_brain_case_actions"]
 
 
+def test_internal_case_action_catalog_audits_business_scope_denials(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-actions",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "other, demo-secret access_token=raw_catalog_grant_secret",
+            "X-Request-ID": "req-catalog-business-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_catalog_grant_secret" not in raw_body
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-catalog-business-denied"
+    assert event["data"]["reason"] == "business_scope_denied"
+    assert event["data"]["permission"] == "business:access"
+    assert event["data"]["allowed_businesses"] == ["other", "[REDACTED]"]
+    assert "raw_catalog_grant_secret" not in json.dumps(event, sort_keys=True)
+
+
 def test_internal_operator_session_projects_viewer_permissions_and_redacts_actor(monkeypatch, tmp_path):
     client, _ = _client(monkeypatch, tmp_path)
 
@@ -1174,6 +1202,34 @@ def test_internal_operator_session_projects_redacted_business_grants(monkeypatch
         "allowed_businesses": ["artemea", "[REDACTED]"],
     }
     assert body["redaction_applied"] is True
+
+
+def test_internal_operator_session_audits_business_scope_denials(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-session",
+        headers={
+            **AUTH,
+            "X-Orvo-Businesses": "other, demo-secret access_token=raw_session_grant_secret",
+            "X-Request-ID": "req-session-business-denied",
+        },
+    )
+
+    assert response.status_code == 403
+    raw_body = response.get_data(as_text=True)
+    assert "raw_session_grant_secret" not in raw_body
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_type"] == "internal_operator_api"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-session-business-denied"
+    assert event["data"]["reason"] == "business_scope_denied"
+    assert event["data"]["permission"] == "business:access"
+    assert event["data"]["allowed_businesses"] == ["other", "[REDACTED]"]
+    assert "raw_session_grant_secret" not in json.dumps(event, sort_keys=True)
 
 
 def test_internal_read_allows_viewer_role(monkeypatch, tmp_path):
@@ -2323,6 +2379,48 @@ def test_internal_case_acknowledgment_latency_by_severity_returns_scoped_envelop
     assert data["fastest_acknowledged"]["case_id"] == critical.case_id
     assert data["slowest_acknowledged"]["case_id"] == warning.case_id
     assert "run-other-ack-severity" not in str(data)
+
+
+def test_internal_case_acknowledgment_latency_by_severity_redacts_secret_business_id_in_data(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    secret_business_id = "artemea access_token=raw_business_secret"
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    opened_at = datetime(2026, 5, 24, 8, tzinfo=timezone.utc)
+    case = store.upsert_detection(
+        _case_detection(
+            business_id=secret_business_id,
+            run_id="run-secret-business-ack-severity",
+            dedupe_suffix="stockout_risk/product/sku-secret-business/commerce.inventory/daily",
+        ),
+        detected_at=opened_at,
+    )
+    store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=opened_at + timedelta(minutes=30),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea%20access_token=raw_business_secret/cases/acknowledgment-latency/by-severity",
+        headers={**AUTH, "X-Request-ID": "req-secret-business-latency"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_business_secret" not in raw_body
+    body = response.get_json()
+    assert body["business_id"] == "[REDACTED]"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea access_token=[REDACTED]"
+    assert data["acknowledged_total"] == 1
+    assert data["by_acknowledgment_bucket_severity"]["under_1h"] == {"critical": 1}
+    assert data["fastest_acknowledged"]["case_id"] == case.case_id
 
 
 def test_internal_case_acknowledgment_latency_by_case_type_returns_scoped_envelope(monkeypatch, tmp_path):
@@ -4068,6 +4166,38 @@ def test_internal_endpoints_audit_basic_authorization_attempt_without_credential
     serialized = json.dumps(event, sort_keys=True)
     assert basic_credentials not in serialized
     assert "raw_basic_actor_secret" not in serialized
+
+
+def test_internal_endpoints_fail_closed_for_non_ascii_authorization_header(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            "Authorization": "Béarer wrong-token",
+            "X-Orvo-Operator": "operator:non-ascii-auth",
+            "X-Request-ID": "req-non-ascii-auth-denied",
+        },
+    )
+
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["error"]["code"] == "unauthorized"
+    assert body["redaction_applied"] is True
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authentication.denied"
+    assert event["actor_ref"] == "operator:non-ascii-auth"
+    assert event["request_id"] == "req-non-ascii-auth-denied"
+    assert event["data"] == {
+        "status": "denied",
+        "reason": "invalid_internal_token",
+        "method": "GET",
+        "header_present": True,
+        "scheme": "Béarer",
+    }
 
 
 def _audit_events(db_path) -> list[dict]:

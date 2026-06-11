@@ -1,5 +1,100 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-11 01:44 UTC
+
+Status: **Delivery-status global admin boundary promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `44f3b23` (`merge: integrate delivery status admin boundary`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before the merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-delivery-status-admin-boundary-20260611` was clean.
+- Candidate scope was intentionally small: four files, one branch-only commit, and no new dependencies.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-delivery-status-admin-boundary-20260611`
+- Head before merge: `c5998e7` (`fix: require admin scope for delivery status reads`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- The global `/internal/brain/whatsapp/delivery-statuses` read route now requires `operator_audit:read` plus an explicit all-business grant (`X-Orvo-Businesses: *`).
+- Legacy token-scoped principals with `allowed_businesses=None` remain accepted for tenant-scoped migration paths, but cannot implicitly read the global cross-business delivery-status surface.
+- Successful global delivery-status reads now append a redacted operator audit event, while authorization denials continue to be audited through the shared internal boundary.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_server_whatsapp_delivery_status.py -q` -> `19 passed in 2.52s`.
+- Focused canonical suite after merge: `pytest tests/test_server_whatsapp_delivery_status.py -q` -> `19 passed in 2.42s`.
+- Full canonical suite after merge: `pytest -q` -> `1392 passed in 24.49s`.
+
+Review notes / risks:
+
+- Architecture alignment: this closes the ARB-flagged global WhatsApp delivery-status boundary without making delivery status a source of truth for cases/workflows.
+- The new global-scope check lives in `operator_auth` / shared internal route authorization, not directly in transport-only code, so future global internal read surfaces can reuse it.
+- Remaining Trust/Admin risk: external Admin launch still needs explicit role and business claims everywhere; current implicit legacy operator behavior is still only acceptable for internal migration routes.
+
+Current next integration order:
+
+1. **Work Management workflow metadata:** rebase/review `codex/work-management` for system reopen transitions, actor taxonomy, SLA fields, and evidence lineage. It remains valuable but broad (27 branch-only commits against current head), so prefer a scoped rebase/slice if conflicts appear.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, and delivery-status admin-boundary commits; avoid duplicating already-shipped safe actor/error work.
+3. **Search/Analytics field registry slices:** review `codex/search-analytics` only if it keeps analytics as WorkItem/JQL/view/facet primitives rather than one-off endpoint-local KPI semantics.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
+## Release integration update — 2026-06-10 23:40 UTC
+
+Status: **Case-family release-state metadata promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `72582d5` (`merge: integrate case family release states`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before the merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-case-family-release-state-20260610` was clean.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-case-family-release-state-20260610`
+- Head before merge: `a60f679` (`codex: add case family release state metadata`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- WorkItem issue-type definitions now expose `release_state` values derived from the semantic registry.
+- Case families with `CASE_FAMILY_METRICS` evidence contracts are `promoted`; implemented-but-not-registry-promoted families such as `channel_mix_shift` are `deferred`; unknown/internal issue-type strings resolve as `internal_only`.
+- The case-family promotion invariant now verifies that promoted issue types exactly match registry-backed owner-facing/detectable case families.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_work_items.py tests/invariants/test_case_family_promotion_policy.py -q` -> `8 passed in 1.33s`.
+- Focused canonical suite after merge: same command -> `8 passed in 1.04s`.
+- Full canonical suite after merge: `pytest -q` -> `1389 passed in 29.67s`.
+
+Review notes / risks:
+
+- Architecture alignment: this closes the ARB-flagged deferred case-family footgun without making WhatsApp/report/operator surfaces a source of truth and without relaxing semantic-registry promotion gates.
+- No dependencies were added; the change is confined to WorkItem projection metadata plus invariants.
+- Follow-up: external/operator contracts should document `release_state` if/when issue-type definitions become API-visible.
+
+Current next integration order:
+
+1. **Work Management workflow metadata:** rebase/review `codex/work-management` for system reopen transitions, actor taxonomy, SLA fields, and evidence lineage. It is valuable but broad (25 branch-only commits against current head), so prefer a scoped rebase/slice if conflicts appear.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit and redaction commits; avoid duplicating already-shipped safe actor/error work.
+3. **Search/Analytics field registry slices:** review `codex/search-analytics` only if it keeps analytics as WorkItem/JQL/view/facet primitives rather than one-off endpoint-local KPI semantics.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
 ## Release integration update — 2026-06-10 21:36 UTC
 
 Status: **Workflow Automation approval/execution gate branch promoted**.

@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from flask import request
-
-from app.brain.operator_api import *  # noqa: F401,F403
-from app.brain.operator_auth import INTERNAL_READ_PERMISSION, OPERATOR_AUDIT_READ_PERMISSION
-
-from .common import (
-    _authorize_internal_operator,
-    _internal_success,
-    _internal_error,
-    _require_internal_header_permission,
-    _with_internal_stores,
-)
-
 import sqlite3
 from contextlib import closing
 
+from flask import request
+
 from app.brain.delivery_status import SQLiteWhatsAppDeliveryStatusStore
+from app.brain.operator_api import *  # noqa: F401,F403
+from app.brain.operator_auth import INTERNAL_READ_PERMISSION, OPERATOR_AUDIT_READ_PERMISSION
 from app.brain.storage import init_schema
-from .common import _internal_brain_db_path
+
+from .common import (
+    _append_operator_audit_event,
+    _authorize_internal_operator,
+    _internal_brain_db_path,
+    _internal_error,
+    _internal_principal_or_error,
+    _internal_success,
+    _with_internal_stores,
+)
 
 
 def _delivery_status_limit_or_error(business_id: str):
@@ -62,29 +62,44 @@ def register_run_delivery_routes(app):
             ),
         )
 
-
     @app.get("/internal/brain/whatsapp/delivery-statuses")
     def internal_brain_whatsapp_delivery_statuses():
         business_id = "whatsapp"
         auth_error = _authorize_internal_operator(business_id)
         if auth_error is not None:
             return auth_error
-        permission_error = _require_internal_header_permission(
+        principal, permission_error = _internal_principal_or_error(
             business_id,
             OPERATOR_AUDIT_READ_PERMISSION,
             audit_denial=True,
+            require_explicit_global_scope=True,
         )
         if permission_error is not None:
             return permission_error
-        return _delivery_status_success(business_id)
-
+        assert principal is not None
+        limit, limit_error = _delivery_status_limit_or_error(business_id)
+        if limit_error is not None:
+            return limit_error
+        assert limit is not None
+        with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+            init_schema(conn)
+            events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(limit=limit)
+        _append_operator_audit_event(
+            business_id=business_id,
+            actor_ref=principal.actor_ref,
+            event_type="operator.whatsapp_delivery_statuses.read",
+            target_type="whatsapp_delivery_statuses",
+            target_id=business_id,
+            data={"status": "allowed", "scope": "global", "limit": limit},
+        )
+        return _internal_success(business_id, {"events": redact_secrets(events)})
 
     @app.get("/internal/brain/businesses/<business_id>/whatsapp/delivery-statuses")
     def internal_brain_business_whatsapp_delivery_statuses(business_id: str):
         auth_error = _authorize_internal_operator(business_id)
         if auth_error is not None:
             return auth_error
-        permission_error = _require_internal_header_permission(
+        _principal, permission_error = _internal_principal_or_error(
             business_id,
             INTERNAL_READ_PERMISSION,
             audit_denial=True,
@@ -92,7 +107,6 @@ def register_run_delivery_routes(app):
         if permission_error is not None:
             return permission_error
         return _delivery_status_success(business_id, event_business_id=business_id)
-
 
     @app.get("/internal/brain/businesses/<business_id>/runs/<run_id>")
     def internal_brain_run_detail(business_id: str, run_id: str):

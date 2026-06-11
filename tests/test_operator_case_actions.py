@@ -11,7 +11,13 @@ from app.brain.operational_cases import (
     OperationalCaseDetection,
     SQLiteOperationalCaseStore,
 )
-from app.brain.operator_api import OperatorAPIError, apply_case_action, apply_case_action_with_idempotency
+from app.brain.operator_api import (
+    OperatorAPIError,
+    apply_case_action,
+    apply_case_action_with_idempotency,
+    normalize_case_assignee,
+    normalize_operator_actor,
+)
 from app.brain.storage import init_schema
 from app.brain.workflow_action_ledger import InMemoryWorkflowActionLedgerStore
 
@@ -75,6 +81,20 @@ def assert_no_raw_comment_secret(serialized: str) -> None:
 
 def assert_no_raw_actor_secret(serialized: str) -> None:
     assert "raw_actor_secret" not in serialized
+
+
+def test_normalize_operator_actor_redacts_secret_shapes_before_store_or_ledger_use():
+    actor = normalize_operator_actor("operator access_token=raw_actor_secret", None)
+
+    assert actor == "operator access_token=[REDACTED]"
+    assert_no_raw_actor_secret(actor)
+
+
+def test_normalize_case_assignee_redacts_secret_shapes_before_store_or_ledger_use():
+    assignee = normalize_case_assignee("dueña api_key=raw_actor_secret", None)
+
+    assert assignee == "dueña api_key=[REDACTED]"
+    assert_no_raw_actor_secret(assignee)
 
 
 def test_timeline_actor_ref_is_redacted_for_comments_and_status_actions_before_persistence(conn):
@@ -176,6 +196,48 @@ def test_apply_case_action_add_comment_returns_case_detail_with_redacted_comment
     assert "Checked supplier" in event["summary"]
     assert event["metadata"]["safe"] == "visible"
     assert_no_raw_comment_secret(str(result))
+
+
+def test_apply_case_action_with_idempotency_rejects_reused_key_with_different_payload_without_mutation():
+    """Manual idempotency keys must replay the same request, not mask payload drift."""
+
+    store = InMemoryOperationalCaseStore()
+    action_ledger = InMemoryWorkflowActionLedgerStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    first = apply_case_action_with_idempotency(
+        store,
+        action_ledger,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="add_comment",
+        idempotency_key="case-action-comment-1",
+        actor_ref="operator@example.com",
+        comment="First supplier note",
+    )
+
+    assert first["action"]["status"] == "executed"
+    timeline_count_after_first = len(first["case"]["timeline"])
+
+    with pytest.raises(OperatorAPIError) as exc:
+        apply_case_action_with_idempotency(
+            store,
+            action_ledger,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="add_comment",
+            idempotency_key="case-action-comment-1",
+            actor_ref="operator@example.com",
+            comment="Different supplier note must not be accepted as a replay",
+        )
+
+    assert exc.value.code == "idempotency_key_conflict"
+    assert exc.value.status_code == 409
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert len(reloaded.timeline) == timeline_count_after_first
+    assert reloaded.timeline[-1].summary == "First supplier note"
+    assert len(action_ledger.list_actions(business_id="artemea")) == 1
 
 
 def test_apply_case_action_add_comment_strips_actor_ref_before_persisting_timeline_event():
@@ -344,6 +406,34 @@ def test_store_assign_case_sets_assignee_timeline_event_preserves_status_redacts
         assert event.created_at == utc(9)
         assert event.metadata == {"assignee_ref": "owner access_token=[REDACTED]"}
         assert "raw_assignee_secret" not in assigned.model_dump_json()
+
+
+def test_assign_case_same_assignee_is_idempotent_without_timeline_noise(conn):
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(case_detection(run_id=f"{label}-run"), detected_at=utc(8))
+        first = store.assign_case(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="operator@example.com",
+            assignee_ref="owner access_token=raw_assignee_secret",
+            assigned_at=utc(9),
+        )
+        second = store.assign_case(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="other-operator@example.com",
+            assignee_ref="  owner access_token=raw_assignee_secret  ",
+            assigned_at=utc(10),
+        )
+
+        assert second == first, f"{label}: assigning the same owner again must be a no-op"
+        assert second.assigned_at == utc(9)
+        assert second.updated_at == utc(9)
+        assert [event.event_type for event in second.timeline] == ["case_opened", "case_assigned"]
+        assert "raw_assignee_secret" not in second.model_dump_json()
 
 
 def test_apply_case_action_assign_owner_updates_projection_and_keeps_lifecycle_status():
