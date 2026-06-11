@@ -75,8 +75,18 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 ```http
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
+GET /internal/brain/businesses/{business_id}/cases/facets
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
+
+Case queue and detail projections include WorkItem envelope fields derived from
+`OperationalCase`, including `project_key`, `issue_type`, `release_state`,
+`status_category`, and `work_item_id`. JQL-lite and case facets are read-only,
+route-scoped projections over the canonical WorkItem field registry; supported
+fields include `project`, `issue_type`, `release_state`, `status_category`,
+`assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. The
+API must reject unsupported fields/operators/values instead of translating user
+input into SQL or allowing query text to own business scope.
 
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
