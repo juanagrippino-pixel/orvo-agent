@@ -118,6 +118,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "readonly": True,
     },
     {
+        "view_id": "readiness_gated_actionable",
+        "label": "Readiness-gated actionable cases",
+        "description": "Actionable cases for readiness-gated modules that need operator setup or source validation.",
+        "jql": "release_state = readiness_gated AND actionable = true ORDER BY updated_at DESC",
+        "readonly": True,
+    },
+    {
         "view_id": "data_stale",
         "label": "Data stale",
         "description": "Open, acknowledged, or in-progress stale-data cases.",
