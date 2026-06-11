@@ -6,7 +6,7 @@ Related: `docs/research/2026-06-11-lapyme-benchmark.md`, `docs/product/d2c-contr
 
 ## Decision
 
-Orvo's MVP should look and sell like the first slice of an Argentine PyME operating system, not like a narrow report bot.
+Orvo's MVP should look and sell like the first slice of an Argentine PyME operating system, not like a narrow report bot. The main surface should be an app/operator console similar in seriousness to La Pyme/Tango-style systems; WhatsApp should be a notification/projection channel, not the whole control interface.
 
 La Pyme validates that Argentine SMBs understand and pay for an operational system that joins commerce, stock, fiscal/admin workflows, reports, and AI over real data. Orvo should compete at that category level while preserving its current deterministic control-plane architecture.
 
@@ -14,7 +14,7 @@ La Pyme validates that Argentine SMBs understand and pay for an operational syst
 
 ```text
 Orvo is the AI-native operating control plane for Argentine commerce PyMEs.
-The first wedge is Tiendanube/WhatsApp-first D2C operations.
+The first wedge is Tiendanube/D2C operations with an app/operator-console-first workflow and WhatsApp alerts/projections.
 ```
 
 Avoid these framings:
@@ -23,6 +23,7 @@ Avoid these framings:
 - dashboard;
 - generic agent platform;
 - loose AI analyst;
+- WhatsApp-only control surface;
 - ERP clone.
 
 ## MVP category slice
@@ -37,9 +38,10 @@ The MVP should expose five visible capabilities even if some begin as readiness-
    - `stockout_risk` and readiness-gated `fulfillment_backlog`.
    - Suppress owner-facing claims when order/status evidence is ambiguous.
 
-3. **WhatsApp/customer attention**
+3. **Customer attention**
    - readiness-gated `unanswered_conversations`.
    - No raw message bodies, phone numbers, or auto-reply promises in MVP.
+   - WhatsApp can alert and summarize, but the canonical queue/actions live in the app/operator console.
 
 4. **Fiscal/admin readiness lane**
    - ARCA/facturación is not a full MVP integration yet.
@@ -59,7 +61,8 @@ Use La Pyme's breadth as the buyer-facing category, but build only platform-safe
 - metric registry/evidence;
 - Operational Cases;
 - audited actions;
-- redacted operator/WhatsApp projections.
+- redacted operator-console projections;
+- WhatsApp/email alerts as secondary projections.
 
 If a capability cannot pass those contracts, ship it as:
 
@@ -83,7 +86,7 @@ For one merchant:
 - configure stock/fulfillment thresholds;
 - qualify WhatsApp source readiness;
 - qualify ARCA/payment source readiness;
-- produce a concise OS-style operator screen and WhatsApp projection.
+- produce a concise OS-style operator screen first, plus optional WhatsApp projection.
 
 ### Owner-facing promise
 
@@ -97,7 +100,8 @@ En una semana te damos el centro operativo de tu tienda: ventas, stock, chats pe
 - At least 3 deterministic case families.
 - Case queue + run health inspection.
 - Redacted degraded-state handling.
-- WhatsApp projection from cases.
+- App/operator console projection from cases.
+- Optional WhatsApp alerts from cases.
 
 ### What can be readiness-gated
 
@@ -114,11 +118,12 @@ Readiness-gated means visible in product as setup/status/next-step, but not owne
 Autonomous workers should now prioritize MVP work that makes Orvo feel like a PyME OS without broad rewrites:
 
 1. operator home / OS snapshot;
-2. module readiness statuses for sales, stock, WhatsApp, ARCA, treasury;
+2. module readiness statuses for sales, stock, customer attention, ARCA, treasury;
 3. setup-required / data-stale cases;
-4. case-backed WhatsApp projection;
-5. pilot activation checklist and demo data;
-6. only then deeper integrations.
+4. case-backed app/operator projection;
+5. WhatsApp alert/projection only after the app source of truth exists;
+6. pilot activation checklist and demo data;
+7. only then deeper integrations.
 
 ## Not now
 

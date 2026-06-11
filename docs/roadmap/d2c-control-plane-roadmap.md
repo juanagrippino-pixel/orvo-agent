@@ -132,12 +132,13 @@ Outcome: the MVP feels like the first slice of a PyME operating system, not a re
 
 Deliverables:
 
-- operator home / OS snapshot that shows module status for sales/orders, stock/fulfillment, WhatsApp/customer attention, ARCA/fiscal readiness, and treasury/reporting;
+- operator home / OS snapshot that shows module status for sales/orders, stock/fulfillment, customer attention, ARCA/fiscal readiness, and treasury/reporting;
 - readiness-gated setup-required or `data_stale` cases for modules that are not connected or cannot prove source truth;
 - sales/orders remains the fully automated core via Tiendanube evidence;
-- stock/fulfillment and WhatsApp attention remain owner-facing only when readiness gates pass;
+- stock/fulfillment and customer-attention modules remain owner-facing only when readiness gates pass;
 - ARCA and treasury appear as readiness/status lanes, not fake automation;
 - GTM copy updated from "report/brief" to "centro operativo de tu tienda".
+- WhatsApp remains a concise alert/projection channel; the operator console remains the canonical control surface.
 
 Exit criteria:
 

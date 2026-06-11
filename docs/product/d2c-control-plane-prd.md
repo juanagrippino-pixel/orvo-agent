@@ -7,7 +7,7 @@ Related: `docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`, `docs/product/d2c
 
 ## Product thesis
 
-Orvo is the AI-native operating control plane for Argentine commerce PyMEs. The first wedge is D2C ecommerce: it turns scattered business signals into a prioritized queue of evidence-backed operational cases, then helps the owner/operator follow up through WhatsApp and internal operator surfaces.
+Orvo is the AI-native operating control plane for Argentine commerce PyMEs. The first wedge is D2C ecommerce: it turns scattered business signals into a prioritized queue of evidence-backed operational cases, then helps the owner/operator operate from an app/operator console with WhatsApp as an alert/projection channel.
 
 The first product is not a chatbot, not a BI dashboard, not a generic agent platform, and not an ERP clone. It is a PyME operating-system slice that answers:
 
@@ -17,7 +17,7 @@ The first product is not a chatbot, not a BI dashboard, not a generic agent plat
 4. What should the operator do next?
 5. What is still open, resolved, stale, or blocked?
 
-The La Pyme benchmark raises the MVP bar: the first sellable product should feel like the beginning of an operating system for the business, even while only Tiendanube/WhatsApp-first modules are fully automated.
+The La Pyme/Tango benchmark raises the MVP bar: the first sellable product should feel like the beginning of an operating system for the business. The canonical control surface should be the app/operator console; WhatsApp should not be asked to control the whole business through one message.
 
 ## Initial ICP
 
@@ -74,7 +74,7 @@ Buyer-facing promises:
 3. Operator queue filters: open, stale, high priority, source degraded.
 4. Example/demo data with redacted credentials.
 5. Sales/demo packet generated from the product contract, not hand-written fantasy.
-6. OS-style module readiness statuses for sales/orders, stock/fulfillment, WhatsApp/customer attention, ARCA/fiscal readiness, and treasury/reporting.
+6. OS-style module readiness statuses for sales/orders, stock/fulfillment, customer attention, ARCA/fiscal readiness, and treasury/reporting.
 7. Setup-required cases for unconnected or untrusted modules so the product shows the path to a broader PyME OS without inventing data.
 
 ### Not yet
