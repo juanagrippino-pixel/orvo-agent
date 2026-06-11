@@ -1093,10 +1093,14 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
         "unassigned_actionable",
         "actionable_cases",
         "high_priority_actionable",
+        "readiness_gated_actionable",
     }.issubset(views)
     assert views["actionable_cases"]["jql"] == "actionable = true ORDER BY priority_score DESC"
     assert views["high_priority_actionable"]["jql"] == (
         "actionable = true AND priority_bracket = high ORDER BY priority_score DESC"
+    )
+    assert views["readiness_gated_actionable"]["jql"] == (
+        "release_state = readiness_gated AND actionable = true ORDER BY updated_at DESC"
     )
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"
@@ -1144,6 +1148,75 @@ def test_internal_high_priority_actionable_view_matches_jql_and_business_scope(m
     }
     assert view_body["data"]["cases"] == direct_body["data"]["cases"]
     assert [case["case_id"] for case in view_body["data"]["cases"]] == [high.case_id]
+    assert all(case["business_id"] == "artemea" for case in view_body["data"]["cases"])
+
+
+def test_internal_readiness_gated_actionable_view_matches_jql_and_excludes_resolved(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-promoted", priority=95))
+    readiness = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            priority=70,
+            title="Conversaciones sin responder",
+            run_id="run-readiness-open",
+        ),
+    )
+    resolved_readiness = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/resolved.conversations/daily",
+            severity="warning",
+            priority=80,
+            title="Conversaciones resueltas",
+            run_id="run-readiness-resolved",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-other-readiness", business_id="other", priority=99))
+
+    with sqlite3.connect(db_path) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        store.transition_case(
+            resolved_readiness.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator:juan",
+        )
+        store.transition_case(
+            resolved_readiness.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            reason="fixture resolved",
+        )
+
+    view_response = client.get(
+        "/internal/brain/businesses/artemea/case-views/readiness_gated_actionable/cases",
+        headers=AUTH,
+    )
+    direct_response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "release_state = readiness_gated AND actionable = true ORDER BY updated_at DESC"},
+    )
+
+    assert view_response.status_code == 200
+    assert direct_response.status_code == 200
+    view_body = view_response.get_json()
+    direct_body = direct_response.get_json()
+    assert view_body["data"]["view"] == {
+        "view_id": "readiness_gated_actionable",
+        "label": "Readiness-gated actionable cases",
+        "readonly": True,
+    }
+    assert view_body["data"]["cases"] == direct_body["data"]["cases"]
+    assert [case["case_id"] for case in view_body["data"]["cases"]] == [readiness.case_id]
+    assert view_body["data"]["cases"][0]["release_state"] == "readiness_gated"
     assert all(case["business_id"] == "artemea" for case in view_body["data"]["cases"])
 
 
