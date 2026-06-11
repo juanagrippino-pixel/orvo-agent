@@ -551,24 +551,34 @@ def test_owner_brief_redacts_secret_shaped_recommended_action_text():
     assert "[REDACTED" in text
 
 
-def test_compose_owner_case_brief_excludes_internal_case_families_from_owner_surface():
+def test_compose_owner_case_brief_excludes_unpromoted_case_families_from_owner_surface():
     from app.brain.reporting import compose_owner_case_brief
 
     visible = _owner_case(case_id="case-visible", title="Stock crítico", priority_score=90)
-    internal = _owner_case(
-        case_id="case-internal",
-        title="Mix de canales interno",
-        case_type="channel_mix_shift",
+    readiness_gated = _owner_case(
+        case_id="case-readiness-gated",
+        title="Conversaciones sin responder",
+        case_type="unanswered_conversations",
         priority_score=100,
     )
+    deferred = _owner_case(
+        case_id="case-deferred",
+        title="Mix de canales interno",
+        case_type="channel_mix_shift",
+        priority_score=99,
+    )
 
-    text = compose_owner_case_brief("Artemea", [internal, visible], report_date=date(2026, 5, 24))
+    text = compose_owner_case_brief(
+        "Artemea", [readiness_gated, deferred, visible], report_date=date(2026, 5, 24)
+    )
 
     assert "1 tema operativo" in text
     assert "Stock crítico" in text
     assert "case-visible" in text
+    assert "Conversaciones sin responder" not in text
+    assert "case-readiness-gated" not in text
     assert "Mix de canales interno" not in text
-    assert "case-internal" not in text
+    assert "case-deferred" not in text
 
 
 def test_compose_owner_case_brief_marks_degraded_evidence():
