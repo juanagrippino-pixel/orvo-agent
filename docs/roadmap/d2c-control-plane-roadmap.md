@@ -126,6 +126,26 @@ Exit criteria:
 - Failures degrade honestly.
 - Follow-up history exists for open/resolved cases.
 
+## Milestone 4C — La Pyme-category OS snapshot
+
+Outcome: the MVP feels like the first slice of a PyME operating system, not a report-only tool, while still preserving the Tiendanube/WhatsApp wedge and all platform contracts.
+
+Deliverables:
+
+- operator home / OS snapshot that shows module status for sales/orders, stock/fulfillment, WhatsApp/customer attention, ARCA/fiscal readiness, and treasury/reporting;
+- readiness-gated setup-required or `data_stale` cases for modules that are not connected or cannot prove source truth;
+- sales/orders remains the fully automated core via Tiendanube evidence;
+- stock/fulfillment and WhatsApp attention remain owner-facing only when readiness gates pass;
+- ARCA and treasury appear as readiness/status lanes, not fake automation;
+- GTM copy updated from "report/brief" to "centro operativo de tu tienda".
+
+Exit criteria:
+
+- A merchant can understand what Orvo monitors today, what is stale, and what needs connecting next.
+- No module creates owner-facing claims without evidence and source freshness.
+- The OS snapshot is derived from connector/runtime/case state, not hand-written marketing copy.
+- Full suite remains green.
+
 ### Milestone 4A — Readiness-gated fulfillment backlog module
 
 Outcome: Orvo can safely decide whether a Tiendanube merchant is eligible for owner-facing `fulfillment_backlog` cases, and can explain when fulfillment data is not trustworthy enough.

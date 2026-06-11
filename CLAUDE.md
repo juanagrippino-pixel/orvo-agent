@@ -4,10 +4,10 @@
 Build Orvo Brain: a deterministic control plane for Argentine/LatAm PyMEs. It ingests business data, normalizes metrics, generates evidence-backed insights, and dispatches concise WhatsApp reports.
 
 ## Accepted product direction
-- First sellable product: D2C ecommerce control plane for Tiendanube/WhatsApp-first operators.
+- First sellable product: La Pyme-category operating control plane for Argentine commerce PyMEs, with a Tiendanube/WhatsApp-first D2C wedge.
 - Internal architecture: Atlassian-like platform/control-plane core with compiled runtime, connector registry, run ledger, metric registry, Operational Cases, governance, and operator surfaces.
-- Sell narrow/build deep: prioritize D2C ecommerce cases and operator workflows without bypassing platform contracts.
-- Do not position the first product as a generic chatbot or generic agent platform.
+- Sell category/build wedge: the MVP should feel like a PyME operating-system slice (sales/orders, stock/fulfillment, WhatsApp attention, ARCA readiness, treasury/reporting readiness) without bypassing platform contracts.
+- Do not position the first product as a generic chatbot, generic agent platform, dashboard, loose AI analyst, or ERP clone.
 - Start from `docs/README.md`, `docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`, `docs/product/d2c-control-plane-prd.md`, `docs/specs/d2c-case-family-catalog.md`, `docs/specs/d2c-action-key-catalog.md`, `docs/specs/d2c-operator-surface-contract.md`, `docs/roadmap/d2c-control-plane-roadmap.md`, and `docs/organization/d2c-autonomous-worker-addendum.md` before product/architecture work.
 - For implementation work, also read `docs/specs/compiled-runtime-contract.md`, `docs/specs/connector-registry-contract.md`, `docs/specs/metric-registry-contract.md`, `docs/specs/tenant-secret-redaction-contract.md`, `docs/specs/testing-invariant-matrix.md`, and `docs/organization/d2c-worker-task-packets.md`.
 
