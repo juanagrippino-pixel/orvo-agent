@@ -252,6 +252,35 @@ def test_internal_delivery_statuses_audits_authorization_denials(monkeypatch, tm
     assert event["data"]["permission"] == "role:known"
 
 
+def test_internal_delivery_statuses_enforces_global_whatsapp_scope_allowlist(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    assert client.post("/webhook", json=_status_payload()).status_code == 200
+    headers = {
+        **AUTH,
+        "X-Orvo-Businesses": "artemea",
+        "X-Request-ID": "req-delivery-status-scope-denied",
+    }
+
+    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=headers)
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "whatsapp"
+    assert "data" not in body
+    assert body["error"]["code"] == "forbidden"
+    events = _read_audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "whatsapp"
+    assert event["event_type"] == "operator.authorization.denied"
+    assert event["target_id"] == "whatsapp"
+    assert event["request_id"] == "req-delivery-status-scope-denied"
+    assert event["data"]["reason"] == "business_scope_denied"
+    assert event["data"]["permission"] == "business:access"
+    assert event["data"]["allowed_businesses"] == ["artemea"]
+
+
 def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     assert client.post("/webhook", json=_status_payload(message_id="wamid.A", status="sent", timestamp="1748002000")).status_code == 200
