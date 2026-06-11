@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -48,6 +49,12 @@ def _case_detection_with_evidence_count(*, evidence_count: int, run_id: str, **k
         for index in range(evidence_count)
     ]
     return detection.model_copy(update={"evidence_refs": evidence_refs, "evidence_snapshots": []})
+
+
+def _case_detection_with_latest_evidence_at(*, captured_at: datetime, run_id: str, **kwargs):
+    detection = _case_detection(run_id=run_id, **kwargs)
+    snapshot = detection.evidence_snapshots[0].model_copy(update={"captured_at": captured_at})
+    return detection.model_copy(update={"evidence_snapshots": [snapshot]})
 
 
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
@@ -256,6 +263,68 @@ def test_parse_case_jql_supports_evidence_count_filter():
     with pytest.raises(OperatorAPIError) as sql_shape:
         parse_case_jql("evidence_count >= 1 OR 1 = 1")
     assert sql_shape.value.code == "invalid_jql"
+
+
+def test_parse_case_jql_supports_latest_evidence_timestamp_filter():
+    assert parse_case_jql("latest_evidence_at >= 2026-05-24T09:00:00+00:00").normalized == (
+        "latest_evidence_at >= 2026-05-24T09:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_value:
+        parse_case_jql("latest_evidence_at >= 2026-05-24T09:00:00")
+    assert unsupported_value.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as sql_shape:
+        parse_case_jql("latest_evidence_at >= 2026-05-24T09:00:00+00:00 OR 1 = 1")
+    assert sql_shape.value.code == "invalid_jql"
+
+
+def test_internal_case_queue_filters_by_latest_evidence_at_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(
+        db_path,
+        _case_detection_with_latest_evidence_at(
+            run_id="run-early-evidence",
+            captured_at=datetime(2026, 5, 24, 7, tzinfo=timezone.utc),
+            dedupe_suffix="stockout_risk/sku/EARLY_EVIDENCE/inventory.on_hand/daily",
+            entity_scope={"kind": "sku", "id": "EARLY_EVIDENCE", "label": "Early evidence"},
+        ),
+    )
+    late_case = _seed_case(
+        db_path,
+        _case_detection_with_latest_evidence_at(
+            run_id="run-late-evidence",
+            captured_at=datetime(2026, 5, 24, 9, tzinfo=timezone.utc),
+            dedupe_suffix="stockout_risk/sku/LATE_EVIDENCE/inventory.on_hand/daily",
+            entity_scope={"kind": "sku", "id": "LATE_EVIDENCE", "label": "Late evidence"},
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection_with_latest_evidence_at(
+            business_id="other",
+            run_id="run-other-late-evidence",
+            captured_at=datetime(2026, 5, 24, 10, tzinfo=timezone.utc),
+            dedupe_suffix="stockout_risk/sku/OTHER_LATE_EVIDENCE/inventory.on_hand/daily",
+            entity_scope={"kind": "sku", "id": "OTHER_LATE_EVIDENCE", "label": "Other late evidence"},
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "latest_evidence_at >= 2026-05-24T09:00:00+00:00"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        "latest_evidence_at >= 2026-05-24T09:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [late_case.case_id]
+    assert body["data"]["cases"][0]["latest_evidence_at"] == "2026-05-24T09:00:00Z"
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):

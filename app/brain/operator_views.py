@@ -17,7 +17,12 @@ from app.brain.operational_cases import (
     OperationalCaseStore,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
-from app.brain.operator_case_projections import evidence_freshness_states, is_case_degraded, source_connectors
+from app.brain.operator_case_projections import (
+    evidence_freshness_states,
+    is_case_degraded,
+    latest_evidence_at,
+    source_connectors,
+)
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
@@ -683,6 +688,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_priority_bracket(case)
     if field == "evidence_count":
         return len(case.evidence_refs)
+    if field == "latest_evidence_at":
+        return latest_evidence_at(case)
     if field == "assigned":
         return case.assignee_ref is not None
     if field == "actionable":

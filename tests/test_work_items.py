@@ -325,6 +325,11 @@ def test_work_item_query_field_registry_is_canonical_for_case_search_fields():
     assert by_field["priority_bracket"]["operators"] == ["=", "!=", "IN"]
     assert by_field["source_connector"]["source"] == "evidence_projection"
     assert by_field["freshness_state"]["allowed_values"] == ["degraded", "fresh", "missing", "stale", "unknown"]
+    assert by_field["latest_evidence_at"]["source"] == "evidence_projection"
+    assert by_field["latest_evidence_at"]["value_type"] == "datetime"
+    assert by_field["latest_evidence_at"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
+    assert by_field["latest_evidence_at"]["sortable"] is False
+    assert by_field["latest_evidence_at"]["facetable"] is False
     assert by_field["priority_score"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
     assert by_field["priority_score"]["sortable"] is True
     assert by_field["priority_score"]["facetable"] is False
