@@ -97,7 +97,7 @@ def _seed_run(
     business_id: str,
     run_id: str,
     status: RunStatus = "succeeded",
-    dispatch_status: DispatchRunStatus = "sent",
+    dispatch_status: DispatchRunStatus | None = "sent",
 ):
     conn = sqlite3.connect(db_path)
     init_schema(conn)
@@ -119,15 +119,16 @@ def _seed_run(
             operational_case_ids=[f"case-for-{run_id}"],
         ),
     )
-    ledger.append_dispatch_outcome(
-        run.run_id,
-        DispatchOutcomeRef(
-            channel="whatsapp",
-            status=dispatch_status,
-            message_id="wamid.safe",
-            provider_response_ref="provider://response?access_token=raw_provider_secret",
-        ),
-    )
+    if dispatch_status is not None:
+        ledger.append_dispatch_outcome(
+            run.run_id,
+            DispatchOutcomeRef(
+                channel="whatsapp",
+                status=dispatch_status,
+                message_id="wamid.safe",
+                provider_response_ref="provider://response?access_token=raw_provider_secret",
+            ),
+        )
     ledger.update_run(run.run_id, status=status, finished_at=_utc(8), summary_metadata={"cases_opened": 1})
     conn.close()
     return run
@@ -1207,6 +1208,24 @@ def test_internal_run_history_can_filter_by_latest_dispatch_status_after_limit(m
     assert body["data"]["limit"] == 1
     assert [run["run_id"] for run in body["data"]["runs"]] == ["run-a-failed"]
     assert body["data"]["runs"][0]["dispatch_status"] == "failed"
+
+
+def test_internal_run_history_can_filter_undispatched_runs(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-sent", dispatch_status="sent")
+    _seed_run(db_path, business_id="artemea", run_id="run-no-dispatch", dispatch_status=None)
+    _seed_run(db_path, business_id="other", run_id="run-other-no-dispatch", dispatch_status=None)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs?dispatch_status=none",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert [run["run_id"] for run in body["data"]["runs"]] == ["run-no-dispatch"]
+    assert body["data"]["runs"][0]["dispatch_count"] == 0
+    assert body["data"]["runs"][0]["dispatch_status"] is None
 
 
 def test_internal_run_history_rejects_invalid_dispatch_status(monkeypatch, tmp_path):

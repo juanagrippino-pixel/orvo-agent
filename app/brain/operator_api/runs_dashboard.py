@@ -3,7 +3,9 @@ from __future__ import annotations
 from app.brain.run_ledger import DispatchRunStatus, RunRecord
 
 from .common import *  # noqa: F401,F403
+from .common import _NO_DISPATCH_STATUS, RunDispatchStatusFilter
 from .projections import *  # noqa: F401,F403
+from .projections import _latest_dispatch_outcome
 from .cases import *  # noqa: F401,F403
 from .top_cases import *  # noqa: F401,F403
 from .recent_cases import *  # noqa: F401,F403
@@ -14,10 +16,15 @@ from .histograms_handling import *  # noqa: F401,F403
 
 
 def _latest_dispatch_status(run: RunRecord) -> DispatchRunStatus | None:
-    if not run.dispatch_outcomes:
-        return None
-    latest = max(run.dispatch_outcomes, key=lambda outcome: (outcome.created_at, outcome.attempt_number))
-    return latest.status
+    latest = _latest_dispatch_outcome(run)
+    return latest.status if latest is not None else None
+
+
+def _matches_dispatch_status_filter(run: RunRecord, dispatch_status: RunDispatchStatusFilter) -> bool:
+    latest_status = _latest_dispatch_status(run)
+    if dispatch_status == _NO_DISPATCH_STATUS:
+        return latest_status is None
+    return latest_status == dispatch_status
 
 
 def list_run_history(
@@ -37,7 +44,7 @@ def list_run_history(
         limit=None if parsed_dispatch_status is not None else parsed_limit,
     )
     if parsed_dispatch_status is not None:
-        runs = [run for run in runs if _latest_dispatch_status(run) == parsed_dispatch_status]
+        runs = [run for run in runs if _matches_dispatch_status_filter(run, parsed_dispatch_status)]
         runs = runs[:parsed_limit]
     return {"runs": [run_history_item(run) for run in runs], "limit": parsed_limit}
 
