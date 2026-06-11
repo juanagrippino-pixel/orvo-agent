@@ -226,6 +226,38 @@ def test_default_connector_capability_contracts_are_certified():
     } == {spec.connector_type: [] for spec in list_connector_specs()}
 
 
+def test_connector_metric_family_certification_flags_unknown_semantic_families():
+    from app.brain.connector_registry import ConnectorSpec
+
+    spec = ConnectorSpec(
+        connector_type="drifty_metrics",
+        display_name="Drifty metrics connector",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders", "commerce.unknown_future"),
+    )
+
+    issues = spec.validate_metric_family_contract()
+
+    assert [(issue.code, issue.family, issue.severity) for issue in issues] == [
+        ("unknown_metric_family", "commerce.unknown_future", "error"),
+    ]
+    assert issues[0].message == (
+        "drifty_metrics connector declares emitted metric family "
+        "commerce.unknown_future outside the semantic metric registry"
+    )
+
+
+def test_default_connector_metric_family_contracts_are_certified():
+    from app.brain.connector_registry import list_connector_specs
+
+    assert {
+        spec.connector_type: spec.validate_metric_family_contract()
+        for spec in list_connector_specs()
+    } == {spec.connector_type: [] for spec in list_connector_specs()}
+
+
 def test_connector_executor_certification_flags_unsafe_metadata_drift():
     from app.brain.connector_registry import (
         ConnectorExecutorMetadata,
@@ -355,6 +387,36 @@ def test_connector_contract_certification_rolls_up_registry_release_gate_issues(
     }
 
 
+def test_connector_contract_certification_includes_metric_family_drift():
+    from app.brain.connector_registry import ConnectorSpec
+
+    spec = ConnectorSpec(
+        connector_type="drifty_family",
+        display_name="Drifty family",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders", "commerce.future_unknown"),
+    )
+
+    certification = spec.certify_contract()
+
+    assert certification.passed is False
+    assert certification.issue_count == 1
+    assert certification.issue_codes == ("unknown_metric_family",)
+    assert certification.as_metadata()["metric_family_issues"] == [
+        {
+            "code": "unknown_metric_family",
+            "family": "commerce.future_unknown",
+            "message": (
+                "drifty_family connector declares emitted metric family "
+                "commerce.future_unknown outside the semantic metric registry"
+            ),
+            "severity": "error",
+        }
+    ]
+
+
 def test_default_registry_contract_certification_passes_all_specs():
     from app.brain.connector_registry import certify_connector_contracts
 
@@ -372,6 +434,7 @@ def test_default_registry_contract_certification_passes_all_specs():
         "health_issues": [],
         "scope_issues": [],
         "capability_issues": [],
+        "metric_family_issues": [],
         "executor_issues": [],
     }
 

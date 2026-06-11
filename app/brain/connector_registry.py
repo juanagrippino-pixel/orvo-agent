@@ -17,8 +17,10 @@ from typing import Any, Iterable, Mapping
 
 from app.brain.connector_health import CONNECTOR_HEALTH_STATES, ConnectorHealthState
 from app.brain.semantics.metric_registry import (
+    CONNECTOR_FAMILY_COMPATIBILITY,
     MetricRegistry,
     MetricValidationIssue,
+    default_metric_registry,
     find_evidence_required_violations,
     find_evidence_source_violations,
     find_family_envelope_violations,
@@ -215,6 +217,16 @@ class ConnectorCapabilityValidationIssue:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectorMetricFamilyValidationIssue:
+    """Deterministic diagnostic for emitted metric-family registry drift."""
+
+    code: str
+    family: str
+    message: str
+    severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectorExecutorValidationIssue:
     """Deterministic diagnostic for unsafe executor metadata drift."""
 
@@ -230,16 +242,18 @@ class ConnectorSpecCertification:
     """Aggregated release-gate diagnostics for one connector spec.
 
     Connector-platform readiness depends on several independent contracts:
-    health taxonomy, least-privilege scopes, advertised capabilities, and safe
-    executor metadata. This value object rolls those checks into one stable shape
-    that CI, release controllers, and operator admin surfaces can consume without
-    reimplementing the registry's validation order.
+    health taxonomy, least-privilege scopes, advertised capabilities, semantic
+    metric-family alignment, and safe executor metadata. This value object rolls
+    those checks into one stable shape that CI, release controllers, and operator
+    admin surfaces can consume without reimplementing the registry's validation
+    order.
     """
 
     connector_type: str
     health_issues: tuple[ConnectorHealthValidationIssue, ...] = ()
     scope_issues: tuple[ConnectorScopeValidationIssue, ...] = ()
     capability_issues: tuple[ConnectorCapabilityValidationIssue, ...] = ()
+    metric_family_issues: tuple[ConnectorMetricFamilyValidationIssue, ...] = ()
     executor_issues: tuple[ConnectorExecutorValidationIssue, ...] = ()
 
     @property
@@ -252,6 +266,7 @@ class ConnectorSpecCertification:
             len(self.health_issues)
             + len(self.scope_issues)
             + len(self.capability_issues)
+            + len(self.metric_family_issues)
             + len(self.executor_issues)
         )
 
@@ -264,6 +279,7 @@ class ConnectorSpecCertification:
             *self.health_issues,
             *self.scope_issues,
             *self.capability_issues,
+            *self.metric_family_issues,
             *self.executor_issues,
         )
 
@@ -281,6 +297,9 @@ class ConnectorSpecCertification:
             "health_issues": [asdict(issue) for issue in self.health_issues],
             "scope_issues": [asdict(issue) for issue in self.scope_issues],
             "capability_issues": [asdict(issue) for issue in self.capability_issues],
+            "metric_family_issues": [
+                asdict(issue) for issue in self.metric_family_issues
+            ],
             "executor_issues": [asdict(issue) for issue in self.executor_issues],
         }
 
@@ -623,6 +642,41 @@ class ConnectorSpec:
             )
         return issues
 
+    def validate_metric_family_contract(
+        self,
+        *,
+        registry: MetricRegistry | None = None,
+    ) -> list[ConnectorMetricFamilyValidationIssue]:
+        """Certify emitted metric families against the semantic registry.
+
+        Connector specs advertise coarse emitted metric families that runtime
+        certification uses to evaluate adapter output. Those family names must be
+        anchored in the canonical semantic registry (or in the explicit
+        transitional compatibility map) so connector metadata cannot drift into a
+        parallel metric taxonomy.
+        """
+
+        active_registry = registry or default_metric_registry()
+        known_families = {
+            definition.family for definition in active_registry.definitions()
+        }
+        known_families.update(CONNECTOR_FAMILY_COMPATIBILITY)
+        issues: list[ConnectorMetricFamilyValidationIssue] = []
+        for family in self.emitted_metric_families:
+            if family in known_families:
+                continue
+            issues.append(
+                ConnectorMetricFamilyValidationIssue(
+                    code="unknown_metric_family",
+                    family=family,
+                    message=(
+                        f"{self.connector_type} connector declares emitted metric family "
+                        f"{family} outside the semantic metric registry"
+                    ),
+                )
+            )
+        return issues
+
     def validate_executor_contract(self) -> list[ConnectorExecutorValidationIssue]:
         """Certify that executor metadata is safe for registry-driven runtime use.
 
@@ -721,6 +775,7 @@ class ConnectorSpec:
             health_issues=tuple(self.validate_health_policy()),
             scope_issues=tuple(self.validate_scope_requirements()),
             capability_issues=tuple(self.validate_capability_contract()),
+            metric_family_issues=tuple(self.validate_metric_family_contract()),
             executor_issues=tuple(self.validate_executor_contract()),
         )
 
