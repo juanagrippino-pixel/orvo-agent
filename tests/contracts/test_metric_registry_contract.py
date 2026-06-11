@@ -194,18 +194,29 @@ def test_detectable_operational_case_types_are_semantic_registry_families_or_exp
     assert implemented_case_types <= registered_case_families | explicitly_deferred_case_types
 
 
-def test_owner_facing_operational_case_types_are_semantic_registry_families():
-    """Owner surfaces must not expose internal/deferred case families.
+def test_owner_facing_operational_case_types_are_explicitly_promoted_registry_families():
+    """Owner surfaces must not expose internal/deferred/readiness-gated families.
 
     OperationalCaseType can include future catalog targets such as
-    channel_mix_shift, but WhatsApp/operator owner projections are limited to
-    families with CASE_FAMILY_METRICS evidence contracts.
+    channel_mix_shift, and CASE_FAMILY_METRICS can register evidence for
+    readiness-gated families before they are owner-facing. WhatsApp/operator
+    owner projections are limited to the explicit promoted subset.
     """
 
-    from app.brain.operational_cases import OWNER_FACING_OPERATIONAL_CASE_TYPES
+    from app.brain.operational_cases import (
+        DETECTABLE_OPERATIONAL_CASE_TYPES,
+        OWNER_FACING_OPERATIONAL_CASE_TYPES,
+        READINESS_GATED_OPERATIONAL_CASE_TYPES,
+    )
     from app.brain.semantics.metric_registry import CASE_FAMILY_METRICS
 
-    assert OWNER_FACING_OPERATIONAL_CASE_TYPES == set(CASE_FAMILY_METRICS)
+    registered_case_families = set(CASE_FAMILY_METRICS)
+
+    assert DETECTABLE_OPERATIONAL_CASE_TYPES == registered_case_families
+    assert OWNER_FACING_OPERATIONAL_CASE_TYPES <= registered_case_families
+    assert READINESS_GATED_OPERATIONAL_CASE_TYPES == (
+        registered_case_families - OWNER_FACING_OPERATIONAL_CASE_TYPES
+    )
     assert "channel_mix_shift" not in OWNER_FACING_OPERATIONAL_CASE_TYPES
 
 

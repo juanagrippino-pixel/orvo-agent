@@ -45,7 +45,16 @@ OperationalCaseType = Literal[
     "channel_mix_shift",
 ]
 DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
-OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
+OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(
+    {
+        "sales_drop",
+        "stockout_risk",
+        "data_stale",
+    }
+)
+READINESS_GATED_OPERATIONAL_CASE_TYPES: frozenset[str] = (
+    DETECTABLE_OPERATIONAL_CASE_TYPES - OWNER_FACING_OPERATIONAL_CASE_TYPES
+)
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
