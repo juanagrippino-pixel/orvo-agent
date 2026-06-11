@@ -25,58 +25,54 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ## Current next recommendations train
 
-### 2026-06-07 status checkpoint
+### 2026-06-11 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `67a8e27` (`merge: basic auth audit redaction invariant`). This supersedes the 2026-06-06 checkpoint and the 2026-06-07 Architecture Review Board recommendation that still treated helper-level case-action idempotency and Basic-auth audit redaction as pending/redundancy-check items.
+The current repository `HEAD` before this reconciliation is `d0c9d1c` (`codex: reserve woocommerce external toolkit`). This supersedes the 2026-06-07 checkpoint and the 2026-06-10 Architecture Review Board recommendations that still treated workflow approval/request matching, case-family release-state metadata, global delivery-status boundaries, and system reopen workflow metadata as pending items.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
 - WorkItem remains projection-only: `app/brain/work_items.py` derives project keys, work item IDs, issue types, workflow/status definitions, status categories, priority brackets, and query-field definitions without a separate WorkItem store.
+- WorkItem issue-type definitions now expose `release_state` from the semantic registry gate: registry-backed families are `promoted`, cataloged-but-unregistered families such as `channel_mix_shift` are `deferred`, and unknown/internal strings resolve as `internal_only`.
+- Manual/operator workflow transitions are now separated from deterministic system reopen transitions: `operational_case_status_transitions()` remains the operator-action table while `operational_case_system_status_transitions()` and WorkItem status definitions expose terminal-state reopen metadata for recurring evidence.
 - WorkItem query/search vocabulary is centralized near the projection helpers: `work_item_query_field_spec()`, `work_item_query_field_definitions()`, and `allowed_work_item_query_sort_fields()` are the source for JQL-lite/view/sort fields; broad search or dashboard branches must extend this registry instead of adding endpoint-local field semantics.
-- Connector secret-boundary hardening is now baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and connector contract tests assert forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
-- Trust/Admin hardening now includes safe actor refs, safe internal error codes/messages, audit-business scoping for secret-shaped tenant IDs, and the Basic-auth audit redaction invariant. `app/brain/operator_audit.py` collapses secret-shaped top-level audit identifiers before persistence and returns redacted audit payloads.
-- Manual case actions now require idempotency at both the HTTP boundary and the shared helper boundary. `apply_case_action_with_idempotency()` calls `require_case_action_idempotency_key()` before validation, ledger reservation, or mutation, so non-HTTP/internal callers cannot accidentally bypass the ledgered idempotency path.
-- Internal operator analytics continue to use thin route wrappers and shared service helpers. The current baseline includes severity-split summary/resolution-latency/acknowledgment-latency/handling-latency projections while keeping `OperationalCase` as the source of truth.
-- Workflow planning/approval/execution queues remain projection-only: queue views still report execution disabled / `side_effects_executed = 0`; broad workflow execution remains blocked until durable audit, RBAC, provider idempotency, retry/failure semantics, and approval gates are all enforced.
-- `channel_mix_shift` is still present in type/projection mappings but absent from `CASE_FAMILY_METRICS`; `DETECTABLE_OPERATIONAL_CASE_TYPES` and `OWNER_FACING_OPERATIONAL_CASE_TYPES` continue deriving from `CASE_FAMILY_METRICS`, so the family remains deferred/internal until Packet N promotes it.
+- Workflow planning/approval/execution queues remain projection-only, but the execution queue no longer trusts ledger state alone: `list_workflow_execution_queue()` requires a catalog-defined approval-required action, `approval_state=approved`, `execution_state=pending_execution`, and a matching approved approval-request object with matching ledger/business/case/action identity and `decided_at`. Queue views still report `execution_enabled = False` and `side_effects_executed = 0`.
+- Trust/Admin hardening now includes safe actor refs, safe internal error codes/messages, audit-business scoping for secret-shaped tenant IDs, the Basic-auth audit redaction invariant, non-ASCII internal-auth fail-closed behavior, redacted operator action principals, and an admin plus explicit all-business grant boundary for the global `/internal/brain/whatsapp/delivery-statuses` route.
+- Manual case actions require idempotency at both the HTTP boundary and the shared helper boundary. `apply_case_action_with_idempotency()` calls `require_case_action_idempotency_key()` before validation, ledger reservation, or mutation, so non-HTTP/internal callers cannot accidentally bypass the ledgered idempotency path.
+- Connector secret-boundary hardening is baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and connector contract tests assert forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
+- Internal operator analytics continue to use thin route wrappers and shared service helpers. Endpoint count remains the largest Atlassian-pattern risk; future analytics/search/dashboard slices should converge on WorkItem/JQL/view/facet primitives rather than one route per card.
 
 Recommended order from this checkpoint:
 
-1. **Protect the now-baseline case-action idempotency invariant**
-   - Treat `codex/eng-factory-required-case-action-idempotency-20260606` and duplicate QA idempotency branches as integrated/superseded unless patch-id review finds a unique regression test.
-   - Gate: every successful mutating case-action path carries a safe idempotency key, reserves before mutation, replays/skips duplicates without a second side effect, and fails missing/blank/secret-shaped keys before ledger writes or case mutation.
+1. **Patch-id review and split remaining Work Management value**
+   - Treat case-family release-state metadata and system reopen workflow metadata as integrated. Do not revive or direct-merge broad `codex/work-management` history just to re-land those pieces.
+   - Gate: remaining slices must be narrow and additive, such as owner/worker actor taxonomy, evidence-lineage refinements, or SLA-compatible metadata. They must preserve `OperationalCase` as lifecycle source of truth and keep manual/operator transitions separate from deterministic system transitions.
 
-2. **Keep WorkItem query-field registry as the only JQL/search vocabulary source**
-   - Future JQL-lite/view/facet fields must be added through the canonical WorkItem/OperationalCase query-field registry near the projection helpers, while keeping metric keys in the semantic metric registry.
-   - Gate: built-in views and the JQL parser continue importing the same allowlisted field definitions; future dashboard/search filters must either reuse existing WorkItem helpers or extend the registry first. No SQL translation, persisted saved views, or tenant-custom schemas are introduced.
+2. **Keep workflow automation projection-only until executor foundations exist**
+   - Treat approval-request matching as integrated. Future workflow work can improve audit projections and trigger coverage, but broad side-effect execution remains blocked.
+   - Gate: any real executor requires provider idempotency proof, an execution-attempt ledger, RBAC/action-scope checks, retry/failure semantics, redacted external response audit, and tests proving no side-effect path can bypass approval/idempotency/audit.
 
-3. **Trust/Admin patch-id review after safe actor/error-code/Basic-auth hardening**
-   - Treat safe actor refs, safe internal error codes, and Basic-auth audit redaction as integrated. Future Trust/Admin merges must patch-id against those commits instead of reintroducing duplicate implementations or conflicting envelope/audit shapes.
-   - Gate: every internal endpoint keeps auth, business scoping, redacted envelopes, route-level permission checks for reads/writes/admin where applicable, and audit identifiers that collapse secret-shaped top-level IDs before persistence.
+3. **Trust/Admin patch-id review after global delivery-status hardening**
+   - Treat safe actor refs, safe internal error codes, Basic-auth redaction, denial audits, non-ASCII auth fail-closed behavior, redacted action principals, and the delivery-status admin/all-business boundary as integrated.
+   - Gate: external Admin launch still requires explicit role and explicit business claims everywhere; legacy default role=`operator` and `allowed_businesses=None` remain internal-migration compatibility only.
 
 4. **Connector-platform hardening after resolved-secret bindings**
    - Treat Packet Q's resolved-secret binding work as integrated; the next connector milestone is connector instance/health-history/provisioning audit storage plus typed stale/unauthorized/rate-limit paths.
    - Gate: registry -> compiled runtime -> run ledger -> semantic validation -> cases remains the execution path; runtime hashes and operator metadata never include secret values; raw secret material exists only on execution-scoped resolved copies.
 
-5. **Workflow automation projections and trigger matching, not broad execution**
-   - Merge workflow trigger/audit projection work only if event names are normalized against existing operator-audit taxonomy and approval decisions are durably auditable.
-   - Gate: approval/execution queues keep `execution_enabled = False` and `side_effects_executed = 0`; approved actions must not become broad side effects until actor identity, provider idempotency proof, execution-attempt ledger, RBAC, retries, and redacted audit linkage exist.
+5. **Split broad operator/search surface branches by generic primitives**
+   - Decompose `codex/operator-surfaces` and `codex/search-analytics`; do not merge wholesale while they conflict with newer activity/API/test files or invent local query vocabulary.
+   - Gate: every endpoint remains read-only, business-scoped, redacted at the API boundary, and backed by shared service/query helpers over `OperationalCase`, WorkItem projections, JQL-lite, facets, or the run ledger. Owner brief previews must expose case IDs, evidence/freshness, and registered action keys; WhatsApp copy is never the action/state contract.
 
 6. **Service-management/SLA as nested projections**
-   - Integrate `codex/service-management` only as Jira Service Management-style projections over canonical cases.
-   - Gate: `waiting_owner`, `waiting_external`, SLA status, escalation reason, and service record type stay nested service/owner fields; canonical WorkItem status categories remain exactly `to_do`, `in_progress`, and `done`.
+   - Integrate `codex/service-management` only as Jira Service Management-style projections over canonical cases and only when the slice is D2C-pilot useful.
+   - Gate: `waiting_owner`, `waiting_external`, SLA status, escalation reason, and service record type stay nested service/owner fields; canonical WorkItem status categories remain exactly `to_do`, `in_progress`, and `done`; deferred families such as `channel_mix_shift` remain non-owner-facing until Packet N gates pass.
 
-7. **Split broad operator/search surface branches by endpoint family**
-   - Decompose `codex/operator-surfaces` and `codex/search-analytics`; do not merge wholesale while they conflict with newer activity/API/test files or invent local query vocabulary.
-   - Gate: every endpoint remains read-only, business-scoped, redacted at the API boundary, and backed by shared service/query helpers over `OperationalCase`, WorkItem projections, JQL-lite, or the run ledger. Owner brief previews must expose case IDs, evidence/freshness, and registered action keys; WhatsApp copy is never the action/state contract.
+7. **Edge/developer and external-action toolkits stay contract-first**
+   - Keep gateway/service-catalog/external-action toolkits internal unless they include durable idempotency, rate-limit, audit, route-coverage, provider capability, and redacted-response enforcement.
+   - Gate: docs and API payloads must not imply production gateway or provider execution when code only reserves capabilities or declares policy metadata.
 
-8. **Edge/developer platform as contract-first until enforcement exists**
-   - Reframe `codex/edge-developer-platform` as gateway policy/service-catalog metadata unless it lands durable idempotency, rate-limit, audit, and route-coverage enforcement.
-   - Gate: docs and API payloads must not imply production gateway enforcement when code only checks idempotency-key presence or declares rate-limit buckets.
-
-9. **Pilot lead execution and pilot-readiness docs after core gates**
-   - Use the first-10 lead-build and fulfillment-backlog research packets for outbound learning, but keep the sellable promise constrained to Tiendanube-backed cases/evidence already covered by the PRD and pilot checklist.
-   - Update the Tiendanube/WhatsApp-first pilot checklist only after connector-platform hardening and operator-surface deltas are integrated; manual idempotency and WorkItem query-field registry gates are already baseline and must stay green.
+8. **Pilot-readiness docs after truth gates, not before**
+   - Fulfillment backlog and WhatsApp attention backlog are Growth/readiness-gated modules. Use research packets for qualification, but keep the sellable Starter promise constrained to evidence-backed Tiendanube cases already covered by the PRD and pilot checklist.
    - Gate: docs link validation, secret scan, and one dry-run/operator-report artifact; keep WhatsApp as projection/delivery, not source of truth.
 
 Do not start broad automation, marketplace/extensibility, or Meta Ads/channel-mix expansion until this train can explain every owner-facing claim from runtime, ledger, cases, evidence, and WorkItem projections and until workflow execution and gateway enforcement are explicitly implemented rather than manifest/projection-only.

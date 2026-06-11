@@ -538,7 +538,7 @@ Acceptance:
 
 ## Packet U — Workflow action ledger and approval object foundation
 
-Status: foundation mostly satisfied in the current baseline; dispatch the next slice only for approval/execution hardening that preserves zero side effects.
+Status: approval-gate foundation satisfied in the current baseline by `cfb9d53` (`merge: integrate workflow automation gates`); dispatch the next slice only for executor-foundation hardening that preserves zero side effects until every side-effect gate is implemented.
 
 Goal: harden durable workflow/action bookkeeping and approval projections before any workflow automation can mutate cases or call external systems.
 
@@ -549,6 +549,7 @@ Current source-of-truth check:
 - `app/brain/workflow_action_ledger.py` records durable workflow action ledger rows, enforces idempotency keys, redacts params, and creates approval-request objects for approval-required actions.
 - `app/brain/workflow_automation.py` can write planned workflow actions to the ledger while preserving projection-only behavior.
 - `app/brain/workflow_approval_queue.py` and `app/brain/workflow_execution_queue.py` expose read-only queue projections with execution disabled and `side_effects_executed = 0`.
+- `app/brain/workflow_execution_queue.py` now requires a catalog-defined approval-required action, `approval_state=approved`, `execution_state=pending_execution`, and a matching approved approval-request object with matching ledger/business/case/action identity and `decided_at` before a record appears in the execution queue.
 - Manual case-action idempotency now covers the internal operator API when callers provide `X-Idempotency-Key`: keys are reserved before mutation, stored as `source="manual_operator"`, and duplicate completed requests replay without a second timeline mutation. Governed external/provider execution remains out of scope unless a separate packet adds provider idempotency, execution-attempt ledgering, retry/failure semantics, and approval-backed side-effect execution.
 
 Read:
@@ -573,9 +574,11 @@ Acceptance:
 - workflow action ledger continues to record action key, case/work item ref, actor/source, idempotency key, approval state, execution state, timestamps, and redacted params;
 - duplicate idempotency keys continue to be enforced against durable storage, not only within one dry-run projection;
 - approval-required actions continue to produce durable approval requests with deterministic lifecycle states and cannot execute as side effects;
+- execution queue projections include only actions with a matching approved approval-request object; manually or corruptly setting ledger `approval_state=approved` / `execution_state=pending_execution` is not enough;
 - approval/execution queue projections remain read-only, redacted, business-scoped, and explicit that execution is disabled;
 - manual case mutations either accept/enforce idempotency keys or are explicitly documented as non-automated operator actions with audit coverage from Packet O;
-- no external side effects are executed and existing dry-run projections remain backward-compatible.
+- no external side effects are executed and existing dry-run projections remain backward-compatible;
+- any future executor packet separately adds provider idempotency proof, execution-attempt ledgering, RBAC/action-scope checks, retry/failure semantics, and redacted external-response audit before consuming the queue.
 
 ## Packet V — Fulfillment backlog truth gates
 
