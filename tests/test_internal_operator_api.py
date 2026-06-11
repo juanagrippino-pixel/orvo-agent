@@ -99,6 +99,7 @@ def _seed_run(
     run_id: str,
     status: RunStatus = "succeeded",
     dispatch_status: DispatchRunStatus | None = "sent",
+    dispatch_message_type: str | None = None,
 ):
     conn = sqlite3.connect(db_path)
     init_schema(conn)
@@ -121,6 +122,7 @@ def _seed_run(
         ),
     )
     if dispatch_status is not None:
+        dispatch_metadata = {"message_type": dispatch_message_type} if dispatch_message_type is not None else {}
         ledger.append_dispatch_outcome(
             run.run_id,
             DispatchOutcomeRef(
@@ -128,6 +130,7 @@ def _seed_run(
                 status=dispatch_status,
                 message_id="wamid.safe",
                 provider_response_ref="provider://response?access_token=raw_provider_secret",
+                metadata=dispatch_metadata,
             ),
         )
     ledger.update_run(run.run_id, status=status, finished_at=_utc(8), summary_metadata={"cases_opened": 1})
@@ -1601,6 +1604,106 @@ def test_internal_run_dispatch_status_summary_is_scoped_redacted_and_filterable(
             "none": 1,
         },
     }
+
+
+def test_internal_run_history_can_filter_by_dispatch_message_type_after_limit(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(
+        db_path,
+        business_id="artemea",
+        run_id="run-z-daily",
+        dispatch_status="sent",
+        dispatch_message_type="daily_report",
+    )
+    _seed_run(
+        db_path,
+        business_id="artemea",
+        run_id="run-a-owner-brief",
+        dispatch_status="failed",
+        dispatch_message_type="owner_case_brief",
+    )
+    _seed_run(
+        db_path,
+        business_id="other",
+        run_id="run-other-owner-brief",
+        dispatch_status="failed",
+        dispatch_message_type="owner_case_brief",
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs?dispatch_message_type=owner_case_brief&limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_provider_secret" not in raw_body
+    body = response.get_json()
+    assert body["data"]["limit"] == 1
+    assert body["data"]["dispatch_message_type"] == "owner_case_brief"
+    assert [run["run_id"] for run in body["data"]["runs"]] == ["run-a-owner-brief"]
+    assert body["data"]["runs"][0]["dispatch_status"] == "failed"
+    assert body["data"]["runs"][0]["dispatch_summary"]["owner_case_brief"]["status"] == "failed"
+
+
+def test_internal_run_dispatch_status_summary_can_filter_by_message_type_and_redacts_invalid_filter(
+    monkeypatch, tmp_path
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(
+        db_path,
+        business_id="artemea",
+        run_id="run-owner-failed",
+        dispatch_status="failed",
+        dispatch_message_type="owner_case_brief",
+    )
+    _seed_run(
+        db_path,
+        business_id="artemea",
+        run_id="run-daily-sent",
+        dispatch_status="sent",
+        dispatch_message_type="daily_report",
+    )
+    _seed_run(
+        db_path,
+        business_id="other",
+        run_id="run-other-owner-failed",
+        dispatch_status="failed",
+        dispatch_message_type="owner_case_brief",
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/dispatch-status-summary?dispatch_message_type=owner_case_brief",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"] == {
+        "limit": 50,
+        "run_status": None,
+        "dispatch_message_type": "owner_case_brief",
+        "total_runs": 1,
+        "dispatched_runs": 1,
+        "undispatched_runs": 0,
+        "by_dispatch_status": {
+            "sent": 0,
+            "failed": 1,
+            "skipped_duplicate": 0,
+            "skipped": 0,
+            "queued": 0,
+            "none": 0,
+        },
+    }
+
+    invalid = client.get(
+        "/internal/brain/businesses/artemea/runs/dispatch-status-summary?dispatch_message_type=owner_case_brief%20access_token=raw_message_type_secret",
+        headers=AUTH,
+    )
+
+    assert invalid.status_code == 400
+    assert "raw_message_type_secret" not in invalid.get_data(as_text=True)
+    assert invalid.get_json()["error"]["code"] == "invalid_dispatch_message_type"
 
 
 def test_internal_case_queue_summary_returns_status_severity_and_actionable_counts(monkeypatch, tmp_path):

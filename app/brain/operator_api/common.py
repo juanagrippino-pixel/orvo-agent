@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, get_args
+from typing import Any, Literal, TypeAlias, get_args
 from datetime import datetime, timezone
 
 from app.brain.action_catalog import ACTION_CATALOG, API_ENABLED_CASE_ACTION_KEYS, list_case_action_catalog
@@ -37,12 +37,14 @@ _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
 _NO_DISPATCH_STATUS = "none"
 _ALLOWED_DISPATCH_STATUSES: set[str] = {*get_args(DispatchRunStatus), _NO_DISPATCH_STATUS}
+_ALLOWED_DISPATCH_MESSAGE_TYPES: set[str] = {"daily_report", "owner_case_brief", "unknown"}
 _ALLOWED_TIMELINE_EVENT_TYPES: set[str] = set(get_args(TimelineEventType))
 _ALLOWED_TIMELINE_ACTOR_TYPES: set[str] = set(get_args(ActorType))
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 50
 
-RunDispatchStatusFilter = DispatchRunStatus | Literal["none"]
+RunDispatchStatusFilter: TypeAlias = DispatchRunStatus | Literal["none"]
+RunDispatchMessageTypeFilter: TypeAlias = Literal["daily_report", "owner_case_brief", "unknown"]
 
 
 class OperatorAPIError(Exception):
@@ -138,6 +140,19 @@ def parse_dispatch_status(value: str | None) -> RunDispatchStatusFilter | None:
     if value not in _ALLOWED_DISPATCH_STATUSES:
         raise OperatorAPIError("invalid_dispatch_status", f"unsupported dispatch status: {value}", status_code=400)
     return value  # type: ignore[return-value]
+
+
+def parse_dispatch_message_type(value: str | None) -> RunDispatchMessageTypeFilter | None:
+    if value in (None, ""):
+        return None
+    normalized = value.strip()
+    if normalized not in _ALLOWED_DISPATCH_MESSAGE_TYPES:
+        raise OperatorAPIError(
+            "invalid_dispatch_message_type",
+            f"unsupported dispatch message type: {value}",
+            status_code=400,
+        )
+    return normalized  # type: ignore[return-value]
 
 
 def normalize_operator_actor(actor_ref: Any, actor: Any) -> str:

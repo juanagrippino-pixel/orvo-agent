@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.brain.run_ledger import DispatchRunStatus, RunRecord
 
 from .common import *  # noqa: F401,F403
-from .common import _NO_DISPATCH_STATUS, RunDispatchStatusFilter
+from .common import _NO_DISPATCH_STATUS, RunDispatchMessageTypeFilter, RunDispatchStatusFilter
 from .projections import *  # noqa: F401,F403
 
 _DISPATCH_STATUS_SUMMARY_KEYS: tuple[str, ...] = (
@@ -13,7 +13,7 @@ _DISPATCH_STATUS_SUMMARY_KEYS: tuple[str, ...] = (
     "skipped",
     "queued",
 )
-from .projections import _latest_dispatch_outcome
+from .projections import _dispatch_message_type, _latest_dispatch_outcome
 from .cases import *  # noqa: F401,F403
 from .top_cases import *  # noqa: F401,F403
 from .recent_cases import *  # noqa: F401,F403
@@ -23,13 +23,41 @@ from .histograms_ack import *  # noqa: F401,F403
 from .histograms_handling import *  # noqa: F401,F403
 
 
-def _latest_dispatch_status(run: RunRecord) -> DispatchRunStatus | None:
-    latest = _latest_dispatch_outcome(run)
+def _latest_dispatch_for_message_type(
+    run: RunRecord,
+    dispatch_message_type: RunDispatchMessageTypeFilter | None,
+) -> Any | None:
+    if dispatch_message_type is None:
+        return _latest_dispatch_outcome(run)
+    matching = [
+        outcome for outcome in run.dispatch_outcomes if _dispatch_message_type(outcome) == dispatch_message_type
+    ]
+    if not matching:
+        return None
+    return max(matching, key=lambda outcome: (outcome.created_at, outcome.attempt_number))
+
+
+def _latest_dispatch_status(
+    run: RunRecord,
+    dispatch_message_type: RunDispatchMessageTypeFilter | None = None,
+) -> DispatchRunStatus | None:
+    latest = _latest_dispatch_for_message_type(run, dispatch_message_type)
     return latest.status if latest is not None else None
 
 
-def _matches_dispatch_status_filter(run: RunRecord, dispatch_status: RunDispatchStatusFilter) -> bool:
-    latest_status = _latest_dispatch_status(run)
+def _matches_dispatch_message_type_filter(
+    run: RunRecord,
+    dispatch_message_type: RunDispatchMessageTypeFilter,
+) -> bool:
+    return _latest_dispatch_for_message_type(run, dispatch_message_type) is not None
+
+
+def _matches_dispatch_status_filter(
+    run: RunRecord,
+    dispatch_status: RunDispatchStatusFilter,
+    dispatch_message_type: RunDispatchMessageTypeFilter | None,
+) -> bool:
+    latest_status = _latest_dispatch_status(run, dispatch_message_type)
     if dispatch_status == _NO_DISPATCH_STATUS:
         return latest_status is None
     return latest_status == dispatch_status
@@ -42,19 +70,32 @@ def list_run_history(
     status: str | None,
     limit: str | None,
     dispatch_status: str | None = None,
+    dispatch_message_type: str | None = None,
 ) -> dict[str, Any]:
     parsed_status = parse_run_status(status)
     parsed_dispatch_status = parse_dispatch_status(dispatch_status)
+    parsed_dispatch_message_type = parse_dispatch_message_type(dispatch_message_type)
     parsed_limit = parse_limit(limit)
     runs = ledger.list_runs(
         business_id=business_id,
         status=parsed_status,
-        limit=None if parsed_dispatch_status is not None else parsed_limit,
+        limit=None if parsed_dispatch_status is not None or parsed_dispatch_message_type is not None else parsed_limit,
     )
+    if parsed_dispatch_message_type is not None:
+        runs = [run for run in runs if _matches_dispatch_message_type_filter(run, parsed_dispatch_message_type)]
     if parsed_dispatch_status is not None:
-        runs = [run for run in runs if _matches_dispatch_status_filter(run, parsed_dispatch_status)]
+        runs = [
+            run
+            for run in runs
+            if _matches_dispatch_status_filter(run, parsed_dispatch_status, parsed_dispatch_message_type)
+        ]
         runs = runs[:parsed_limit]
-    return {"runs": [run_history_item(run) for run in runs], "limit": parsed_limit}
+    elif parsed_dispatch_message_type is not None:
+        runs = runs[:parsed_limit]
+    payload: dict[str, Any] = {"runs": [run_history_item(run) for run in runs], "limit": parsed_limit}
+    if parsed_dispatch_message_type is not None:
+        payload["dispatch_message_type"] = parsed_dispatch_message_type
+    return payload
 
 
 def summarize_run_dispatch_statuses(
@@ -63,21 +104,30 @@ def summarize_run_dispatch_statuses(
     business_id: str,
     status: str | None,
     limit: str | None,
+    dispatch_message_type: str | None = None,
 ) -> dict[str, Any]:
     parsed_status = parse_run_status(status)
+    parsed_dispatch_message_type = parse_dispatch_message_type(dispatch_message_type)
     parsed_limit = parse_limit(limit)
-    runs = ledger.list_runs(business_id=business_id, status=parsed_status, limit=parsed_limit)
+    runs = ledger.list_runs(
+        business_id=business_id,
+        status=parsed_status,
+        limit=None if parsed_dispatch_message_type is not None else parsed_limit,
+    )
+    if parsed_dispatch_message_type is not None:
+        runs = [run for run in runs if _matches_dispatch_message_type_filter(run, parsed_dispatch_message_type)]
+        runs = runs[:parsed_limit]
     by_dispatch_status = {key: 0 for key in _DISPATCH_STATUS_SUMMARY_KEYS}
     by_dispatch_status[_NO_DISPATCH_STATUS] = 0
     for run in runs:
-        latest_status = _latest_dispatch_status(run)
+        latest_status = _latest_dispatch_status(run, parsed_dispatch_message_type)
         if latest_status is None:
             by_dispatch_status[_NO_DISPATCH_STATUS] += 1
         else:
             by_dispatch_status[latest_status] += 1
     undispatched_runs = by_dispatch_status[_NO_DISPATCH_STATUS]
     total_runs = len(runs)
-    return {
+    payload: dict[str, Any] = {
         "limit": parsed_limit,
         "run_status": parsed_status,
         "total_runs": total_runs,
@@ -85,6 +135,9 @@ def summarize_run_dispatch_statuses(
         "undispatched_runs": undispatched_runs,
         "by_dispatch_status": by_dispatch_status,
     }
+    if parsed_dispatch_message_type is not None:
+        payload["dispatch_message_type"] = parsed_dispatch_message_type
+    return payload
 
 
 def get_scoped_run(ledger: RunLedger, *, business_id: str, run_id: str) -> RunRecord:

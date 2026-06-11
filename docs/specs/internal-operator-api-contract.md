@@ -66,9 +66,10 @@ Allowed only after idempotency and approval rules are explicit. For early implem
 ```http
 GET /internal/brain/businesses/{business_id}/runs
 GET /internal/brain/businesses/{business_id}/runs/{run_id}
+GET /internal/brain/businesses/{business_id}/runs/dispatch-status-summary
 ```
 
-Returns run status, connector outcomes, artifacts, dispatch status, cases opened/updated.
+Returns run status, connector outcomes, artifacts, dispatch status, cases opened/updated. Run list and dispatch-status summary support allowlisted projection filters for `dispatch_status` (`sent`, `failed`, `skipped_duplicate`, `skipped`, `queued`, `none`) and `dispatch_message_type` (`daily_report`, `owner_case_brief`, `unknown`) so operators can inspect primary report delivery separately from secondary owner-brief delivery without treating WhatsApp text as workflow state.
 Run-history rows and run detail include a redacted `dispatch_summary` derived from
 run-ledger dispatch outcomes so operators can distinguish the primary daily
 report from the secondary owner-case-brief delivery without using WhatsApp/report
