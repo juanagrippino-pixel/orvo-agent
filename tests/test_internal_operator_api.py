@@ -5,6 +5,10 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.brain.delivery_status import (
+    SQLiteWhatsAppDeliveryStatusStore,
+    WhatsAppDeliveryStatusEvent,
+)
 from app.brain.operational_cases import (
     OperationalCaseDetection,
     OperationalCaseEvidenceMetric,
@@ -1437,6 +1441,88 @@ def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkey
     cross = client.get(f"/internal/brain/businesses/artemea/runs/{other.run_id}", headers=AUTH)
     assert cross.status_code == 404
     assert cross.get_json()["error"]["code"] == "run_not_found"
+
+
+def test_internal_run_delivery_statuses_are_run_scoped_business_scoped_and_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-artemea")
+    other = _seed_run(db_path, business_id="other", run_id="run-other")
+    with sqlite3.connect(db_path) as conn:
+        init_schema(conn)
+        status_store = SQLiteWhatsAppDeliveryStatusStore(conn)
+        status_store.record_event(
+            WhatsAppDeliveryStatusEvent(
+                provider="meta_cloud",
+                message_id="wamid.safe",
+                status="delivered",
+                status_timestamp="1748002100",
+                recipient_id="5491100000001",
+                business_id="artemea",
+                raw={"errors": [{"title": "Authorization: Bearer raw_run_delivery_secret"}]},
+            )
+        )
+        status_store.record_event(
+            WhatsAppDeliveryStatusEvent(
+                provider="meta_cloud",
+                message_id="wamid.unrelated",
+                status="read",
+                business_id="artemea",
+            )
+        )
+        status_store.record_event(
+            WhatsAppDeliveryStatusEvent(
+                provider="meta_cloud",
+                message_id="wamid.safe",
+                status="failed",
+                business_id="other",
+                raw={"access_token": "raw_other_delivery_secret"},
+            )
+        )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/run-artemea/delivery-statuses",
+        headers={**AUTH, "X-Orvo-Businesses": "artemea"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_run_delivery_secret" not in raw_body
+    assert "raw_other_delivery_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["run_id"] == "run-artemea"
+    assert data["dispatch_message_ids"] == ["wamid.safe"]
+    assert data["event_count"] == 1
+    assert [event["message_id"] for event in data["events"]] == ["wamid.safe"]
+    assert data["events"][0]["status"] == "delivered"
+    assert data["events"][0]["business_id"] == "artemea"
+
+    cross = client.get(
+        f"/internal/brain/businesses/artemea/runs/{other.run_id}/delivery-statuses",
+        headers=AUTH,
+    )
+    assert cross.status_code == 404
+    assert cross.get_json()["error"]["code"] == "run_not_found"
+
+
+def test_internal_run_delivery_statuses_enforce_business_grants(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-artemea")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/run-artemea/delivery-statuses",
+        headers={**AUTH, "X-Orvo-Businesses": "other"},
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "forbidden"
+    assert body["redaction_applied"] is True
 
 
 def test_internal_run_history_and_detail_include_redacted_dispatch_summary(monkeypatch, tmp_path):

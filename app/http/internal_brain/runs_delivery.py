@@ -126,6 +126,24 @@ def register_run_delivery_routes(app):
             return permission_error
         return _delivery_status_success(business_id, event_business_id=business_id)
 
+    @app.get("/internal/brain/businesses/<business_id>/runs/<run_id>/delivery-statuses")
+    def internal_brain_run_delivery_statuses(business_id: str, run_id: str):
+        def _projection(_case_store, run_ledger):
+            with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+                init_schema(conn)
+                return _internal_success(
+                    business_id,
+                    get_run_delivery_status_projection(
+                        run_ledger,
+                        SQLiteWhatsAppDeliveryStatusStore(conn),
+                        business_id=business_id,
+                        run_id=run_id,
+                        limit=request.args.get("limit"),
+                    ),
+                )
+
+        return _with_internal_stores(business_id, _projection)
+
     @app.get("/internal/brain/businesses/<business_id>/runs/<run_id>")
     def internal_brain_run_detail(business_id: str, run_id: str):
         return _with_internal_stores(

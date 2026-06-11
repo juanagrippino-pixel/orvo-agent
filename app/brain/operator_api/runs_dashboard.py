@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.brain.run_ledger import DispatchRunStatus, RunRecord
 
 from .common import *  # noqa: F401,F403
@@ -13,7 +15,7 @@ _DISPATCH_STATUS_SUMMARY_KEYS: tuple[str, ...] = (
     "skipped",
     "queued",
 )
-from .projections import _dispatch_message_type, _latest_dispatch_outcome
+from .projections import _dispatch_message_type, _latest_dispatch_outcome, _redact_run_projection
 from .cases import *  # noqa: F401,F403
 from .top_cases import *  # noqa: F401,F403
 from .recent_cases import *  # noqa: F401,F403
@@ -148,6 +150,52 @@ def get_scoped_run(ledger: RunLedger, *, business_id: str, run_id: str) -> RunRe
 
 def get_run_projection(ledger: RunLedger, *, business_id: str, run_id: str) -> dict[str, Any]:
     return {"run": run_detail(get_scoped_run(ledger, business_id=business_id, run_id=run_id))}
+
+
+def _safe_run_dispatch_message_ids(run: RunRecord) -> list[str]:
+    message_ids: list[str] = []
+    for outcome in run.dispatch_outcomes:
+        raw_message_id = outcome.message_id
+        if not isinstance(raw_message_id, str):
+            continue
+        message_id = raw_message_id.strip()
+        if not message_id:
+            continue
+        redacted = redact_text(message_id) or "[REDACTED]"
+        if redacted != message_id:
+            continue
+        if message_id not in message_ids:
+            message_ids.append(message_id)
+    return message_ids
+
+
+def get_run_delivery_status_projection(
+    ledger: RunLedger,
+    delivery_status_store: Any,
+    *,
+    business_id: str,
+    run_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    run = get_scoped_run(ledger, business_id=business_id, run_id=run_id)
+    parsed_limit = parse_limit(limit, max_limit=200)
+    message_ids = _safe_run_dispatch_message_ids(run)
+    events = delivery_status_store.list_by_message_ids(
+        message_ids=message_ids,
+        business_id=business_id,
+        limit=parsed_limit,
+    )
+    return _redact_run_projection(
+        {
+            "run_id": run.run_id,
+            "business_id": business_id,
+            "dispatch_message_ids": message_ids,
+            "limit": parsed_limit,
+            "event_count": len(events),
+            "events": events,
+        }
+    )
+
 
 def get_operator_dashboard(
     store: OperationalCaseStore,

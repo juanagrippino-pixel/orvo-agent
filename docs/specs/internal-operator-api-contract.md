@@ -66,6 +66,7 @@ Allowed only after idempotency and approval rules are explicit. For early implem
 ```http
 GET /internal/brain/businesses/{business_id}/runs
 GET /internal/brain/businesses/{business_id}/runs/{run_id}
+GET /internal/brain/businesses/{business_id}/runs/{run_id}/delivery-statuses
 GET /internal/brain/businesses/{business_id}/runs/dispatch-status-summary
 ```
 
@@ -73,7 +74,10 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 Run-history rows and run detail include a redacted `dispatch_summary` derived from
 run-ledger dispatch outcomes so operators can distinguish the primary daily
 report from the secondary owner-case-brief delivery without using WhatsApp/report
-text as source of truth.
+text as source of truth. The run-scoped `delivery-statuses` route correlates the
+run ledger's safe dispatch `message_id` values with business-scoped WhatsApp
+delivery-status events, redacts provider metadata, excludes unrelated message IDs
+and other businesses, and remains a read-only observability projection.
 
 ### WhatsApp delivery status inspection
 
@@ -223,6 +227,7 @@ Before exposing beyond local/dev:
 - internal envelopes and durable audit events redact secret-shaped `X-Request-ID` values;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
+- run-scoped delivery-status projection is authenticated, grant-scoped, redacted, and only returns business-scoped events for dispatch message IDs from the selected run;
 - WhatsApp delivery-status inspection prefers the business-scoped route, filters by durable event `business_id`, rejects excluded business grants, and keeps the global route admin-only;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
 - case action rejects unknown action keys;

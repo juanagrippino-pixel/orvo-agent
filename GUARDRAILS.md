@@ -142,6 +142,7 @@ All listed routes returned `200` in the seeded snapshot unless otherwise noted. 
 | GET | `/internal/brain/businesses/<business_id>/cases/<case_id>/timeline` | `internal_brain_case_timeline` | `case_id`, `case_status`, `count`, `events`, `filters`, `limit`, `total` |
 | POST | `/internal/brain/businesses/<business_id>/cases/<case_id>/actions` | `internal_brain_case_action` | `case` |
 | GET | `/internal/brain/businesses/<business_id>/runs` | `internal_brain_runs` | `limit`, `runs` |
+| GET | `/internal/brain/businesses/<business_id>/runs/<run_id>/delivery-statuses` | `internal_brain_run_delivery_statuses` | `business_id`, `dispatch_message_ids`, `event_count`, `events`, `limit`, `run_id` |
 | GET | `/internal/brain/businesses/<business_id>/runs/<run_id>` | `internal_brain_run_detail` | `run` |
 | GET | `/internal/brain/businesses/<business_id>/whatsapp/delivery-statuses` | `internal_brain_business_whatsapp_delivery_statuses` | `events` |
 | GET | `/internal/brain/whatsapp/delivery-statuses` | `internal_brain_whatsapp_delivery_statuses` | `events` |

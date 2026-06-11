@@ -75,6 +75,24 @@ class WhatsAppDeliveryStatusEvent(BaseModel):
         )
 
 
+def _delivery_status_row_to_projection(row: Any) -> dict[str, Any]:
+    provider, message_id, status, recipient_id, business_id, status_ts, created_at, data = row
+    try:
+        raw = json.loads(data).get("raw", {})
+    except (TypeError, ValueError):
+        raw = {}
+    return {
+        "provider": provider,
+        "message_id": message_id,
+        "status": status,
+        "recipient_id": recipient_id,
+        "business_id": business_id,
+        "status_timestamp": status_ts,
+        "created_at": created_at,
+        "raw": redact_secrets(raw),
+    }
+
+
 class SQLiteWhatsAppDeliveryStatusStore:
     """Append-only SQLite store for WhatsApp delivery status events.
 
@@ -143,26 +161,43 @@ class SQLiteWhatsAppDeliveryStatusStore:
                 (business_id, limit),
             )
         rows = cursor.fetchall()
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            provider, message_id, status, recipient_id, business_id, status_ts, created_at, data = row
-            try:
-                raw = json.loads(data).get("raw", {})
-            except (TypeError, ValueError):
-                raw = {}
-            result.append(
-                {
-                    "provider": provider,
-                    "message_id": message_id,
-                    "status": status,
-                    "recipient_id": recipient_id,
-                    "business_id": business_id,
-                    "status_timestamp": status_ts,
-                    "created_at": created_at,
-                    "raw": redact_secrets(raw),
-                }
-            )
-        return result
+        return [_delivery_status_row_to_projection(row) for row in rows]
+
+    def list_by_message_ids(
+        self,
+        *,
+        message_ids: Iterable[str],
+        business_id: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return delivery events for dispatch message ids within one business scope."""
+
+        safe_message_ids: list[str] = []
+        for raw_message_id in message_ids:
+            if not isinstance(raw_message_id, str):
+                continue
+            message_id = raw_message_id.strip()
+            if not message_id or message_id in safe_message_ids:
+                continue
+            safe_message_ids.append(message_id)
+        if not safe_message_ids:
+            return []
+        if limit < 1:
+            limit = 1
+        placeholders = ", ".join("?" for _ in safe_message_ids)
+        cursor = self._conn.execute(
+            f"""
+            SELECT provider, message_id, status, recipient_id, business_id,
+                   status_timestamp, created_at, data
+            FROM whatsapp_delivery_status_events
+            WHERE business_id = ? AND message_id IN ({placeholders})
+            ORDER BY created_at DESC, message_id DESC
+            LIMIT ?
+            """,
+            (business_id, *safe_message_ids, limit),
+        )
+        rows = cursor.fetchall()
+        return [_delivery_status_row_to_projection(row) for row in rows]
 
 
 def parse_meta_status_payload(payload: Any) -> list[WhatsAppDeliveryStatusEvent]:
