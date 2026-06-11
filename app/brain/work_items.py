@@ -122,6 +122,7 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
         facetable=True,
     ),
     WorkItemQueryFieldDefinition("evidence_count", "int", allowed_operators=_RANGE_OPERATORS),
+    WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS),
     WorkItemQueryFieldDefinition("entity.kind", "string", facetable=True),
     WorkItemQueryFieldDefinition("entity.id", "string"),
     WorkItemQueryFieldDefinition("entity.label", "string", allowed_operators=frozenset({"=", "!="})),
@@ -346,6 +347,12 @@ def operational_case_query_field_definitions() -> list[dict[str, Any]]:
         _query_field_definition(
             "evidence_count",
             "int",
+            source="evidence_projection",
+            operators=_COMPARISON_OPERATORS,
+        ),
+        _query_field_definition(
+            "latest_evidence_at",
+            "datetime",
             source="evidence_projection",
             operators=_COMPARISON_OPERATORS,
         ),

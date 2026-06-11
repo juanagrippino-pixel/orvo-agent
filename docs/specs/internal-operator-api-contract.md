@@ -97,7 +97,8 @@ Case queue and detail projections include WorkItem envelope fields derived from
 `status_category`, and `work_item_id`. Case queries must use the canonical
 allowlisted query-field registry; supported fields include `project`,
 `issue_type`, `release_state`, `status_category`, `assignee_ref`,
-`priority_bracket`, `source_connector`, and `degraded`. The `case-query-fields`
+`priority_bracket`, `source_connector`, `freshness_state`,
+`latest_evidence_at`, and `degraded`. The `case-query-fields`
 response exposes route-owned business scope metadata plus `sort_fields` and
 `facet_fields`; callers must not supply tenant/business scope inside JQL. Query
 summaries and built-in view summaries are aggregate projections only and must
@@ -132,9 +133,12 @@ JQL-lite may filter evidence freshness through the
 allowlisted `freshness_state` values (`fresh`, `stale`, `degraded`, `missing`,
 `unknown`) derived from persisted case evidence snapshots, and may filter
 `evidence_count` with bounded integer comparison operators over canonical case
-evidence references. View summaries return aggregate facets only, not raw case
-rows, including priority-bracket counts, evidence freshness-state counts, and
-evidence-count totals/distributions where available.
+evidence references. `latest_evidence_at` supports timezone-aware ISO datetime
+comparison over persisted evidence snapshot capture times, allowing operators to
+find cases backed by fresh enough evidence without making evidence recency a
+caller-controlled tenant scope. View summaries return aggregate facets only, not
+raw case rows, including priority-bracket counts, evidence freshness-state counts,
+and evidence-count totals/distributions where available.
 
 ### Operator audit events
 
