@@ -66,6 +66,13 @@ _CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]
     "resolved": set(),
     "dismissed": set(),
 }
+_SYSTEM_CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]] = {
+    "open": set(),
+    "acknowledged": set(),
+    "in_progress": set(),
+    "resolved": {"open"},
+    "dismissed": {"open"},
+}
 _SAFE_CONNECTOR_IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 
 
@@ -80,9 +87,22 @@ def operational_case_status_category(status: OperationalCaseStatus) -> Operation
 
 
 def operational_case_status_transitions() -> dict[OperationalCaseStatus, frozenset[OperationalCaseStatus]]:
-    """Return a copy of the current deterministic case lifecycle transition table."""
+    """Return manual/operator case lifecycle transitions.
+
+    Deterministic detections can reopen terminal cases through
+    :meth:`OperationalCaseStore.upsert_detection`; those system-only transitions
+    are exposed separately by :func:`operational_case_system_status_transitions`
+    so WorkItem metadata does not imply operators may manually reopen terminal
+    cases through ordinary status-change actions.
+    """
 
     return {status: frozenset(targets) for status, targets in _CASE_STATUS_TRANSITIONS.items()}
+
+
+def operational_case_system_status_transitions() -> dict[OperationalCaseStatus, frozenset[OperationalCaseStatus]]:
+    """Return deterministic system lifecycle transitions for recurring evidence."""
+
+    return {status: frozenset(targets) for status, targets in _SYSTEM_CASE_STATUS_TRANSITIONS.items()}
 
 
 def _now_utc() -> datetime:

@@ -1410,6 +1410,9 @@ def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkey
     assert list_response.status_code == 200
     list_body = list_response.get_json()
     assert [run["run_id"] for run in list_body["data"]["runs"]] == ["run-artemea"]
+    run_summary = list_body["data"]["runs"][0]
+    assert run_summary["dispatch_status"] == "sent"
+    assert run_summary["latest_dispatch_channel"] == "whatsapp"
     assert "raw_run_secret" not in list_response.get_data(as_text=True)
 
     detail_response = client.get("/internal/brain/businesses/artemea/runs/run-artemea", headers=AUTH)

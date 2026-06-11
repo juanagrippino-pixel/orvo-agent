@@ -259,18 +259,25 @@ def test_duplicate_idempotency_key_is_skipped_before_second_provider_call():
     assert ledger.get_run("run-ext-1").connector_outcomes[-1].metadata["idempotency_decision"] == "duplicate"  # type: ignore[union-attr]
 
 
-def test_critical_tiendanube_and_whatsapp_toolkits_are_structurally_denied_even_if_allowlisted():
+@pytest.mark.parametrize(
+    ("toolkit", "action_key"),
+    [
+        ("tiendanube", "tiendanube.get_orders"),
+        ("woocommerce", "woocommerce.get_orders"),
+    ],
+)
+def test_critical_core_connector_toolkits_are_structurally_denied_even_if_allowlisted(toolkit: str, action_key: str):
     client = FakeExternalActionClient()
-    provider = ComposioProvider(client=client, allowed_actions={("tiendanube", "tiendanube.get_orders")})
+    provider = ComposioProvider(client=client, allowed_actions={(toolkit, action_key)})
     ledger = _ledger()
     request = ExternalActionRequest(
         business_id="artemea",
         run_id="run-ext-1",
-        toolkit="tiendanube",
-        action_key="tiendanube.get_orders",
+        toolkit=toolkit,
+        action_key=action_key,
         operation_type="read",
         payload={},
-        idempotency_key="external/artemea/tiendanube/read/1",
+        idempotency_key=f"external/artemea/{toolkit}/read/1",
     )
 
     with pytest.raises(ExternalActionError) as exc:
@@ -278,7 +285,7 @@ def test_critical_tiendanube_and_whatsapp_toolkits_are_structurally_denied_even_
 
     assert exc.value.code == "external_action_toolkit_reserved"
     assert client.calls == []
-    assert ledger.get_run("run-ext-1").connector_outcomes[0].metadata["reserved_toolkit"] == "tiendanube"  # type: ignore[union-attr]
+    assert ledger.get_run("run-ext-1").connector_outcomes[0].metadata["reserved_toolkit"] == toolkit  # type: ignore[union-attr]
 
 
 def test_invalid_request_and_run_scope_fail_before_provider_side_effect():
