@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.dispatch import ReportDispatchResult
 from app.brain.execution_ledger import record_pipeline_failure, record_pipeline_success
-from app.brain.models import DailyReport
+from app.brain.models import DailyReport, Evidence, Insight
 from app.brain.operational_cases import InMemoryOperationalCaseStore
 from app.brain.pipeline import PipelineResult
 from app.brain.run_ledger import InMemoryRunLedger
@@ -109,6 +109,82 @@ def test_record_pipeline_failure_maps_rate_limit_errors_to_typed_health_state():
     [outcome] = reloaded.connector_outcomes
     assert outcome.status == "failed"
     assert outcome.health_state == "rate_limited"
+
+
+def test_record_pipeline_success_filters_readiness_gated_cases_from_owner_brief_dispatch():
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="whatsapp-main",
+                connector_type="google_sheets",
+                label="WhatsApp readiness fixture",
+                params={"spreadsheet_id": "abc123", "range_name": "Daily!A1:G1000"},
+            )
+        ],
+    )
+    ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+    run = ledger.create_run(
+        run_id="run-readiness-gated-owner-brief",
+        business_id=business.business_id,
+        trigger_type="scheduled",
+        started_at=utc_dt(8),
+    )
+    pipeline = PipelineResult(
+        report=DailyReport(
+            business_name=business.business_name,
+            report_date=date(2026, 5, 24),
+            metrics=[],
+            insights=[
+                Insight(
+                    severity="warning",
+                    title="Conversaciones sin responder en WhatsApp",
+                    explanation="Hay conversaciones pendientes, pero la familia sigue readiness-gated.",
+                    recommended_action="Revisar el origen antes de habilitar un brief owner-facing.",
+                    evidence=[Evidence(source="whatsapp", label="WhatsApp support source")],
+                )
+            ],
+        ),
+        dispatch=ReportDispatchResult(
+            status="sent",
+            idempotency_key="artemea:2026-05-24:daily",
+        ),
+    )
+    owner_case_types_seen: list[str] = []
+
+    def owner_brief_dispatcher(owner_cases):
+        owner_case_types_seen.extend(case.case_type for case in owner_cases)
+        return ReportDispatchResult(
+            status="sent",
+            idempotency_key="artemea/2026-05-24/owner_case_brief",
+        ) if owner_cases else None
+
+    secondary_dispatch = record_pipeline_success(
+        run_ledger=ledger,
+        case_store=case_store,
+        run_id=run.run_id,
+        business=business,
+        connector_types=["google_sheets"],
+        pipeline=pipeline,
+        case_brief_dispatcher=owner_brief_dispatcher,
+    )
+
+    [readiness_gated_case] = case_store.list_cases(business_id=business.business_id)
+    assert readiness_gated_case.case_type == "unanswered_conversations"
+    assert readiness_gated_case.evidence_snapshots
+    assert owner_case_types_seen == []
+    assert secondary_dispatch is None
+
+    reloaded = ledger.get_run(run.run_id)
+    assert reloaded is not None
+    assert reloaded.status == "succeeded"
+    assert [outcome.metadata["message_type"] for outcome in reloaded.dispatch_outcomes] == ["daily_report"]
+    assert "case_brief_dispatch_status" not in reloaded.summary_metadata
 
 
 def test_record_pipeline_success_finalizes_partial_when_secondary_owner_brief_dispatcher_raises():
