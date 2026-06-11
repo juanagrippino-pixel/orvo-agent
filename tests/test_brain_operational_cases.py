@@ -113,6 +113,31 @@ def test_operational_case_persists_redacted_evidence_snapshots_and_dedupes_by_sn
     assert "raw_snapshot_secret" not in reloaded.model_dump_json()
 
 
+def test_owner_and_worker_timeline_actor_types_survive_sqlite_reload(conn):
+    store = SQLiteOperationalCaseStore(conn)
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-actor"), detected_at=utc_dt(8))
+    store.add_comment(
+        opened.case_id,
+        actor_type="owner",
+        actor_ref="owner@example.com",
+        comment="Owner confirmed the follow-up.",
+        commented_at=utc_dt(9),
+    )
+    store.add_comment(
+        opened.case_id,
+        actor_type="worker",
+        actor_ref="worker:triage",
+        comment="Autonomous worker attached context.",
+        commented_at=utc_dt(10),
+    )
+
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(opened.case_id)
+
+    assert reloaded is not None
+    assert [event.actor_type for event in reloaded.timeline[-2:]] == ["owner", "worker"]
+    assert [event.actor_ref for event in reloaded.timeline[-2:]] == ["owner@example.com", "worker:triage"]
+
+
 def test_evidence_snapshot_key_is_redacted_before_persistence(conn):
     snapshot = make_stock_snapshot(
         snapshot_key="run-1/evidence://tiendanube/stockout?access_token=raw_snapshot_key_secret",

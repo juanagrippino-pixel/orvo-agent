@@ -287,6 +287,78 @@ def test_sqlite_run_ledger_persists_records_and_lists_newest_first(conn):
     assert [run.run_id for run in SQLiteRunLedger(conn).list_runs(business_id="artemea", limit=1)] == ["run-new"]
 
 
+def test_sqlite_run_ledger_records_failed_secondary_dispatch_as_terminal_partial(conn):
+    ledger = SQLiteRunLedger(conn)
+    ledger.create_run(
+        run_id="run-secondary-dispatch-failed",
+        business_id="artemea",
+        trigger_type="scheduled",
+        started_at=utc_dt(8),
+    )
+    ledger.append_connector_outcome(
+        "run-secondary-dispatch-failed",
+        ConnectorRunOutcome(
+            connector_id="tn-main",
+            connector_type="tiendanube",
+            status="succeeded",
+            started_at=utc_dt(8),
+            finished_at=utc_dt(8, 1),
+            metrics_count=7,
+        ),
+    )
+    ledger.append_dispatch_outcome(
+        "run-secondary-dispatch-failed",
+        DispatchOutcomeRef(
+            channel="whatsapp_daily_report",
+            status="sent",
+            idempotency_key="artemea/2026-05-24/daily-report",
+            message_id="wamid.primary",
+        ),
+    )
+    ledger.append_dispatch_outcome(
+        "run-secondary-dispatch-failed",
+        DispatchOutcomeRef(
+            channel="whatsapp_owner_case_brief",
+            status="failed",
+            idempotency_key="artemea/2026-05-24/owner-case-brief",
+            error_summary="secondary dispatch failed Authorization: Basic raw_secondary_dispatch_secret",
+            metadata={"provider_token": "raw_secondary_metadata_secret"},
+        ),
+    )
+
+    finished = ledger.update_run(
+        "run-secondary-dispatch-failed",
+        status="partial",
+        finished_at=utc_dt(8, 2),
+        summary_metadata={
+            "primary_dispatch_status": "sent",
+            "secondary_dispatch_status": "failed",
+        },
+    )
+
+    assert finished.status == "partial"
+    assert finished.finished_at == utc_dt(8, 2)
+    assert [outcome.status for outcome in finished.connector_outcomes] == ["succeeded"]
+    assert [(outcome.channel, outcome.status) for outcome in finished.dispatch_outcomes] == [
+        ("whatsapp_daily_report", "sent"),
+        ("whatsapp_owner_case_brief", "failed"),
+    ]
+    assert finished.dispatch_outcomes[1].error_summary == "secondary dispatch failed Authorization: [REDACTED]"
+    assert finished.dispatch_outcomes[1].metadata == {"provider_token": "[REDACTED]"}
+    assert "raw_secondary" not in finished.model_dump_json()
+
+    reloaded = SQLiteRunLedger(conn).get_run("run-secondary-dispatch-failed")
+    assert reloaded is not None
+    assert reloaded.status == "partial"
+    assert reloaded.dispatch_outcomes[1].channel == "whatsapp_owner_case_brief"
+    assert "raw_secondary" not in reloaded.model_dump_json()
+    with pytest.raises(RunLedgerStatusError):
+        ledger.append_dispatch_outcome(
+            "run-secondary-dispatch-failed",
+            DispatchOutcomeRef(channel="whatsapp_owner_case_brief", status="queued"),
+        )
+
+
 def test_sqlite_run_ledger_list_runs_can_filter_by_status(conn):
     ledger = SQLiteRunLedger(conn)
     ledger.create_run(run_id="run-ok", business_id="artemea", trigger_type="scheduled", started_at=utc_dt(8))

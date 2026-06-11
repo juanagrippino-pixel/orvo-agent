@@ -105,10 +105,49 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("status_category IN (to_do, done)").normalized == (
         "status_category IN (to_do, done) ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("release_state = readiness_gated").normalized == (
+        "release_state = readiness_gated ORDER BY priority_score DESC, opened_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
     assert unsupported_category.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as unsupported_release_state:
+        parse_case_jql("release_state = experimental")
+    assert unsupported_release_state.value.code == "unsupported_jql_value"
+
+
+def test_internal_case_queue_filters_by_release_state(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    promoted = _seed_case(db_path, _case_detection(run_id="run-promoted", priority=95))
+    readiness_gated = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            priority=70,
+            title="Conversaciones sin responder",
+            run_id="run-readiness-gated",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "release_state = readiness_gated"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "release_state = readiness_gated ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [readiness_gated.case_id]
+    assert body["data"]["cases"][0]["release_state"] == "readiness_gated"
+    assert body["data"]["cases"][0]["work_item"]["release_state"] == "readiness_gated"
+    assert promoted.case_id not in [case["case_id"] for case in body["data"]["cases"]]
 
 
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
@@ -444,6 +483,39 @@ def test_internal_case_facets_support_source_connector_and_bucket_limit(monkeypa
     assert body["data"]["returned"] == 1
     assert body["data"]["truncated"] is True
     assert body["data"]["buckets"] == [{"value": "meta_ads", "count": 1}]
+
+
+def test_internal_case_facets_group_by_release_state(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-promoted"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            priority=70,
+            title="Conversaciones sin responder",
+            run_id="run-readiness-gated",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "release_state", "jql": "status = open"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["field"] == "release_state"
+    assert body["data"]["total_cases"] == 2
+    assert body["data"]["buckets"] == [
+        {"value": "promoted", "count": 1},
+        {"value": "readiness_gated", "count": 1},
+    ]
 
 
 def test_internal_case_facets_reject_business_scope_and_redact_bad_field(monkeypatch, tmp_path):

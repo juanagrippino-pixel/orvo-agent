@@ -87,15 +87,27 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 ```http
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
+GET /internal/brain/businesses/{business_id}/cases/facets
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
+
+Case queue and detail projections include WorkItem envelope fields derived from
+`OperationalCase`, including `project_key`, `issue_type`, `release_state`,
+`status_category`, and `work_item_id`. JQL-lite and case facets are read-only,
+route-scoped projections over the canonical WorkItem field registry; supported
+fields include `project`, `issue_type`, `release_state`, `status_category`,
+`assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. The
+API must reject unsupported fields/operators/values instead of translating user
+input into SQL or allowing query text to own business scope.
 
 Actions must use registered action keys, carry a business-scoped
 `X-Idempotency-Key` (or `Idempotency-Key`) accepted by
 `operator_api.case_action.mutate` in `GatewayPolicyRegistry`, and append timeline
-events only after the gateway policy allows the request. The key is reserved in
-the durable workflow action ledger before the case mutation, duplicate completed
-requests replay the current case with `data.action.status = "skipped_duplicate"`,
+events only after the gateway policy allows the request. Missing/blank keys fail
+before mutation with a stable error envelope and redacted audit event. Valid keys
+are reserved in the durable workflow action ledger before the case mutation,
+duplicate completed requests replay the current case with
+`data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope.
 Missing or invalid idempotency keys return the shared safe error envelope before
 case mutation.

@@ -7,7 +7,7 @@ This is the navigation layer for current Orvo Brain / Orvo Control Plane work.
 The accepted direction is:
 
 ```text
-First sellable product: D2C ecommerce control plane, Tiendanube/WhatsApp-first.
+First sellable product: La Pyme-category operating control plane, Tiendanube/WhatsApp-first.
 Internal architecture: Atlassian-like platform/control-plane core.
 ```
 
@@ -16,8 +16,9 @@ Start here:
 1. [`docs/adr/0005-d2c-ecommerce-wedge-platform-core.md`](adr/0005-d2c-ecommerce-wedge-platform-core.md)
 2. [`docs/product/d2c-ecommerce-control-plane.md`](product/d2c-ecommerce-control-plane.md)
 3. [`docs/product/d2c-control-plane-prd.md`](product/d2c-control-plane-prd.md)
-4. [`docs/roadmap/d2c-control-plane-roadmap.md`](roadmap/d2c-control-plane-roadmap.md)
-5. [`docs/plans/2026-05-24-d2c-control-plane-first-product.md`](plans/2026-05-24-d2c-control-plane-first-product.md)
+4. [`docs/product/2026-06-11-lapyme-category-mvp-scope.md`](product/2026-06-11-lapyme-category-mvp-scope.md)
+5. [`docs/roadmap/d2c-control-plane-roadmap.md`](roadmap/d2c-control-plane-roadmap.md)
+6. [`docs/plans/2026-05-24-d2c-control-plane-first-product.md`](plans/2026-05-24-d2c-control-plane-first-product.md)
 
 ## Architecture and contracts
 
@@ -44,6 +45,7 @@ Start here:
 
 - [`docs/product/report-design.md`](product/report-design.md)
 - [`docs/product/feedback-design.md`](product/feedback-design.md)
+- [`docs/product/2026-06-11-lapyme-category-mvp-scope.md`](product/2026-06-11-lapyme-category-mvp-scope.md) — accepted scope adjustment: compete as an Argentine PyME operating-system category while keeping the Tiendanube/WhatsApp wedge.
 - [`docs/gtm/d2c-packaging-and-messaging.md`](gtm/d2c-packaging-and-messaging.md)
 - [`docs/gtm/2026-06-01-paid-pilot-close-kit.md`](gtm/2026-06-01-paid-pilot-close-kit.md) — close-ready USD 149 paid-pilot asset.
 - [`docs/gtm/2026-06-05-first-10-paid-pilot-lead-build-packet.md`](gtm/2026-06-05-first-10-paid-pilot-lead-build-packet.md) — current lead-build workflow for the first 10 qualified commercial conversations.

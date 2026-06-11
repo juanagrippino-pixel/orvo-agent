@@ -146,6 +146,32 @@ def test_store_deduplicates_repeat_event_key(store):
     assert len([r for r in recent if r["message_id"] == "wamid.dup"]) == 1
 
 
+def test_store_record_events_counts_only_inserted_events(store):
+    duplicate = WhatsAppDeliveryStatusEvent(
+        provider="meta_cloud",
+        message_id="wamid.dup-batch",
+        status="delivered",
+        status_timestamp="1748000100",
+        recipient_id="5491100000001",
+        raw={"id": "wamid.dup-batch", "status": "delivered"},
+    )
+    distinct = WhatsAppDeliveryStatusEvent(
+        provider="meta_cloud",
+        message_id="wamid.distinct-batch",
+        status="read",
+        status_timestamp="1748000101",
+        recipient_id="5491100000001",
+        raw={"id": "wamid.distinct-batch", "status": "read"},
+    )
+
+    inserted = store.record_events([duplicate, duplicate, distinct])
+
+    assert inserted == 2
+    recent = store.list_recent(limit=10)
+    batch_message_ids = {"wamid.dup-batch", "wamid.distinct-batch"}
+    assert len([r for r in recent if r["message_id"] in batch_message_ids]) == 2
+
+
 def test_store_keeps_distinct_statuses_for_same_message(store):
     sent = WhatsAppDeliveryStatusEvent(
         provider="meta_cloud",

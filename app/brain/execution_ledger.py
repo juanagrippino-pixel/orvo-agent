@@ -460,36 +460,92 @@ def record_pipeline_failure(
     business_id: str | None = None,
     connector_types: Sequence[str] | None = None,
     summary_metadata: dict[str, Any] | None = None,
-) -> None:
+    case_brief_dispatcher: Callable[[Sequence[OperationalCase]], ReportDispatchResult | None] | None = None,
+) -> ReportDispatchResult | None:
     """Record failed connector context, mark run failed, and open/update data_stale cases."""
 
     error_summary = f"{type(error).__name__}: {error}"
+    connector_failures = [
+        failure
+        for failure in getattr(error, "connector_failures", [])
+        if isinstance(failure, PipelineConnectorFailure)
+    ]
+    stale_connector_types = [failure.connector_type for failure in connector_failures] or list(connector_types or [])
     case_summary = upsert_data_stale_cases(
         case_store=case_store,
         business_id=business_id,
-        connector_types=list(connector_types or []),
+        connector_types=stale_connector_types,
         run_id=run_id,
         error_summary=error_summary,
     )
+
+    case_brief_dispatch: ReportDispatchResult | None = None
+    if case_store is not None and business is not None and case_brief_dispatcher is not None:
+        owner_cases = _owner_brief_cases(case_store, business.business_id)
+        if owner_cases:
+            try:
+                case_brief_dispatch = case_brief_dispatcher(owner_cases)
+            except Exception as exc:
+                case_brief_dispatch = ReportDispatchResult(
+                    status="failed",
+                    idempotency_key=f"{business.business_id}/{run_id or 'unknown-run'}/owner_case_brief",
+                    error=redact_text(f"{type(exc).__name__}: {exc}"),
+                )
+
     if run_ledger is None or run_id is None:
-        return
+        return case_brief_dispatch
     failed_at = _now_utc()
-    for outcome in _failed_connector_outcomes(
-        business=business,
-        connector_types=connector_types,
-        error_summary=error_summary,
-        failed_at=failed_at,
-        error=error,
-    ):
-        run_ledger.append_connector_outcome(run_id, outcome)
+    if connector_failures:
+        for failure in connector_failures:
+            if business is not None:
+                outcome = _partial_failed_connector_outcome(
+                    business=business,
+                    failure=failure,
+                    failed_at=failed_at,
+                )
+            else:
+                outcome = _failed_connector_outcome(
+                    connector_id=failure.connector_id or failure.connector_type,
+                    connector_type=failure.connector_type,
+                    connector_label=None,
+                    error_summary=failure.error_summary,
+                    failed_at=failed_at,
+                )
+            run_ledger.append_connector_outcome(run_id, outcome)
+    else:
+        for outcome in _failed_connector_outcomes(
+            business=business,
+            connector_types=connector_types,
+            error_summary=error_summary,
+            failed_at=failed_at,
+            error=error,
+        ):
+            run_ledger.append_connector_outcome(run_id, outcome)
+    if case_brief_dispatch is not None:
+        run_ledger.append_dispatch_outcome(
+            run_id,
+            _dispatch_outcome(
+                case_brief_dispatch,
+                message_type="owner_case_brief",
+                metadata={"case_count": len(_owner_brief_cases(case_store, business.business_id))}
+                if case_store is not None and business is not None
+                else None,
+            ),
+        )
+    final_summary = {
+        "cases_opened": case_summary.opened_count,
+        "cases_updated": case_summary.updated_count,
+        **(summary_metadata or {}),
+    }
+    if connector_failures:
+        final_summary["failed_connector_count"] = len(connector_failures)
+    if case_brief_dispatch is not None:
+        final_summary["case_brief_dispatch_status"] = case_brief_dispatch.status
     run_ledger.update_run(
         run_id,
         status="failed",
         finished_at=failed_at,
-        summary_metadata={
-            "cases_opened": case_summary.opened_count,
-            "cases_updated": case_summary.updated_count,
-            **(summary_metadata or {}),
-        },
+        summary_metadata=final_summary,
         error_summary=error_summary,
     )
+    return case_brief_dispatch

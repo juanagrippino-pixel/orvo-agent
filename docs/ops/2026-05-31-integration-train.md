@@ -1,5 +1,104 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-11 21:33 UTC
+
+Status: **Run-ledger partial secondary-dispatch regression guard promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `347534a` (`merge: integrate run ledger partial regression guard`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and one local docs/research commit ahead of `origin/feat/orvo-brain-control-plane` before merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/qa-regression-runledger-partial` was clean.
+- Candidate scope was intentionally test-only: one branch-only commit, one touched test file, no production code, no docs contract changes, and no new dependencies.
+
+Promoted branch:
+
+- Branch: `codex/qa-regression-runledger-partial`
+- Head before merge: `5050a5d` (`test: cover partial run ledger secondary dispatch failure`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- Added a run-ledger regression test proving that a failed secondary owner-case brief dispatch can be recorded as a terminal `partial` run after a primary WhatsApp report dispatch succeeds.
+- The guard verifies the secondary dispatch failure remains in dispatch outcomes, redacts Basic-auth-style credential tails and metadata secrets, persists as `partial` after reload, and rejects further dispatch mutation after terminal finalization.
+- This strengthens the runtime side-effect invariant without making delivery channels source-of-truth for cases/workflows.
+
+Post-merge verification:
+
+- `git diff --check feat/orvo-brain-control-plane...codex/qa-regression-runledger-partial` before merge -> passed.
+- Secret-pattern scan over candidate and merge diffs -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Test deletion check over candidate diff -> no deleted `tests/` files.
+- Focused worker suite before merge: `pytest tests/test_brain_run_ledger.py -q` -> `8 passed in 0.87s`.
+- Focused canonical suite before merge: `pytest tests/test_brain_run_ledger.py -q` -> `7 passed in 0.80s`.
+- Focused canonical suite after merge: `pytest tests/test_brain_run_ledger.py -q` -> `8 passed in 0.83s`.
+- Full canonical suite after merge: `pytest -q` -> `1421 passed in 45.49s`.
+
+Review notes / risks:
+
+- Architecture alignment: test-only hardening of run-ledger finalization and redaction behavior; no runtime shortcut, LLM decision, connector bypass, case lifecycle mutation, or owner-facing projection semantics were added.
+- This is low-risk and directly addresses the guardrail that secondary side effects after a primary successful dispatch must finalize as terminal `partial` rather than leaving runs `running` or leaking dispatch secrets.
+- The candidate branch can now be treated as integrated; keep future work focused on production paths only if a regression escapes this invariant.
+
+Current next integration order:
+
+1. **Test-only tenant/query guard:** `codex/qa-jql-project-scope-20260611` remains a small high-value scope invariant candidate after focused rebase/duplication check.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, delivery-status admin-boundary, connector-failure stale-case, and run-ledger partial-guard work.
+3. **Connector-platform reconcile:** review local sliced `codex/connector-platform` / `codex/eng-factory-connector-platform-reconcile-20260606` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad remote history.
+4. **Work Management slices:** patch-id review narrow remaining SLA/evidence/timeline pieces from `codex/work-management`; avoid direct broad merge of already-integrated reopen/release-state/history/readiness pieces.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/search-analytics`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates unless reduced to WorkItem/JQL/facet/SLA primitives.
+
+## Release integration update — 2026-06-11 12:13 UTC
+
+Status: **Connector failure data-stale case path promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `e01fd7c` (`merge: integrate connector failure stale cases`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/connector-failure-cases` was clean.
+- Candidate scope was intentionally bounded to the connector failure/runtime-report path: 7 files, one branch-only commit, no new dependencies, and no connector/report shortcut around registry, ledger, or OperationalCase contracts.
+
+Promoted branch:
+
+- Branch: `fix/connector-failure-cases`
+- Head before merge: `986cfeb` (`fix: record connector failures as stale cases`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- Connector/auth/HTTP/runtime failures are converted into redacted typed `PipelineConnectorFailure` evidence.
+- If all attempted data connectors fail, the pipeline raises redacted `PipelineAllConnectorsFailedError`, records each failed connector outcome, opens/updates `data_stale` Operational Cases, and dispatches an owner case brief when configured.
+- If at least one connector succeeds, the successful report path continues, failed connectors are recorded as partial outcomes, and stale data cases preserve degraded-source honesty instead of suppressing the whole report.
+- Scheduled runner and forced-report script now wire the owner-case brief dispatcher into failure finalization without making WhatsApp/report text the source of truth.
+
+Post-merge verification:
+
+- `git diff --check feat/orvo-brain-control-plane...fix/connector-failure-cases` before merge -> passed.
+- Secret-pattern scan over candidate and merge diffs -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_brain_pipeline.py tests/test_brain_runner.py tests/test_run_orvo_brain_reports_script.py -q` -> `48 passed in 2.97s`.
+- Focused canonical suite after merge: same command -> `48 passed in 2.38s`.
+- Full canonical suite after merge: `pytest -q` -> `1408 passed in 37.38s`.
+
+Review notes / risks:
+
+- Architecture alignment: this closes the ARB priority that failed/stale data sources should create `data_stale` cases while preserving connector registry/runtime/ledger/case boundaries.
+- Failure text and run/case payloads stay redacted in tests; no raw access tokens or failure secrets are persisted.
+- Runtime behavior intentionally changes from fail-fast on any non-Meta connector failure to degraded partial operation when another connector succeeds. This is product-aligned for D2C control-plane honesty, but downstream operators should expect more `partial` runs rather than total report suppression.
+
+Current next integration order:
+
+1. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, delivery-status admin-boundary, and connector-failure stale-case work.
+2. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad remote branch.
+3. **Work Management slices:** patch-id review narrow remaining SLA/evidence/timeline pieces from `codex/work-management` / `origin/codex/work-management-sla-query-status-20260611`; avoid direct broad merge of already-integrated reopen/release-state/history pieces.
+4. **Search/Analytics registry slices:** case facets and release-state query are integrated; only promote remaining `codex/search-analytics` work if it is rebased/split around canonical WorkItem query/facet/view primitives.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
 ## Release integration update — 2026-06-11 08:02 UTC
 
 Status: **Worker manifest test-deletion guard promoted**.
