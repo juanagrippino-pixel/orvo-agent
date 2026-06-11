@@ -27,4 +27,17 @@ def execute_builtin_case_view(
     view = get_builtin_case_view(view_id)
     return query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
 
+
+def list_case_facets(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    field: str | None,
+    jql: str | None,
+    limit: str | None,
+) -> dict[str, Any]:
+    from app.brain.operator_views import facet_case_queue
+
+    return facet_case_queue(store, business_id=business_id, field=field, jql=jql, limit=limit)
+
 __all__ = [name for name in globals() if not name.startswith("__")]
