@@ -8,9 +8,12 @@ Orvo introduces heavier infrastructure.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.brain.security.redaction import redact_text
 
 ComponentStatus = Literal["active", "draft", "planned"]
 ComponentTier = Literal["control_plane", "runtime", "surface", "platform"]
@@ -26,6 +29,7 @@ RuntimeSurface = Literal[
 ]
 
 SERVICE_CATALOG_SCHEMA_VERSION = "2026-05-31.service-catalog.v1"
+SERVICE_CATALOG_CERTIFICATION_SCHEMA_VERSION = "2026-06-11.service-catalog-certification.v1"
 
 
 class ServiceComponent(BaseModel):
@@ -65,6 +69,30 @@ class ServiceComponent(BaseModel):
             "runtime_surfaces": list(self.runtime_surfaces),
             "observability_signals": list(self.observability_signals),
         }
+
+
+class ServiceCatalogCertificationFinding(BaseModel):
+    """Safe certification finding for catalog owners and integration reviewers."""
+
+    model_config = ConfigDict(frozen=True)
+
+    severity: Literal["error"] = "error"
+    code: str
+    component_id: str
+    field: str
+    message: str
+
+
+class ServiceCatalogCertificationReport(BaseModel):
+    """Deterministic self-service certification report for catalog metadata."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = SERVICE_CATALOG_CERTIFICATION_SCHEMA_VERSION
+    ok: bool
+    checked_component_count: int
+    checked_path_count: int
+    findings: tuple[ServiceCatalogCertificationFinding, ...] = Field(default_factory=tuple)
 
 
 class ServiceCatalog:
@@ -210,7 +238,7 @@ def default_service_catalog() -> ServiceCatalog:
                 status="active",
                 tier="surface",
                 docs=("docs/specs/d2c-operator-surface-contract.md",),
-                code_paths=("app/brain/operator_api.py",),
+                code_paths=("app/brain/operator_api/",),
                 test_paths=("tests/test_internal_operator_api.py",),
                 dependencies=("operational_cases", "run_ledger"),
                 runtime_surfaces=("operator_api",),
@@ -303,3 +331,116 @@ def service_catalog_manifest() -> dict[str, Any]:
     """Return the default public service catalog manifest."""
 
     return default_service_catalog().public_manifest()
+
+
+def certify_service_catalog(
+    catalog: ServiceCatalog,
+    *,
+    repo_root: str | Path,
+) -> ServiceCatalogCertificationReport:
+    """Certify catalog metadata is path-backed and safe for public projection.
+
+    This is a lightweight Python-runtime analogue to platform catalog checks:
+    every declared durable artifact should exist in the repo, and catalog text
+    must not include secret-shaped material. It deliberately validates metadata
+    only; it does not import component modules or execute component code.
+    """
+
+    root = Path(repo_root)
+    findings: list[ServiceCatalogCertificationFinding] = []
+    checked_path_count = 0
+    for component in catalog.components:
+        findings.extend(_unsafe_metadata_findings(component))
+        for field, paths in _component_path_fields(component).items():
+            for path in paths:
+                checked_path_count += 1
+                if not _catalog_path_exists(root, path):
+                    findings.append(
+                        _certification_finding(
+                            component,
+                            code="missing_catalog_path",
+                            field=field,
+                            message="Catalog path must point at an existing repository file or directory.",
+                        )
+                    )
+    return ServiceCatalogCertificationReport(
+        ok=not findings,
+        checked_component_count=len(catalog.components),
+        checked_path_count=checked_path_count,
+        findings=tuple(findings),
+    )
+
+
+def _component_path_fields(component: ServiceComponent) -> dict[str, tuple[str, ...]]:
+    return {
+        "docs": component.docs,
+        "code_paths": component.code_paths,
+        "test_paths": component.test_paths,
+        "runbooks": component.runbooks,
+    }
+
+
+def _catalog_path_exists(repo_root: Path, relative_path: str) -> bool:
+    if not relative_path.strip() or Path(relative_path).is_absolute():
+        return False
+    return (repo_root / relative_path).exists()
+
+
+def _unsafe_metadata_findings(component: ServiceComponent) -> list[ServiceCatalogCertificationFinding]:
+    findings: list[ServiceCatalogCertificationFinding] = []
+    scalar_fields = {
+        "component_id": component.component_id,
+        "display_name": component.display_name,
+        "owner_department": component.owner_department,
+        "source_of_truth": component.source_of_truth,
+    }
+    for field, value in scalar_fields.items():
+        if _is_unsafe_catalog_text(value):
+            findings.append(
+                _certification_finding(
+                    component,
+                    code="unsafe_component_metadata",
+                    field=field,
+                    message="Catalog metadata must not include secret-shaped material.",
+                )
+            )
+
+    iterable_fields = {
+        "docs": component.docs,
+        "code_paths": component.code_paths,
+        "test_paths": component.test_paths,
+        "runbooks": component.runbooks,
+        "dependencies": component.dependencies,
+        "runtime_surfaces": component.runtime_surfaces,
+        "observability_signals": component.observability_signals,
+    }
+    for field, values in iterable_fields.items():
+        if any(_is_unsafe_catalog_text(value) for value in values):
+            findings.append(
+                _certification_finding(
+                    component,
+                    code="unsafe_component_metadata",
+                    field=field,
+                    message="Catalog metadata must not include secret-shaped material.",
+                )
+            )
+    return findings
+
+
+def _is_unsafe_catalog_text(value: str) -> bool:
+    return redact_text(value) != value
+
+
+def _certification_finding(
+    component: ServiceComponent,
+    *,
+    code: str,
+    field: str,
+    message: str,
+) -> ServiceCatalogCertificationFinding:
+    return ServiceCatalogCertificationFinding(
+        code=code,
+        component_id=redact_text(component.component_id) or "[REDACTED]",
+        field=field,
+        message=message,
+    )

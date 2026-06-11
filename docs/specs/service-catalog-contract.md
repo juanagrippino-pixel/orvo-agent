@@ -46,6 +46,25 @@ It is intentionally not a new infrastructure service. The first slice is an in-r
 | `runtime_surfaces` | Runtime/API surfaces touched by the component. |
 | `observability_signals` | Stable log/ledger/API field names useful for provenance. Signal names that reference actors, keys, or external identifiers must describe redacted/projected values, never raw credential-bearing values. |
 
+## Certification schema
+
+`certify_service_catalog(catalog, repo_root=...)` emits
+`2026-06-11.service-catalog-certification.v1`, a deterministic developer-platform
+quality gate for catalog metadata. It is intentionally metadata-only: it does not
+import component modules or execute runtime code.
+
+The certification report checks:
+
+- every declared `docs`, `code_paths`, `test_paths`, and `runbooks` entry points
+  at an existing repository file or directory;
+- scalar metadata such as `display_name`, `owner_department`, and
+  `source_of_truth` is safe for projection and does not contain secret-shaped
+  material;
+- list metadata such as paths, dependencies, runtime surfaces, and observability
+  signals is also secret-safe;
+- findings are safe envelopes with `component_id`, `field`, `code`, and message
+  values that do not echo the unsafe raw text.
+
 ## Current components
 
 The initial catalog covers the current Orvo Brain control-plane spine:
@@ -69,6 +88,8 @@ Required tests live in `tests/contracts/test_service_catalog_contract.py` and pr
 - gateway policy ownership, source-of-truth metadata, and telemetry/provenance observability signals;
 - connector provisioning ownership, source-of-truth metadata, docs, tests, dependencies, and telemetry/provenance observability signals;
 - gateway policy runbook metadata is included in the public manifest and points at durable docs;
+- service catalog certification accepts the default catalog's existing paths and
+  flags missing paths plus secret-shaped metadata without echoing raw values;
 - stable public manifest schema and component ordering;
 - duplicate component IDs are rejected;
 - dependencies must point at known components;

@@ -106,7 +106,6 @@ def test_service_catalog_queries_by_owner_and_runtime_surface():
     from app.brain.service_catalog import default_service_catalog
 
     catalog = default_service_catalog()
-
     edge_components = catalog.by_owner("Edge / Developer Platform")
     api_components = catalog.by_runtime_surface("operator_api")
 
@@ -117,3 +116,66 @@ def test_service_catalog_queries_by_owner_and_runtime_surface():
         "edge_developer_platform",
     ]
     assert [component.component_id for component in api_components] == ["operator_api", "gateway_policy"]
+
+
+def test_service_catalog_certification_accepts_default_catalog_paths_and_metadata():
+    from app.brain.service_catalog import certify_service_catalog, default_service_catalog
+
+    repo_root = Path(__file__).resolve().parents[2]
+    report = certify_service_catalog(default_service_catalog(), repo_root=repo_root)
+
+    assert report.schema_version == "2026-06-11.service-catalog-certification.v1"
+    assert report.ok is True
+    assert report.checked_component_count == 10
+    assert report.checked_path_count >= 30
+    assert report.findings == ()
+    serialized = repr(report.model_dump()).lower()
+    assert "access_token" not in serialized
+    assert "secret://" not in serialized
+
+
+def test_service_catalog_certification_flags_missing_paths_and_unsafe_metadata(tmp_path):
+    from app.brain.service_catalog import ServiceCatalog, ServiceComponent, certify_service_catalog
+
+    secret_marker = "raw_" + "catalog_secret"
+    secret_assignment = "access_token=" + secret_marker
+    component = ServiceComponent(
+        component_id="unsafe_component",
+        display_name="Unsafe component " + secret_assignment,
+        owner_department="Edge / Developer Platform",
+        source_of_truth="app.brain." + secret_assignment,
+        status="draft",
+        tier="platform",
+        docs=("docs/missing-catalog-doc.md",),
+        code_paths=("app/brain/missing_catalog_component.py",),
+        test_paths=("tests/missing_catalog_test.py",),
+        runbooks=("docs/operability/missing-catalog-runbook.md",),
+        observability_signals=("api_key=" + secret_marker,),
+    )
+
+    report = certify_service_catalog(ServiceCatalog((component,)), repo_root=tmp_path)
+
+    assert report.ok is False
+    assert [finding.code for finding in report.findings] == [
+        "unsafe_component_metadata",
+        "unsafe_component_metadata",
+        "unsafe_component_metadata",
+        "missing_catalog_path",
+        "missing_catalog_path",
+        "missing_catalog_path",
+        "missing_catalog_path",
+    ]
+    assert {(finding.component_id, finding.field) for finding in report.findings[:3]} == {
+        ("unsafe_component", "display_name"),
+        ("unsafe_component", "source_of_truth"),
+        ("unsafe_component", "observability_signals"),
+    }
+    assert {finding.field for finding in report.findings[3:]} == {
+        "docs",
+        "code_paths",
+        "test_paths",
+        "runbooks",
+    }
+    serialized = repr(report.model_dump())
+    assert secret_marker not in serialized
+    assert secret_assignment not in serialized
