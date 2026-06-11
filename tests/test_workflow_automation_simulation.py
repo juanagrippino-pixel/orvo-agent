@@ -1628,8 +1628,8 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
         business_id="artemea",
         approval_request_id=earlier.approval_request.approval_request_id,
         decision="approved",
-        actor_ref="manager",
-        reason="Approved earlier",
+        actor_ref="manager token=raw_queue_decision_actor_secret",
+        reason="Approved earlier Authorization: Basic raw_queue_decision_reason_secret",
         now=utc(19, 30),
     )
     ledger.decide_approval_request(
@@ -1670,6 +1670,12 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert [action["execution_state"] for action in queue["actions"]] == ["pending_execution", "pending_execution"]
     assert [action["approval_state"] for action in queue["actions"]] == ["approved", "approved"]
     assert queue["actions"][0]["params"]["Authorization"] == "[REDACTED]"
+    assert queue["actions"][0]["approval_decision"] == {
+        "status": "approved",
+        "decided_at": "2026-05-31T19:30:00Z",
+        "actor_ref": "manager token=[REDACTED]",
+        "reason": "Approved earlier Authorization: [REDACTED]",
+    }
     assert queue["actions"][0]["side_effects_executed"] == 0
     assert queue["actions"][0]["executor_state"] == "not_implemented"
     assert "case-rejected" not in str(queue)
