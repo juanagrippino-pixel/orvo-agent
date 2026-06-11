@@ -73,12 +73,42 @@ def register_run_delivery_routes(app):
             return permission_error
         assert principal is not None
         raw_limit = request.args.get("limit")
+        raw_status = request.args.get("status")
         try:
             limit = parse_limit(raw_limit, default=50, max_limit=200)
-            status_filter = normalize_delivery_status_filter(request.args.get("status"))
+            status_filter = normalize_delivery_status_filter(raw_status)
         except OperatorAPIError as exc:
+            _append_operator_audit_event(
+                business_id=business_id,
+                actor_ref=principal.actor_ref,
+                event_type="operator.whatsapp_delivery_statuses.read_failed",
+                target_type="whatsapp_delivery_statuses",
+                target_id=business_id,
+                data={
+                    "status": "failed",
+                    "scope": "global",
+                    "error_code": exc.code,
+                    "status_code": exc.status_code,
+                    "limit_present": raw_limit is not None,
+                    "status_filter_present": raw_status is not None,
+                },
+            )
             return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
         except ValueError:
+            _append_operator_audit_event(
+                business_id=business_id,
+                actor_ref=principal.actor_ref,
+                event_type="operator.whatsapp_delivery_statuses.read_failed",
+                target_type="whatsapp_delivery_statuses",
+                target_id=business_id,
+                data={
+                    "status": "failed",
+                    "scope": "global",
+                    "error_code": "invalid_delivery_status",
+                    "status_code": 400,
+                    "status_filter_present": raw_status is not None,
+                },
+            )
             return _internal_error(business_id, "invalid_delivery_status", "unsupported delivery status", status_code=400)
         with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
             init_schema(conn)
