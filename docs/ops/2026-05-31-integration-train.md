@@ -1,5 +1,55 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-11 05:56 UTC
+
+Status: **Case facet query surface promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `b1bb9bf` (`merge: integrate case facet query surface`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean before merge; it was one local docs commit ahead of `origin/feat/orvo-brain-control-plane` from the prior integration-train checkpoint.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-case-facets-20260611` was clean.
+- Candidate scope was intentionally bounded: one branch-only commit, six files, no new dependencies, and a thin internal route over shared operator-view services.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-case-facets-20260611`
+- Head before merge: `c64eeba` (`feat: add case facet query surface`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- Added a read-only internal case facet route: `GET /internal/brain/businesses/<business_id>/cases/facets`.
+- Faceting is backed by canonical WorkItem query field metadata via a new `facetable` registry flag and `allowed_work_item_facet_fields()` helper.
+- Facet queries reuse the allowlisted case JQL parser and route-owned business scope; `business_id` is intentionally not queryable/facetable.
+- Source-connector facets support multi-source evidence buckets while responses stay inside the standard internal success envelope and boundary redaction.
+
+Post-merge verification:
+
+- `git diff --check feat/orvo-brain-control-plane...codex/eng-factory-case-facets-20260611` before merge -> passed.
+- Secret-pattern scan over candidate and merge diffs -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_operator_case_views.py tests/test_work_items.py -q` -> `26 passed in 3.07s`.
+- Focused canonical nodeids after merge: case facet endpoint/registry tests -> `4 passed in 1.20s`.
+- Focused canonical suite after merge: `pytest tests/test_operator_case_views.py tests/test_work_items.py -q` -> `26 passed in 2.56s`.
+- Full canonical suite after merge: `pytest -q` -> `1397 passed in 27.14s`.
+
+Review notes / risks:
+
+- Architecture alignment: this moves search/analytics toward WorkItem/JQL/facet primitives instead of one-off endpoint-local KPI semantics, while keeping OperationalCase as source of truth.
+- No external side effects, workflow execution, connector/runtime shortcuts, LLM decisions, or owner-facing WhatsApp state were added.
+- Remaining risk: operator endpoint count still needs convergence; future search/analytics work should extend the same WorkItem query/facet registry instead of adding bespoke route semantics.
+
+Current next integration order:
+
+1. **Work Management slices:** patch-id review narrow remaining SLA/evidence/timeline pieces from `codex/work-management` / `origin/codex/work-management-sla-query-status-20260611`; avoid direct broad merge of already-integrated reopen/release-state history.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, and delivery-status admin-boundary commits.
+3. **Search/Analytics registry slices:** treat case facets as integrated; only promote remaining `codex/search-analytics` work if it is rebased/split around the canonical WorkItem query/facet registry.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
 ## Release integration update — 2026-06-11 03:47 UTC
 
 Status: **System reopen workflow metadata promoted**.
