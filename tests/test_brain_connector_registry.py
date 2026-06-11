@@ -354,6 +354,73 @@ def test_default_connector_executor_contracts_are_certified():
     } == {spec.connector_type: [] for spec in list_connector_specs()}
 
 
+def test_connector_executor_certification_flags_unsafe_factory_paths():
+    """Executor metadata must stay inside the reviewed adapter boundary.
+
+    The registry is executable control-plane metadata. Certification should catch
+    unsafe module paths plus missing/non-callable factories before the runtime
+    attempts a connector execution.
+    """
+
+    from app.brain.connector_registry import ConnectorExecutorMetadata, ConnectorSpec
+
+    unsafe_module = ConnectorSpec(
+        connector_type="unsafe_executor",
+        display_name="Unsafe executor",
+        adapter_module="app.brain.connector_registry",
+        report_factory="CONNECTOR_TYPE_CSV",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders",),
+        executor=ConnectorExecutorMetadata(
+            adapter_module="app.brain.connector_registry",
+            report_factory="CONNECTOR_TYPE_CSV",
+        ),
+    )
+    missing_factory = ConnectorSpec(
+        connector_type="missing_factory",
+        display_name="Missing factory",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="missing_daily_report_factory",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders",),
+        executor=ConnectorExecutorMetadata(
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="missing_daily_report_factory",
+        ),
+    )
+    non_callable_factory = ConnectorSpec(
+        connector_type="non_callable_factory",
+        display_name="Non-callable factory",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="__name__",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders",),
+        executor=ConnectorExecutorMetadata(
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="__name__",
+        ),
+    )
+
+    assert [
+        (issue.code, issue.field, issue.value)
+        for issue in unsafe_module.validate_executor_contract()
+    ] == [
+        ("unsafe_adapter_module", "adapter_module", "app.brain.connector_registry"),
+    ]
+    assert [
+        (issue.code, issue.field, issue.value)
+        for issue in missing_factory.validate_executor_contract()
+    ] == [
+        ("factory_not_found", "report_factory", "missing_daily_report_factory"),
+    ]
+    assert [
+        (issue.code, issue.field, issue.value)
+        for issue in non_callable_factory.validate_executor_contract()
+    ] == [
+        ("factory_not_callable", "report_factory", "__name__"),
+    ]
+
+
 def test_connector_contract_certification_rolls_up_registry_release_gate_issues():
     from app.brain.connector_registry import (
         ConnectorExecutorMetadata,

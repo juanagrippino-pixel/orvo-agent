@@ -98,6 +98,7 @@ PUBLIC_CONNECTOR_PARAM_SOURCES = (
     "connector_param_bool",
     "connector_param_or_label",
 )
+SAFE_CONNECTOR_ADAPTER_MODULE_PREFIX = "app.brain.adapters."
 
 
 def _metric_object_key(metric: object) -> str:
@@ -728,6 +729,7 @@ class ConnectorSpec:
 
         The runtime treats executor metadata as the source of truth for adapter
         invocation. This check catches drift before execution: unsupported modes,
+        executor module/factory paths outside the reviewed adapter boundary,
         unsupported binding sources, public bindings to secret-backed params, and
         connector-param bindings that were never declared in the registry.
         """
@@ -741,6 +743,61 @@ class ConnectorSpec:
             self.optional_config_fields
         )
         declared_secret_params = set(self.legacy_secret_config_fields)
+
+        if not self.executor.adapter_module.startswith(SAFE_CONNECTOR_ADAPTER_MODULE_PREFIX):
+            issues.append(
+                ConnectorExecutorValidationIssue(
+                    code="unsafe_adapter_module",
+                    field="adapter_module",
+                    value=self.executor.adapter_module,
+                    message=(
+                        f"{self.connector_type} connector executor module "
+                        f"{self.executor.adapter_module} is outside the reviewed adapter boundary"
+                    ),
+                )
+            )
+        else:
+            try:
+                module = import_module(self.executor.adapter_module)
+            except (ImportError, ModuleNotFoundError):
+                issues.append(
+                    ConnectorExecutorValidationIssue(
+                        code="factory_module_not_importable",
+                        field="adapter_module",
+                        value=self.executor.adapter_module,
+                        message=(
+                            f"{self.connector_type} connector executor module "
+                            f"{self.executor.adapter_module} could not be imported"
+                        ),
+                    )
+                )
+            else:
+                missing = object()
+                factory = getattr(module, self.executor.report_factory, missing)
+                if factory is missing:
+                    issues.append(
+                        ConnectorExecutorValidationIssue(
+                            code="factory_not_found",
+                            field="report_factory",
+                            value=self.executor.report_factory,
+                            message=(
+                                f"{self.connector_type} connector executor factory "
+                                f"{self.executor.report_factory} was not found in {self.executor.adapter_module}"
+                            ),
+                        )
+                    )
+                elif not callable(factory):
+                    issues.append(
+                        ConnectorExecutorValidationIssue(
+                            code="factory_not_callable",
+                            field="report_factory",
+                            value=self.executor.report_factory,
+                            message=(
+                                f"{self.connector_type} connector executor factory "
+                                f"{self.executor.report_factory} is not callable"
+                            ),
+                        )
+                    )
 
         for mode in self.executor.supported_runtime_modes:
             if mode not in known_modes:
