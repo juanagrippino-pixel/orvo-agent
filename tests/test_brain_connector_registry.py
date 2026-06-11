@@ -249,11 +249,44 @@ def test_connector_metric_family_certification_flags_unknown_semantic_families()
     )
 
 
+def test_connector_event_family_certification_flags_unknown_event_families():
+    from app.brain.connector_registry import ConnectorSpec
+
+    spec = ConnectorSpec(
+        connector_type="drifty_events",
+        display_name="Drifty events connector",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders",),
+        emitted_event_families=("connector.execution", "workflow.rule"),
+    )
+
+    issues = spec.validate_event_family_contract()
+
+    assert [(issue.code, issue.family, issue.severity) for issue in issues] == [
+        ("unknown_event_family", "workflow.rule", "error"),
+    ]
+    assert issues[0].message == (
+        "drifty_events connector declares emitted event family workflow.rule "
+        "outside the connector event registry"
+    )
+
+
 def test_default_connector_metric_family_contracts_are_certified():
     from app.brain.connector_registry import list_connector_specs
 
     assert {
         spec.connector_type: spec.validate_metric_family_contract()
+        for spec in list_connector_specs()
+    } == {spec.connector_type: [] for spec in list_connector_specs()}
+
+
+def test_default_connector_event_family_contracts_are_certified():
+    from app.brain.connector_registry import list_connector_specs
+
+    assert {
+        spec.connector_type: spec.validate_event_family_contract()
         for spec in list_connector_specs()
     } == {spec.connector_type: [] for spec in list_connector_specs()}
 
@@ -417,6 +450,37 @@ def test_connector_contract_certification_includes_metric_family_drift():
     ]
 
 
+def test_connector_contract_certification_includes_event_family_drift():
+    from app.brain.connector_registry import ConnectorSpec
+
+    spec = ConnectorSpec(
+        connector_type="drifty_event_family",
+        display_name="Drifty event family",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report",),
+        emitted_metric_families=("commerce.orders",),
+        emitted_event_families=("connector.execution", "workflow.rule"),
+    )
+
+    certification = spec.certify_contract()
+
+    assert certification.passed is False
+    assert certification.issue_count == 1
+    assert certification.issue_codes == ("unknown_event_family",)
+    assert certification.as_metadata()["event_family_issues"] == [
+        {
+            "code": "unknown_event_family",
+            "family": "workflow.rule",
+            "message": (
+                "drifty_event_family connector declares emitted event family "
+                "workflow.rule outside the connector event registry"
+            ),
+            "severity": "error",
+        }
+    ]
+
+
 def test_default_registry_contract_certification_passes_all_specs():
     from app.brain.connector_registry import certify_connector_contracts
 
@@ -435,6 +499,7 @@ def test_default_registry_contract_certification_passes_all_specs():
         "scope_issues": [],
         "capability_issues": [],
         "metric_family_issues": [],
+        "event_family_issues": [],
         "executor_issues": [],
     }
 

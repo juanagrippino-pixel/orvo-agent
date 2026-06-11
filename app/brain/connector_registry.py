@@ -65,6 +65,10 @@ RUNTIME_MODE_HEALTH_CHECK = "health_check"
 
 EVENT_FAMILY_CONNECTOR_EXECUTION = "connector.execution"
 EVENT_FAMILY_CONNECTOR_HEALTH = "connector.health"
+KNOWN_CONNECTOR_EVENT_FAMILIES = (
+    EVENT_FAMILY_CONNECTOR_EXECUTION,
+    EVENT_FAMILY_CONNECTOR_HEALTH,
+)
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
@@ -227,6 +231,16 @@ class ConnectorMetricFamilyValidationIssue:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectorEventFamilyValidationIssue:
+    """Deterministic diagnostic for emitted event-family registry drift."""
+
+    code: str
+    family: str
+    message: str
+    severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectorExecutorValidationIssue:
     """Deterministic diagnostic for unsafe executor metadata drift."""
 
@@ -254,6 +268,7 @@ class ConnectorSpecCertification:
     scope_issues: tuple[ConnectorScopeValidationIssue, ...] = ()
     capability_issues: tuple[ConnectorCapabilityValidationIssue, ...] = ()
     metric_family_issues: tuple[ConnectorMetricFamilyValidationIssue, ...] = ()
+    event_family_issues: tuple[ConnectorEventFamilyValidationIssue, ...] = ()
     executor_issues: tuple[ConnectorExecutorValidationIssue, ...] = ()
 
     @property
@@ -267,6 +282,7 @@ class ConnectorSpecCertification:
             + len(self.scope_issues)
             + len(self.capability_issues)
             + len(self.metric_family_issues)
+            + len(self.event_family_issues)
             + len(self.executor_issues)
         )
 
@@ -280,6 +296,7 @@ class ConnectorSpecCertification:
             *self.scope_issues,
             *self.capability_issues,
             *self.metric_family_issues,
+            *self.event_family_issues,
             *self.executor_issues,
         )
 
@@ -299,6 +316,9 @@ class ConnectorSpecCertification:
             "capability_issues": [asdict(issue) for issue in self.capability_issues],
             "metric_family_issues": [
                 asdict(issue) for issue in self.metric_family_issues
+            ],
+            "event_family_issues": [
+                asdict(issue) for issue in self.event_family_issues
             ],
             "executor_issues": [asdict(issue) for issue in self.executor_issues],
         }
@@ -677,6 +697,32 @@ class ConnectorSpec:
             )
         return issues
 
+    def validate_event_family_contract(self) -> list[ConnectorEventFamilyValidationIssue]:
+        """Certify emitted event families against connector-platform taxonomy.
+
+        Connector outcome logging and runtime certification synthesize events using
+        a small allowlisted family set. Specs must not advertise workflow/admin
+        event families here until those families have a reviewed connector-event
+        registry contract.
+        """
+
+        known_families = set(KNOWN_CONNECTOR_EVENT_FAMILIES)
+        issues: list[ConnectorEventFamilyValidationIssue] = []
+        for family in self.emitted_event_families:
+            if family in known_families:
+                continue
+            issues.append(
+                ConnectorEventFamilyValidationIssue(
+                    code="unknown_event_family",
+                    family=family,
+                    message=(
+                        f"{self.connector_type} connector declares emitted event family "
+                        f"{family} outside the connector event registry"
+                    ),
+                )
+            )
+        return issues
+
     def validate_executor_contract(self) -> list[ConnectorExecutorValidationIssue]:
         """Certify that executor metadata is safe for registry-driven runtime use.
 
@@ -776,6 +822,7 @@ class ConnectorSpec:
             scope_issues=tuple(self.validate_scope_requirements()),
             capability_issues=tuple(self.validate_capability_contract()),
             metric_family_issues=tuple(self.validate_metric_family_contract()),
+            event_family_issues=tuple(self.validate_event_family_contract()),
             executor_issues=tuple(self.validate_executor_contract()),
         )
 
