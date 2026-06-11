@@ -289,6 +289,93 @@ def test_default_connector_executor_contracts_are_certified():
     } == {spec.connector_type: [] for spec in list_connector_specs()}
 
 
+def test_connector_contract_certification_rolls_up_registry_release_gate_issues():
+    from app.brain.connector_registry import (
+        ConnectorExecutorMetadata,
+        ConnectorFactoryParam,
+        ConnectorHealthMetadata,
+        ConnectorScopeMetadata,
+        ConnectorSpec,
+        SecretRequirement,
+    )
+
+    spec = ConnectorSpec(
+        connector_type="drifty_shop",
+        display_name="Drifty shop",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=("daily_report", "unreviewed_capability"),
+        emitted_metric_families=(),
+        required_config_fields=("store_id",),
+        required_secret_refs=(
+            SecretRequirement(
+                name="access_token",
+                provider="shop_oauth",
+                scopes=("orders.read", "products.read"),
+                legacy_config_field="access_token",
+            ),
+        ),
+        legacy_secret_config_fields=("access_token",),
+        scopes=ConnectorScopeMetadata(required=("orders.read",)),
+        health=ConnectorHealthMetadata(
+            degraded_state="inventory_partial",  # type: ignore[arg-type]
+            allowed_states=("ok", "degraded"),
+        ),
+        executor=ConnectorExecutorMetadata(
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="build_daily_report_from_csv_file",
+            supported_runtime_modes=("scheduled", "sideways"),
+            factory_params=(
+                ConnectorFactoryParam("store_id", "connector_param", key="store_id"),
+                ConnectorFactoryParam("access_token", "connector_param", key="access_token"),
+            ),
+        ),
+    )
+
+    certification = spec.certify_contract()
+
+    assert certification.connector_type == "drifty_shop"
+    assert certification.passed is False
+    assert certification.issue_count == 7
+    assert certification.issue_codes == (
+        "degraded_state_not_allowed",
+        "unknown_health_state",
+        "secret_scope_not_required",
+        "unknown_capability",
+        "daily_report_missing_metric_families",
+        "unsupported_runtime_mode",
+        "secret_param_bound_as_public",
+    )
+    assert certification.as_metadata()["health_issues"][0] == {
+        "code": "degraded_state_not_allowed",
+        "field": "degraded_state",
+        "state": "inventory_partial",
+        "message": "drifty_shop connector degraded_state inventory_partial is not listed in allowed health states",
+        "severity": "error",
+    }
+
+
+def test_default_registry_contract_certification_passes_all_specs():
+    from app.brain.connector_registry import certify_connector_contracts
+
+    certifications = certify_connector_contracts()
+
+    assert tuple(cert.connector_type for cert in certifications) == EXPECTED_CONNECTOR_TYPES
+    assert all(cert.passed for cert in certifications)
+    assert {cert.connector_type: cert.issue_count for cert in certifications} == {
+        connector_type: 0 for connector_type in EXPECTED_CONNECTOR_TYPES
+    }
+    assert certifications[0].as_metadata() == {
+        "connector_type": "csv",
+        "passed": True,
+        "issue_count": 0,
+        "health_issues": [],
+        "scope_issues": [],
+        "capability_issues": [],
+        "executor_issues": [],
+    }
+
+
 def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import get_connector_spec
