@@ -1,10 +1,13 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from scripts.check_worker_handoff_manifests import (
     REQUIRED_FIELDS,
     WorkerHandoffManifest,
     discover_manifest_paths,
+    main,
     parse_manifest,
     validate_manifest,
     validate_manifest_paths,
@@ -107,6 +110,16 @@ def test_validate_manifest_paths_accepts_current_committed_worker_manifests() ->
     assert validate_manifest_paths(paths) == []
 
 
+def test_main_rejects_forbid_test_deletions_without_verify_git(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "worker.md"
+    manifest_path.write_text(VALID_MANIFEST, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as error:
+        main(["--forbid-test-deletions", str(manifest_path)])
+
+    assert error.value.code == 2
+
+
 def _run_git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -177,6 +190,47 @@ def test_verify_manifest_git_claims_rejects_files_changed_that_do_not_match_diff
     assert result.passed is False
     assert result.problems == (
         "files_changed does not match git diff base_sha...head_sha; missing from manifest: tests/test_guard.py",
+    )
+
+
+def test_verify_manifest_git_claims_can_reject_test_file_deletions(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(repo, "init")
+    _run_git(repo, "config", "user.email", "orvo-tests@example.invalid")
+    _run_git(repo, "config", "user.name", "Orvo Tests")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_existing.py").write_text("def test_existing():\n    assert True\n", encoding="utf-8")
+    _run_git(repo, "add", "tests/test_existing.py")
+    _run_git(repo, "commit", "-m", "base")
+    base_sha = _run_git(repo, "rev-parse", "HEAD")
+    _run_git(repo, "checkout", "-b", "codex/delete-test")
+    _run_git(repo, "rm", "tests/test_existing.py")
+    _run_git(repo, "commit", "-m", "delete test")
+    head_sha = _run_git(repo, "rev-parse", "HEAD")
+    manifest_path = repo / "worker.md"
+    manifest_path.write_text(
+        VALID_MANIFEST.replace("/root/orvo-agent-worktrees/sample-task", str(repo))
+        .replace("codex/sample-task", "codex/delete-test")
+        .replace("3f768883d3fc41cc19fab36acf63a23794324540", base_sha)
+        .replace("uncommitted", head_sha)
+        .replace("dirty-blocked", "review-ready")
+        .replace(
+            "  - scripts/check_worker_handoff_manifests.py\n  - tests/test_worker_handoff_manifest_guard.py",
+            "  - tests/test_existing.py",
+        ),
+        encoding="utf-8",
+    )
+
+    result = verify_manifest_git_claims(
+        parse_manifest(manifest_path),
+        repo_root=repo,
+        forbid_test_deletions=True,
+    )
+
+    assert result.passed is False
+    assert result.problems == (
+        "test file deletion requires explicit review: tests/test_existing.py",
     )
 
 
