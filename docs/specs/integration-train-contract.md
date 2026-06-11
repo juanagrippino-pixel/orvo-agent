@@ -44,8 +44,8 @@ Recent shipped baseline facts, grounded in repo inspection:
 Recommended order from this checkpoint:
 
 1. **Patch-id review and split remaining Work Management value**
-   - Treat case-family release-state metadata and system reopen workflow metadata as integrated. Do not revive or direct-merge broad `codex/work-management` history just to re-land those pieces.
-   - Gate: remaining slices must be narrow and additive, such as owner/worker actor taxonomy, evidence-lineage refinements, or SLA-compatible metadata. They must preserve `OperationalCase` as lifecycle source of truth and keep manual/operator transitions separate from deterministic system transitions.
+   - Treat case-family release-state metadata, system reopen workflow metadata, and owner/worker timeline actor taxonomy as integrated. Do not revive or direct-merge broad `codex/work-management` history just to re-land those pieces.
+   - Gate: remaining slices must be narrow and additive, such as evidence-lineage refinements or SLA-compatible metadata. They must preserve `OperationalCase` as lifecycle source of truth and keep manual/operator transitions separate from deterministic system transitions.
 
 2. **Keep workflow automation projection-only until executor foundations exist**
    - Treat approval-request matching as integrated. Future workflow work can improve audit projections and trigger coverage, but broad side-effect execution remains blocked.
