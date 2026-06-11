@@ -57,7 +57,7 @@ The initial catalog covers the current Orvo Brain control-plane spine:
 5. `operational_cases` — WorkItem/OperationalCase lifecycle source of truth.
 6. `operator_api` — internal operator API projection layer.
 7. `gateway_policy` — shared auth, permission, rate-limit, idempotency, request/trace provenance, schema-versioned gateway telemetry, and audit-decision conventions for internal edges. Its catalog entry points at `docs/operability/gateway-policy-telemetry-runbook.md` so operators and reviewers can inspect policy decisions without exposing raw idempotency keys or credentials.
-8. `connector_provisioning` — side-effect-free self-service connector provisioning validation that reuses the connector registry, enforces `secret://` references, emits stable `operation_ref` correlation IDs, and emits redacted plans for developer/operator surfaces.
+8. `connector_provisioning` — side-effect-free self-service connector provisioning validation that reuses the connector registry, enforces `secret://` references, emits stable `operation_ref` correlation IDs plus redacted telemetry `provenance_ref` values, and emits redacted plans for developer/operator surfaces.
 9. `delivery_dispatch` — dispatch/idempotency boundary for report and owner brief delivery.
 10. `edge_developer_platform` — in-repo platform conventions and catalog contract.
 
@@ -67,7 +67,7 @@ Required tests live in `tests/contracts/test_service_catalog_contract.py` and pr
 
 - default catalog coverage for core control-plane components;
 - gateway policy ownership, source-of-truth metadata, and telemetry/provenance observability signals;
-- connector provisioning ownership, source-of-truth metadata, docs, tests, and dependencies;
+- connector provisioning ownership, source-of-truth metadata, docs, tests, dependencies, and telemetry/provenance observability signals;
 - gateway policy runbook metadata is included in the public manifest and points at durable docs;
 - stable public manifest schema and component ordering;
 - duplicate component IDs are rejected;

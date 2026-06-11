@@ -259,6 +259,8 @@ def default_service_catalog() -> ServiceCatalog:
                     "connector_id",
                     "connector_type",
                     "provisioning_issue_code",
+                    "provisioning_telemetry_schema",
+                    "provenance_ref",
                     "secret_ref_names",
                 ),
             ),

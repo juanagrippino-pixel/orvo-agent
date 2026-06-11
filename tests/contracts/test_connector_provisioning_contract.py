@@ -126,6 +126,61 @@ def test_connector_provisioning_operation_ref_is_deterministic_secret_safe_and_c
     assert "operator access_token=raw_inline_value" not in serialized
 
 
+def test_connector_provisioning_plan_emits_deterministic_secret_safe_telemetry():
+    from app.brain.connector_provisioning import (
+        CONNECTOR_PROVISIONING_TELEMETRY_SCHEMA_VERSION,
+        ConnectorProvisioningRequest,
+        compile_connector_provisioning_plan,
+    )
+
+    request = ConnectorProvisioningRequest(
+        business_id="artemea",
+        connector_id="tn-main",
+        connector_type=CONNECTOR_TYPE_TIENDANUBE,
+        label="Tiendanube principal",
+        params={"store_id": "12345"},
+        secret_refs={
+            "access_token": "secret://businesses/artemea/connectors/tn-main/access_token",
+        },
+        actor_id="operator access_token=raw_inline_value",
+    )
+
+    first = compile_connector_provisioning_plan(request)
+    second = compile_connector_provisioning_plan(request)
+    invalid = compile_connector_provisioning_plan(
+        request.model_copy(
+            update={
+                "params": {"store_id": "12345", "access_token": "raw_inline_value"},
+                "secret_refs": {"access_token": "raw_inline_value"},
+            }
+        )
+    )
+
+    assert first.telemetry_event["schema_version"] == CONNECTOR_PROVISIONING_TELEMETRY_SCHEMA_VERSION
+    assert first.telemetry_event["event_type"] == "connector.provisioning.plan_compiled"
+    assert first.telemetry_event["source_component"] == "connector_provisioning"
+    assert first.telemetry_event["operation_ref"] == first.operation_ref
+    assert first.telemetry_event["business_id"] == "artemea"
+    assert first.telemetry_event["connector_type"] == CONNECTOR_TYPE_TIENDANUBE
+    assert first.telemetry_event["ok"] is True
+    assert first.telemetry_event["next_step"] == "ready_for_config_save"
+    assert first.telemetry_event["issue_codes"] == []
+    assert first.telemetry_event["provenance_ref"].startswith("connprovprov_")
+    assert first.telemetry_event["provenance_ref"] == second.telemetry_event["provenance_ref"]
+    assert invalid.telemetry_event["provenance_ref"] != first.telemetry_event["provenance_ref"]
+    assert invalid.telemetry_event["issue_codes"] == [
+        "secret_param_not_allowed",
+        "invalid_secret_ref",
+        "legacy_inline_secret",
+    ]
+
+    manifest = invalid.public_manifest()
+    assert manifest["telemetry_event"] == invalid.telemetry_event
+    serialized = repr(manifest)
+    assert "raw_inline_value" not in serialized
+    assert "operator access_token=raw_inline_value" not in serialized
+
+
 def test_connector_provisioning_reuses_connector_registry_required_and_strict_field_validation():
     from app.brain.connector_provisioning import (
         ConnectorProvisioningRequest,
@@ -165,6 +220,8 @@ def test_service_catalog_includes_connector_provisioning_contract_component():
     assert component.source_of_truth == "app.brain.connector_provisioning"
     assert component.dependencies == ("connector_registry", "compiled_runtime", "run_ledger")
     assert "operation_ref" in component.observability_signals
+    assert "provenance_ref" in component.observability_signals
+    assert "provisioning_telemetry_schema" in component.observability_signals
     assert "docs/specs/connector-provisioning-contract.md" in component.docs
     assert "tests/contracts/test_connector_provisioning_contract.py" in component.test_paths
     assert "developer_platform" in component.runtime_surfaces

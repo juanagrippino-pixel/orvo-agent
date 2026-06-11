@@ -24,6 +24,7 @@ from app.brain.connector_registry import (
 from app.brain.security.redaction import is_secret_key, redact_secrets, redact_text
 
 CONNECTOR_PROVISIONING_SCHEMA_VERSION = "2026-06-07.connector-provisioning.v1"
+CONNECTOR_PROVISIONING_TELEMETRY_SCHEMA_VERSION = "2026-06-11.connector-provisioning-telemetry.v1"
 ProvisioningOperation = Literal["connector.provision"]
 ProvisioningNextStep = Literal["ready_for_config_save", "fix_validation_issues"]
 
@@ -93,6 +94,7 @@ class ConnectorProvisioningPlan(BaseModel):
     connector: ConnectorProvisioningConnector
     issues: tuple[ConnectorProvisioningIssue, ...] = ()
     audit_event: dict[str, Any]
+    telemetry_event: dict[str, Any]
 
     def public_manifest(self) -> dict[str, Any]:
         """Return a stable redacted manifest safe for API/docs projection."""
@@ -107,6 +109,7 @@ class ConnectorProvisioningPlan(BaseModel):
             "connector": self.connector.model_dump(mode="json"),
             "issues": [issue.model_dump(mode="json") for issue in self.issues],
             "audit_event": self.audit_event,
+            "telemetry_event": self.telemetry_event,
         }
 
 
@@ -131,6 +134,40 @@ def _provisioning_operation_ref(request: ConnectorProvisioningRequest) -> str:
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
     return f"connprov_{digest}"
+
+
+def _provisioning_telemetry_event(
+    *,
+    operation_ref: str,
+    ok: bool,
+    next_step: ProvisioningNextStep,
+    business_id: str,
+    connector_type: str,
+    issue_codes: tuple[str, ...],
+) -> dict[str, Any]:
+    """Return a deterministic, redacted provisioning telemetry envelope."""
+
+    event = {
+        "schema_version": CONNECTOR_PROVISIONING_TELEMETRY_SCHEMA_VERSION,
+        "event_type": "connector.provisioning.plan_compiled",
+        "provisioning_schema_version": CONNECTOR_PROVISIONING_SCHEMA_VERSION,
+        "source_component": "connector_provisioning",
+        "operation_ref": operation_ref,
+        "business_id": business_id,
+        "connector_type": connector_type,
+        "ok": ok,
+        "next_step": next_step,
+        "issue_codes": list(issue_codes),
+    }
+    event["provenance_ref"] = _connector_provisioning_provenance_ref(event)
+    return event
+
+
+def _connector_provisioning_provenance_ref(event: Mapping[str, Any]) -> str:
+    payload = {key: value for key, value in event.items() if key != "provenance_ref"}
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+    return f"connprovprov_{digest}"
 
 
 def _safe_actor_id(actor_id: str) -> str:
@@ -261,6 +298,14 @@ def compile_connector_provisioning_plan(
             connector=_unknown_connector_spec(request),
             issues=(issue,),
             audit_event=audit_event,
+            telemetry_event=_provisioning_telemetry_event(
+                operation_ref=operation_ref,
+                ok=False,
+                next_step="fix_validation_issues",
+                business_id=_safe_text(request.business_id),
+                connector_type=_safe_text(request.connector_type),
+                issue_codes=(issue.code,),
+            ),
         )
 
     issues: list[ConnectorProvisioningIssue] = []
@@ -277,12 +322,21 @@ def compile_connector_provisioning_plan(
     )
 
     ok = not issues
+    next_step: ProvisioningNextStep = "ready_for_config_save" if ok else "fix_validation_issues"
     return ConnectorProvisioningPlan(
         operation_ref=operation_ref,
         ok=ok,
-        next_step="ready_for_config_save" if ok else "fix_validation_issues",
+        next_step=next_step,
         business_id=_safe_text(request.business_id),
         connector=_connector_manifest(request, spec),
         issues=tuple(issues),
         audit_event=audit_event,
+        telemetry_event=_provisioning_telemetry_event(
+            operation_ref=operation_ref,
+            ok=ok,
+            next_step=next_step,
+            business_id=_safe_text(request.business_id),
+            connector_type=_safe_text(request.connector_type),
+            issue_codes=tuple(issue.code for issue in issues),
+        ),
     )

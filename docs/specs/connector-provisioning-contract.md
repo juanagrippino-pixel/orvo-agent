@@ -41,9 +41,22 @@ it remains intentionally local and deterministic:
 `compile_connector_provisioning_plan(...)` returns a `ConnectorProvisioningPlan`
 with schema version `2026-06-07.connector-provisioning.v1`, operation
 `connector.provision`, a deterministic `operation_ref`, a boolean `ok`, an
-explicit `next_step`, a redacted connector manifest, validation issues, and a
-redacted audit event that carries the same `operation_ref` for future broker,
-ledger, or status polling correlation.
+explicit `next_step`, a redacted connector manifest, validation issues, a
+redacted audit event, and a redacted telemetry/provenance event. Both the audit
+and telemetry events carry the same `operation_ref` for future broker, ledger,
+or status polling correlation.
+
+`ConnectorProvisioningPlan.telemetry_event` is schema-versioned as
+`2026-06-11.connector-provisioning-telemetry.v1` and includes:
+
+- `event_type=connector.provisioning.plan_compiled` and
+  `source_component=connector_provisioning`;
+- the connector provisioning schema version that produced it;
+- `operation_ref`, redacted `business_id`, redacted `connector_type`, `ok`, and
+  `next_step`;
+- ordered validation `issue_codes` without raw issue values;
+- `provenance_ref`, a deterministic short reference derived from the redacted
+  telemetry payload for future ledger/log correlation.
 
 ## Validation rules
 
@@ -62,7 +75,7 @@ The provisioning compiler MUST:
 8. compute a stable `connprov_<hash>` `operation_ref` from redacted provisioning
    intent so repeated validation can be correlated without storing raw secrets;
 9. never echo raw secret values in the plan, public manifest, validation issues,
-   or audit event.
+   audit event, or telemetry/provenance event.
 
 ## Redaction and secret boundary
 
@@ -98,6 +111,11 @@ side-effect free, but future config persistence and provisioning execution must
 record durable audit/provenance outcomes rather than relying on gateway text or
 WhatsApp reports as source of truth.
 
+The catalog observability signals include `operation_ref`,
+`provisioning_telemetry_schema`, and `provenance_ref` so reviewers can verify the
+future broker/status-ledger wiring without treating this validation compiler as a
+persistence layer.
+
 ## Acceptance checks
 
 - A valid Tiendanube provisioning request with `store_id` and
@@ -107,6 +125,8 @@ WhatsApp reports as source of truth.
   public config yields a different one.
 - Raw inline credential params and non-reference secret values are rejected and
   redacted.
+- Plans emit deterministic, secret-safe telemetry events with stable
+  `provenance_ref` values and ordered issue codes.
 - Missing required params and strict unknown fields are reported by reusing the
   connector registry diagnostics.
 - The service catalog includes `connector_provisioning` and points to this spec
