@@ -347,6 +347,8 @@ def export_builtin_case_view_rows(
             "view": queue["view"],
             "export": {
                 "format": "case_view_rows_v1",
+                "jql": queue["jql"],
+                "normalized_jql": queue["normalized_jql"],
                 "columns": list(_CASE_VIEW_EXPORT_COLUMNS),
                 "limit": queue["limit"],
                 "count": queue["count"],

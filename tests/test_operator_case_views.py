@@ -1185,6 +1185,8 @@ def test_internal_case_view_export_returns_scoped_redacted_rows(monkeypatch, tmp
     assert body["business_id"] == "artemea"
     assert body["data"]["view"] == {"view_id": "open_cases", "label": "Open cases", "readonly": True}
     assert body["data"]["export"]["format"] == "case_view_rows_v1"
+    assert body["data"]["export"]["jql"] == "status = open ORDER BY priority_score DESC"
+    assert body["data"]["export"]["normalized_jql"] == "status = open ORDER BY priority_score DESC"
     assert body["data"]["export"]["limit"] == 1
     assert body["data"]["export"]["count"] == 1
     assert body["data"]["export"]["total"] == 2
