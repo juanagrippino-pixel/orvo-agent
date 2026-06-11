@@ -110,6 +110,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "readonly": True,
     },
     {
+        "view_id": "high_priority_actionable",
+        "label": "High-priority actionable cases",
+        "description": "High-priority actionable cases first, across open operator workflows.",
+        "jql": "actionable = true AND priority_bracket = high ORDER BY priority_score DESC",
+        "readonly": True,
+    },
+    {
         "view_id": "data_stale",
         "label": "Data stale",
         "description": "Open, acknowledged, or in-progress stale-data cases.",
