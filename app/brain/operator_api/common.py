@@ -55,15 +55,22 @@ def _iso(value: datetime | None) -> str | None:
         return None
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
-def parse_limit(value: str | None, *, default: int = _DEFAULT_LIMIT, max_limit: int = _MAX_LIMIT) -> int:
+def parse_limit(
+    value: str | None,
+    *,
+    default: int = _DEFAULT_LIMIT,
+    max_limit: int = _MAX_LIMIT,
+    parameter_name: str = "limit",
+) -> int:
+    error_code = "invalid_limit" if parameter_name == "limit" else f"invalid_{parameter_name}"
     if value in (None, ""):
         return default
     try:
         parsed = int(value)
     except ValueError as exc:
-        raise OperatorAPIError("invalid_limit", "limit must be an integer", status_code=400) from exc
+        raise OperatorAPIError(error_code, f"{parameter_name} must be an integer", status_code=400) from exc
     if parsed < 1:
-        raise OperatorAPIError("invalid_limit", "limit must be positive", status_code=400)
+        raise OperatorAPIError(error_code, f"{parameter_name} must be positive", status_code=400)
     return min(parsed, max_limit)
 
 def parse_case_status(value: str | None) -> OperationalCaseStatus | None:

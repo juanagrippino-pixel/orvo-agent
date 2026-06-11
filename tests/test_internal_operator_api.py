@@ -405,6 +405,28 @@ def test_internal_owner_case_brief_preview_requires_business_scope(monkeypatch, 
     assert body["redaction_applied"] is True
 
 
+def test_internal_owner_case_brief_preview_invalid_max_cases_uses_parameter_specific_safe_error(
+    monkeypatch, tmp_path
+):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview"
+        "?business_name=Artemea%20access_token=raw_owner_limit_secret&max_cases=not-a-number",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_owner_limit_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_max_cases"
+    assert body["error"]["message"] == "max_cases must be an integer"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())

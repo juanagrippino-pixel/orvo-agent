@@ -95,7 +95,7 @@ def preview_owner_case_brief(
     scoped before text composition.
     """
 
-    parsed_max_cases = parse_limit(max_cases, default=3, max_limit=10)
+    parsed_max_cases = parse_limit(max_cases, default=3, max_limit=10, parameter_name="max_cases")
     parsed_report_date = _parse_report_date(report_date)
     safe_business_name = redact_text((business_name or business_id).strip() or business_id) or "[REDACTED]"
     actionable = _owner_brief_cases(store, business_id)
