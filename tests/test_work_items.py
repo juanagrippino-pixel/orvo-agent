@@ -654,6 +654,34 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
         "sortable": True,
     }
+    assert fields["acknowledgment_sla_status"] == {
+        "field": "acknowledgment_sla_status",
+        "value_type": "enum",
+        "allowed_values": ["breached", "met", "pending"],
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+    }
+    assert fields["resolution_sla_status"] == {
+        "field": "resolution_sla_status",
+        "value_type": "enum",
+        "allowed_values": ["breached", "met", "pending"],
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+    }
+    assert fields["acknowledgment_sla_breached"] == {
+        "field": "acknowledgment_sla_breached",
+        "value_type": "bool",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "="],
+        "sortable": False,
+    }
+    assert fields["resolution_sla_breached"] == {
+        "field": "resolution_sla_breached",
+        "value_type": "bool",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "="],
+        "sortable": False,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"

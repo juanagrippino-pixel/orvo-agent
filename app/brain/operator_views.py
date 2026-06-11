@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.brain.operational_cases import (
@@ -22,12 +22,16 @@ from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
     allowed_work_item_query_sort_fields,
     case_acknowledgment_due_at,
+    case_acknowledgment_sla_breached,
+    case_acknowledgment_sla_status,
     case_comment_count,
     case_issue_type,
     case_last_commented_datetime,
     case_priority_bracket,
     case_project_key,
     case_resolution_due_at,
+    case_resolution_sla_breached,
+    case_resolution_sla_status,
     case_status_category,
     case_terminal_datetime,
     work_item_query_field_spec,
@@ -292,14 +296,15 @@ def _format_value(value: Any) -> str:
 
 
 def _matches(case: OperationalCase, clauses: tuple[CaseJQLClause, ...]) -> bool:
-    return all(_matches_clause(case, clause) for clause in clauses)
+    as_of = datetime.now(tz=timezone.utc)
+    return all(_matches_clause(case, clause, as_of=as_of) for clause in clauses)
 
 
-def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
+def _matches_clause(case: OperationalCase, clause: CaseJQLClause, *, as_of: datetime) -> bool:
     if clause.field == "source_connector":
         return _matches_source_connector(case, clause)
 
-    actual = _case_field_value(case, clause.field)
+    actual = _case_field_value(case, clause.field, as_of=as_of)
     if clause.operator == "IN":
         return actual in clause.values
     expected = clause.values[0]
@@ -336,7 +341,7 @@ def _matches_source_connector(case: OperationalCase, clause: CaseJQLClause) -> b
     raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
 
 
-def _case_field_value(case: OperationalCase, field: str) -> Any:
+def _case_field_value(case: OperationalCase, field: str, *, as_of: datetime | None = None) -> Any:
     if field == "entity.kind":
         return case.entity_scope.get("kind")
     if field == "entity.id":
@@ -357,6 +362,14 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_acknowledgment_due_at(case)
     if field == "resolution_due_at":
         return case_resolution_due_at(case)
+    if field == "acknowledgment_sla_status":
+        return case_acknowledgment_sla_status(case, as_of=as_of or datetime.now(tz=timezone.utc))
+    if field == "resolution_sla_status":
+        return case_resolution_sla_status(case, as_of=as_of or datetime.now(tz=timezone.utc))
+    if field == "acknowledgment_sla_breached":
+        return case_acknowledgment_sla_breached(case, as_of=as_of or datetime.now(tz=timezone.utc))
+    if field == "resolution_sla_breached":
+        return case_resolution_sla_breached(case, as_of=as_of or datetime.now(tz=timezone.utc))
     if field == "comment_count":
         return case_comment_count(case)
     if field == "last_commented_at":

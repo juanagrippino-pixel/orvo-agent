@@ -72,6 +72,7 @@ _PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
 )
 
 _RANGE_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
+_SLA_STATUS_VALUES = frozenset({"pending", "met", "breached"})
 
 _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("status", "enum", frozenset(get_args(OperationalCaseStatus))),
@@ -97,6 +98,10 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("terminal_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("acknowledgment_due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("resolution_due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("acknowledgment_sla_status", "enum", _SLA_STATUS_VALUES),
+    WorkItemQueryFieldDefinition("resolution_sla_status", "enum", _SLA_STATUS_VALUES),
+    WorkItemQueryFieldDefinition("acknowledgment_sla_breached", "bool", allowed_operators=frozenset({"=", "!="})),
+    WorkItemQueryFieldDefinition("resolution_sla_breached", "bool", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("comment_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("last_commented_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
 )

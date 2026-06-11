@@ -119,10 +119,20 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("terminal_at >= 2026-05-24T10:00:00Z ORDER BY terminal_at ASC").normalized == (
         "terminal_at >= 2026-05-24T10:00:00+00:00 ORDER BY terminal_at ASC"
     )
+    assert parse_case_jql("acknowledgment_sla_status = breached").normalized == (
+        "acknowledgment_sla_status = breached ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("resolution_sla_breached = true").normalized == (
+        "resolution_sla_breached = true ORDER BY priority_score DESC, opened_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
     assert unsupported_category.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as unsupported_sla_status:
+        parse_case_jql("acknowledgment_sla_status = late")
+    assert unsupported_sla_status.value.code == "unsupported_jql_value"
 
 
 def test_internal_case_queue_filters_and_sorts_by_comment_activity(monkeypatch, tmp_path):
@@ -315,6 +325,70 @@ def test_internal_case_queue_filters_and_sorts_by_sla_due_fields(monkeypatch, tm
     due_times = [case["work_item"]["acknowledgment_due_at"] for case in body["data"]["cases"]]
     assert due_times == ["2026-05-24T11:00:00Z", "2026-05-24T09:00:00Z"]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_filters_by_sla_status_fields(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    breached = _seed_case(db_path, _case_detection(run_id="run-sla-breached", priority=95))
+    met_seed = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-sla-met",
+            dedupe_suffix="stockout_risk/sku/SLA-MET/commerce.inventory/daily",
+            priority=95,
+            title="SLA met fixture",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-sla-other", business_id="other", priority=95))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    acknowledged = store.transition_case(
+        met_seed.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=_utc(8),
+    )
+    resolved = store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        reason="Resolved before SLA",
+        transitioned_at=_utc(9),
+    )
+    conn.close()
+
+    breached_response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "acknowledgment_sla_status = breached AND resolution_sla_breached = true"},
+    )
+    met_response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "resolution_sla_status = met"},
+    )
+
+    assert breached_response.status_code == 200
+    breached_body = breached_response.get_json()
+    assert breached_body["ok"] is True
+    assert breached_body["data"]["normalized_jql"] == (
+        "acknowledgment_sla_status = breached AND resolution_sla_breached = true "
+        "ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert [case["case_id"] for case in breached_body["data"]["cases"]] == [breached.case_id]
+    assert breached_body["data"]["cases"][0]["work_item"]["acknowledgment_sla_status"] == "breached"
+    assert breached_body["data"]["cases"][0]["work_item"]["resolution_sla_breached"] is True
+
+    assert met_response.status_code == 200
+    met_body = met_response.get_json()
+    assert [case["case_id"] for case in met_body["data"]["cases"]] == [resolved.case_id]
+    assert met_body["data"]["cases"][0]["work_item"]["resolution_sla_status"] == "met"
+    assert all(case["business_id"] == "artemea" for case in breached_body["data"]["cases"])
+    assert all(case["business_id"] == "artemea" for case in met_body["data"]["cases"])
 
 
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
