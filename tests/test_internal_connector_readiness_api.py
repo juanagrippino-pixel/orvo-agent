@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import sqlite3
+from contextlib import closing
+from datetime import datetime, timezone
+
+from app.brain.config import BusinessConfig, ConnectorConfig
+from app.brain.run_ledger import ConnectorRunOutcome
+from app.brain.storage import SQLiteConfigStore, SQLiteRunLedger, init_schema
+
+AUTH = {
+    "Authorization": "Bearer test-internal-token",
+    "X-Orvo-Operator": "operator:juan",
+    "X-Request-ID": "req-readiness",
+}
+
+
+def _utc(hour: int) -> datetime:
+    return datetime(2026, 5, 24, hour, tzinfo=timezone.utc)
+
+
+def _client(monkeypatch, tmp_path):
+    db_path = tmp_path / "operator-readiness.sqlite3"
+    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(db_path))
+    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
+    from server import app
+
+    return app.test_client(), db_path
+
+
+def _save_business(db_path, business: BusinessConfig) -> None:
+    with closing(sqlite3.connect(db_path)) as conn:
+        init_schema(conn)
+        SQLiteConfigStore(conn).save_business_config(business)
+
+
+def _append_connector_outcome(db_path) -> None:
+    with closing(sqlite3.connect(db_path)) as conn:
+        init_schema(conn)
+        ledger = SQLiteRunLedger(conn)
+        run = ledger.create_run(
+            business_id="artemea",
+            trigger_type="forced",
+            run_id="run-readiness-latest",
+            started_at=_utc(7),
+        )
+        ledger.append_connector_outcome(
+            run.run_id,
+            ConnectorRunOutcome(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                status="failed",
+                health_state="unauthorized",
+                started_at=_utc(7),
+                finished_at=_utc(8),
+                error_summary="Tiendanube 401 access_token=raw_runtime_token",
+            ),
+        )
+        ledger.update_run(run.run_id, status="failed", finished_at=_utc(8))
+
+
+def test_internal_connector_readiness_projects_config_validation_and_last_health(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _save_business(
+        db_path,
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn-main",
+                    connector_type="tiendanube",
+                    label="TiendaNube principal",
+                    params={"store_id": "123"},
+                    secret_refs={
+                        "access_token": "secret://tenant/artemea/tiendanube/raw_config_secret"
+                    },
+                ),
+                ConnectorConfig(
+                    connector_id="csv-disabled",
+                    connector_type="csv",
+                    label="CSV backup",
+                    params={"csv_path": "examples/sample_sales.csv"},
+                    enabled=False,
+                ),
+            ],
+        ),
+    )
+    _append_connector_outcome(db_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_config_secret" not in raw_body
+    assert "raw_runtime_token" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["request_id"] == "req-readiness"
+    assert body["redaction_applied"] is True
+
+    data = body["data"]
+    assert data["summary"] == {
+        "total": 2,
+        "ready": 0,
+        "degraded": 1,
+        "not_ready": 0,
+        "disabled": 1,
+        "unknown": 0,
+    }
+    connectors = {item["connector_id"]: item for item in data["connectors"]}
+
+    tiendanube = connectors["tn-main"]
+    assert tiendanube["connector_type"] == "tiendanube"
+    assert tiendanube["registered"] is True
+    assert tiendanube["readiness_state"] == "degraded"
+    assert tiendanube["validation"] == {"error_count": 0, "warning_count": 0, "issues": []}
+    assert tiendanube["auth_requirements"] == [
+        {
+            "name": "access_token",
+            "provider": "tiendanube_oauth",
+            "present": True,
+            "scopes": ["orders.read", "products.read"],
+        }
+    ]
+    assert tiendanube["last_health"] == {
+        "run_id": "run-readiness-latest",
+        "status": "failed",
+        "health_state": "unauthorized",
+        "started_at": "2026-05-24T07:00:00Z",
+        "finished_at": "2026-05-24T08:00:00Z",
+        "error_summary": "Tiendanube 401 access_token=[REDACTED]",
+    }
+    assert tiendanube["health_policy"]["readiness_check"] == "metadata_only"
+
+    disabled = connectors["csv-disabled"]
+    assert disabled["readiness_state"] == "disabled"
+    assert disabled["last_health"] is None
+
+
+def test_internal_connector_readiness_fails_closed_on_legacy_inline_secret(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _save_business(
+        db_path,
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn-inline",
+                    connector_type="tiendanube",
+                    label="TiendaNube legacy",
+                    params={"store_id": "123", "access_token": "raw_inline_token"},
+                ),
+            ],
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_inline_token" not in raw_body
+    body = response.get_json()
+    connector = body["data"]["connectors"][0]
+    assert connector["readiness_state"] == "not_ready"
+    assert connector["auth_requirements"][0]["present"] is False
+    assert connector["validation"]["error_count"] == 1
+    assert connector["validation"]["warning_count"] == 1
+    assert [issue["code"] for issue in connector["validation"]["issues"]] == [
+        "missing_required_secret_ref",
+        "legacy_inline_secret",
+    ]
+
+
+def test_internal_connector_readiness_missing_business_config_is_safe_404(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 404
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "business_config_not_found"
+    assert body["redaction_applied"] is True
