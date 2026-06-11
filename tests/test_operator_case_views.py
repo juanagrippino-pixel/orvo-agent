@@ -105,10 +105,17 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("status_category IN (to_do, done)").normalized == (
         "status_category IN (to_do, done) ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("release_state = deferred").normalized == (
+        "release_state = deferred ORDER BY priority_score DESC, opened_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
     assert unsupported_category.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as unsupported_release_state:
+        parse_case_jql("release_state = experimental")
+    assert unsupported_release_state.value.code == "unsupported_jql_value"
 
 
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
@@ -213,6 +220,36 @@ def test_internal_case_queue_redacts_secret_shaped_jql_error_messages(monkeypatc
     assert body["error"]["code"] == "unsupported_jql_value"
     assert body["error"]["safe_to_show_owner"] is False
     assert "[REDACTED]" in body["error"]["message"]
+
+
+def test_internal_case_queue_filters_by_release_state(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    promoted = _seed_case(db_path, _case_detection(run_id="run-promoted", priority=95))
+    deferred = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="channel_mix_shift",
+            dedupe_suffix="channel_mix_shift/channel/all/commerce.revenue/daily",
+            severity="info",
+            priority=55,
+            title="Cambio de mix de canales",
+            run_id="run-deferred",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "release_state = deferred"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "release_state = deferred ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [deferred.case_id]
+    assert body["data"]["cases"][0]["work_item"]["release_state"] == "deferred"
+    assert promoted.case_id not in [case["case_id"] for case in body["data"]["cases"]]
 
 
 def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(monkeypatch, tmp_path):
@@ -444,6 +481,39 @@ def test_internal_case_facets_support_source_connector_and_bucket_limit(monkeypa
     assert body["data"]["returned"] == 1
     assert body["data"]["truncated"] is True
     assert body["data"]["buckets"] == [{"value": "meta_ads", "count": 1}]
+
+
+def test_internal_case_facets_group_by_release_state(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-promoted"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="channel_mix_shift",
+            dedupe_suffix="channel_mix_shift/channel/all/commerce.revenue/daily",
+            severity="info",
+            priority=55,
+            title="Cambio de mix de canales",
+            run_id="run-deferred",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "release_state", "jql": "status = open"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["field"] == "release_state"
+    assert body["data"]["total_cases"] == 2
+    assert body["data"]["buckets"] == [
+        {"value": "deferred", "count": 1},
+        {"value": "promoted", "count": 1},
+    ]
 
 
 def test_internal_case_facets_reject_business_scope_and_redact_bad_field(monkeypatch, tmp_path):

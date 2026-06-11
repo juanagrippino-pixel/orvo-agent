@@ -68,6 +68,7 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["work_item_id"] == f"ARTEMEA:{case.case_id}"
     assert projection["project_key"] == "ARTEMEA"
     assert projection["issue_type"] == "stockout_risk"
+    assert projection["release_state"] == "promoted"
     assert projection["status"] == "open"
     assert projection["status_category"] == "to_do"
     assert projection["priority_score"] == 87
@@ -223,6 +224,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "facetable": True,
     }
     assert fields["issue_type"]["allowed_values"] == sorted(get_args(OperationalCaseType))
+    assert fields["release_state"] == {
+        "field": "release_state",
+        "value_type": "enum",
+        "allowed_values": ["deferred", "internal_only", "promoted"],
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+        "facetable": True,
+    }
     assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
     assert fields["assignee_ref"]["value_type"] == "string"
     assert fields["priority_score"] == {
@@ -246,6 +255,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "issue_type",
         "priority_bracket",
         "project",
+        "release_state",
         "severity",
         "source_connector",
         "status",

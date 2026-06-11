@@ -476,7 +476,7 @@ Current source-of-truth check:
 
 - `app/brain/work_items.py` now exposes project/work-item projections, deterministic project keys with a hash suffix for long names, issue-type definitions, workflow/status definitions, and canonical status categories.
 - `app/brain/work_items.py` now also exposes canonical priority bracket helpers and `operational_case_priority_definitions()`; `app/brain/operator_api/common.py` routes priority-bracket analytics through those helpers.
-- `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `status_category`, `assignee_ref`, and `priority_bracket` through the canonical WorkItem query-field registry integrated in Packet W.
+- `app/brain/operator_views.py` resolves JQL-lite `project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`, and `priority_bracket` through the canonical WorkItem query-field registry integrated in Packet W.
 - `OperationalCase` remains the durable state owner; there is no separate WorkItem persistence table or owner-facing copy change from this slice.
 
 Read:

@@ -74,9 +74,17 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 
 ```http
 GET /internal/brain/businesses/{business_id}/cases
+GET /internal/brain/businesses/{business_id}/cases/facets?field={work_item_field}&jql={jql}
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
+
+Case list/detail projections include WorkItem metadata (`project_key`, `issue_type`,
+`release_state`, `status_category`, `work_item_id`) derived from `OperationalCase`.
+JQL-lite and facets must use the canonical WorkItem field registry; `release_state`
+is the operator/query projection of the semantic case-family promotion gate
+(`promoted`, `deferred`, `internal_only`) and must not itself promote a case
+family to owner-facing delivery.
 
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
