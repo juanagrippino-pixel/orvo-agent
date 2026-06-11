@@ -155,6 +155,26 @@ def require_internal_business_scope(principal: InternalOperatorPrincipal, busine
     )
 
 
+def require_explicit_global_business_scope(principal: InternalOperatorPrincipal) -> None:
+    """Fail closed unless an operator has an explicit all-business grant.
+
+    Legacy token-scoped principals (``allowed_businesses is None``) are still
+    accepted by tenant-scoped internal routes during migration, but global
+    cross-business surfaces must not inherit that implicit grant.
+    """
+
+    allowed_businesses = principal.allowed_businesses
+    if allowed_businesses is not None and "*" in allowed_businesses:
+        return
+    raise InternalOperatorAuthorizationError(
+        "explicit_global_scope_required",
+        "Operator must have an explicit global business grant.",
+        role=principal.role,
+        permission=BUSINESS_ACCESS_PERMISSION,
+        allowed_businesses=allowed_businesses,
+    )
+
+
 def permissions_for_role(role: str) -> list[str]:
     """Return stable, sorted permissions for a normalized role."""
 

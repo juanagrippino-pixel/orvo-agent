@@ -135,7 +135,7 @@ Current repo paths:
 
 - `app/brain/storage.py` for SQLite config and idempotency tables
 - `app/brain/runtime_env.py` for environment readiness checks
-- `docs/connectors/depth-audit.md` for current robustness and observability gaps
+- `docs/connectors/depth-audit.md` for historical connector robustness findings; current runtime/connector/ledger status lives in `docs/specs/integration-train-contract.md`, the compiled-runtime contract, and the connector-registry contract
 - `docs/operability/worktree-hygiene.md` for autonomous work hygiene
 
 Phase A additions:

@@ -41,7 +41,11 @@ def register_case_summary_routes(app):
         auth_error = _authorize_internal_operator(business_id)
         if auth_error is not None:
             return auth_error
-        principal, permission_error = _internal_principal_or_error(business_id, INTERNAL_READ_PERMISSION)
+        principal, permission_error = _internal_principal_or_error(
+            business_id,
+            INTERNAL_READ_PERMISSION,
+            audit_denial=True,
+        )
         if permission_error is not None:
             return permission_error
         assert principal is not None

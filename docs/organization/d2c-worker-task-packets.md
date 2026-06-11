@@ -538,7 +538,7 @@ Acceptance:
 
 ## Packet U — Workflow action ledger and approval object foundation
 
-Status: foundation mostly satisfied in the current baseline; dispatch the next slice only for approval/execution hardening that preserves zero side effects.
+Status: approval-gate foundation satisfied in the current baseline by `cfb9d53` (`merge: integrate workflow automation gates`); dispatch the next slice only for executor-foundation hardening that preserves zero side effects until every side-effect gate is implemented.
 
 Goal: harden durable workflow/action bookkeeping and approval projections before any workflow automation can mutate cases or call external systems.
 
@@ -549,6 +549,7 @@ Current source-of-truth check:
 - `app/brain/workflow_action_ledger.py` records durable workflow action ledger rows, enforces idempotency keys, redacts params, and creates approval-request objects for approval-required actions.
 - `app/brain/workflow_automation.py` can write planned workflow actions to the ledger while preserving projection-only behavior.
 - `app/brain/workflow_approval_queue.py` and `app/brain/workflow_execution_queue.py` expose read-only queue projections with execution disabled and `side_effects_executed = 0`.
+- `app/brain/workflow_execution_queue.py` now requires a catalog-defined approval-required action, `approval_state=approved`, `execution_state=pending_execution`, and a matching approved approval-request object with matching ledger/business/case/action identity and `decided_at` before a record appears in the execution queue.
 - Manual case-action idempotency now covers the internal operator API when callers provide `X-Idempotency-Key`: keys are reserved before mutation, stored as `source="manual_operator"`, and duplicate completed requests replay without a second timeline mutation. Governed external/provider execution remains out of scope unless a separate packet adds provider idempotency, execution-attempt ledgering, retry/failure semantics, and approval-backed side-effect execution.
 
 Read:
@@ -573,9 +574,11 @@ Acceptance:
 - workflow action ledger continues to record action key, case/work item ref, actor/source, idempotency key, approval state, execution state, timestamps, and redacted params;
 - duplicate idempotency keys continue to be enforced against durable storage, not only within one dry-run projection;
 - approval-required actions continue to produce durable approval requests with deterministic lifecycle states and cannot execute as side effects;
+- execution queue projections include only actions with a matching approved approval-request object; manually or corruptly setting ledger `approval_state=approved` / `execution_state=pending_execution` is not enough;
 - approval/execution queue projections remain read-only, redacted, business-scoped, and explicit that execution is disabled;
 - manual case mutations either accept/enforce idempotency keys or are explicitly documented as non-automated operator actions with audit coverage from Packet O;
-- no external side effects are executed and existing dry-run projections remain backward-compatible.
+- no external side effects are executed and existing dry-run projections remain backward-compatible;
+- any future executor packet separately adds provider idempotency proof, execution-attempt ledgering, RBAC/action-scope checks, retry/failure semantics, and redacted external-response audit before consuming the queue.
 
 ## Packet V — Fulfillment backlog truth gates
 
@@ -628,11 +631,11 @@ Current source-of-truth check:
 - `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `status_category`, `assignee_ref`, and `priority_bracket`.
-- `docs/architecture-reviews/2026-06-06-arb-review-c69b03e.md` remains the latest ARB input: future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
+- `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md` is the latest ARB input, and `docs/specs/integration-train-contract.md` records the post-ARB idempotency/audit-redaction baseline. Future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
 
 Read:
 
-- `docs/architecture-reviews/2026-06-06-arb-review.md`
+- `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md`
 - `docs/specs/internal-operator-api-contract.md`
 - `docs/specs/integration-train-contract.md`
 - `docs/specs/testing-invariant-matrix.md`
@@ -652,6 +655,45 @@ Acceptance:
 - built-in views and JQL-lite tests prove `project`, `issue_type`, `status_category`, `assignee_ref`, and priority-related filters derive from canonical WorkItem/OperationalCase helpers;
 - metric values and aliases remain in `MetricRegistry`, not the WorkItem field registry;
 - SQL-looking input is still rejected before storage, route/context still owns business scope, and no writable saved views or tenant-custom fields are introduced.
+
+## Packet X — WhatsApp attention-backlog truth gates
+
+Goal: turn the registered `unanswered_conversations` case family into a readiness-gated Growth workflow for WhatsApp-heavy Tiendanube merchants without becoming an inbox, chatbot, or auto-reply feature.
+
+Dependency: dispatch after current metric registry, case evidence snapshot, data-stale suppression, and operator brief redaction tests are green. Do not combine with WhatsApp message sending, chatbot automation, broadcast/campaign tooling, helpdesk-ticket sync, or generic conversation-AI classification.
+
+Current source-of-truth check:
+
+- `app/brain/semantics/metric_registry.py` includes `unanswered_conversations` in `CASE_FAMILY_METRICS` with `support.conversations.unanswered_count` and `support.conversations.oldest_unanswered_age_minutes`.
+- `app/brain/operational_cases.py` includes the `unanswered_conversations` case type and derives owner-facing/detectable families from `CASE_FAMILY_METRICS`.
+- `app/brain/insights.py` still supports the legacy report insight from `unanswered_conversations`; that is compatibility behavior, not proof that a live WhatsApp/support connector is ready for owner-facing backlog cases.
+- `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md` packages this as a Growth/readiness-gated module, not a default Starter promise.
+
+Read:
+
+- `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md`
+- `docs/specs/d2c-case-family-catalog.md`
+- `docs/specs/metric-registry-contract.md`
+- `docs/specs/operational-case-engine-contract.md`
+- `docs/specs/tenant-secret-redaction-contract.md`
+- `docs/roadmap/d2c-control-plane-roadmap.md`
+
+Likely files:
+
+- WhatsApp/support connector or normalizer code only if a structured source can provide status and timestamps deterministically
+- `app/brain/operational_cases.py` only for source/freshness/suppression behavior, not lifecycle rewrites
+- `tests/test_brain_operational_cases.py`
+- focused connector fixture tests with synthetic/redacted conversation refs
+- owner-brief/operator API projection tests if the case becomes visible in briefs
+
+Acceptance:
+
+- cases open only when a structured source provides unanswered count, oldest unanswered age, channel/team scope, stable conversation refs, freshness, business-hours/SLA policy, and resolver/team ownership;
+- stale/missing/ambiguous WhatsApp/support evidence suppresses owner-facing backlog cases and opens/updates `data_stale` or setup-required operator context;
+- evidence snapshots and briefs use registered support-conversation metrics and redacted refs only; no raw message bodies, phone numbers, customer names, addresses, or sensitive support text are persisted or projected;
+- no WhatsApp replies, macros, coupons, delivery promises, refunds, ticket mutations, broadcast/campaign sends, or other customer-facing side effects are introduced;
+- no LLM decides whether a conversation is unanswered, urgent, angry, or sales-related unless deterministic source labels already exist and are evidenced;
+- package/demo copy remains Growth/readiness-gated and never describes Orvo as a WhatsApp inbox, chatbot, or helpdesk replacement.
 
 ## Packet output format
 

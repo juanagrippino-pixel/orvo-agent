@@ -1,3 +1,5 @@
+import json
+import sys
 from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
@@ -7,6 +9,7 @@ from pydantic import ValidationError
 from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
+from app.brain.pipeline import PipelineConnectorError, run_enabled_connectors_daily_report_pipeline
 from app.brain.run_ledger import InMemoryRunLedger
 from app.brain.operational_cases import InMemoryOperationalCaseStore
 import scripts.run_orvo_brain_reports as reports_script
@@ -55,6 +58,13 @@ class FakeMetaAdsHTTPClient:
         }
         return response
 
+
+class FailingMetaAdsHTTPClient:
+    def get(self, url, params=None):
+        response = MagicMock()
+        response.status_code = 400
+        response.json.return_value = {"error": {"message": "Bad request access_token=raw_meta_secret"}}
+        return response
 
 def make_tiendanube_business():
     return BusinessConfig(
@@ -283,6 +293,62 @@ def test_force_report_runs_all_enabled_daily_connectors_and_records_ledger():
         ("artemea-meta-ads", "meta_ads"),
     ]
     assert record.summary_metadata["connector_types"] == ["tiendanube", "meta_ads"]
+
+
+def test_force_report_keeps_tiendanube_value_when_meta_ads_http_400_opens_data_stale_case():
+    delivery = MagicMock()
+    delivery.send_text.side_effect = [
+        DeliveryResult(success=True, message_id="dry-run-daily", error=None),
+        DeliveryResult(success=True, message_id="dry-run-brief", error=None),
+    ]
+    ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    result = reports_script.run_forced_report(
+        business=make_tiendanube_and_meta_ads_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery,
+        idempotency_store=InMemoryIdempotencyStore(),
+        sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+        tiendanube_http_client=FakeTiendanubeHTTPClient(),
+        meta_ads_http_client=FailingMetaAdsHTTPClient(),
+        run_ledger=ledger,
+        case_store=case_store,
+    )
+
+    metrics = {metric.key: metric.value for metric in result.report.metrics}
+    evidence_sources = {ev.source for metric in result.report.metrics for ev in metric.evidence}
+    assert result.report.business_name == "ARTEMEA"
+    assert metrics["revenue_today"] == 1000.0
+    assert "ad_spend_today" not in metrics
+    assert evidence_sources == {"tiendanube"}
+    assert result.dispatch.status == "sent"
+    assert result.case_brief_dispatch is not None
+    assert result.case_brief_dispatch.status == "sent"
+    assert delivery.send_text.call_count == 2
+
+    [case] = case_store.list_cases(business_id="artemea")
+    assert case.case_type == "data_stale"
+    assert case.dedupe_key == "artemea/data_stale/connector/meta_ads/runtime.freshness/daily"
+    assert case.entity_scope["id"] == "meta_ads"
+    assert "raw_meta_secret" not in case.model_dump_json()
+
+    [record] = ledger.list_runs(business_id="artemea")
+    assert record.status == "partial"
+    assert [(out.connector_id, out.connector_type, out.status) for out in record.connector_outcomes] == [
+        ("artemea-tiendanube", "tiendanube", "succeeded"),
+        ("artemea-meta-ads", "meta_ads", "failed"),
+    ]
+    failed = record.connector_outcomes[1]
+    assert failed.error_summary is not None
+    assert "MetaAdsConnectionError" in failed.error_summary
+    assert "raw_meta_secret" not in record.model_dump_json()
+    assert record.summary_metadata["cases_opened"] == 1
+    assert record.summary_metadata["partial_connector_failures"] == 1
+    assert [out.metadata.get("message_type") for out in record.dispatch_outcomes] == [
+        "daily_report",
+        "owner_case_brief",
+    ]
 
 
 def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():
@@ -579,3 +645,97 @@ def test_force_report_csv_requires_csv_path():
                 )
             ],
         )
+
+
+def test_enabled_connectors_pipeline_failure_carries_business_id():
+    class FailingTiendanubeHTTPClient:
+        def get(self, url, headers=None, params=None):
+            raise RuntimeError("401 access_token=raw_failure_secret")
+
+    with pytest.raises(PipelineConnectorError) as raised:
+        run_enabled_connectors_daily_report_pipeline(
+            business=make_tiendanube_business(),
+            report_date=date(2026, 5, 19),
+            connector_types=["tiendanube"],
+            delivery_client=MagicMock(),
+            idempotency_store=InMemoryIdempotencyStore(),
+            tiendanube_http_client=FailingTiendanubeHTTPClient(),
+        )
+
+    assert raised.value.business_id == "demo-shop"
+    assert raised.value.connector_type == "tiendanube"
+    assert raised.value.connector_id == "demo-tiendanube"
+
+
+def test_main_force_connector_failure_exits_with_terminal_redacted_failure(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "orvo_brain.sqlite3"
+    conn, config_store, *_ = reports_script.open_runtime(str(db_path))
+    config_store.save_business_config(make_tiendanube_business())
+    conn.close()
+
+    def failing_pipeline(**kwargs):
+        raise RuntimeError("401 Unauthorized access_token=raw_failure_secret")
+
+    monkeypatch.setattr(reports_script, "run_tiendanube_daily_report_pipeline", failing_pipeline)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_orvo_brain_reports.py",
+            "--db", str(db_path),
+            "--business-id", "demo-shop",
+            "--report-date", "2026-05-19",
+            "--dry-run",
+            "--force",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        reports_script.main()
+
+    assert raised.value.code == 1
+    out = capsys.readouterr().out
+    assert "raw_failure_secret" not in out
+    payload = json.loads(out)
+    assert payload["status"] == "failed"
+    [failure] = payload["results"]
+    assert failure["status"] == "failed"
+    assert failure["business_id"] == "demo-shop"
+    assert "[REDACTED]" in failure["error_summary"]
+    assert failure["data_stale_cases"]
+    assert all(case["case_type"] == "data_stale" for case in failure["data_stale_cases"])
+    assert any(
+        case["dedupe_key"] == "demo-shop/data_stale/connector/tiendanube/runtime.freshness/daily"
+        for case in failure["data_stale_cases"]
+    )
+
+
+def test_main_scheduled_connector_failure_exits_with_terminal_redacted_failure(tmp_path, monkeypatch, capsys):
+    db_path = tmp_path / "orvo_brain.sqlite3"
+    conn, config_store, *_ = reports_script.open_runtime(str(db_path))
+    config_store.save_business_config(make_tiendanube_business())
+    conn.close()
+
+    def failing_due_reports(**kwargs):
+        raise PipelineConnectorError(
+            connector_type="tiendanube",
+            connector_id="demo-tiendanube",
+            business_id="demo-shop",
+            original_exception=RuntimeError("401 access_token=raw_failure_secret"),
+        )
+
+    monkeypatch.setattr(reports_script, "run_due_daily_reports", failing_due_reports)
+    monkeypatch.setattr(sys, "argv", ["run_orvo_brain_reports.py", "--db", str(db_path), "--dry-run"])
+
+    with pytest.raises(SystemExit) as raised:
+        reports_script.main()
+
+    assert raised.value.code == 1
+    out = capsys.readouterr().out
+    assert "raw_failure_secret" not in out
+    payload = json.loads(out)
+    assert payload["status"] == "failed"
+    [failure] = payload["results"]
+    assert failure["business_id"] == "demo-shop"
+    assert "[REDACTED]" in failure["error_summary"]
+    assert failure["data_stale_cases"] == []

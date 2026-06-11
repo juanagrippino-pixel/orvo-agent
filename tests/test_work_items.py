@@ -5,15 +5,19 @@ from typing import get_args
 import sqlite3
 
 from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCaseStore
+from app.brain.semantics import CASE_FAMILY_METRICS
 from app.brain.storage import init_schema
 from app.brain.work_items import (
     allowed_priority_brackets,
     allowed_status_categories,
+    allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
     case_priority_bracket,
     case_project_key,
     case_status_category,
+    case_type_release_state,
     case_work_item_projection,
+    operational_case_issue_type_definitions,
     operational_case_priority_definitions,
     operational_case_status_definitions,
     operational_case_workflow_definition,
@@ -74,6 +78,51 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
     assert case_priority_bracket(case) == "high"
+
+
+def test_issue_type_definitions_expose_release_state_from_semantic_registry():
+    definitions = {definition["case_type"]: definition for definition in operational_case_issue_type_definitions()}
+
+    assert case_type_release_state("stockout_risk") == "promoted"
+    assert case_type_release_state("unanswered_conversations") == "readiness_gated"
+    assert case_type_release_state("channel_mix_shift") == "deferred"
+    assert definitions["stockout_risk"] == {
+        "issue_type": "stockout_risk",
+        "case_type": "stockout_risk",
+        "scheme_id": "d2c-default-case-types",
+        "release_state": "promoted",
+    }
+    assert definitions["unanswered_conversations"] == {
+        "issue_type": "unanswered_conversations",
+        "case_type": "unanswered_conversations",
+        "scheme_id": "d2c-default-case-types",
+        "release_state": "readiness_gated",
+    }
+    assert definitions["channel_mix_shift"] == {
+        "issue_type": "channel_mix_shift",
+        "case_type": "channel_mix_shift",
+        "scheme_id": "d2c-default-case-types",
+        "release_state": "deferred",
+    }
+    promoted_case_types = {
+        definition["case_type"]
+        for definition in definitions.values()
+        if definition["release_state"] == "promoted"
+    }
+
+    readiness_gated_case_types = {
+        definition["case_type"]
+        for definition in definitions.values()
+        if definition["release_state"] == "readiness_gated"
+    }
+
+    assert promoted_case_types == {"sales_drop", "stockout_risk", "data_stale"}
+    assert readiness_gated_case_types == {
+        "fulfillment_backlog",
+        "spend_without_orders",
+        "unanswered_conversations",
+    }
+    assert promoted_case_types | readiness_gated_case_types == set(CASE_FAMILY_METRICS)
 
 
 def test_priority_definitions_are_canonical_work_item_semantics(tmp_path):
@@ -158,6 +207,26 @@ def test_status_and_workflow_definitions_expose_current_transition_table(tmp_pat
     assert "acknowledged" in workflow["transitions"]["open"]
     assert "resolved" in workflow["transitions"]["in_progress"]
     assert workflow["transitions"]["resolved"] == []
+    assert workflow["manual_transitions"] == workflow["transitions"]
+    assert workflow["system_transitions"]["open"] == []
+    assert workflow["system_transitions"]["resolved"] == ["open"]
+    assert workflow["system_transitions"]["dismissed"] == ["open"]
+    assert status_by_key["resolved"]["system_transitions"] == ["open"]
+    assert status_by_key["dismissed"]["system_transitions"] == ["open"]
+    assert workflow["system_transition_events"] == [
+        {
+            "event_type": "case_reopened",
+            "actor_type": "system",
+            "from_status": "dismissed",
+            "to_status": "open",
+        },
+        {
+            "event_type": "case_reopened",
+            "actor_type": "system",
+            "from_status": "resolved",
+            "to_status": "open",
+        },
+    ]
 
 
 def test_query_field_registry_is_canonical_work_item_semantics():
@@ -170,6 +239,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "allowed_values": None,
         "allowed_operators": ["!=", "=", "IN"],
         "sortable": False,
+        "facetable": True,
     }
     assert fields["issue_type"]["allowed_values"] == sorted(get_args(OperationalCaseType))
     assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
@@ -180,9 +250,23 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "allowed_values": None,
         "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
         "sortable": True,
+        "facetable": False,
     }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
+    assert allowed_work_item_facet_fields() == {
+        "assignee_ref",
+        "case_type",
+        "degraded",
+        "entity.kind",
+        "issue_type",
+        "priority_bracket",
+        "project",
+        "severity",
+        "source_connector",
+        "status",
+        "status_category",
+    }

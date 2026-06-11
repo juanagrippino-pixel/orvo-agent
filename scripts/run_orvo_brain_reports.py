@@ -16,7 +16,7 @@ from app.brain.adapters.google_sheets import get_sheets_service
 from app.brain.delivery import DeliveryResult, WhatsAppDeliveryClient
 from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
 from app.brain.execution_ledger import begin_pipeline_run, record_pipeline_failure, record_pipeline_success
-from app.brain.operational_cases import OperationalCaseStore
+from app.brain.operational_cases import ACTIONABLE_OPERATIONAL_CASE_STATUSES, OperationalCaseStore
 from app.brain.pipeline import (
     run_csv_daily_report_pipeline,
     run_enabled_connectors_daily_report_pipeline,
@@ -30,6 +30,7 @@ from app.brain.runner import run_due_daily_reports
 from app.brain.run_ledger import RunLedger
 from app.brain.runtime import RuntimeCompileError, compile_business_runtime, runtime_run_metadata
 from app.brain.scheduler import due_schedules
+from app.brain.security.redaction import redact_text
 from app.brain.storage import (
     SQLiteConfigStore,
     SQLiteIdempotencyStore,
@@ -223,6 +224,34 @@ def run_forced_report(
     return result
 
 
+def _actionable_data_stale_cases(case_store: OperationalCaseStore, business_id: str | None) -> list[dict]:
+    if business_id is None:
+        return []
+    cases = []
+    for status in sorted(ACTIONABLE_OPERATIONAL_CASE_STATUSES):
+        cases.extend(case_store.list_cases(business_id=business_id, status=status, limit=None))
+    return [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "title": case.title,
+            "dedupe_key": case.dedupe_key,
+        }
+        for case in cases
+        if case.case_type == "data_stale"
+    ]
+
+
+def _terminal_failure_payload(error: BaseException, business_id: str | None, case_store: OperationalCaseStore) -> dict:
+    return {
+        "status": "failed",
+        "business_id": business_id,
+        "error_summary": redact_text(f"{type(error).__name__}: {error}"),
+        "data_stale_cases": _actionable_data_stale_cases(case_store, business_id),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Orvo Brain report pipelines")
     parser.add_argument("--db", default=os.environ.get("ORVO_BRAIN_DB_PATH", "orvo_brain.sqlite3"))
@@ -236,48 +265,56 @@ def main() -> None:
     try:
         delivery_client = DryRunDeliveryClient() if args.dry_run else WhatsAppDeliveryClient.from_env()
         runtime_idempotency_store = InMemoryIdempotencyStore() if args.dry_run else idempotency_store
-        if args.force:
-            business = config_store.load_business_config(args.business_id)
-            if business is None:
-                raise SystemExit(f"Business not found: {args.business_id}")
-            result = run_forced_report(
-                business=business,
-                report_date=date.fromisoformat(args.report_date),
-                delivery_client=delivery_client,
-                idempotency_store=runtime_idempotency_store,
-                run_ledger=run_ledger,
-                case_store=case_store,
-            )
-            output = [
-                {
-                    "business_id": business.business_id,
-                    "runtime_metadata": result.runtime_metadata,
-                    "dispatch": result.dispatch.model_dump(mode="json"),
-                    "report": result.report.model_dump(mode="json"),
-                }
-            ]
-        else:
-            now = datetime.now(tz=timezone.utc)
-            sheets_service = get_sheets_service() if due_daily_reports_need_google_sheets(config_store, now=now) else None
-            results = run_due_daily_reports(
-                config_store=config_store,
-                idempotency_store=runtime_idempotency_store,
-                delivery_client=delivery_client,
-                sheets_service=sheets_service,
-                now=now,
-                run_ledger=run_ledger,
-                case_store=case_store,
-            )
-            output = [
-                {
-                    "business_id": result.business_id,
-                    "schedule_id": result.schedule_id,
-                    "runtime_metadata": result.runtime_metadata,
-                    "dispatch": result.pipeline.dispatch.model_dump(mode="json"),
-                    "report": result.pipeline.report.model_dump(mode="json"),
-                }
-                for result in results
-            ]
+        try:
+            if args.force:
+                business = config_store.load_business_config(args.business_id)
+                if business is None:
+                    raise SystemExit(f"Business not found: {args.business_id}")
+                result = run_forced_report(
+                    business=business,
+                    report_date=date.fromisoformat(args.report_date),
+                    delivery_client=delivery_client,
+                    idempotency_store=runtime_idempotency_store,
+                    run_ledger=run_ledger,
+                    case_store=case_store,
+                )
+                output = [
+                    {
+                        "business_id": business.business_id,
+                        "runtime_metadata": result.runtime_metadata,
+                        "dispatch": result.dispatch.model_dump(mode="json"),
+                        "report": result.report.model_dump(mode="json"),
+                    }
+                ]
+            else:
+                now = datetime.now(tz=timezone.utc)
+                sheets_service = get_sheets_service() if due_daily_reports_need_google_sheets(config_store, now=now) else None
+                results = run_due_daily_reports(
+                    config_store=config_store,
+                    idempotency_store=runtime_idempotency_store,
+                    delivery_client=delivery_client,
+                    sheets_service=sheets_service,
+                    now=now,
+                    run_ledger=run_ledger,
+                    case_store=case_store,
+                )
+                output = [
+                    {
+                        "business_id": result.business_id,
+                        "schedule_id": result.schedule_id,
+                        "runtime_metadata": result.runtime_metadata,
+                        "dispatch": result.pipeline.dispatch.model_dump(mode="json"),
+                        "report": result.pipeline.report.model_dump(mode="json"),
+                    }
+                    for result in results
+                ]
+        except Exception as exc:
+            # Run-ledger/data_stale recording already happened upstream; keep the
+            # cron exit terminal and redacted instead of an unhandled traceback.
+            failed_business_id = args.business_id if args.force else getattr(exc, "business_id", None)
+            failure = _terminal_failure_payload(exc, failed_business_id, case_store)
+            print(json.dumps({"dry_run": args.dry_run, "status": "failed", "results": [failure]}, ensure_ascii=False))
+            raise SystemExit(1) from None
         print(json.dumps({"dry_run": args.dry_run, "results": output}, ensure_ascii=False))
     finally:
         conn.close()

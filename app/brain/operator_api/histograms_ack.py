@@ -71,6 +71,22 @@ def summarize_case_acknowledgment_latency_histogram(
         }
     )
 
+
+def summarize_case_acknowledgment_latency_histogram_by_severity(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Severity-split acknowledgment-latency histogram.
+
+    The canonical acknowledgment-latency projection already exposes
+    ``by_acknowledgment_bucket_severity``. Keep this explicit service-layer
+    entry point so the `/by-severity` HTTP route mirrors the resolution and
+    handling latency route contracts without duplicating bucket logic in the
+    transport layer.
+    """
+
+    return summarize_case_acknowledgment_latency_histogram(store, business_id=business_id)
+
+
 def summarize_case_acknowledgment_latency_histogram_by_case_type(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:

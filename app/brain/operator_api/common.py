@@ -19,7 +19,7 @@ from app.brain.operator_case_projections import (
     latest_evidence_at as _latest_evidence_at,
     source_connectors as _source_connectors,
 )
-from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
+from app.brain.run_ledger import DispatchRunStatus, RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.work_items import priority_bracket_for_score
 
@@ -35,10 +35,14 @@ _ALLOWED_CASE_ACTIONS: set[str] = set(API_ENABLED_CASE_ACTION_KEYS)
 _REGISTERED_CASE_ACTIONS: set[str] = set(ACTION_CATALOG)
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
+_NO_DISPATCH_STATUS = "none"
+_ALLOWED_DISPATCH_STATUSES: set[str] = {*get_args(DispatchRunStatus), _NO_DISPATCH_STATUS}
 _ALLOWED_TIMELINE_EVENT_TYPES: set[str] = set(get_args(TimelineEventType))
 _ALLOWED_TIMELINE_ACTOR_TYPES: set[str] = set(get_args(ActorType))
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 50
+
+RunDispatchStatusFilter = DispatchRunStatus | Literal["none"]
 
 
 class OperatorAPIError(Exception):
@@ -102,6 +106,15 @@ def parse_run_status(value: str | None) -> RunStatus | None:
         raise OperatorAPIError("invalid_run_status", f"unsupported run status: {value}", status_code=400)
     return value  # type: ignore[return-value]
 
+
+def parse_dispatch_status(value: str | None) -> RunDispatchStatusFilter | None:
+    if value in (None, ""):
+        return None
+    if value not in _ALLOWED_DISPATCH_STATUSES:
+        raise OperatorAPIError("invalid_dispatch_status", f"unsupported dispatch status: {value}", status_code=400)
+    return value  # type: ignore[return-value]
+
+
 def normalize_operator_actor(actor_ref: Any, actor: Any) -> str:
     effective_actor_ref = actor_ref if actor_ref is not None else actor
     if effective_actor_ref is None:
@@ -111,7 +124,8 @@ def normalize_operator_actor(actor_ref: Any, actor: Any) -> str:
     normalized = effective_actor_ref.strip()
     if not normalized:
         raise OperatorAPIError("missing_operator_actor", "operator actor is required", status_code=400)
-    return normalized
+    return redact_text(normalized) or "[REDACTED]"
+
 
 def normalize_case_assignee(assignee_ref: Any, owner_ref: Any) -> str:
     effective_assignee_ref = assignee_ref if assignee_ref is not None else owner_ref
@@ -122,7 +136,7 @@ def normalize_case_assignee(assignee_ref: Any, owner_ref: Any) -> str:
     normalized = effective_assignee_ref.strip()
     if not normalized:
         raise OperatorAPIError("invalid_assignee_ref", "assignee_ref must be a non-empty string", status_code=400)
-    return normalized
+    return redact_text(normalized) or "[REDACTED]"
 
 _ACTIONABLE_STATUSES = ACTIONABLE_OPERATIONAL_CASE_STATUSES
 

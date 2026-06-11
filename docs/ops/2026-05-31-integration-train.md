@@ -1,5 +1,350 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-11 08:02 UTC
+
+Status: **Worker manifest test-deletion guard promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `4da7a4d` (`merge: integrate worker manifest test deletion guard`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-manifest-test-deletion-guard-20260611` was clean.
+- Candidate scope was intentionally bounded: one branch-only commit, three files, no new dependencies, and no runtime/operator behavior changes.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-manifest-test-deletion-guard-20260611`
+- Head before merge: `f665126` (`codex: guard worker manifests against test deletions`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- `scripts/check_worker_handoff_manifests.py` now supports `--forbid-test-deletions` with `--verify-git` and fails a manifest if `base_sha...head_sha` deletes files under `tests/`.
+- The guard prevents autonomous workers from reporting green suites after silently removing regression coverage.
+- `docs/specs/worker-handoff-manifest.md` documents the integration-gate usage and the remaining requirement for human review of deleted-test claims.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_worker_handoff_manifest_guard.py -q` -> `10 passed in 0.16s`.
+- Worker manifest CLI before merge: `python scripts/check_worker_handoff_manifests.py` -> `5 manifest(s) checked`.
+- Focused canonical suite after merge: `pytest tests/test_worker_handoff_manifest_guard.py -q` -> `10 passed in 0.15s`.
+- Canonical manifest CLI after merge: `python scripts/check_worker_handoff_manifests.py` -> `5 manifest(s) checked`.
+- Full canonical suite after merge: `pytest -q` -> `1402 passed in 23.75s`.
+
+Review notes / risks:
+
+- Architecture alignment: this is a release-governance hardening slice, not a product-surface expansion. It supports the 24/7 operating-system rule that workers must not make suites green by deleting tests.
+- No external side effects, connector/runtime shortcuts, LLM-driven decisions, case/workflow state changes, or owner-facing projections were added.
+- Integration risk is low; future release-manager runs should use `python scripts/check_worker_handoff_manifests.py --verify-git --forbid-test-deletions <manifest>` for branch-specific manifests with real SHAs.
+
+Current next integration order:
+
+1. **Work Management slices:** patch-id review narrow remaining SLA/evidence/timeline pieces from `codex/work-management` / `origin/codex/work-management-sla-query-status-20260611`; avoid direct broad merge of already-integrated reopen/release-state/history pieces.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, delivery-status admin-boundary, and manifest/test-deletion guard work.
+3. **Search/Analytics registry slices:** case facets and run dispatch status summaries are integrated; only promote remaining `codex/search-analytics` work if it is rebased/split around canonical WorkItem query/facet/view primitives.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
+## Release integration update — 2026-06-11 05:56 UTC
+
+Status: **Case facet query surface promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `b1bb9bf` (`merge: integrate case facet query surface`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean before merge; it was one local docs commit ahead of `origin/feat/orvo-brain-control-plane` from the prior integration-train checkpoint.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-case-facets-20260611` was clean.
+- Candidate scope was intentionally bounded: one branch-only commit, six files, no new dependencies, and a thin internal route over shared operator-view services.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-case-facets-20260611`
+- Head before merge: `c64eeba` (`feat: add case facet query surface`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- Added a read-only internal case facet route: `GET /internal/brain/businesses/<business_id>/cases/facets`.
+- Faceting is backed by canonical WorkItem query field metadata via a new `facetable` registry flag and `allowed_work_item_facet_fields()` helper.
+- Facet queries reuse the allowlisted case JQL parser and route-owned business scope; `business_id` is intentionally not queryable/facetable.
+- Source-connector facets support multi-source evidence buckets while responses stay inside the standard internal success envelope and boundary redaction.
+
+Post-merge verification:
+
+- `git diff --check feat/orvo-brain-control-plane...codex/eng-factory-case-facets-20260611` before merge -> passed.
+- Secret-pattern scan over candidate and merge diffs -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_operator_case_views.py tests/test_work_items.py -q` -> `26 passed in 3.07s`.
+- Focused canonical nodeids after merge: case facet endpoint/registry tests -> `4 passed in 1.20s`.
+- Focused canonical suite after merge: `pytest tests/test_operator_case_views.py tests/test_work_items.py -q` -> `26 passed in 2.56s`.
+- Full canonical suite after merge: `pytest -q` -> `1397 passed in 27.14s`.
+
+Review notes / risks:
+
+- Architecture alignment: this moves search/analytics toward WorkItem/JQL/facet primitives instead of one-off endpoint-local KPI semantics, while keeping OperationalCase as source of truth.
+- No external side effects, workflow execution, connector/runtime shortcuts, LLM decisions, or owner-facing WhatsApp state were added.
+- Remaining risk: operator endpoint count still needs convergence; future search/analytics work should extend the same WorkItem query/facet registry instead of adding bespoke route semantics.
+
+Current next integration order:
+
+1. **Work Management slices:** patch-id review narrow remaining SLA/evidence/timeline pieces from `codex/work-management` / `origin/codex/work-management-sla-query-status-20260611`; avoid direct broad merge of already-integrated reopen/release-state history.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, and delivery-status admin-boundary commits.
+3. **Search/Analytics registry slices:** treat case facets as integrated; only promote remaining `codex/search-analytics` work if it is rebased/split around the canonical WorkItem query/facet registry.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
+## Release integration update — 2026-06-11 03:47 UTC
+
+Status: **System reopen workflow metadata promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `9a63f79` (`merge: integrate system reopen workflow metadata`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before the merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-system-reopen-workflow-20260611` was clean.
+- Candidate scope was intentionally small: one branch-only commit, three files, no new dependencies, and no transport/controller changes.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-system-reopen-workflow-20260611`
+- Head before merge: `98004dc` (`codex: expose system case reopen transitions`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- Manual/operator case transitions remain separate from deterministic system-only reopen transitions.
+- WorkItem status/workflow metadata now exposes `system_transitions` for terminal `resolved` and `dismissed` states reopening to `open` via recurring evidence.
+- Workflow metadata includes explicit `case_reopened` system transition event descriptors without enabling manual terminal-state reopen actions.
+
+Post-merge verification:
+
+- `git diff --check feat/orvo-brain-control-plane...codex/eng-factory-system-reopen-workflow-20260611` before merge -> passed.
+- Secret-pattern scan over candidate diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_work_items.py -q` -> `7 passed in 0.93s`.
+- Broader worker suite before merge: `pytest tests/test_brain_operational_cases.py tests/test_work_items.py tests/test_operator_case_views.py -q` -> `67 passed in 2.47s`.
+- Post-merge canonical verification is recorded in this run's release-manager report.
+
+Review notes / risks:
+
+- Architecture alignment: closes the ARB finding that system reopen transitions were implicit while preserving OperationalCase as the lifecycle source of truth.
+- The change is metadata-only around WorkItem/workflow projections and does not add side effects, LLM decisions, owner-facing case promotion, or connector/report shortcuts.
+- Remaining Work Management risk: the broad `codex/work-management` branch still contains many useful but overlapping SLA/evidence/query slices and should be decomposed or patch-id reviewed before any wholesale promotion.
+
+Current next integration order:
+
+1. **Work Management slices:** review narrow SLA/evidence/timeline pieces from `codex/work-management` / `origin/codex/work-management-sla-query-status-20260611`; avoid direct broad merge unless it is rebased and still non-overlapping.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, and delivery-status admin-boundary commits.
+3. **Search/Analytics field registry slices:** review `codex/search-analytics` only if it keeps analytics as WorkItem/JQL/view/facet primitives rather than one-off endpoint-local KPI semantics.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
+## Release integration update — 2026-06-11 01:44 UTC
+
+Status: **Delivery-status global admin boundary promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `44f3b23` (`merge: integrate delivery status admin boundary`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before the merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-delivery-status-admin-boundary-20260611` was clean.
+- Candidate scope was intentionally small: four files, one branch-only commit, and no new dependencies.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-delivery-status-admin-boundary-20260611`
+- Head before merge: `c5998e7` (`fix: require admin scope for delivery status reads`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- The global `/internal/brain/whatsapp/delivery-statuses` read route now requires `operator_audit:read` plus an explicit all-business grant (`X-Orvo-Businesses: *`).
+- Legacy token-scoped principals with `allowed_businesses=None` remain accepted for tenant-scoped migration paths, but cannot implicitly read the global cross-business delivery-status surface.
+- Successful global delivery-status reads now append a redacted operator audit event, while authorization denials continue to be audited through the shared internal boundary.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_server_whatsapp_delivery_status.py -q` -> `19 passed in 2.52s`.
+- Focused canonical suite after merge: `pytest tests/test_server_whatsapp_delivery_status.py -q` -> `19 passed in 2.42s`.
+- Full canonical suite after merge: `pytest -q` -> `1392 passed in 24.49s`.
+
+Review notes / risks:
+
+- Architecture alignment: this closes the ARB-flagged global WhatsApp delivery-status boundary without making delivery status a source of truth for cases/workflows.
+- The new global-scope check lives in `operator_auth` / shared internal route authorization, not directly in transport-only code, so future global internal read surfaces can reuse it.
+- Remaining Trust/Admin risk: external Admin launch still needs explicit role and business claims everywhere; current implicit legacy operator behavior is still only acceptable for internal migration routes.
+
+Current next integration order:
+
+1. **Work Management workflow metadata:** rebase/review `codex/work-management` for system reopen transitions, actor taxonomy, SLA fields, and evidence lineage. It remains valuable but broad (27 branch-only commits against current head), so prefer a scoped rebase/slice if conflicts appear.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, and delivery-status admin-boundary commits; avoid duplicating already-shipped safe actor/error work.
+3. **Search/Analytics field registry slices:** review `codex/search-analytics` only if it keeps analytics as WorkItem/JQL/view/facet primitives rather than one-off endpoint-local KPI semantics.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
+## Release integration update — 2026-06-10 23:40 UTC
+
+Status: **Case-family release-state metadata promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `72582d5` (`merge: integrate case family release states`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before the merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-case-family-release-state-20260610` was clean.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-case-family-release-state-20260610`
+- Head before merge: `a60f679` (`codex: add case family release state metadata`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- WorkItem issue-type definitions now expose `release_state` values derived from the semantic registry.
+- Case families with `CASE_FAMILY_METRICS` evidence contracts are `promoted`; implemented-but-not-registry-promoted families such as `channel_mix_shift` are `deferred`; unknown/internal issue-type strings resolve as `internal_only`.
+- The case-family promotion invariant now verifies that promoted issue types exactly match registry-backed owner-facing/detectable case families.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_work_items.py tests/invariants/test_case_family_promotion_policy.py -q` -> `8 passed in 1.33s`.
+- Focused canonical suite after merge: same command -> `8 passed in 1.04s`.
+- Full canonical suite after merge: `pytest -q` -> `1389 passed in 29.67s`.
+
+Review notes / risks:
+
+- Architecture alignment: this closes the ARB-flagged deferred case-family footgun without making WhatsApp/report/operator surfaces a source of truth and without relaxing semantic-registry promotion gates.
+- No dependencies were added; the change is confined to WorkItem projection metadata plus invariants.
+- Follow-up: external/operator contracts should document `release_state` if/when issue-type definitions become API-visible.
+
+Current next integration order:
+
+1. **Work Management workflow metadata:** rebase/review `codex/work-management` for system reopen transitions, actor taxonomy, SLA fields, and evidence lineage. It is valuable but broad (25 branch-only commits against current head), so prefer a scoped rebase/slice if conflicts appear.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit and redaction commits; avoid duplicating already-shipped safe actor/error work.
+3. **Search/Analytics field registry slices:** review `codex/search-analytics` only if it keeps analytics as WorkItem/JQL/view/facet primitives rather than one-off endpoint-local KPI semantics.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
+## Release integration update — 2026-06-10 21:36 UTC
+
+Status: **Workflow Automation approval/execution gate branch promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `cfb9d53` (`merge: integrate workflow automation gates`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully.
+- The canonical worktree initially contained an untracked Architecture Review Board deliverable, `docs/architecture-reviews/2026-06-10-review.md`, left by the prior read-only ARB cron job.
+- The report was inspected as a legitimate architecture deliverable and committed before implementation integration: `676403c` (`docs: add architecture review 2026-06-10`).
+- Canonical worktree was clean before the implementation merge.
+
+Promoted branch:
+
+- Branch: `codex/workflow-automation`
+- Head before merge: `59396a6` (`codex: add workflow actionable condition`)
+- Worker worktree: `/root/orvo-agent-worktrees/codex-workflow-automation`
+- Worker status before test: clean.
+- Worker focused suite: `pytest tests/test_workflow_automation_simulation.py -q` -> `58 passed in 1.57s`.
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- `workflow_execution_queue` now requires a catalog-defined approval-required action plus a matching approved approval request with matching ledger/business/case/action identity and `decided_at` before projecting `pending_execution`.
+- Workflow approval decisions/cancellations now require non-empty redacted actor/reason text and remain no-side-effect projections.
+- Workflow audit events are projected from canonical ledger/approval-request records with boundary redaction and `side_effects_executed: 0`.
+- Additional workflow conditions landed as deterministic service-layer checks: trigger matching, source connector, entity kind, status category, case age, freshness/degraded/actionable/assigned filters.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused canonical suite: `pytest tests/test_workflow_automation_simulation.py -q` -> `58 passed in 1.33s`.
+- Full canonical suite: `pytest -q` -> `1375 passed in 44.29s`.
+
+Review notes / risks:
+
+- Architecture alignment: merge preserves service-layer workflow logic, action-catalog reuse, ledger-backed approval gates, and no external side effects.
+- Remaining gate: workflow execution is still intentionally not implemented. Do not add a real executor until provider idempotency, execution-attempt ledger, RBAC, retry/failure semantics, and redacted external response audit are all present.
+- Branch state note: local `codex/workflow-automation` remains ahead/behind its remote due historical rebases; the promoted merge used local verified head `59396a6` and preserved the source worktree.
+
+Current next integration order:
+
+1. **Work Management workflow metadata:** rebase/review `codex/work-management` for Jira-like system reopen transitions, actor taxonomy, and WorkItem semantics now that workflow approval gating is canonical.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` against shipped safe actor refs, safe error codes, Basic-auth audit redaction, and delivery-status denial audit before merging only unique RBAC/audit hardening.
+3. **Search/Analytics field registry slices:** review `codex/search-analytics` only if it extends the canonical WorkItem/JQL/view vocabulary without duplicating endpoint-local KPI semantics.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening, not the stale broad remote branch.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into generic WorkItem/JQL/view/facet or internal-contract slices.
+
+## Release integration update — 2026-06-07 08:23 UTC
+
+Status: **No implementation branch promoted; idempotency helper-hardening branch conflicted and was preserved**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after docs preservation: `d5f16ed` (`docs: add architecture review 2026-06-07`)
+
+Preflight notes:
+
+- The canonical worktree initially contained an untracked Architecture Review Board deliverable, `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md`, left by the prior read-only ARB cron job.
+- The report was inspected as a legitimate architecture deliverable and committed before integration work: `d5f16ed`.
+- `git fetch --all --prune` completed successfully; canonical worktree was clean before the merge attempt.
+
+Inventory summary:
+
+- `git branch --no-merged feat/orvo-brain-control-plane` reports 69 local unmerged branches after excluding the canonical branch.
+- Bucketed inventory: 18 `codex/*`, 13 `codex/eng-factory-*`, 17 `codex/qa-*`, 7 `qa/*`, 7 `docs/*`, and 7 other local branches.
+- Recent ARB review marks the current baseline merge-ready, but recommends staged rebase for high-value branches rather than wholesale platform/operator-surface merges.
+
+Candidate attempted:
+
+- Branch: `codex/eng-factory-required-case-action-idempotency-20260606`
+- Head: `03d16fd` (`codex: require idempotency for case actions`)
+- Worker worktree: `/root/orvo-agent-worktrees/eng-factory-required-case-action-idempotency-20260606`
+- Worker status before test: clean.
+- Worker focused suite: `pytest tests/test_internal_operator_api.py tests/test_operator_case_actions.py -q` -> `122 passed in 9.20s`.
+- Architecture disposition: aligned with ARB finding that service-level manual case action idempotency must fail closed, not rely only on HTTP boundary enforcement.
+
+Result:
+
+- Merge attempt into `feat/orvo-brain-control-plane` was stopped and aborted due to conflicts in test files.
+- Conflict files from `git merge`:
+  - `tests/test_internal_operator_api.py`
+  - `tests/test_operator_case_actions.py`
+- `git merge-tree` also reports both-side changes in `app/brain/operator_api/actions.py`, but the visible conflict markers were confined to adjacent test expectations/idempotency-key fixture strings.
+- Source branch was preserved; canonical worktree was restored clean with `git merge --abort`.
+
+Required fix before retry:
+
+- Rebase `codex/eng-factory-required-case-action-idempotency-20260606` on top of `d5f16ed+` and preserve both current canonical idempotency tests and the helper-level `missing_idempotency_key` invariant.
+- Resolve adjacent fixture-key conflicts without weakening existing redaction/actor/RBAC route tests.
+- Re-run `pytest tests/test_internal_operator_api.py tests/test_operator_case_actions.py -q`, then `pytest -q`, before promotion.
+
+Current next integration order:
+
+1. **Idempotency helper hardening repair:** retry `codex/eng-factory-required-case-action-idempotency-20260606` only after the small test conflicts are rebased/resolved and the branch proves the service helper fails closed before mutation/ledger writes.
+2. **Trust/Admin/Security redaction guards:** inspect `codex/trust-admin-security` and `codex/qa-redteam-operator-audit-redaction-20260607` for unique, non-duplicative audit/export redaction coverage after current safe-envelope commits.
+3. **Connector-platform reconcile:** review `codex/connector-platform` / `codex/eng-factory-connector-platform-reconcile-20260606` selectively for registry-driven runtime filtering and secret-scope certification only; avoid wholesale runtime rewrites.
+4. **Work Management SLA/activity slices:** decompose `codex/work-management` into small Jira-like WorkItem/OperationalCase invariants, especially SLA due/activity fields, evidence lineage, and transition boundaries.
+5. **Hold/split broad branches:** keep `codex/operator-surfaces`, `codex/search-analytics`, `codex/workflow-automation`, `codex/service-management`, and `codex/edge-developer-platform` behind rebase/decomposition review.
+
 ## Release integration update — 2026-06-06 15:59 UTC
 
 Status: **No branch promoted; first safe-looking QA invariant conflicted and was preserved**.

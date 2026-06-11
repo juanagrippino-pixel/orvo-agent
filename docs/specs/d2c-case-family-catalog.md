@@ -171,6 +171,8 @@ Open when count or age exceeds configured threshold and source freshness is suff
 
 **Buyer language:** Sales/support chats are waiting too long.
 
+**Current promotion state (2026-06-10): registered but readiness-gated.** The semantic registry already maps this family to `support.conversations.unanswered_count` and `support.conversations.oldest_unanswered_age_minutes`, and legacy Sheets/sample report inputs can still raise the historical report insight. Do **not** treat that compatibility path as permission to sell a default Starter WhatsApp-inbox feature. Owner-facing Operational Cases require a structured WhatsApp/support source plus the gates in `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md`.
+
 **Initial sources:** WhatsApp/support connector when available.
 
 **Required metrics:**
@@ -179,10 +181,12 @@ Open when count or age exceeds configured threshold and source freshness is suff
 - age of oldest unanswered conversation
 - channel/team scope
 - freshness
+- configured SLA/business-hours policy
+- safe conversation refs and resolver/team ownership
 
 **Detection policy:**
 
-Open when unanswered count/age exceeds threshold and source freshness is sufficient.
+Open when unanswered count/age exceeds a configured threshold, the conversation source is fresh, business-hours/SLA policy says the backlog is actionable, and a named resolver/team can act. If source structure, freshness, SLA, resolver, or PII/redaction gates are missing, suppress the owner-facing backlog claim and create/update `data_stale` or setup-required operator context instead. Do not infer urgency from raw message text or LLM classification in the first implementation.
 
 **Dedupe key shape:**
 
@@ -192,7 +196,7 @@ Open when unanswered count/age exceeds threshold and source freshness is suffici
 
 **Evidence:** count, oldest age, source freshness, safe conversation refs.
 
-**Initial actions:** reply to pending chats, route owner/operator, mark follow-up.
+**Initial actions:** route the owner/operator to reply to pending chats, assign/confirm resolver, mark follow-up in Orvo. Orvo must not send customer replies, macros, coupons, delivery promises, refunds, or chatbot messages for this family in the first implementation.
 
 ### 7. `channel_mix_shift`
 

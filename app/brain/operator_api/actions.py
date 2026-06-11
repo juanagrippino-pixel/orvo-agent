@@ -111,6 +111,17 @@ def _ensure_idempotent_replay_matches(
         )
 
 
+def _ensure_idempotent_replay_payload_matches(record: WorkflowActionLedgerRecord, params: dict[str, Any]) -> None:
+    safe_params = redact_secrets(params)
+    normalized_params = safe_params if isinstance(safe_params, dict) else {}
+    if record.params != normalized_params:
+        raise OperatorAPIError(
+            "idempotency_key_conflict",
+            "X-Idempotency-Key was already used for a different manual case action payload",
+            status_code=409,
+        )
+
+
 def _ensure_replay_executed(record: WorkflowActionLedgerRecord) -> None:
     if record.execution_state == "pending_execution":
         raise OperatorAPIError(
@@ -250,21 +261,7 @@ def apply_case_action_with_idempotency(
     assignee_ref: Any = None,
     owner_ref: Any = None,
 ) -> dict[str, Any]:
-    normalized_idempotency_key = normalize_case_action_idempotency_key(idempotency_key)
-    if normalized_idempotency_key is None:
-        return apply_case_action(
-            store,
-            business_id=business_id,
-            case_id=case_id,
-            action_key=action_key,
-            actor_ref=actor_ref,
-            actor=actor,
-            reason=reason,
-            comment=comment,
-            metadata=metadata,
-            assignee_ref=assignee_ref,
-            owner_ref=owner_ref,
-        )
+    normalized_idempotency_key = require_case_action_idempotency_key(idempotency_key)
 
     _case, effective_actor_ref = _validate_case_action_inputs(
         store,
@@ -299,6 +296,7 @@ def apply_case_action_with_idempotency(
     if not write.created:
         _ensure_idempotent_replay_matches(write.record, case_id=case_id, action_key=action_key)
         _ensure_replay_executed(write.record)
+        _ensure_idempotent_replay_payload_matches(write.record, params)
         case = get_scoped_case(store, business_id=business_id, case_id=case_id)
         return {"case": case_detail(case), "action": _action_response(write.record, status="skipped_duplicate")}
 

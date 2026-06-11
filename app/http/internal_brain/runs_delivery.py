@@ -5,15 +5,15 @@ from datetime import datetime, timezone
 from flask import request
 
 from app.brain.operator_api import *  # noqa: F401,F403
-from app.brain.operator_auth import CASE_ACTION_PERMISSION, INTERNAL_READ_PERMISSION
+from app.brain.operator_auth import OPERATOR_AUDIT_READ_PERMISSION
 
 from .common import (
     _authorize_internal_operator,
     _internal_success,
     _internal_error,
     _internal_principal_or_error,
-    _require_internal_header_permission,
     _with_internal_stores,
+    _append_operator_audit_event,
 )
 
 import sqlite3
@@ -36,6 +36,7 @@ def register_run_delivery_routes(app):
                     business_id=business_id,
                     status=request.args.get("status"),
                     limit=request.args.get("limit"),
+                    dispatch_status=request.args.get("dispatch_status"),
                 ),
             ),
         )
@@ -47,9 +48,15 @@ def register_run_delivery_routes(app):
         auth_error = _authorize_internal_operator(business_id)
         if auth_error is not None:
             return auth_error
-        permission_error = _require_internal_header_permission(business_id, INTERNAL_READ_PERMISSION)
+        principal, permission_error = _internal_principal_or_error(
+            business_id,
+            OPERATOR_AUDIT_READ_PERMISSION,
+            audit_denial=True,
+            require_explicit_global_scope=True,
+        )
         if permission_error is not None:
             return permission_error
+        assert principal is not None
         raw_limit = request.args.get("limit")
         try:
             limit = int(raw_limit) if raw_limit not in (None, "") else 50
@@ -61,6 +68,14 @@ def register_run_delivery_routes(app):
         with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
             init_schema(conn)
             events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(limit=limit)
+        _append_operator_audit_event(
+            business_id=business_id,
+            actor_ref=principal.actor_ref,
+            event_type="operator.whatsapp_delivery_statuses.read",
+            target_type="whatsapp_delivery_statuses",
+            target_id=business_id,
+            data={"status": "allowed", "scope": "global", "limit": limit},
+        )
         return _internal_success(business_id, {"events": redact_secrets(events)})
 
 

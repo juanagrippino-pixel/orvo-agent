@@ -8,7 +8,10 @@ from app.brain.operational_cases import (
     InMemoryOperationalCaseStore,
     OperationalCaseDetection,
 )
-from app.brain.operator_api import summarize_case_acknowledgment_latency_histogram
+from app.brain.operator_api import (
+    summarize_case_acknowledgment_latency_histogram,
+    summarize_case_acknowledgment_latency_histogram_by_severity,
+)
 
 
 NOW = datetime(2026, 5, 26, 12, tzinfo=timezone.utc)
@@ -271,3 +274,43 @@ def test_summarize_case_acknowledgment_latency_histogram_groups_multiple_cases_p
         "warning": 2,
     }
     assert result["by_acknowledgment_bucket_severity"]["over_7d"] == {"info": 1}
+
+
+def test_summarize_case_acknowledgment_latency_histogram_by_severity_uses_canonical_projection():
+    store = InMemoryOperationalCaseStore()
+    opened_at = NOW - timedelta(days=30)
+    _acknowledge(
+        store,
+        detection=_detection(
+            case_type="stockout_risk",
+            dedupe_suffix="stockout_risk/business/monitored/commerce.inventory/daily",
+            severity="critical",
+            priority=95,
+            run_id="run-ack-severity-critical",
+        ),
+        opened_at=opened_at,
+        acknowledged_at=opened_at + timedelta(minutes=45),
+    )
+    _acknowledge(
+        store,
+        detection=_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            priority=70,
+            run_id="run-ack-severity-warning",
+        ),
+        opened_at=opened_at,
+        acknowledged_at=opened_at + timedelta(hours=8),
+    )
+
+    result = summarize_case_acknowledgment_latency_histogram_by_severity(store, business_id="artemea")
+
+    assert result == summarize_case_acknowledgment_latency_histogram(store, business_id="artemea")
+    assert result["by_acknowledgment_bucket_severity"] == {
+        "under_1h": {"critical": 1},
+        "under_6h": {},
+        "under_24h": {"warning": 1},
+        "under_7d": {},
+        "over_7d": {},
+    }

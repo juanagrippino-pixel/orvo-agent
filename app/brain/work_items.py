@@ -16,6 +16,8 @@ from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
+    OWNER_FACING_OPERATIONAL_CASE_TYPES,
+    READINESS_GATED_OPERATIONAL_CASE_TYPES,
     TERMINAL_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
     OperationalCaseSeverity,
@@ -23,6 +25,7 @@ from app.brain.operational_cases import (
     OperationalCaseStatusCategory,
     OperationalCaseType,
     operational_case_status_category,
+    operational_case_system_status_transitions,
     operational_case_status_transitions,
 )
 
@@ -41,6 +44,9 @@ class WorkItemPriorityDefinition:
 
 
 WorkItemQueryFieldValueType = Literal["bool", "enum", "int", "string", "datetime"]
+OperationalCaseIssueTypeReleaseState = Literal[
+    "promoted", "readiness_gated", "deferred", "internal_only"
+]
 
 
 @dataclass(frozen=True)
@@ -57,6 +63,7 @@ class WorkItemQueryFieldDefinition:
     allowed_values: frozenset[str] | None = None
     allowed_operators: frozenset[str] = frozenset({"=", "!=", "IN"})
     sortable: bool = False
+    facetable: bool = False
 
 
 _PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
@@ -68,21 +75,31 @@ _PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
 _RANGE_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
 
 _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
-    WorkItemQueryFieldDefinition("status", "enum", frozenset(get_args(OperationalCaseStatus))),
-    WorkItemQueryFieldDefinition("status_category", "enum", frozenset(get_args(OperationalCaseStatusCategory))),
-    WorkItemQueryFieldDefinition("project", "string"),
-    WorkItemQueryFieldDefinition("issue_type", "enum", frozenset(get_args(OperationalCaseType))),
-    WorkItemQueryFieldDefinition("assignee_ref", "string"),
-    WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType))),
-    WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity))),
+    WorkItemQueryFieldDefinition("status", "enum", frozenset(get_args(OperationalCaseStatus)), facetable=True),
+    WorkItemQueryFieldDefinition(
+        "status_category",
+        "enum",
+        frozenset(get_args(OperationalCaseStatusCategory)),
+        facetable=True,
+    ),
+    WorkItemQueryFieldDefinition("project", "string", facetable=True),
+    WorkItemQueryFieldDefinition("issue_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
+    WorkItemQueryFieldDefinition("assignee_ref", "string", facetable=True),
+    WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
+    WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity)), facetable=True),
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("priority_bracket", "enum", frozenset({definition.bracket for definition in _PRIORITY_DEFINITIONS})),
-    WorkItemQueryFieldDefinition("entity.kind", "string"),
+    WorkItemQueryFieldDefinition(
+        "priority_bracket",
+        "enum",
+        frozenset({definition.bracket for definition in _PRIORITY_DEFINITIONS}),
+        facetable=True,
+    ),
+    WorkItemQueryFieldDefinition("entity.kind", "string", facetable=True),
     WorkItemQueryFieldDefinition("entity.id", "string"),
     WorkItemQueryFieldDefinition("entity.label", "string", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("latest_run_id", "string"),
-    WorkItemQueryFieldDefinition("source_connector", "string"),
-    WorkItemQueryFieldDefinition("degraded", "bool", allowed_operators=frozenset({"=", "!="})),
+    WorkItemQueryFieldDefinition("source_connector", "string", facetable=True),
+    WorkItemQueryFieldDefinition("degraded", "bool", allowed_operators=frozenset({"=", "!="}), facetable=True),
     WorkItemQueryFieldDefinition("dedupe_key", "string", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("opened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("updated_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
@@ -133,6 +150,25 @@ def case_issue_type(case: OperationalCase) -> OperationalCaseType:
     return case.case_type
 
 
+def case_type_release_state(case_type: str) -> OperationalCaseIssueTypeReleaseState:
+    """Return the release state for an OperationalCase issue type.
+
+    Metric registration and owner-facing promotion are separate gates. Case
+    families with ``CASE_FAMILY_METRICS`` evidence contracts are detectable, but
+    only explicitly promoted families are eligible for owner-facing projections;
+    registered families that still need source/readiness proof remain
+    ``readiness_gated``.
+    """
+
+    if case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES:
+        return "promoted"
+    if case_type in READINESS_GATED_OPERATIONAL_CASE_TYPES:
+        return "readiness_gated"
+    if case_type in get_args(OperationalCaseType):
+        return "deferred"
+    return "internal_only"
+
+
 def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory:
     return operational_case_status_category(case.status)
 
@@ -168,6 +204,12 @@ def allowed_work_item_query_sort_fields() -> set[str]:
     return {definition.field for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS if definition.sortable}
 
 
+def allowed_work_item_facet_fields() -> set[str]:
+    """Return canonical WorkItem fields allowed for faceted operator counts."""
+
+    return {definition.field for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS if definition.facetable}
+
+
 def work_item_query_field_definitions() -> list[dict[str, Any]]:
     """Expose canonical query-field metadata for tests/docs/operator surfaces."""
 
@@ -178,6 +220,7 @@ def work_item_query_field_definitions() -> list[dict[str, Any]]:
             "allowed_values": sorted(definition.allowed_values) if definition.allowed_values is not None else None,
             "allowed_operators": sorted(definition.allowed_operators),
             "sortable": definition.sortable,
+            "facetable": definition.facetable,
         }
         for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS
     ]
@@ -213,6 +256,7 @@ def operational_case_issue_type_definitions() -> list[dict[str, str]]:
             "issue_type": case_type,
             "case_type": case_type,
             "scheme_id": _DEFAULT_CASE_TYPE_SCHEME_ID,
+            "release_state": case_type_release_state(case_type),
         }
         for case_type in get_args(OperationalCaseType)
     ]
@@ -222,6 +266,7 @@ def operational_case_status_definitions() -> list[dict[str, Any]]:
     """Expose current status metadata without enabling custom workflows."""
 
     transitions = operational_case_status_transitions()
+    system_transitions = operational_case_system_status_transitions()
     return [
         {
             "status": status,
@@ -229,6 +274,7 @@ def operational_case_status_definitions() -> list[dict[str, Any]]:
             "actionable": status in ACTIONABLE_OPERATIONAL_CASE_STATUSES,
             "terminal": status in TERMINAL_OPERATIONAL_CASE_STATUSES,
             "transitions": sorted(transitions[status]),
+            "system_transitions": sorted(system_transitions[status]),
         }
         for status in get_args(OperationalCaseStatus)
     ]
@@ -252,11 +298,24 @@ def operational_case_workflow_definition() -> dict[str, Any]:
     """Expose the current deterministic OperationalCase workflow definition."""
 
     transitions = operational_case_status_transitions()
+    system_transitions = operational_case_system_status_transitions()
     return {
         "workflow_id": _DEFAULT_WORKFLOW_ID,
         "workflow_scheme_id": _DEFAULT_WORKFLOW_SCHEME_ID,
         "statuses": operational_case_status_definitions(),
         "transitions": {status: sorted(targets) for status, targets in transitions.items()},
+        "manual_transitions": {status: sorted(targets) for status, targets in transitions.items()},
+        "system_transitions": {status: sorted(targets) for status, targets in system_transitions.items()},
+        "system_transition_events": [
+            {
+                "event_type": "case_reopened",
+                "actor_type": "system",
+                "from_status": status,
+                "to_status": target,
+            }
+            for status in sorted(system_transitions)
+            for target in sorted(system_transitions[status])
+        ],
         "tenant_customizable": False,
     }
 

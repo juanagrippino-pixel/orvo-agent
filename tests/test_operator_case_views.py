@@ -68,6 +68,10 @@ def test_parse_case_jql_supports_source_connector_allowlist_filter():
         parse_case_jql("source_connector > tiendanube")
     assert unsupported_operator.value.code == "unsupported_jql_operator"
 
+    with pytest.raises(OperatorAPIError) as empty_in_list:
+        parse_case_jql("source_connector IN ()")
+    assert empty_in_list.value.code == "invalid_jql"
+
     with pytest.raises(OperatorAPIError) as sql_shape:
         parse_case_jql("source_connector = meta_ads; DROP TABLE operational_cases")
     assert sql_shape.value.code == "invalid_jql"
@@ -371,6 +375,97 @@ def test_internal_case_queue_rejects_conflicting_filters_and_invalid_jql(monkeyp
     raw_invalid = invalid.get_data(as_text=True)
     assert "raw_jql_secret" not in raw_invalid
     assert invalid.get_json()["error"]["code"] == "unsupported_jql_field"
+
+
+def test_internal_case_facets_group_by_work_item_registry_field_with_jql(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-high", priority=95))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            priority=70,
+            title="Ventas bajaron",
+            run_id="run-medium",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other", priority=99))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "priority_bracket", "jql": "status = open"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["field"] == "priority_bracket"
+    assert body["data"]["normalized_jql"] == "status = open ORDER BY priority_score DESC, opened_at ASC"
+    assert body["data"]["total_cases"] == 2
+    assert body["data"]["buckets"] == [
+        {"value": "high", "count": 1},
+        {"value": "medium", "count": 1},
+    ]
+    assert body["data"]["truncated"] is False
+    assert body["redaction_applied"] is True
+
+
+def test_internal_case_facets_support_source_connector_and_bucket_limit(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
+    _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-meta",
+            case_type="spend_without_orders",
+            dedupe_suffix="spend_without_orders/channel/meta_ads/marketing.spend/daily",
+            severity="warning",
+            priority=75,
+            title="Meta Ads sin ventas",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "source_connector", "limit": "1"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["field"] == "source_connector"
+    assert body["data"]["total_cases"] == 2
+    assert body["data"]["returned"] == 1
+    assert body["data"]["truncated"] is True
+    assert body["data"]["buckets"] == [{"value": "meta_ads", "count": 1}]
+
+
+def test_internal_case_facets_reject_business_scope_and_redact_bad_field(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-facet-error"))
+
+    business_scope = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "business_id"},
+    )
+    secret_field = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "token=raw_facet_secret"},
+    )
+
+    assert business_scope.status_code == 400
+    assert business_scope.get_json()["error"]["code"] == "unsupported_facet_field"
+    assert secret_field.status_code == 400
+    assert secret_field.get_json()["error"]["code"] == "unsupported_facet_field"
+    assert "raw_facet_secret" not in secret_field.get_data(as_text=True)
 
 
 def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):

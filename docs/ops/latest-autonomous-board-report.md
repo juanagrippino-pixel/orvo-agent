@@ -1,121 +1,105 @@
 # Reporte ejecutivo autónomo — Orvo Codex Board
 
-Fecha de corte: 2026-06-07 05:05 UTC
+Fecha de corte: 2026-06-10 22:32 UTC
 Repo: `/root/orvo-agent`
 Rama canónica: `feat/orvo-brain-control-plane`
-Baseline de producto verificado antes de publicar este reporte: `a8c27dad3c6c0f028dcd68d5f137bd62d7f4433c` (`merge: safe internal error codes`)
-Estado repo al corte: limpio y sincronizado con `origin/feat/orvo-brain-control-plane` (`0/0` ahead/behind).
-Inventario: 123 worktrees registrados, 0 dirty, 0 missing antes de esta reconciliación docs-only. Backlog: 68 ramas locales y 103 remotas no mergeadas.
-Gate local: `pytest -q` → `1331 passed in 21.81s`.
+Baseline verificado antes de este reporte: `2803542964c7` (`docs: gate unanswered conversations roadmap`)
+Estado repo al corte: limpio; local estaba `ahead 1` de `origin/feat/orvo-brain-control-plane` por el commit docs-only `2803542`.
+Inventario: 138 worktrees registrados, 0 dirty, 0 missing. Backlog: 76 ramas locales y 111 remotas no mergeadas.
 
 ## 1. Qué shipped desde el último board report
 
-La rama canónica avanzó de `36ac5ff` a `a8c27da`. El foco fue endurecer el control-plane interno: más endpoints de análisis de casos, menos drift en WorkItem/JQL, secret-boundary de conectores, idempotencia obligatoria en acciones internas y redacción más segura.
+La rama canónica avanzó de `a8c27da` a `2803542`. El foco fue hardening de control-plane y una promoción grande pero correcta de workflow automation: más invariantes de redacción/idempotencia/JQL, aprobación explícita antes de proyectar ejecución pendiente, y research/roadmap para el caso Growth de conversaciones WhatsApp sin responder.
 
-### Commits destacados
+Commits destacados:
 
-- `a8c27da merge: safe internal error codes` + `18d1476 fix: sanitize internal error codes`
-  - Cierra el ítem Trust/Admin que el board anterior todavía marcaba pendiente: `_internal_error()` ya colapsa códigos dinámicos, secret-shaped, oversized o no allowlisted a `internal_error` en el boundary HTTP interno.
-  - Gate de regresión: `tests/test_internal_operator_error_envelope.py` cubre códigos secret-shaped e inestables.
+- `cfb9d53` / `59396a6` — **Workflow Automation gates integrados**.
+  - La cola de ejecución ahora exige acción catalogada, approval request aprobada y matching de ledger/business/case/action antes de proyectar `pending_execution`.
+  - Se agregaron condiciones determinísticas: trigger, source connector, entity kind, status category, case age/freshness/degraded/actionable/assigned.
+  - Sigue sin ejecutar side effects: `execution_enabled=False`, `side_effects_executed=0`.
 
-- `a8b399c codex: expose resolution latency severity service`
-  - Integra el servicio/endpoint de latencia de resolución por severidad sin convertir la ruta HTTP en lógica de negocio.
-  - Branch fuente ya quedó incorporado: `codex/operator-api-limit-validation-20260607025756`.
+- `4a41cec` — **JQL-lite rechaza `IN ()` vacío**.
+  - Cierra un vector de query ambigua en case views; alineado con parser allowlisted, no SQL interpolation.
 
-- `87acc20 merge: severity case summary endpoint` + `efcc94d codex: expose severity case summary`
-  - Agrega surface interno para resumen de casos por severidad; sigue siendo proyección sobre casos canónicos.
+- `2eb8690` / `f76a86d` — **Data-stale connector redaction invariant**.
+  - Refuerza que fallas/stale connectors abran evidencia redacted y no filtren secretos.
 
-- `3c737c1 merge: workitem query field registry` + `10ed711 feat: centralize work item query fields`
-  - Cierra el gap ARB principal: JQL/views ya no deben inventar vocabulario local; los campos de WorkItem query viven cerca de `app/brain/work_items.py`.
+- `7a81948` — **Audit de denegaciones en delivery-status authorization**.
+  - Mejor trazabilidad de intentos no autorizados en surfaces internas.
 
-- `e2280b8 merge: integrate workitem priority registry` + `4fccf16 codex: centralize work item priority brackets`
-  - Prioridad low/medium/high queda centralizada en WorkItem semantics y reutilizable por operator surfaces.
+- `36ed77a`, `2987e2b`, `8769d48` — **hardening adicional de envelopes/idempotencia/run ledger**.
+  - Success envelopes internos redacted, replay de idempotencia fallida cubierto y finalización `partial` de owner-brief secondary dispatch protegida.
 
-- `ea8a5a8 merge: connector resolved-secret runtime bindings` + `b093178 feat: mark connector credentials as resolved secrets`
-  - Refuerza que secrets de conectores sean resueltos en runtime, no tratados como params durables públicos.
+- `b5ad02a` + `2803542` — **research y roadmap para `unanswered_conversations`**.
+  - Decisión producto: no Starter/default. Es módulo Growth readiness-gated, solo si existe inbox/API estructurado, freshness, SLA, business-hours, PII/redaction, resolver humano, no auto-reply y no LLM classification.
 
-- `5c98742 codex: require case action idempotency keys`
-  - El endpoint mutante interno de acciones de caso exige `X-Idempotency-Key` antes de mutar; reduce riesgo de doble side effect.
-
-- `6335e2b merge: safe internal actor refs` + `d412525 fix: collapse secret-shaped internal actor refs`
-  - Hardening de Trust/Admin: actor refs secret-shaped se colapsan/redactan antes de persistirse/proyectarse.
-
-- `c69b03e codex: redact internal error messages` + `0250e18 test: cover jql error redaction`
-  - Mejora de envelope/error redaction para JQL y errores internos.
-
-- Producto/docs:
-  - `f6502f7 research: meta ads spend gate` define `spend_without_orders` como Growth-gated, no Starter ni ads optimization.
-  - `41ef400 docs: reconcile workitem query packet`, `20e12f7 docs: refresh integration train packets`, `5b24f45 docs: record architecture review checkpoint` mantienen el tren alineado con código real.
-
-Lectura producto: Orvo sigue avanzando como control-plane determinista para D2C/Tiendanube, no como chatbot ni dashboard genérico. WhatsApp/reportes permanecen superficies; Operational Cases, WorkItems, registry, ledger y audit son la fuente de verdad.
+- `676403c` + `03c7375` — **docs de ARB/integration train actualizados**.
+  - ARB 2026-06-10 confirmó dirección: OperationalCase/WorkItem como objeto canónico; mayor riesgo actual = proliferación de endpoints/proyecciones solapadas.
 
 ## 2. Qué está corriendo
 
-- **Release / Integration:** activo. La rama canónica está green y sincronizada; integró varias piezas pequeñas de seguridad, WorkItem registry, connector secret boundary y operator analytics.
-- **QA / Red Team:** activo. Produjo/propuso invariants nuevos, incluyendo `codex/qa-severity-summary-actionable-20260607000816` @ `d895ac6` para lifecycle/actionability del summary por severidad.
-- **SRE / Ops:** activo con degradación operativa real: el dry-run de Artemea sigue fallando antes de dispatch por Meta Ads HTTP 400.
-- **COO / Product/GTM:** activo. La señal más útil nueva es el gating de Meta Ads: vender `spend_without_orders` solo como Growth ads-to-ops guardrail, no prometer atribución/ROAS ni pausado automático.
-- **Architecture Review Board / Knowledge:** activo. El último checkpoint marcó como prioridad cerrar drift de WorkItem/JQL; eso ya shipped con `10ed711`.
+- **Release / Integration:** activo, último run ok. Integró `codex/workflow-automation` con focused suite `58 passed` y full suite `1375 passed` en el integration train.
+- **QA / Red Team:** activo, último run ok. Sigue produciendo invariants de redacción, JQL, data-stale, ledger partial e idempotencia.
+- **SRE / Ops:** activo, último run ok, pero el dry-run real de Artemea sigue fallando antes de valor de piloto.
+- **Knowledge / Roadmap / GTM:** activos. Roadmap ya refleja que Meta Ads y `unanswered_conversations` no son prerequisitos del Starter Tiendanube/WhatsApp.
+- **Platform lanes:** Work Management, Workflow, Connector, Search, Service Management y Edge registran últimos runs ok y workdirs externos limpios.
+- **Watchdog MVP:** `Orvo MVP progress watchdog` corre cada 20m y usa repo absoluto; alerta de higiene: su cron tiene `workdir=null`, aunque el script internamente hace `cwd=/root/orvo-agent`.
 
 ## 3. Bloqueos y riesgos que importan
 
-1. **Bloqueo operacional de piloto Artemea: Meta Ads HTTP 400**
-   - Verificación local: `python scripts/run_orvo_brain_reports.py --db /root/orvo-agent/orvo_brain.sqlite3 --business-id artemea --dry-run --force` falló con `PipelineConnectorError: Meta Ads error: HTTP 400`.
-   - Run ledger: 7 forced runs fallidos para `artemea` en las últimas 24h; último run `2ae3b0e8-26e4-457f-9817-ac4586778d65`, status `failed`, connector `artemea-meta-ads`, stage `pre_dispatch`.
-   - Riesgo: el piloto no recibe reporte útil si Meta Ads bloquea el pipeline completo.
-   - Decisión técnica pendiente: degradar Meta Ads a case/data_stale y permitir reporte parcial Tiendanube, o tratar Meta Ads como obligatorio y resolver credencial/query primero.
+1. **Bloqueo operacional de Artemea cambió: ahora Tiendanube HTTP 401.**
+   - Verificación real: `python scripts/run_orvo_brain_reports.py --db /root/orvo-agent/orvo_brain.sqlite3 --business-id artemea --dry-run --force` falló con `PipelineConnectorError: Tiendanube auth failed: HTTP 401`.
+   - Run ledger: últimas 24h = 3/3 runs `failed` por Tiendanube 401; últimas 72h = 6/6 failed, mezclando 3 Tiendanube 401 y 3 Meta Ads 400; última semana = 30 failed, mayormente Meta Ads 400.
+   - Riesgo: el piloto no genera owner output útil cuando el primer conector obligatorio falla.
 
-2. **Backlog de integración creció**
-   - Antes: 61/89 aprox.; ahora: 68 ramas locales y 103 remotas no mergeadas.
-   - Riesgo: drift y ramas amplias (`operator-surfaces`, `search-analytics`, `work-management`) que tocan archivos centrales.
-   - Regla recomendada: una rama por corrida, focused + full suite, sin force-delete ni force-push.
+2. **Tres jobs once de unblocker MVP parecen vencidos/no ejecutados.**
+   - En `~/.hermes/cron/jobs.json`, `20b9b7956dc9`, `e047ce02d964` y `201701672851` están `state=scheduled`, `completed=0`, `last_run_at=null`, con `next_run_at` en el pasado (~21:17-21:18 UTC).
+   - No los modifiqué por regla del board reporter. Esto merece intervención SRE/Hermes porque justo atacaban el blocker de connector failures → `data_stale`/partial.
 
-3. **Ramas amplias todavía no deben entrar wholesale**
-   - `codex/operator-surfaces`, `codex/search-analytics`, `codex/work-management`, `codex/workflow-automation`, `codex/service-management`, `codex/edge-developer-platform` siguen útiles pero grandes.
-   - Riesgo: duplicar vocabulario de WorkItem/JQL, convertir surfaces en source of truth o adelantar plataforma genérica antes del wedge D2C vendible.
+3. **Backlog de integración sigue creciendo.**
+   - 76 ramas locales y 111 remotas no mergeadas; 138 worktrees limpios, pero el volumen eleva riesgo de drift.
+   - Regla: merge/cherry-pick de un slice por vez, focused + full suite, sin branch wholesale.
 
-4. **Trust/Admin sigue siendo MVP interno, aunque los dos deltas chicos ya shipped**
-   - Safe actor refs y safe internal error codes ya están en canonical (`6335e2b`, `a8c27da`).
-   - Riesgo restante: RBAC todavía es coarse/header-based, el acceso token-scoped legacy sigue vigente cuando no hay `X-Orvo-Businesses`, y cualquier rama Trust/Admin amplia necesita patch-id review para no duplicar hardening ya integrado.
+4. **Riesgo arquitectónico principal: endpoint proliferation.**
+   - ARB marca que `operator-surfaces`, `search-analytics` y ramas de latencia/summary agregan valor, pero deben converger a WorkItem/JQL/view/facet registries, no a una ruta bespoke por widget.
+
+5. **Workflow execution sigue intencionalmente no implementado.**
+   - Correcto por seguridad. Antes de cualquier executor real faltan execution-attempt ledger, RBAC fuerte, retry/failure semantics, external response redaction e invariant de no bypass de approval/idempotency/audit.
 
 ## 4. Branches que necesitan integración/revisión
 
 Orden recomendado desde el estado actual:
 
-1. **`codex/qa-severity-summary-actionable-20260607000816` @ `d895ac6`**
-   - Delta pequeño QA-only: 1 ahead / 3 behind.
-   - Valor: invariant para que summary por severidad respete lifecycle/actionability.
-   - Gate: rebase y focused tests de `tests/test_server_internal_brain_*summary*`/cases summary antes de full suite.
+1. **`codex/work-management` @ `f688e5d` — 27 branch-only commits, 0 current-only.**
+   - Valor: terminal timestamps, workflow metadata, actor taxonomy y WorkItem semantics.
+   - Gate: focused Work Management + operator views + full suite. Es el mejor próximo slice Atlassian-like.
 
-2. **`codex/connector-platform` @ `2b981e4`**
-   - 10 ahead / 5 behind.
-   - Valor: centralizar filtering diario/runtime de conectores y continuar platformización real.
-   - Gate alto: connector registry contracts, compiled runtime, redaction, Google Sheets/CSV/Tiendanube compatibility, diff review para evitar shortcuts.
+2. **`codex/connector-platform` local @ `b0d400e` — 14 branch-only, 0 current-only.**
+   - Valor: registry-filtered connector configs y health/runtime validation.
+   - Gate: usar branch local sliced, no `origin/codex/connector-platform` que está muy divergente (`105 / 72`). Secret invariant obligatorio.
 
-3. **`codex/trust-admin-security` @ `fcec69e`**
-   - 9 ahead / 5 behind.
-   - Valor: hardening restante de labels/audit/internal headers.
-   - Gate: patch-id review para no duplicar safe actor/error redaction ya shipped.
+3. **`codex/search-analytics` @ `dbc24aa` — 1 current-only / 23 branch-only.**
+   - Valor: facet metadata y query/view primitives.
+   - Gate: no duplicar KPI/fields fuera de registry.
 
-4. **`codex/work-management` @ `2a97f58`**
-   - 23 ahead / 1 behind.
-   - Valor: SLA due fields, evidence lineage, transition boundaries, reopen/timeline invariants.
-   - Manejo: no merge wholesale; partir en invariants centrales y projections/SLA.
+4. **`codex/trust-admin-security` @ `bc995c5` — 30 current-only / 14 branch-only.**
+   - Valor: RBAC/audit/idempotency hardening restante.
+   - Gate: patch-id review; no reintroducir piezas ya shipped (safe actor refs, safe error codes, Basic-auth audit redaction).
 
-5. **Diferir/split**
-   - `codex/operator-surfaces` @ `851ff1e` (34 ahead), `codex/search-analytics` @ `ef12e5a` (39 ahead), `codex/workflow-automation` @ `1bd5b1e`, `codex/service-management` @ `8cd585d`, `codex/edge-developer-platform` @ `24e1f2f`.
-   - Entrar solo por familias pequeñas, con registry/service-layer reuse y sin prometer ejecución/marketplace/gateway enforcement que todavía no existe.
+5. **Hold/split:** `codex/operator-surfaces` (`23 / 39`), `codex/service-management` (`0 / 16`) y `codex/edge-developer-platform` (`39 / 28`).
+   - Integrar solo slices que profundicen el wedge D2C y preserven OperationalCase como source of truth.
 
 ## 5. Próximas acciones autónomas
 
-- **SRE/Ops:** aislar Meta Ads HTTP 400; si no se puede resolver sin credenciales nuevas, proponer/fixar modo degradado para que Tiendanube produzca reporte parcial y Meta Ads abra/actualice `data_stale`.
-- **Release:** integrar primero el delta chico QA (`severity-summary-actionable`), luego evaluar `connector-platform` con gates completos; no reabrir `safe-internal-error-code` salvo para safe-delete/retención porque ya shipped.
-- **QA:** convertir cualquier `REQUEST_CHANGES` de redaction/idempotency en regression tests antes de merge.
-- **Engineering Factory:** no abrir más breadth branches; producir fixers chicos para integration train y piloto Artemea.
-- **Product/COO:** empaquetar el próximo demo/piloto alrededor de Tiendanube operational truth; `spend_without_orders` queda como Growth upsell gated por Meta access + freshness + spend floor + resolver humano.
+- **SRE/Hermes:** investigar por qué los once jobs MVP están vencidos sin `last_run_at`; no tocar cron desde board reporter, pero esto debe alertar.
+- **MVP reliability:** implementar/fixar connector failure resilience: Tiendanube/Meta failures deben quedar como connector outcomes + `data_stale`/setup-required cases redacted; si todos los sources fallan, el run debe terminar como failure/partial terminal con información accionable, no traceback crudo.
+- **Release:** integrar `codex/work-management` primero; luego `codex/connector-platform` local. Mantener broad branches en hold.
+- **QA:** agregar regression sobre Tiendanube 401 / Meta 400 para que no bloqueen todo el pipeline sin caso `data_stale` redacted.
+- **Product/GTM:** vender Starter sobre verdad Tiendanube operativa; `unanswered_conversations` y Meta Ads quedan Growth/upsell gated.
 
 ## Decisiones pedidas a Juan
 
-1. **Artemea/Meta Ads:** ¿Meta Ads es obligatorio para el reporte del piloto, o autorizamos degradación para enviar Tiendanube parcial mientras Meta queda como `data_stale`?
-2. **Integración:** ¿seguimos con el delta QA chico (`severity-summary-actionable`) antes de `connector-platform`, o pasamos directo al review amplio de connector-platform?
-3. **Producto:** confirmar que `spend_without_orders` se vende solo como Growth ads-to-ops guardrail, sin claim de atribución/ROAS ni automatización de campañas.
+1. **Credencial vs resiliencia:** ¿renovamos/validamos token Tiendanube de Artemea ahora, o priorizamos que el pipeline degrade a `data_stale`/partial aunque la credencial siga rota?
+2. **Cron/SRE:** ¿autorizás a SRE a corregir/destrabar los three once jobs MVP vencidos?
+3. **Integración:** confirmar orden: `work-management` → `connector-platform` local → `search-analytics`, dejando `operator-surfaces/service-management/edge` en slices.
+4. **Producto:** confirmar que `unanswered_conversations` no se promete en Starter ni como chatbot/inbox; solo Growth gated por fuente estructurada y privacidad.

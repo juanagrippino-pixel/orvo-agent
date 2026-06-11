@@ -8,6 +8,7 @@ surfaces are projections of this state, not owners of lifecycle.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -44,7 +45,16 @@ OperationalCaseType = Literal[
     "channel_mix_shift",
 ]
 DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
-OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
+OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(
+    {
+        "sales_drop",
+        "stockout_risk",
+        "data_stale",
+    }
+)
+READINESS_GATED_OPERATIONAL_CASE_TYPES: frozenset[str] = (
+    DETECTABLE_OPERATIONAL_CASE_TYPES - OWNER_FACING_OPERATIONAL_CASE_TYPES
+)
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
@@ -65,6 +75,14 @@ _CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]
     "resolved": set(),
     "dismissed": set(),
 }
+_SYSTEM_CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]] = {
+    "open": set(),
+    "acknowledged": set(),
+    "in_progress": set(),
+    "resolved": {"open"},
+    "dismissed": {"open"},
+}
+_SAFE_CONNECTOR_IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 
 
 class OperationalCaseStatusError(ValueError):
@@ -78,9 +96,22 @@ def operational_case_status_category(status: OperationalCaseStatus) -> Operation
 
 
 def operational_case_status_transitions() -> dict[OperationalCaseStatus, frozenset[OperationalCaseStatus]]:
-    """Return a copy of the current deterministic case lifecycle transition table."""
+    """Return manual/operator case lifecycle transitions.
+
+    Deterministic detections can reopen terminal cases through
+    :meth:`OperationalCaseStore.upsert_detection`; those system-only transitions
+    are exposed separately by :func:`operational_case_system_status_transitions`
+    so WorkItem metadata does not imply operators may manually reopen terminal
+    cases through ordinary status-change actions.
+    """
 
     return {status: frozenset(targets) for status, targets in _CASE_STATUS_TRANSITIONS.items()}
+
+
+def operational_case_system_status_transitions() -> dict[OperationalCaseStatus, frozenset[OperationalCaseStatus]]:
+    """Return deterministic system lifecycle transitions for recurring evidence."""
+
+    return {status: frozenset(targets) for status, targets in _SYSTEM_CASE_STATUS_TRANSITIONS.items()}
 
 
 def _now_utc() -> datetime:
@@ -129,6 +160,23 @@ def _load_operational_case_json(value: str) -> "OperationalCase":
 def _safe_metadata(value: Any) -> dict[str, Any]:
     redacted = redact_secrets(value or {})
     return redacted if isinstance(redacted, dict) else {}
+
+
+def _safe_connector_identifier(value: str | None) -> str:
+    """Return a connector identifier safe for canonical case keys and scopes.
+
+    Connector types normally come from the registry (``tiendanube``, ``csv``,
+    etc.), but failure paths may pass caller-controlled strings. Dedupe keys and
+    entity ids are durable canonical fields, so collapse secret-shaped values
+    rather than keeping a redacted prefix plus credential context.
+    """
+
+    candidate = str(value or "unknown").strip() or "unknown"
+    redacted = redact_text(candidate) or "[REDACTED]"
+    if redacted != candidate:
+        return "[REDACTED]"
+    normalized = _SAFE_CONNECTOR_IDENTIFIER_RE.sub("_", candidate).strip("_")
+    return normalized or "unknown"
 
 
 class OperationalCaseEvidenceMetric(BaseModel):
@@ -372,9 +420,9 @@ class OperationalCase(BaseModel):
 
 
 def is_owner_facing_operational_case(case: OperationalCase) -> bool:
-    """Return whether a case family is promoted for owner-facing projections."""
+    """Return whether a case is eligible for owner-facing projections."""
 
-    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES
+    return case.case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES and bool(case.evidence_snapshots)
 
 
 def owner_facing_actionable_cases(cases: Iterable[OperationalCase]) -> list[OperationalCase]:
@@ -732,10 +780,13 @@ class _OperationalCaseMutations:
         normalized_assignee_ref = assignee_ref.strip()
         if not normalized_assignee_ref:
             raise ValueError("assignee_ref must be non-empty")
+        redacted_assignee_ref = redact_text(normalized_assignee_ref) or "[REDACTED]"
+        if record.assignee_ref == redacted_assignee_ref:
+            return record.model_copy(deep=True)
         assigned_at = _as_utc(assigned_at) if assigned_at is not None else _now_utc()
         updated = record.model_copy(
             update={
-                "assignee_ref": normalized_assignee_ref,
+                "assignee_ref": redacted_assignee_ref,
                 "assigned_at": assigned_at,
                 "updated_at": assigned_at,
                 "timeline": [
@@ -746,8 +797,8 @@ class _OperationalCaseMutations:
                         actor_ref=actor_ref,
                         case_id=record.case_id,
                         created_at=assigned_at,
-                        summary=f"Assigned case to {normalized_assignee_ref}.",
-                        metadata={"assignee_ref": normalized_assignee_ref},
+                        summary=f"Assigned case to {redacted_assignee_ref}.",
+                        metadata={"assignee_ref": redacted_assignee_ref},
                     ),
                 ],
             },
@@ -1105,18 +1156,19 @@ def make_data_stale_detection(
 ) -> OperationalCaseDetection:
     """Build the catalog-backed data_stale case for failed/stale connector execution."""
 
+    safe_connector_type = _safe_connector_identifier(connector_type)
     return OperationalCaseDetection(
         business_id=business_id,
         case_type="data_stale",
-        dedupe_key=f"{business_id}/data_stale/connector/{connector_type}/runtime.freshness/daily",
-        title=f"Datos stale o fallidos: {connector_type}",
+        dedupe_key=f"{business_id}/data_stale/connector/{safe_connector_type}/runtime.freshness/daily",
+        title=f"Datos stale o fallidos: {safe_connector_type}",
         severity="warning",
         priority_score=80,
-        entity_scope={"kind": "connector", "id": connector_type, "label": connector_type},
-        evidence_refs=[f"evidence://{connector_type}/{run_id or 'unknown-run'}/data_stale"],
+        entity_scope={"kind": "connector", "id": safe_connector_type, "label": safe_connector_type},
+        evidence_refs=[f"evidence://{safe_connector_type}/{run_id or 'unknown-run'}/data_stale"],
         run_id=run_id,
         artifact_refs=[f"ledger://runs/{run_id}/failure"] if run_id else [],
-        metadata={"connector_type": connector_type, "error_summary": error_summary},
+        metadata={"connector_type": safe_connector_type, "error_summary": error_summary},
     )
 
 

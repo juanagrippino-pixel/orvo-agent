@@ -27,7 +27,7 @@ from app.brain.operational_cases import (
 )
 from app.brain.dispatch import ReportDispatchResult
 from app.brain.delivery import make_idempotency_key
-from app.brain.pipeline import PipelineResult
+from app.brain.pipeline import PipelineConnectorFailure, PipelineResult
 from app.brain.run_ledger import ArtifactRef, ConnectorRunOutcome, DispatchOutcomeRef, RunLedger
 from app.brain.security.redaction import redact_text
 
@@ -259,6 +259,43 @@ def _failed_connector_outcomes(
     ]
 
 
+def _connector_failed_in_partial_run(
+    connector_id: str,
+    connector_type: str,
+    failures: Sequence[PipelineConnectorFailure],
+) -> bool:
+    return any(
+        failure.connector_type == connector_type
+        and (failure.connector_id is None or failure.connector_id == connector_id)
+        for failure in failures
+    )
+
+
+def _partial_failed_connector_outcome(
+    *,
+    business: BusinessConfig,
+    failure: PipelineConnectorFailure,
+    failed_at: datetime,
+) -> ConnectorRunOutcome:
+    connector = next(
+        (
+            candidate
+            for candidate in business.connectors
+            if candidate.enabled
+            and candidate.connector_type == failure.connector_type
+            and (failure.connector_id is None or candidate.connector_id == failure.connector_id)
+        ),
+        None,
+    )
+    return _failed_connector_outcome(
+        connector_id=connector.connector_id if connector is not None else (failure.connector_id or failure.connector_type),
+        connector_type=failure.connector_type,
+        connector_label=connector.label if connector is not None else None,
+        error_summary=failure.error_summary,
+        failed_at=failed_at,
+    )
+
+
 def record_pipeline_success(
     *,
     run_ledger: RunLedger | None,
@@ -276,7 +313,12 @@ def record_pipeline_success(
         return None
 
     finished_at = _now_utc()
-    connectors = list(_connector_by_type(business, connector_types))
+    partial_failures = list(pipeline.partial_connector_failures)
+    connectors = [
+        connector
+        for connector in _connector_by_type(business, connector_types)
+        if not _connector_failed_in_partial_run(connector.connector_id, connector.connector_type, partial_failures)
+    ]
     connector_count = max(len(connectors), 1)
     for connector in connectors:
         connector_metrics = _metrics_for_connector(pipeline, connector.connector_type, connector_count)
@@ -302,6 +344,16 @@ def record_pipeline_success(
             ),
         )
 
+    for failure in partial_failures:
+        run_ledger.append_connector_outcome(
+            run_id,
+            _partial_failed_connector_outcome(
+                business=business,
+                failure=failure,
+                failed_at=finished_at,
+            ),
+        )
+
     artifact_uri = f"ledger://runs/{run_id}/daily-report"
     case_summary = upsert_cases_from_report(
         case_store=case_store,
@@ -310,6 +362,21 @@ def record_pipeline_success(
         run_id=run_id,
         artifact_ref=artifact_uri,
     )
+    stale_case_ids: list[str] = []
+    stale_opened_count = 0
+    stale_updated_count = 0
+    for failure in partial_failures:
+        stale_summary = upsert_data_stale_cases(
+            case_store=case_store,
+            business_id=business.business_id,
+            connector_types=[failure.connector_type],
+            run_id=run_id,
+            error_summary=failure.error_summary,
+        )
+        stale_case_ids.extend(stale_summary.case_ids)
+        stale_opened_count += stale_summary.opened_count
+        stale_updated_count += stale_summary.updated_count
+    operational_case_ids = [*case_summary.case_ids, *stale_case_ids]
 
     run_ledger.append_artifact_ref(
         run_id,
@@ -321,7 +388,7 @@ def record_pipeline_success(
                 f"evidence://{connector.connector_id}/{pipeline.report.report_date.isoformat()}"
                 for connector in connectors
             ],
-            operational_case_ids=case_summary.case_ids,
+            operational_case_ids=operational_case_ids,
             metadata={
                 "report_date": pipeline.report.report_date.isoformat(),
                 "metrics_count": len(pipeline.report.metrics),
@@ -363,13 +430,15 @@ def record_pipeline_success(
 
     dispatch_ok = dispatch.status in {"sent", "skipped_duplicate"}
     case_brief_ok = case_brief_dispatch is None or case_brief_dispatch.status in {"sent", "skipped_duplicate"}
-    final_status = "succeeded" if dispatch_ok and case_brief_ok else "partial"
+    final_status = "succeeded" if dispatch_ok and case_brief_ok and not partial_failures else "partial"
     final_summary = {
         "report_type": "daily",
-        "cases_opened": case_summary.opened_count,
-        "cases_updated": case_summary.updated_count,
+        "cases_opened": case_summary.opened_count + stale_opened_count,
+        "cases_updated": case_summary.updated_count + stale_updated_count,
         **(summary_metadata or {}),
     }
+    if partial_failures:
+        final_summary["partial_connector_failures"] = len(partial_failures)
     if case_brief_dispatch is not None:
         final_summary["case_brief_dispatch_status"] = case_brief_dispatch.status
     run_ledger.update_run(

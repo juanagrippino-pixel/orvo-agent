@@ -30,6 +30,7 @@ from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerError,
     WorkflowApprovalRequest,
 )
+from app.brain.workflow_action_audit import list_workflow_action_audit_events
 from app.brain.workflow_approval_queue import list_workflow_approval_queue
 from app.brain.workflow_execution_queue import list_workflow_execution_queue
 
@@ -344,7 +345,86 @@ def test_simulate_case_workflow_returns_no_actions_when_conditions_do_not_match(
     assert result["conditions"] == [
         {"field": "min_priority_score", "expected": 90, "actual": 40, "matched": False}
     ]
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "min_priority_score", "expected": 90, "actual": 40}
+    ]
     assert result["side_effects_executed"] == 0
+
+
+def test_simulate_case_workflow_projects_trigger_and_condition_non_match_reasons_without_ledger_writes():
+    _, case = seed_case(priority_score=40)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="manual-critical-only",
+        business_id="artemea",
+        trigger="manual",
+        conditions=[
+            CaseWorkflowCondition(field="status", value="open"),
+            CaseWorkflowCondition(field="min_priority_score", value=90),
+            CaseWorkflowCondition(field="severity", value="critical token=raw_non_match_condition_secret"),
+        ],
+        actions=[
+            WorkflowAction(
+                action_key="acknowledge_case",
+                params={"reason": "Do not leak token=raw_non_match_reason_secret"},
+            )
+        ],
+    )
+
+    result = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(12, 10),
+        action_ledger=ledger,
+        event_trigger="case_updated",
+    )
+
+    assert result["matched"] is False
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "trigger_mismatch", "expected": "manual", "actual": "case_updated"},
+        {"type": "condition_mismatch", "field": "min_priority_score", "expected": 90, "actual": 40},
+        {
+            "type": "condition_mismatch",
+            "field": "severity",
+            "expected": "critical token=[REDACTED]",
+            "actual": "critical",
+        },
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+    assert "raw_non_match" not in str(result)
+
+
+def test_simulate_case_workflow_returns_no_actions_when_event_trigger_does_not_match_rule_trigger():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="opened-only-ack",
+        business_id="artemea",
+        trigger="case_opened",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[WorkflowAction(action_key="acknowledge_case", params={})],
+    )
+
+    result = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(12, 30),
+        action_ledger=ledger,
+        actor_ref="operator:ana",
+        event_trigger="case_updated",
+    )
+
+    assert result["matched"] is False
+    assert result["trigger_match"] == {"expected": "case_opened", "actual": "case_updated", "matched": False}
+    assert result["conditions"] == [{"field": "status", "expected": "open", "actual": "open", "matched": True}]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+    assert ledger.list_approval_requests(business_id="artemea") == []
 
 
 def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapshots():
@@ -365,6 +445,428 @@ def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapsho
     ]
     assert result["actions"][0]["action_key"] == "request_follow_up"
     assert result["actions"][0]["execution_status"] == "dry_run"
+
+
+def test_simulate_case_workflow_matches_status_category_condition_without_side_effects():
+    store, case = seed_case()
+    case = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana",
+        transitioned_at=utc(13, 2),
+    )
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="in-progress-category-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status_category", value="in_progress")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Keep work moving"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 3), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "status_category", "expected": "in_progress", "actual": "in_progress", "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_matches_actionable_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="actionable-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="actionable", value=True)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Actionable case needs follow-up"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 4), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "actionable", "expected": True, "actual": True, "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actionable_rule_for_terminal_case_without_ledger_write():
+    store, case = seed_case()
+    case = store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:ana token=raw_terminal_actor_secret",
+        transitioned_at=utc(13, 5),
+    )
+    case = store.transition_case(
+        case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:ana token=raw_terminal_actor_secret",
+        reason="Resolved after stock check Authorization: Basic raw_terminal_reason_secret",
+        transitioned_at=utc(13, 6),
+    )
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="actionable-only-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="actionable", value=True)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Do not run for done cases"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 7), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "actionable", "expected": True, "actual": False, "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "actionable", "expected": True, "actual": False}
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+    assert "raw_terminal" not in str(result)
+
+
+@pytest.mark.parametrize("condition_value", ["true", 1, None])
+def test_simulate_case_workflow_rejects_invalid_actionable_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-actionable-condition",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="actionable", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid actionable gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(13, 8))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "actionable" in exc.value.message
+
+
+def test_simulate_case_workflow_matches_unassigned_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="assign-unowned-critical-stock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="assigned", value=False)],
+        actions=[WorkflowAction(action_key="assign_owner", params={"assignee_ref": "operator:ana"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 40), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "assigned", "expected": False, "actual": False, "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "assign_owner"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_unassigned_rule_for_assigned_case_without_leaking_owner():
+    store, case = seed_case()
+    case = store.assign_case(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        assignee_ref="operator token=raw_assignee_secret",
+        assigned_at=utc(13, 45),
+    )
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="assign-only-if-unowned",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="assigned", value=False)],
+        actions=[WorkflowAction(action_key="assign_owner", params={"assignee_ref": "operator:bruno"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 50), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "assigned", "expected": False, "actual": True, "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "assigned", "expected": False, "actual": True}
+    ]
+    assert ledger.list_actions(business_id="artemea") == []
+    assert "raw_assignee_secret" not in str(result)
+
+
+@pytest.mark.parametrize("condition_value", ["false", 0, None])
+def test_simulate_case_workflow_rejects_invalid_assigned_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-assigned-condition",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="assigned", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid assigned gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(13, 55))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "assigned" in exc.value.message
+
+
+def test_simulate_case_workflow_matches_min_case_age_minutes_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="aged-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="min_case_age_minutes", value=120)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Case has aged enough"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(10), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "min_case_age_minutes", "expected": 120, "actual": 120, "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actions_until_min_case_age_minutes_elapsed():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="aged-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="min_case_age_minutes", value=121)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Wait until old enough"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(10), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "min_case_age_minutes", "expected": 121, "actual": 120, "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "min_case_age_minutes", "expected": 121, "actual": 120}
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+
+
+@pytest.mark.parametrize("condition_value", ["soon", -1])
+def test_simulate_case_workflow_rejects_invalid_min_case_age_minutes_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-aged-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="min_case_age_minutes", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid age gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(10))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "min_case_age_minutes" in exc.value.message
+
+
+def test_simulate_case_workflow_matches_max_case_age_minutes_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="fresh-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="max_case_age_minutes", value=120)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Case is still fresh enough"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(10), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "max_case_age_minutes", "expected": 120, "actual": 120, "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actions_after_max_case_age_minutes_elapsed():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="fresh-case-window-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="max_case_age_minutes", value=119)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Only while fresh enough"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(10), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "max_case_age_minutes", "expected": 119, "actual": 120, "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "max_case_age_minutes", "expected": 119, "actual": 120}
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+
+
+@pytest.mark.parametrize("condition_value", ["late", -1])
+def test_simulate_case_workflow_rejects_invalid_max_case_age_minutes_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-fresh-case-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="max_case_age_minutes", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid age ceiling"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(10))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "max_case_age_minutes" in exc.value.message
+
+
+def test_simulate_case_workflow_matches_entity_kind_condition_without_side_effects():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="product-stock-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="entity_kind", value="product")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check product owner"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 5), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "entity_kind", "expected": "product", "actual": "product", "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actions_when_entity_kind_does_not_match():
+    _, case = seed_case()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="channel-stock-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="entity_kind", value="channel")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check channel owner"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 10), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "entity_kind", "expected": "channel", "actual": "product", "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "entity_kind", "expected": "channel", "actual": "product"}
+    ]
+    assert ledger.list_actions(business_id="artemea") == []
+
+
+def test_simulate_case_workflow_matches_source_connector_condition_from_evidence_snapshots():
+    _, case = seed_case(degraded=True)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="inventory-connector-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="source_connector", value="commerce.inventory")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check inventory connector"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 15), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {
+            "field": "source_connector",
+            "expected": "commerce.inventory",
+            "actual": ["commerce.inventory"],
+            "matched": True,
+        }
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_actions_when_source_connector_does_not_match():
+    _, case = seed_case(degraded=True)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="sheets-only-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="source_connector", value="google_sheets")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Check sheets connector"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 30), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {
+            "field": "source_connector",
+            "expected": "google_sheets",
+            "actual": ["commerce.inventory"],
+            "matched": False,
+        }
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert ledger.list_actions(business_id="artemea") == []
 
 
 def test_simulate_case_workflow_suppresses_duplicate_idempotency_key_plans_with_audit():
@@ -569,6 +1071,59 @@ def test_workflow_approval_decision_approves_pending_gate_without_executing_side
     assert listed_record.execution_state == "pending_execution"
 
 
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_approval_gate_decisions_require_non_empty_actor_and_reason(tmp_path, store_factory):
+    ledger = store_factory(tmp_path)
+    write = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approval-identity",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/approval-identity/case/request_external_action/once",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator:ana",
+        params={"target": "supplier", "reason": "Request supplier restock"},
+        rule_id="approval-identity",
+        now=utc(18),
+    )
+    assert write.approval_request is not None
+
+    with pytest.raises(WorkflowActionLedgerError) as blank_actor:
+        ledger.decide_approval_request(
+            business_id="artemea",
+            approval_request_id=write.approval_request.approval_request_id,
+            decision="approved",
+            actor_ref="   ",
+            reason="Manager approval",
+            now=utc(18, 5),
+        )
+    assert blank_actor.value.code == "invalid_approval_decision_actor"
+
+    with pytest.raises(WorkflowActionLedgerError) as blank_reason:
+        ledger.cancel_approval_request(
+            business_id="artemea",
+            approval_request_id=write.approval_request.approval_request_id,
+            actor_ref="manager",
+            reason="   ",
+            now=utc(18, 10),
+        )
+    assert blank_reason.value.code == "invalid_approval_decision_reason"
+
+    [request] = ledger.list_approval_requests(business_id="artemea")
+    [record] = ledger.list_actions(business_id="artemea")
+    assert request.status == "pending"
+    assert request.decided_at is None
+    assert record.approval_state == "pending"
+    assert record.execution_state == "blocked_approval_required"
+
+
 def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_decision(tmp_path):
     _, case = seed_case()
     ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
@@ -622,6 +1177,89 @@ def test_workflow_approval_decision_rejects_cross_business_and_prevents_double_d
 
     assert second_decision.value.code == "approval_request_already_decided"
     assert "raw_second_decision_secret" not in second_decision.value.message
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_approval_cancellation_closes_pending_gate_without_side_effects(tmp_path, store_factory):
+    _, case = seed_case()
+    ledger = store_factory(tmp_path)
+    rule = WorkflowRule(
+        rule_id="cancel-external-restock",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier",
+                    "reason": "Request supplier restock",
+                    "Authorization": "Basic raw_cancel_planning_secret",
+                },
+            )
+        ],
+    )
+    planned = simulate_case_workflow(rule, case, now=utc(18, 30), action_ledger=ledger, actor_ref="operator:ana")
+    approval_request_id = planned["actions"][0]["approval_request_id"]
+
+    cancellation = ledger.cancel_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_request_id,
+        actor_ref="manager token=raw_cancel_actor_secret",
+        reason="Cancelled stale request Authorization: Basic raw_cancel_reason_secret",
+        now=utc(18, 45),
+    )
+
+    assert cancellation.record.approval_state == "cancelled"
+    assert cancellation.record.execution_state == "failed"
+    assert cancellation.approval_request.status == "cancelled"
+    assert cancellation.approval_request.decided_at == utc(18, 45)
+    assert cancellation.approval_request.decision_actor_ref == "manager token=[REDACTED]"
+    assert cancellation.approval_request.decision_reason == "Cancelled stale request Authorization: [REDACTED]"
+    assert cancellation.side_effects_executed == 0
+    assert cancellation.audit_event == {
+        "event_type": "workflow_approval_cancelled",
+        "business_id": "artemea",
+        "approval_request_id": approval_request_id,
+        "ledger_id": cancellation.record.ledger_id,
+        "case_id": case.case_id,
+        "action_key": "request_external_action",
+        "decision": "cancelled",
+        "approval_state": "cancelled",
+        "execution_state": "failed",
+        "actor_ref": "manager token=[REDACTED]",
+        "reason": "Cancelled stale request Authorization: [REDACTED]",
+        "created_at": "2026-05-31T18:45:00Z",
+    }
+    assert list_workflow_approval_queue(ledger, business_id="artemea")["approval_requests"] == []
+    assert list_workflow_execution_queue(ledger, business_id="artemea")["actions"] == []
+    audit = list_workflow_action_audit_events(ledger, business_id="artemea")
+    assert [event["event_type"] for event in audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_approval_requested",
+        "workflow_approval_cancelled",
+    ]
+    assert audit["events"][-1]["decision"] == "cancelled"
+    assert audit["events"][-1]["decision_reason"] == "Cancelled stale request Authorization: [REDACTED]"
+    assert "raw_cancel" not in str(cancellation)
+    assert "raw_cancel" not in str(audit)
+
+    with pytest.raises(WorkflowActionLedgerError) as second_cancel:
+        ledger.cancel_approval_request(
+            business_id="artemea",
+            approval_request_id=approval_request_id,
+            actor_ref="manager",
+            reason="Cannot cancel twice token=raw_cancel_second_secret",
+            now=utc(18, 50),
+        )
+    assert second_cancel.value.code == "approval_request_already_decided"
+    assert "raw_cancel_second_secret" not in second_cancel.value.message
 
 
 @pytest.mark.parametrize(
@@ -698,11 +1336,23 @@ def test_workflow_approval_queue_projects_only_pending_requests_without_side_eff
         rule_id="approval-queue",
         now=utc(19, 20),
     )
+    malformed_manual_gate = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-manual-gate",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/approval-queue/case-manual-gate/acknowledge_case/manual-gate",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"reason": "Malformed manual approval gate"},
+        rule_id="approval-queue",
+        now=utc(19, 25),
+    )
 
     assert later.approval_request is not None
     assert earlier.approval_request is not None
     assert approved.approval_request is not None
     assert no_approval.approval_request is None
+    assert malformed_manual_gate.approval_request is not None
     ledger.decide_approval_request(
         business_id="artemea",
         approval_request_id=approved.approval_request.approval_request_id,
@@ -734,6 +1384,7 @@ def test_workflow_approval_queue_projects_only_pending_requests_without_side_eff
     assert "case-approved" not in str(queue)
     assert "case-other" not in str(queue)
     assert "case-no-approval" not in str(queue)
+    assert "case-manual-gate" not in str(queue)
     assert "raw_approval_queue" not in str(queue)
 
 
@@ -857,11 +1508,23 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
         rule_id="execution-queue",
         now=utc(19, 20),
     )
+    manual_gate = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-manual-gate",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/execution-queue/case-manual-gate/acknowledge_case/manual-gate",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"reason": "Malformed manual action approval"},
+        rule_id="execution-queue",
+        now=utc(19, 25),
+    )
 
     assert later.approval_request is not None
     assert earlier.approval_request is not None
     assert rejected.approval_request is not None
     assert unknown.approval_request is not None
+    assert manual_gate.approval_request is not None
     ledger.decide_approval_request(
         business_id="artemea",
         approval_request_id=later.approval_request.approval_request_id,
@@ -894,6 +1557,14 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
         reason="Unknown actions must remain outside execution queue",
         now=utc(19, 45),
     )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=manual_gate.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Manual actions must remain outside execution queue",
+        now=utc(19, 46),
+    )
 
     queue = list_workflow_execution_queue(ledger, business_id="artemea")
 
@@ -913,5 +1584,238 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert "case-rejected" not in str(queue)
     assert "case-other" not in str(queue)
     assert "case-unknown" not in str(queue)
+    assert "case-manual-gate" not in str(queue)
     assert "invented_llm_action" not in str(queue)
     assert "raw_queue" not in str(queue)
+
+
+def test_workflow_execution_queue_requires_matching_approved_approval_request():
+    valid_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/valid",
+        business_id="artemea",
+        case_id="case-valid",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-valid/request_external_action/valid",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-a", "reason": "Approved Authorization: Basic raw_exec_valid_secret"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/valid",
+        created_at=utc(20),
+        updated_at=utc(20, 10),
+    )
+    missing_request_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/missing-request",
+        business_id="artemea",
+        case_id="case-missing-request",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-missing-request/request_external_action/missing",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-b", "reason": "Forged missing approval request"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/missing-request",
+        created_at=utc(20, 1),
+        updated_at=utc(20, 11),
+    )
+    mismatched_request_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/mismatched-request",
+        business_id="artemea",
+        case_id="case-canonical",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-canonical/request_external_action/mismatched",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-c", "reason": "Forged mismatched approval request"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/mismatched-request",
+        created_at=utc(20, 2),
+        updated_at=utc(20, 12),
+    )
+    pending_request_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/pending-request",
+        business_id="artemea",
+        case_id="case-pending-request",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/execution/case-pending-request/request_external_action/pending",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"target": "supplier-d", "reason": "Forged pending approval request"},
+        rule_id="execution-queue",
+        approval_request_id="workflow-approval/artemea/pending-request",
+        created_at=utc(20, 3),
+        updated_at=utc(20, 13),
+    )
+    valid_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/valid",
+        ledger_id=valid_record.ledger_id,
+        business_id="artemea",
+        case_id="case-valid",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(20),
+        decided_at=utc(20, 10),
+        decision_actor_ref="manager",
+        decision_reason="Approved",
+    )
+    mismatched_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/mismatched-request",
+        ledger_id=mismatched_request_record.ledger_id,
+        business_id="artemea",
+        case_id="case-forged",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(20, 2),
+        decided_at=utc(20, 12),
+        decision_actor_ref="manager",
+        decision_reason="Approved forged request",
+    )
+    pending_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/pending-request",
+        ledger_id=pending_request_record.ledger_id,
+        business_id="artemea",
+        case_id="case-pending-request",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="pending",
+        requested_at=utc(20, 3),
+    )
+
+    class ExecutionLedgerWithForgedRequests(InMemoryWorkflowActionLedgerStore):
+        def list_actions(self, *, business_id: str):
+            return [
+                valid_record,
+                missing_request_record,
+                mismatched_request_record,
+                pending_request_record,
+            ]
+
+        def list_approval_requests(self, *, business_id: str):
+            return [valid_request, mismatched_request, pending_request]
+
+    queue = list_workflow_execution_queue(ExecutionLedgerWithForgedRequests(), business_id="artemea")
+
+    assert queue["total"] == 1
+    assert queue["returned"] == 1
+    assert [action["case_id"] for action in queue["actions"]] == ["case-valid"]
+    assert queue["actions"][0]["params"]["reason"] == "Approved Authorization: [REDACTED]"
+    assert "case-missing-request" not in str(queue)
+    assert "case-canonical" not in str(queue)
+    assert "case-forged" not in str(queue)
+    assert "case-pending-request" not in str(queue)
+    assert "raw_exec_valid_secret" not in str(queue)
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_action_audit_events_project_planning_approval_and_decision_without_side_effects(
+    tmp_path, store_factory
+):
+    ledger = store_factory(tmp_path)
+    ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-dry-run",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/audit/case-dry-run/acknowledge_case/dry-run",
+        execution_state="dry_run",
+        approval_required=False,
+        source="workflow",
+        actor_ref="operator token=raw_audit_actor_secret",
+        params={"reason": "Ack token=raw_audit_dry_param_secret"},
+        rule_id="audit-rule",
+        now=utc(21),
+    )
+    approval_write = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approval",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/audit/case-approval/request_external_action/approval",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator",
+        params={
+            "target": "supplier-a",
+            "reason": "Restock Authorization: Basic raw_audit_plan_secret",
+        },
+        rule_id="audit-rule",
+        now=utc(21, 5),
+    )
+    ledger.record_planned_action(
+        business_id="other-business",
+        case_id="case-other",
+        action_key="request_external_action",
+        idempotency_key="workflow/other-business/audit/case-other/request_external_action/other",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-x", "reason": "Other business"},
+        rule_id="audit-rule",
+        now=utc(21, 10),
+    )
+    assert approval_write.approval_request is not None
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approval_write.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager token=raw_audit_decision_actor_secret",
+        reason="Approved Authorization: Basic raw_audit_decision_reason_secret",
+        now=utc(21, 30),
+    )
+
+    audit = list_workflow_action_audit_events(ledger, business_id="artemea", limit=3)
+
+    assert audit["business_id"] == "artemea"
+    assert audit["audit_projection_enabled"] is True
+    assert audit["side_effects_executed"] == 0
+    assert audit["total"] == 4
+    assert audit["returned"] == 3
+    assert [event["event_type"] for event in audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_action_planned",
+        "workflow_approval_requested",
+    ]
+    assert audit["events"][0]["actor_ref"] == "operator token=[REDACTED]"
+    assert audit["events"][0]["approval_state"] == "not_required"
+    assert audit["events"][0]["execution_state"] == "dry_run"
+    assert audit["events"][1]["approval_request_id"] == approval_write.approval_request.approval_request_id
+    assert audit["events"][1]["params"]["reason"] == "Restock Authorization: [REDACTED]"
+    assert audit["events"][2]["status"] == "pending"
+    assert audit["events"][2]["current_status"] == "approved"
+    assert audit["events"][2]["decision_state"] == "approval_requested"
+    assert audit["events"][2]["approval_state"] == "pending"
+    assert audit["events"][2]["current_approval_state"] == "approved"
+    assert audit["events"][2]["execution_state"] == "blocked_approval_required"
+    assert audit["events"][2]["current_execution_state"] == "pending_execution"
+
+    full_audit = list_workflow_action_audit_events(ledger, business_id="artemea")
+    assert [event["event_type"] for event in full_audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_action_planned",
+        "workflow_approval_requested",
+        "workflow_approval_decided",
+    ]
+    decision_event = full_audit["events"][-1]
+    assert decision_event["decision"] == "approved"
+    assert decision_event["decision_actor_ref"] == "manager token=[REDACTED]"
+    assert decision_event["decision_reason"] == "Approved Authorization: [REDACTED]"
+    assert decision_event["approval_state"] == "approved"
+    assert decision_event["execution_state"] == "pending_execution"
+    assert "case-other" not in str(full_audit)
+    assert "other-business" not in str(full_audit)
+    assert "raw_audit" not in str(audit)
+    assert "raw_audit" not in str(full_audit)
