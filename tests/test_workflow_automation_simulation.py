@@ -150,6 +150,20 @@ def test_simulate_case_workflow_dry_run_plans_whitelisted_action_without_mutatin
         "execution_status": "dry_run",
         "created_at": "2026-05-31T09:00:00Z",
     }
+    assert result["audit_event"] == {
+        "event_type": "workflow_rule_simulated",
+        "business_id": "artemea",
+        "rule_id": "critical-stock-ack",
+        "case_id": case.case_id,
+        "trigger_expected": "case_updated",
+        "trigger_actual": "case_updated",
+        "matched": True,
+        "planned_action_count": 1,
+        "skipped_action_count": 0,
+        "side_effects_executed": 0,
+        "actor_ref": None,
+        "created_at": "2026-05-31T09:00:00Z",
+    }
     assert "raw_action_secret" not in str(result)
     assert "raw_case_title_secret" not in str(result)
 
@@ -376,6 +390,7 @@ def test_simulate_case_workflow_projects_trigger_and_condition_non_match_reasons
         case,
         now=utc(12, 10),
         action_ledger=ledger,
+        actor_ref="operator token=raw_non_match_actor_secret",
         event_trigger="case_updated",
     )
 
@@ -392,6 +407,20 @@ def test_simulate_case_workflow_projects_trigger_and_condition_non_match_reasons
             "actual": "critical",
         },
     ]
+    assert result["audit_event"] == {
+        "event_type": "workflow_rule_simulated",
+        "business_id": "artemea",
+        "rule_id": "manual-critical-only",
+        "case_id": case.case_id,
+        "trigger_expected": "manual",
+        "trigger_actual": "case_updated",
+        "matched": False,
+        "planned_action_count": 0,
+        "skipped_action_count": 0,
+        "side_effects_executed": 0,
+        "actor_ref": "operator token=[REDACTED]",
+        "created_at": "2026-05-31T12:10:00Z",
+    }
     assert result["side_effects_executed"] == 0
     assert ledger.list_actions(business_id="artemea") == []
     assert "raw_non_match" not in str(result)
