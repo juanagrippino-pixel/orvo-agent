@@ -1243,6 +1243,40 @@ def test_internal_run_history_rejects_invalid_dispatch_status(monkeypatch, tmp_p
     assert response.get_json()["error"]["code"] == "invalid_dispatch_status"
 
 
+def test_internal_run_dispatch_status_summary_is_scoped_redacted_and_filterable(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-sent", dispatch_status="sent")
+    _seed_run(db_path, business_id="artemea", run_id="run-dispatch-failed", dispatch_status="failed")
+    _seed_run(db_path, business_id="artemea", run_id="run-queued", status="failed", dispatch_status="queued")
+    _seed_run(db_path, business_id="artemea", run_id="run-none", dispatch_status=None)
+    _seed_run(db_path, business_id="other", run_id="run-other-failed", dispatch_status="failed")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/dispatch-status-summary?status=succeeded&limit=10",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_provider_secret" not in raw_body
+    body = response.get_json()
+    assert body["data"] == {
+        "limit": 10,
+        "run_status": "succeeded",
+        "total_runs": 3,
+        "dispatched_runs": 2,
+        "undispatched_runs": 1,
+        "by_dispatch_status": {
+            "sent": 1,
+            "failed": 1,
+            "skipped_duplicate": 0,
+            "skipped": 0,
+            "queued": 0,
+            "none": 1,
+        },
+    }
+
+
 def test_internal_case_queue_summary_returns_status_severity_and_actionable_counts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _case_detection(run_id="run-artemea-critical")

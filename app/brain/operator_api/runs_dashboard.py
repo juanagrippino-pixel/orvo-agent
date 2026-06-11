@@ -5,6 +5,14 @@ from app.brain.run_ledger import DispatchRunStatus, RunRecord
 from .common import *  # noqa: F401,F403
 from .common import _NO_DISPATCH_STATUS, RunDispatchStatusFilter
 from .projections import *  # noqa: F401,F403
+
+_DISPATCH_STATUS_SUMMARY_KEYS: tuple[str, ...] = (
+    "sent",
+    "failed",
+    "skipped_duplicate",
+    "skipped",
+    "queued",
+)
 from .projections import _latest_dispatch_outcome
 from .cases import *  # noqa: F401,F403
 from .top_cases import *  # noqa: F401,F403
@@ -47,6 +55,37 @@ def list_run_history(
         runs = [run for run in runs if _matches_dispatch_status_filter(run, parsed_dispatch_status)]
         runs = runs[:parsed_limit]
     return {"runs": [run_history_item(run) for run in runs], "limit": parsed_limit}
+
+
+def summarize_run_dispatch_statuses(
+    ledger: RunLedger,
+    *,
+    business_id: str,
+    status: str | None,
+    limit: str | None,
+) -> dict[str, Any]:
+    parsed_status = parse_run_status(status)
+    parsed_limit = parse_limit(limit)
+    runs = ledger.list_runs(business_id=business_id, status=parsed_status, limit=parsed_limit)
+    by_dispatch_status = {key: 0 for key in _DISPATCH_STATUS_SUMMARY_KEYS}
+    by_dispatch_status[_NO_DISPATCH_STATUS] = 0
+    for run in runs:
+        latest_status = _latest_dispatch_status(run)
+        if latest_status is None:
+            by_dispatch_status[_NO_DISPATCH_STATUS] += 1
+        else:
+            by_dispatch_status[latest_status] += 1
+    undispatched_runs = by_dispatch_status[_NO_DISPATCH_STATUS]
+    total_runs = len(runs)
+    return {
+        "limit": parsed_limit,
+        "run_status": parsed_status,
+        "total_runs": total_runs,
+        "dispatched_runs": total_runs - undispatched_runs,
+        "undispatched_runs": undispatched_runs,
+        "by_dispatch_status": by_dispatch_status,
+    }
+
 
 def get_scoped_run(ledger: RunLedger, *, business_id: str, run_id: str) -> RunRecord:
     run = ledger.get_run(run_id)
