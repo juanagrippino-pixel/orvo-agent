@@ -141,6 +141,13 @@ def run_due_daily_reports(
                 business_id=business.business_id,
                 connector_types=connector_types,
                 summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
+                case_brief_dispatcher=lambda cases, business=business, report_date=report_date: dispatch_owner_case_brief(
+                    cases,
+                    business,
+                    report_date,
+                    delivery_client,
+                    idempotency_store,
+                ),
             )
             raise
         case_brief_dispatch = record_pipeline_success(

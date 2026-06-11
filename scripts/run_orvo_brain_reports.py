@@ -199,6 +199,13 @@ def run_forced_report(
             business_id=business.business_id,
             connector_types=executed_connector_types,
             summary_metadata={"report_type": "daily"},
+            case_brief_dispatcher=lambda cases: dispatch_owner_case_brief(
+                cases,
+                business,
+                report_date,
+                delivery_client,
+                idempotency_store,
+            ),
         )
         raise
 
