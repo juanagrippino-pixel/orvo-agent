@@ -8,12 +8,14 @@ from .connectors_readiness import register_connector_readiness_routes
 from .dashboard_views import register_dashboard_view_routes
 from .operator_audit import register_operator_audit_routes
 from .runs_delivery import register_run_delivery_routes
+from .runtime import register_runtime_routes
 from .session import register_session_routes
 
 
 def register_internal_brain_routes(app):
     register_session_routes(app)
     register_connector_readiness_routes(app)
+    register_runtime_routes(app)
     register_case_summary_routes(app)
     register_case_resolution_latency_routes(app)
     register_case_stagnation_routes(app)
