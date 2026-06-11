@@ -60,6 +60,7 @@ class WorkItemQueryFieldDefinition:
     allowed_values: frozenset[str] | None = None
     allowed_operators: frozenset[str] = frozenset({"=", "!=", "IN"})
     sortable: bool = False
+    facetable: bool = False
 
 
 _PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
@@ -71,21 +72,31 @@ _PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
 _RANGE_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
 
 _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
-    WorkItemQueryFieldDefinition("status", "enum", frozenset(get_args(OperationalCaseStatus))),
-    WorkItemQueryFieldDefinition("status_category", "enum", frozenset(get_args(OperationalCaseStatusCategory))),
-    WorkItemQueryFieldDefinition("project", "string"),
-    WorkItemQueryFieldDefinition("issue_type", "enum", frozenset(get_args(OperationalCaseType))),
-    WorkItemQueryFieldDefinition("assignee_ref", "string"),
-    WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType))),
-    WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity))),
+    WorkItemQueryFieldDefinition("status", "enum", frozenset(get_args(OperationalCaseStatus)), facetable=True),
+    WorkItemQueryFieldDefinition(
+        "status_category",
+        "enum",
+        frozenset(get_args(OperationalCaseStatusCategory)),
+        facetable=True,
+    ),
+    WorkItemQueryFieldDefinition("project", "string", facetable=True),
+    WorkItemQueryFieldDefinition("issue_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
+    WorkItemQueryFieldDefinition("assignee_ref", "string", facetable=True),
+    WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
+    WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity)), facetable=True),
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("priority_bracket", "enum", frozenset({definition.bracket for definition in _PRIORITY_DEFINITIONS})),
-    WorkItemQueryFieldDefinition("entity.kind", "string"),
+    WorkItemQueryFieldDefinition(
+        "priority_bracket",
+        "enum",
+        frozenset({definition.bracket for definition in _PRIORITY_DEFINITIONS}),
+        facetable=True,
+    ),
+    WorkItemQueryFieldDefinition("entity.kind", "string", facetable=True),
     WorkItemQueryFieldDefinition("entity.id", "string"),
     WorkItemQueryFieldDefinition("entity.label", "string", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("latest_run_id", "string"),
-    WorkItemQueryFieldDefinition("source_connector", "string"),
-    WorkItemQueryFieldDefinition("degraded", "bool", allowed_operators=frozenset({"=", "!="})),
+    WorkItemQueryFieldDefinition("source_connector", "string", facetable=True),
+    WorkItemQueryFieldDefinition("degraded", "bool", allowed_operators=frozenset({"=", "!="}), facetable=True),
     WorkItemQueryFieldDefinition("dedupe_key", "string", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("opened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("updated_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
@@ -187,6 +198,12 @@ def allowed_work_item_query_sort_fields() -> set[str]:
     return {definition.field for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS if definition.sortable}
 
 
+def allowed_work_item_facet_fields() -> set[str]:
+    """Return canonical WorkItem fields allowed for faceted operator counts."""
+
+    return {definition.field for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS if definition.facetable}
+
+
 def work_item_query_field_definitions() -> list[dict[str, Any]]:
     """Expose canonical query-field metadata for tests/docs/operator surfaces."""
 
@@ -197,6 +214,7 @@ def work_item_query_field_definitions() -> list[dict[str, Any]]:
             "allowed_values": sorted(definition.allowed_values) if definition.allowed_values is not None else None,
             "allowed_operators": sorted(definition.allowed_operators),
             "sortable": definition.sortable,
+            "facetable": definition.facetable,
         }
         for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS
     ]

@@ -20,6 +20,7 @@ from app.brain.operator_case_projections import is_case_degraded, source_connect
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
+    allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
     case_issue_type,
     case_priority_bracket,
@@ -185,6 +186,68 @@ def query_case_queue(
     if view is not None:
         data["view"] = {key: view[key] for key in ("view_id", "label", "readonly")}
     return redact_secrets(data)
+
+
+def facet_case_queue(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    field: str | None,
+    jql: str | None,
+    limit: str | None,
+) -> dict[str, Any]:
+    """Return deterministic WorkItem field facets over route-scoped cases.
+
+    Facets reuse the same allowlisted JQL parser and field registry as the case
+    queue. The caller supplies business scope via the route; ``business_id`` is
+    intentionally not a facetable/queryable field, preventing cross-tenant scope
+    from becoming user-controlled query text.
+    """
+
+    facet_field = (field or "").strip()
+    if facet_field not in allowed_work_item_facet_fields():
+        label = facet_field or "[missing]"
+        raise OperatorAPIError("unsupported_facet_field", f"Unsupported facet field: {label}", status_code=400)
+
+    parsed = parse_case_jql(jql)
+    bucket_limit = parse_limit(limit, default=20)
+    candidates = store.list_cases(business_id=business_id, limit=None)
+    filtered = [case for case in candidates if _matches(case, parsed.clauses)]
+    counts: dict[Any, int] = {}
+    for case in filtered:
+        for value in _case_facet_values(case, facet_field):
+            counts[value] = counts.get(value, 0) + 1
+
+    buckets = [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], _facet_value_sort_key(item[0])))
+    ]
+    selected = buckets[:bucket_limit]
+    data = {
+        "field": facet_field,
+        "jql": parsed.raw,
+        "normalized_jql": parsed.normalized,
+        "total_cases": len(filtered),
+        "limit": bucket_limit,
+        "returned": len(selected),
+        "truncated": len(buckets) > len(selected),
+        "buckets": selected,
+    }
+    return redact_secrets(data)
+
+
+def _case_facet_values(case: OperationalCase, field: str) -> tuple[Any, ...]:
+    if field == "source_connector":
+        return tuple(_case_source_connectors(case))
+    return (_case_field_value(case, field),)
+
+
+def _facet_value_sort_key(value: Any) -> tuple[str, str]:
+    if value is None:
+        return ("1", "")
+    if isinstance(value, bool):
+        return ("0", "true" if value else "false")
+    return ("0", str(value))
 
 
 def _split_order_by(raw: str) -> tuple[str, tuple[tuple[str, str], ...]]:

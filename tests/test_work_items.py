@@ -10,6 +10,7 @@ from app.brain.storage import init_schema
 from app.brain.work_items import (
     allowed_priority_brackets,
     allowed_status_categories,
+    allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
     case_priority_bracket,
     case_project_key,
@@ -219,6 +220,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "allowed_values": None,
         "allowed_operators": ["!=", "=", "IN"],
         "sortable": False,
+        "facetable": True,
     }
     assert fields["issue_type"]["allowed_values"] == sorted(get_args(OperationalCaseType))
     assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
@@ -229,9 +231,23 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "allowed_values": None,
         "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
         "sortable": True,
+        "facetable": False,
     }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
+    assert allowed_work_item_facet_fields() == {
+        "assignee_ref",
+        "case_type",
+        "degraded",
+        "entity.kind",
+        "issue_type",
+        "priority_bracket",
+        "project",
+        "severity",
+        "source_connector",
+        "status",
+        "status_category",
+    }

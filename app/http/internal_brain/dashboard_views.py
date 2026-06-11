@@ -62,6 +62,22 @@ def register_dashboard_view_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/facets")
+    def internal_brain_case_facets(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_case_facets(
+                    case_store,
+                    business_id=business_id,
+                    field=request.args.get("field"),
+                    jql=request.args.get("jql"),
+                    limit=request.args.get("limit"),
+                ),
+            ),
+        )
+
     @app.get("/internal/brain/businesses/<business_id>/cases/<case_id>")
     def internal_brain_case_detail(business_id: str, case_id: str):
         return _with_internal_stores(
