@@ -27,6 +27,7 @@ RESERVED_CORE_TOOLKITS: set[str] = {
     "nuvemshop",
     "mercadolibre",
     "mercado_libre",
+    "woocommerce",
     "whatsapp",
     "meta_whatsapp",
     "meta_cloud_api",
