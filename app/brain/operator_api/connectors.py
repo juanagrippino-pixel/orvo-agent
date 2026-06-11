@@ -20,6 +20,18 @@ def _iso(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _safe_identifier(value: str) -> str:
+    """Return an operator-safe connector identifier.
+
+    Connector ids/types are operational labels, but a pasted credential in these
+    fields should not be partially echoed as an addressable-looking identifier.
+    Collapse the whole value whenever inline secret redaction would change it.
+    """
+
+    redacted = redact_text(value) or "[REDACTED]"
+    return redacted if redacted == value else "[REDACTED]"
+
+
 def _validation_issue_projection(issue: ConnectorValidationIssue) -> dict[str, str]:
     return {
         "code": issue.code,
@@ -140,8 +152,8 @@ def _connector_projection(
     warnings = [issue for issue in validation_issues if issue.severity != "error"]
 
     return {
-        "connector_id": connector.connector_id,
-        "connector_type": connector.connector_type,
+        "connector_id": _safe_identifier(connector.connector_id),
+        "connector_type": _safe_identifier(connector.connector_type),
         "label": redact_text(connector.label) or "[REDACTED]",
         "enabled": connector.enabled,
         "registered": spec is not None,

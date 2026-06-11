@@ -186,6 +186,44 @@ def test_internal_connector_readiness_fails_closed_on_legacy_inline_secret(monke
     ]
 
 
+def test_internal_connector_readiness_redacts_secret_shaped_connector_identifiers(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _save_business(
+        db_path,
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn-main?api_key=raw_identifier_secret",
+                    connector_type="unknown?access_token=raw_type_secret",
+                    label="Connector token=raw_label_secret",
+                    params={},
+                ),
+            ],
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_identifier_secret" not in raw_body
+    assert "raw_type_secret" not in raw_body
+    assert "raw_label_secret" not in raw_body
+    connector = response.get_json()["data"]["connectors"][0]
+    assert connector["connector_id"] == "[REDACTED]"
+    assert connector["connector_type"] == "[REDACTED]"
+    assert connector["label"] == "Connector token=[REDACTED]"
+    assert "raw_type_secret" not in connector["validation"]["issues"][0]["message"]
+
+
 def test_internal_connector_readiness_missing_business_config_is_safe_404(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 
