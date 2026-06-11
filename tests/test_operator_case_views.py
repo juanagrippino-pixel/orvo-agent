@@ -291,6 +291,29 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
+def test_internal_case_queue_project_jql_cannot_override_route_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-artemea", priority=80))
+    other_case = _seed_case(db_path, _case_detection(business_id="other", run_id="run-other", priority=99))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "project = OTHER"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert other_case.case_id not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["normalized_jql"] == "project = OTHER ORDER BY priority_score DESC, opened_at ASC"
+    assert body["data"]["cases"] == []
+    assert body["data"]["count"] == 0
+    assert body["data"]["total"] == 0
+
+
 def test_internal_case_queue_accepts_safe_jql_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _seed_case(db_path, _case_detection(run_id="run-critical"))
