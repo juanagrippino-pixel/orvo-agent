@@ -1092,8 +1092,12 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
         "connector_degraded",
         "unassigned_actionable",
         "actionable_cases",
+        "high_priority_actionable",
     }.issubset(views)
     assert views["actionable_cases"]["jql"] == "actionable = true ORDER BY priority_score DESC"
+    assert views["high_priority_actionable"]["jql"] == (
+        "actionable = true AND priority_bracket = high ORDER BY priority_score DESC"
+    )
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"
     )
@@ -1104,6 +1108,43 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert all("total" not in view for view in views.values())
     assert "business_id" not in " ".join(view["jql"] for view in views.values())
     assert body["redaction_applied"] is True
+
+
+def test_internal_high_priority_actionable_view_matches_jql_and_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    high = _seed_case(db_path, _case_detection(run_id="run-high-actionable", priority=95))
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-medium-actionable",
+            priority=70,
+            dedupe_suffix="stockout_risk/sku/MEDIUM_ACTIONABLE/inventory.on_hand/daily",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-other-high", business_id="other", priority=99))
+
+    view_response = client.get(
+        "/internal/brain/businesses/artemea/case-views/high_priority_actionable/cases",
+        headers=AUTH,
+    )
+    direct_response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "actionable = true AND priority_bracket = high ORDER BY priority_score DESC"},
+    )
+
+    assert view_response.status_code == 200
+    assert direct_response.status_code == 200
+    view_body = view_response.get_json()
+    direct_body = direct_response.get_json()
+    assert view_body["data"]["view"] == {
+        "view_id": "high_priority_actionable",
+        "label": "High-priority actionable cases",
+        "readonly": True,
+    }
+    assert view_body["data"]["cases"] == direct_body["data"]["cases"]
+    assert [case["case_id"] for case in view_body["data"]["cases"]] == [high.case_id]
+    assert all(case["business_id"] == "artemea" for case in view_body["data"]["cases"])
 
 
 
