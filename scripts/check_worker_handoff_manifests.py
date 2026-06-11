@@ -51,6 +51,7 @@ VALID_STATUSES: frozenset[str] = frozenset(
         "abandoned",
     }
 )
+CLEAN_STATUS_CLAIMS: frozenset[str] = frozenset({"clean", "review-ready", "merged"})
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,35 @@ def _deleted_test_files_between(repo_root: Path, base_sha: str, head_sha: str) -
     return tuple(deleted)
 
 
+def _worktree_dirty_state(worktree_path: Path) -> bool | None:
+    """Return whether ``worktree_path`` has uncommitted changes, or None if unavailable."""
+
+    result = _git(worktree_path, "status", "--short")
+    if result.returncode != 0:
+        return None
+    return bool(result.stdout.strip())
+
+
+def _verify_status_claim(manifest: WorkerHandoffManifest) -> str | None:
+    worktree_path = manifest.fields.get("worktree_path", "")
+    status = manifest.fields.get("status", "")
+    if not worktree_path:
+        return None
+
+    path = Path(worktree_path)
+    if not path.exists():
+        return None
+
+    dirty = _worktree_dirty_state(path)
+    if dirty is None:
+        return f"worktree_path exists but git status could not be read: {worktree_path}"
+    if status in CLEAN_STATUS_CLAIMS and dirty:
+        return f"status claims {status} but worktree has uncommitted changes"
+    if status == "dirty-blocked" and not dirty:
+        return "status claims dirty-blocked but worktree is clean"
+    return None
+
+
 def verify_manifest_git_claims(
     manifest: WorkerHandoffManifest,
     *,
@@ -244,6 +274,9 @@ def verify_manifest_git_claims(
             "worktree_path does not exist and branch cannot be found locally or under origin: "
             f"{worktree_path} / {branch}"
         )
+    status_problem = _verify_status_claim(manifest)
+    if status_problem is not None:
+        problems.append(status_problem)
 
     base_sha = manifest.fields.get("base_sha", "")
     head_sha = manifest.fields.get("head_sha", "")
