@@ -16,6 +16,8 @@ from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
+    OWNER_FACING_OPERATIONAL_CASE_TYPES,
+    READINESS_GATED_OPERATIONAL_CASE_TYPES,
     TERMINAL_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
     OperationalCaseSeverity,
@@ -26,7 +28,6 @@ from app.brain.operational_cases import (
     operational_case_system_status_transitions,
     operational_case_status_transitions,
 )
-from app.brain.semantics import CASE_FAMILY_METRICS
 
 _PROJECT_KEY_MAX_LENGTH = 32
 _DEFAULT_CASE_TYPE_SCHEME_ID = "d2c-default-case-types"
@@ -43,7 +44,9 @@ class WorkItemPriorityDefinition:
 
 
 WorkItemQueryFieldValueType = Literal["bool", "enum", "int", "string", "datetime"]
-OperationalCaseIssueTypeReleaseState = Literal["promoted", "deferred", "internal_only"]
+OperationalCaseIssueTypeReleaseState = Literal[
+    "promoted", "readiness_gated", "deferred", "internal_only"
+]
 
 
 @dataclass(frozen=True)
@@ -150,14 +153,17 @@ def case_issue_type(case: OperationalCase) -> OperationalCaseType:
 def case_type_release_state(case_type: str) -> OperationalCaseIssueTypeReleaseState:
     """Return the release state for an OperationalCase issue type.
 
-    The semantic registry remains the promotion gate. Case families with
-    ``CASE_FAMILY_METRICS`` evidence contracts are promoted; implemented future
-    catalog targets without evidence contracts stay deferred so operator/API
-    projections cannot accidentally present them as owner-facing/detectable.
+    Metric registration and owner-facing promotion are separate gates. Case
+    families with ``CASE_FAMILY_METRICS`` evidence contracts are detectable, but
+    only explicitly promoted families are eligible for owner-facing projections;
+    registered families that still need source/readiness proof remain
+    ``readiness_gated``.
     """
 
-    if case_type in CASE_FAMILY_METRICS:
+    if case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES:
         return "promoted"
+    if case_type in READINESS_GATED_OPERATIONAL_CASE_TYPES:
+        return "readiness_gated"
     if case_type in get_args(OperationalCaseType):
         return "deferred"
     return "internal_only"

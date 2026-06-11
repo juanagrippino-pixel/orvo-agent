@@ -84,12 +84,19 @@ def test_issue_type_definitions_expose_release_state_from_semantic_registry():
     definitions = {definition["case_type"]: definition for definition in operational_case_issue_type_definitions()}
 
     assert case_type_release_state("stockout_risk") == "promoted"
+    assert case_type_release_state("unanswered_conversations") == "readiness_gated"
     assert case_type_release_state("channel_mix_shift") == "deferred"
     assert definitions["stockout_risk"] == {
         "issue_type": "stockout_risk",
         "case_type": "stockout_risk",
         "scheme_id": "d2c-default-case-types",
         "release_state": "promoted",
+    }
+    assert definitions["unanswered_conversations"] == {
+        "issue_type": "unanswered_conversations",
+        "case_type": "unanswered_conversations",
+        "scheme_id": "d2c-default-case-types",
+        "release_state": "readiness_gated",
     }
     assert definitions["channel_mix_shift"] == {
         "issue_type": "channel_mix_shift",
@@ -103,7 +110,19 @@ def test_issue_type_definitions_expose_release_state_from_semantic_registry():
         if definition["release_state"] == "promoted"
     }
 
-    assert promoted_case_types == set(CASE_FAMILY_METRICS)
+    readiness_gated_case_types = {
+        definition["case_type"]
+        for definition in definitions.values()
+        if definition["release_state"] == "readiness_gated"
+    }
+
+    assert promoted_case_types == {"sales_drop", "stockout_risk", "data_stale"}
+    assert readiness_gated_case_types == {
+        "fulfillment_backlog",
+        "spend_without_orders",
+        "unanswered_conversations",
+    }
+    assert promoted_case_types | readiness_gated_case_types == set(CASE_FAMILY_METRICS)
 
 
 def test_priority_definitions_are_canonical_work_item_semantics(tmp_path):
