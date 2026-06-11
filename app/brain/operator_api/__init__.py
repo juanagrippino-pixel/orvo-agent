@@ -20,3 +20,4 @@ from .histograms_handling import *  # noqa: F401,F403
 from .views import *  # noqa: F401,F403
 from .actions import *  # noqa: F401,F403
 from .runs_dashboard import *  # noqa: F401,F403
+from .os_snapshot import *  # noqa: F401,F403
