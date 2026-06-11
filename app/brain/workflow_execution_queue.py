@@ -59,7 +59,10 @@ def _is_pending_execution(
     )
 
 
-def _queue_action_projection(record: WorkflowActionLedgerRecord) -> dict[str, Any]:
+def _queue_action_projection(
+    record: WorkflowActionLedgerRecord,
+    request: WorkflowApprovalRequest,
+) -> dict[str, Any]:
     definition = ACTION_CATALOG[record.action_key]
     payload = {
         "ledger_id": record.ledger_id,
@@ -77,6 +80,12 @@ def _queue_action_projection(record: WorkflowActionLedgerRecord) -> dict[str, An
         "actor_ref": record.actor_ref,
         "approval_state": record.approval_state,
         "execution_state": record.execution_state,
+        "approval_decision": {
+            "status": request.status,
+            "decided_at": _iso(request.decided_at) if request.decided_at is not None else None,
+            "actor_ref": request.decision_actor_ref,
+            "reason": request.decision_reason,
+        },
         "params": record.params,
         "created_at": _iso(record.created_at),
         "updated_at": _iso(record.updated_at),
@@ -118,7 +127,10 @@ def list_workflow_execution_queue(
         "side_effects_executed": 0,
         "total": len(records),
         "returned": len(selected),
-        "actions": [_queue_action_projection(record) for record in selected],
+        "actions": [
+            _queue_action_projection(record, approval_requests[record.approval_request_id or ""])
+            for record in selected
+        ],
     }
     redacted = redact_secrets(payload)
     return redacted if isinstance(redacted, dict) else payload
