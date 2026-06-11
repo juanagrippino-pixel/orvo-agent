@@ -59,6 +59,41 @@ def test_connector_spec_certifies_health_events_against_declared_health_states()
     assert all(issue.severity == "warning" for issue in issues)
 
 
+def test_connector_health_policy_certification_rejects_health_state_drift():
+    from app.brain.connector_registry import ConnectorHealthMetadata, ConnectorSpec
+
+    spec = ConnectorSpec(
+        connector_type="drifty_health",
+        display_name="Drifty health",
+        adapter_module="app.brain.adapters.csv_file",
+        report_factory="build_daily_report_from_csv_file",
+        capabilities=(),
+        health=ConnectorHealthMetadata(
+            degraded_state="partial_inventory_unavailable",  # type: ignore[arg-type]
+            allowed_states=("ok", "inventory_partial"),  # type: ignore[arg-type]
+        ),
+    )
+
+    issues = spec.validate_health_policy()
+
+    assert [(issue.code, issue.field, issue.state) for issue in issues] == [
+        ("unknown_health_state", "allowed_states", "inventory_partial"),
+        ("degraded_state_not_allowed", "degraded_state", "partial_inventory_unavailable"),
+        ("unknown_health_state", "degraded_state", "partial_inventory_unavailable"),
+    ]
+    assert all(issue.severity == "error" for issue in issues)
+
+
+def test_default_connector_health_policies_match_registry_taxonomy():
+    from app.brain.connector_registry import list_connector_specs
+
+    assert {
+        spec.connector_type: spec.validate_health_policy()
+        for spec in list_connector_specs()
+        if spec.validate_health_policy()
+    } == {}
+
+
 def test_validate_emitted_events_for_connector_module_function_matches_spec_method():
     from app.brain.connector_registry import (
         get_connector_spec,
