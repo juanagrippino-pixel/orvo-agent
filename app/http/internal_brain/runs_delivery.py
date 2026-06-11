@@ -45,11 +45,16 @@ def _delivery_status_success(business_id: str, *, event_business_id: str | None 
     if limit_error is not None:
         return limit_error
     assert limit is not None
+    try:
+        status_filter = normalize_delivery_status_filter(request.args.get("status"))
+    except ValueError:
+        return _internal_error(business_id, "invalid_delivery_status", "unsupported delivery status", status_code=400)
     with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
         init_schema(conn)
         events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(
             limit=limit,
             business_id=event_business_id,
+            status=status_filter,
         )
     return _internal_success(business_id, {"events": redact_secrets(events)})
 

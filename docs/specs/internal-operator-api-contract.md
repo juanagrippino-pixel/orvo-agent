@@ -88,8 +88,11 @@ GET /internal/brain/whatsapp/delivery-statuses
 
 The business-scoped route is the preferred operator surface. It returns only
 delivery events whose durable `business_id` matches the route business, enforces
-standard internal read permission plus explicit `X-Orvo-Businesses` grants, and
-redacts provider error metadata at the API boundary.
+standard internal read permission plus explicit `X-Orvo-Businesses` grants,
+supports the allowlisted `status` query filter (`sent`, `delivered`, `read`,
+`failed`) within that tenant scope, rejects unsupported filter values with a
+safe redacted `400` envelope, and redacts provider error metadata at the API
+boundary.
 
 The global route is for cross-business internal administration only. It uses the
 legacy envelope `business_id = "whatsapp"`, but must require an admin-only
@@ -238,7 +241,7 @@ Before exposing beyond local/dev:
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - run-scoped delivery-status projection is authenticated, grant-scoped, redacted, and only returns business-scoped events for dispatch message IDs from the selected run;
-- WhatsApp delivery-status inspection prefers the business-scoped route, filters by durable event `business_id`, rejects excluded business grants, and keeps the global route admin-only;
+- WhatsApp delivery-status inspection prefers the business-scoped route, filters by durable event `business_id`, supports allowlisted tenant-scoped status filtering, rejects unsupported status filters without echoing caller input, rejects excluded business grants, and keeps the global route admin-only;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
 - case action rejects unknown action keys;
 - case action catalog is authenticated, tenant-scoped, redacted, and marks disabled catalog actions as not executable;

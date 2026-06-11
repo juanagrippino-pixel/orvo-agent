@@ -63,16 +63,22 @@ def _read_status_rows(db_path):
     return rows
 
 
-def _record_delivery_status(db_path, *, message_id: str, business_id: str | None) -> None:
+def _record_delivery_status(
+    db_path,
+    *,
+    message_id: str,
+    business_id: str | None,
+    status: str = "delivered",
+) -> None:
     conn = sqlite3.connect(db_path)
     init_schema(conn)
     SQLiteWhatsAppDeliveryStatusStore(conn).record_event(
         WhatsAppDeliveryStatusEvent(
             provider="meta_cloud",
             message_id=message_id,
-            status="delivered",
+            status=status,
             business_id=business_id,
-            raw={"id": message_id, "status": "delivered"},
+            raw={"id": message_id, "status": status},
         )
     )
     conn.close()
@@ -299,6 +305,51 @@ def test_business_delivery_statuses_are_tenant_scoped(monkeypatch, tmp_path):
     assert body["business_id"] == "artemea"
     assert [event["message_id"] for event in body["data"]["events"]] == ["wamid.artemea"]
     assert body["data"]["events"][0]["business_id"] == "artemea"
+
+
+def test_business_delivery_statuses_filter_status_within_tenant_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _record_delivery_status(db_path, message_id="wamid.artemea-delivered", business_id="artemea", status="delivered")
+    _record_delivery_status(db_path, message_id="wamid.artemea-failed", business_id="artemea", status="failed")
+    _record_delivery_status(db_path, message_id="wamid.other-failed", business_id="other-shop", status="failed")
+    headers = {**AUTH, "X-Orvo-Businesses": "artemea"}
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/whatsapp/delivery-statuses",
+        headers=headers,
+        query_string={"status": "failed"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    assert [(event["message_id"], event["status"], event["business_id"]) for event in body["data"]["events"]] == [
+        ("wamid.artemea-failed", "failed", "artemea")
+    ]
+
+
+def test_business_delivery_statuses_reject_unknown_status_filter_without_echo(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+    headers = {**AUTH, "X-Orvo-Businesses": "artemea"}
+    raw_status_secret = "raw_business_delivery_status_secret"
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/whatsapp/delivery-statuses",
+        headers=headers,
+        query_string={"status": f"queued access_token={raw_status_secret}"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert raw_status_secret not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_delivery_status"
+    assert body["error"]["message"] == "unsupported delivery status"
+    assert body["redaction_applied"] is True
 
 
 def test_business_delivery_statuses_enforce_business_grants(monkeypatch, tmp_path):
