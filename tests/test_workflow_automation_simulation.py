@@ -724,6 +724,73 @@ def test_simulate_case_workflow_rejects_invalid_assigned_condition_value(conditi
     assert "assigned" in exc.value.message
 
 
+def test_simulate_case_workflow_matches_priority_bracket_condition_without_side_effects():
+    _, case = seed_case(priority_score=95)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="high-priority-stock-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="priority_bracket", value="high")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "High priority case needs follow-up"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 58), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "priority_bracket", "expected": "high", "actual": "high", "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_priority_bracket_mismatch_without_ledger_write():
+    _, case = seed_case(priority_score=95)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="medium-priority-stock-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="priority_bracket", value="medium")],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Medium priority only"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 59), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "priority_bracket", "expected": "medium", "actual": "high", "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "priority_bracket", "expected": "medium", "actual": "high"}
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+
+
+@pytest.mark.parametrize("condition_value", ["", "urgent", None])
+def test_simulate_case_workflow_rejects_invalid_priority_bracket_condition_value(condition_value):
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="invalid-priority-bracket-condition",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="priority_bracket", value=condition_value)],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Invalid priority bracket gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(13, 59))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "priority_bracket" in exc.value.message
+
+
 def test_simulate_case_workflow_matches_min_case_age_minutes_condition_without_side_effects():
     _, case = seed_case()
     ledger = InMemoryWorkflowActionLedgerStore()
