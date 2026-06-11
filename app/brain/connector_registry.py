@@ -168,6 +168,17 @@ class ConnectorScopeValidationIssue:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectorHealthValidationIssue:
+    """Deterministic diagnostic for connector health-policy taxonomy drift."""
+
+    code: str
+    field: str
+    state: str
+    message: str
+    severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectorCapabilityValidationIssue:
     """Deterministic diagnostic for connector capability/mode policy drift."""
 
@@ -379,6 +390,59 @@ class ConnectorSpec:
         """
 
         return [secret.metadata() for secret in self.required_secret_refs]
+
+    def validate_health_policy(self) -> list[ConnectorHealthValidationIssue]:
+        """Certify that connector health metadata uses the canonical taxonomy.
+
+        Connector outcome logging and operator surfaces consume these states as a
+        stable control-plane contract. Specs may narrow ``allowed_states`` for a
+        connector, but they must not invent connector-specific health states, and
+        the configured degraded state must be both taxonomy-known and allowed for
+        that connector.
+        """
+
+        taxonomy = set(CONNECTOR_HEALTH_STATES)
+        allowed_states = tuple(self.health.allowed_states)
+        issues: list[ConnectorHealthValidationIssue] = []
+        for state in allowed_states:
+            if state not in taxonomy:
+                issues.append(
+                    ConnectorHealthValidationIssue(
+                        code="unknown_health_state",
+                        field="allowed_states",
+                        state=str(state),
+                        message=(
+                            f"{self.connector_type} connector allows unknown health state {state}"
+                        ),
+                    )
+                )
+
+        degraded_state = self.health.degraded_state
+        if degraded_state not in allowed_states:
+            issues.append(
+                ConnectorHealthValidationIssue(
+                    code="degraded_state_not_allowed",
+                    field="degraded_state",
+                    state=str(degraded_state),
+                    message=(
+                        f"{self.connector_type} connector degraded_state {degraded_state} "
+                        "is not listed in allowed health states"
+                    ),
+                )
+            )
+        if degraded_state not in taxonomy:
+            issues.append(
+                ConnectorHealthValidationIssue(
+                    code="unknown_health_state",
+                    field="degraded_state",
+                    state=str(degraded_state),
+                    message=(
+                        f"{self.connector_type} connector degraded_state {degraded_state} "
+                        "is outside the canonical connector health taxonomy"
+                    ),
+                )
+            )
+        return issues
 
     def validate_scope_requirements(self) -> list[ConnectorScopeValidationIssue]:
         """Certify that secret provisioning scopes are declared by the connector policy.
