@@ -85,10 +85,10 @@ class SQLiteWhatsAppDeliveryStatusStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    def record_event(self, event: WhatsAppDeliveryStatusEvent) -> None:
+    def record_event(self, event: WhatsAppDeliveryStatusEvent) -> bool:
         created_at = _now_utc_iso()
         data = json.dumps(event.model_dump(mode="json"), sort_keys=True)
-        self._conn.execute(
+        cursor = self._conn.execute(
             """
             INSERT OR IGNORE INTO whatsapp_delivery_status_events (
                 event_key, provider, message_id, status, recipient_id,
@@ -108,12 +108,13 @@ class SQLiteWhatsAppDeliveryStatusStore:
             ),
         )
         self._conn.commit()
+        return cursor.rowcount == 1
 
     def record_events(self, events: Iterable[WhatsAppDeliveryStatusEvent]) -> int:
         count = 0
         for event in events:
-            self.record_event(event)
-            count += 1
+            if self.record_event(event):
+                count += 1
         return count
 
     def list_recent(self, *, limit: int = 50) -> list[dict[str, Any]]:
