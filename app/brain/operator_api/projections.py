@@ -158,7 +158,14 @@ def _redact_run_projection(value: Any) -> Any:
     return redact_metadata(value)
 
 
+def _latest_dispatch_outcome(run: RunRecord) -> Any | None:
+    if not run.dispatch_outcomes:
+        return None
+    return max(run.dispatch_outcomes, key=lambda outcome: (outcome.created_at, outcome.attempt_number))
+
+
 def run_history_item(run: RunRecord) -> dict[str, Any]:
+    latest_dispatch = _latest_dispatch_outcome(run)
     return _redact_run_projection(
         {
             "run_id": run.run_id,
@@ -170,6 +177,8 @@ def run_history_item(run: RunRecord) -> dict[str, Any]:
             "connector_count": len(run.connector_outcomes),
             "artifact_count": len(run.artifacts),
             "dispatch_count": len(run.dispatch_outcomes),
+            "dispatch_status": latest_dispatch.status if latest_dispatch is not None else None,
+            "latest_dispatch_channel": latest_dispatch.channel if latest_dispatch is not None else None,
             "cases_opened": run.summary_metadata.get("cases_opened", 0),
             "cases_updated": run.summary_metadata.get("cases_updated", 0),
             "summary_metadata": run.summary_metadata,
