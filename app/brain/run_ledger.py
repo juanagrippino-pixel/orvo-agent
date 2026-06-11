@@ -171,6 +171,11 @@ class DispatchOutcomeRef(BaseModel):
     def redact_provider_response_ref(cls, value: str | None) -> str | None:
         return redact_uri(value)
 
+    @field_validator("idempotency_key", mode="before")
+    @classmethod
+    def redact_idempotency_key(cls, value: str | None) -> str | None:
+        return redact_uri(value)
+
     @field_validator("error_summary", mode="before")
     @classmethod
     def redact_error_summary(cls, value: str | None) -> str | None:
