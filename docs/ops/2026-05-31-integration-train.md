@@ -1,5 +1,55 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-11 08:02 UTC
+
+Status: **Worker manifest test-deletion guard promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `4da7a4d` (`merge: integrate worker manifest test deletion guard`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/eng-factory-manifest-test-deletion-guard-20260611` was clean.
+- Candidate scope was intentionally bounded: one branch-only commit, three files, no new dependencies, and no runtime/operator behavior changes.
+
+Promoted branch:
+
+- Branch: `codex/eng-factory-manifest-test-deletion-guard-20260611`
+- Head before merge: `f665126` (`codex: guard worker manifests against test deletions`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- `scripts/check_worker_handoff_manifests.py` now supports `--forbid-test-deletions` with `--verify-git` and fails a manifest if `base_sha...head_sha` deletes files under `tests/`.
+- The guard prevents autonomous workers from reporting green suites after silently removing regression coverage.
+- `docs/specs/worker-handoff-manifest.md` documents the integration-gate usage and the remaining requirement for human review of deleted-test claims.
+
+Post-merge verification:
+
+- `git diff --check HEAD^1 HEAD` -> passed.
+- Secret-pattern scan over merge diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_worker_handoff_manifest_guard.py -q` -> `10 passed in 0.16s`.
+- Worker manifest CLI before merge: `python scripts/check_worker_handoff_manifests.py` -> `5 manifest(s) checked`.
+- Focused canonical suite after merge: `pytest tests/test_worker_handoff_manifest_guard.py -q` -> `10 passed in 0.15s`.
+- Canonical manifest CLI after merge: `python scripts/check_worker_handoff_manifests.py` -> `5 manifest(s) checked`.
+- Full canonical suite after merge: `pytest -q` -> `1402 passed in 23.75s`.
+
+Review notes / risks:
+
+- Architecture alignment: this is a release-governance hardening slice, not a product-surface expansion. It supports the 24/7 operating-system rule that workers must not make suites green by deleting tests.
+- No external side effects, connector/runtime shortcuts, LLM-driven decisions, case/workflow state changes, or owner-facing projections were added.
+- Integration risk is low; future release-manager runs should use `python scripts/check_worker_handoff_manifests.py --verify-git --forbid-test-deletions <manifest>` for branch-specific manifests with real SHAs.
+
+Current next integration order:
+
+1. **Work Management slices:** patch-id review narrow remaining SLA/evidence/timeline pieces from `codex/work-management` / `origin/codex/work-management-sla-query-status-20260611`; avoid direct broad merge of already-integrated reopen/release-state/history pieces.
+2. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, delivery-status admin-boundary, and manifest/test-deletion guard work.
+3. **Search/Analytics registry slices:** case facets and run dispatch status summaries are integrated; only promote remaining `codex/search-analytics` work if it is rebased/split around canonical WorkItem query/facet/view primitives.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad `origin/codex/connector-platform`.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
 ## Release integration update — 2026-06-11 05:56 UTC
 
 Status: **Case facet query surface promoted**.
