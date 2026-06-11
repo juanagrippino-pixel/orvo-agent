@@ -36,6 +36,7 @@ def register_run_delivery_routes(app):
                     business_id=business_id,
                     status=request.args.get("status"),
                     limit=request.args.get("limit"),
+                    dispatch_status=request.args.get("dispatch_status"),
                 ),
             ),
         )

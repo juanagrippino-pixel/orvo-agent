@@ -14,7 +14,7 @@ from app.brain.operational_cases import (
     SQLiteOperationalCaseStore,
 )
 from app.brain.operator_audit import SQLiteOperatorAuditStore
-from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, RunStatus, SQLiteRunLedger
+from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, DispatchRunStatus, RunStatus, SQLiteRunLedger
 from app.brain.storage import init_schema
 
 
@@ -91,7 +91,14 @@ def _seed_case(db_path, detection: OperationalCaseDetection):
     return case
 
 
-def _seed_run(db_path, *, business_id: str, run_id: str, status: RunStatus = "succeeded"):
+def _seed_run(
+    db_path,
+    *,
+    business_id: str,
+    run_id: str,
+    status: RunStatus = "succeeded",
+    dispatch_status: DispatchRunStatus = "sent",
+):
     conn = sqlite3.connect(db_path)
     init_schema(conn)
     ledger = SQLiteRunLedger(conn)
@@ -116,7 +123,7 @@ def _seed_run(db_path, *, business_id: str, run_id: str, status: RunStatus = "su
         run.run_id,
         DispatchOutcomeRef(
             channel="whatsapp",
-            status="sent",
+            status=dispatch_status,
             message_id="wamid.safe",
             provider_response_ref="provider://response?access_token=raw_provider_secret",
         ),
@@ -1182,6 +1189,39 @@ def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkey
     cross = client.get(f"/internal/brain/businesses/artemea/runs/{other.run_id}", headers=AUTH)
     assert cross.status_code == 404
     assert cross.get_json()["error"]["code"] == "run_not_found"
+
+
+def test_internal_run_history_can_filter_by_latest_dispatch_status_after_limit(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-z-sent", dispatch_status="sent")
+    _seed_run(db_path, business_id="artemea", run_id="run-a-failed", dispatch_status="failed")
+    _seed_run(db_path, business_id="other", run_id="run-other-failed", dispatch_status="failed")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs?dispatch_status=failed&limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"]["limit"] == 1
+    assert [run["run_id"] for run in body["data"]["runs"]] == ["run-a-failed"]
+    assert body["data"]["runs"][0]["dispatch_status"] == "failed"
+
+
+def test_internal_run_history_rejects_invalid_dispatch_status(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-artemea")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs?dispatch_status=leaked access_token=raw_dispatch_secret",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_dispatch_secret" not in raw_body
+    assert response.get_json()["error"]["code"] == "invalid_dispatch_status"
 
 
 def test_internal_case_queue_summary_returns_status_severity_and_actionable_counts(monkeypatch, tmp_path):

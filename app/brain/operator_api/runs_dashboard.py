@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.brain.run_ledger import DispatchRunStatus, RunRecord
+
 from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 from .cases import *  # noqa: F401,F403
@@ -11,10 +13,32 @@ from .histograms_ack import *  # noqa: F401,F403
 from .histograms_handling import *  # noqa: F401,F403
 
 
-def list_run_history(ledger: RunLedger, *, business_id: str, status: str | None, limit: str | None) -> dict[str, Any]:
+def _latest_dispatch_status(run: RunRecord) -> DispatchRunStatus | None:
+    if not run.dispatch_outcomes:
+        return None
+    latest = max(run.dispatch_outcomes, key=lambda outcome: (outcome.created_at, outcome.attempt_number))
+    return latest.status
+
+
+def list_run_history(
+    ledger: RunLedger,
+    *,
+    business_id: str,
+    status: str | None,
+    limit: str | None,
+    dispatch_status: str | None = None,
+) -> dict[str, Any]:
     parsed_status = parse_run_status(status)
+    parsed_dispatch_status = parse_dispatch_status(dispatch_status)
     parsed_limit = parse_limit(limit)
-    runs = ledger.list_runs(business_id=business_id, status=parsed_status, limit=parsed_limit)
+    runs = ledger.list_runs(
+        business_id=business_id,
+        status=parsed_status,
+        limit=None if parsed_dispatch_status is not None else parsed_limit,
+    )
+    if parsed_dispatch_status is not None:
+        runs = [run for run in runs if _latest_dispatch_status(run) == parsed_dispatch_status]
+        runs = runs[:parsed_limit]
     return {"runs": [run_history_item(run) for run in runs], "limit": parsed_limit}
 
 def get_scoped_run(ledger: RunLedger, *, business_id: str, run_id: str) -> RunRecord:
