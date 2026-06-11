@@ -187,6 +187,26 @@ def test_status_and_workflow_definitions_expose_current_transition_table(tmp_pat
     assert "acknowledged" in workflow["transitions"]["open"]
     assert "resolved" in workflow["transitions"]["in_progress"]
     assert workflow["transitions"]["resolved"] == []
+    assert workflow["manual_transitions"] == workflow["transitions"]
+    assert workflow["system_transitions"]["open"] == []
+    assert workflow["system_transitions"]["resolved"] == ["open"]
+    assert workflow["system_transitions"]["dismissed"] == ["open"]
+    assert status_by_key["resolved"]["system_transitions"] == ["open"]
+    assert status_by_key["dismissed"]["system_transitions"] == ["open"]
+    assert workflow["system_transition_events"] == [
+        {
+            "event_type": "case_reopened",
+            "actor_type": "system",
+            "from_status": "dismissed",
+            "to_status": "open",
+        },
+        {
+            "event_type": "case_reopened",
+            "actor_type": "system",
+            "from_status": "resolved",
+            "to_status": "open",
+        },
+    ]
 
 
 def test_query_field_registry_is_canonical_work_item_semantics():

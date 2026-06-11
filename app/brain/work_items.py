@@ -23,6 +23,7 @@ from app.brain.operational_cases import (
     OperationalCaseStatusCategory,
     OperationalCaseType,
     operational_case_status_category,
+    operational_case_system_status_transitions,
     operational_case_status_transitions,
 )
 from app.brain.semantics import CASE_FAMILY_METRICS
@@ -241,6 +242,7 @@ def operational_case_status_definitions() -> list[dict[str, Any]]:
     """Expose current status metadata without enabling custom workflows."""
 
     transitions = operational_case_status_transitions()
+    system_transitions = operational_case_system_status_transitions()
     return [
         {
             "status": status,
@@ -248,6 +250,7 @@ def operational_case_status_definitions() -> list[dict[str, Any]]:
             "actionable": status in ACTIONABLE_OPERATIONAL_CASE_STATUSES,
             "terminal": status in TERMINAL_OPERATIONAL_CASE_STATUSES,
             "transitions": sorted(transitions[status]),
+            "system_transitions": sorted(system_transitions[status]),
         }
         for status in get_args(OperationalCaseStatus)
     ]
@@ -271,11 +274,24 @@ def operational_case_workflow_definition() -> dict[str, Any]:
     """Expose the current deterministic OperationalCase workflow definition."""
 
     transitions = operational_case_status_transitions()
+    system_transitions = operational_case_system_status_transitions()
     return {
         "workflow_id": _DEFAULT_WORKFLOW_ID,
         "workflow_scheme_id": _DEFAULT_WORKFLOW_SCHEME_ID,
         "statuses": operational_case_status_definitions(),
         "transitions": {status: sorted(targets) for status, targets in transitions.items()},
+        "manual_transitions": {status: sorted(targets) for status, targets in transitions.items()},
+        "system_transitions": {status: sorted(targets) for status, targets in system_transitions.items()},
+        "system_transition_events": [
+            {
+                "event_type": "case_reopened",
+                "actor_type": "system",
+                "from_status": status,
+                "to_status": target,
+            }
+            for status in sorted(system_transitions)
+            for target in sorted(system_transitions[status])
+        ],
         "tenant_customizable": False,
     }
 
