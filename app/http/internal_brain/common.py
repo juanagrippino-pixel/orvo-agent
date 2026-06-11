@@ -125,6 +125,12 @@ def _authorization_scheme(value: str) -> str | None:
     return redact_text(scheme) or "[REDACTED]"
 
 
+def _constant_time_text_equals(left: str, right: str) -> bool:
+    """Compare header strings without raising on non-ASCII probe values."""
+
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
 def _record_internal_authentication_denial(*, business_id: str, actor_ref: str, supplied_authorization: str):
     """Best-effort audit for failed internal bearer-token authentication.
 
@@ -166,7 +172,7 @@ def _authorize_internal_operator(business_id: str):
             status_code=503,
         )
     supplied = request.headers.get("Authorization", "")
-    if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+    if not _constant_time_text_equals(supplied, f"Bearer {expected}"):
         _record_internal_authentication_denial(
             business_id=business_id,
             actor_ref=request.headers.get("X-Orvo-Operator", ""),

@@ -3946,6 +3946,38 @@ def test_internal_endpoints_audit_basic_authorization_attempt_without_credential
     assert "raw_basic_actor_secret" not in serialized
 
 
+def test_internal_endpoints_fail_closed_for_non_ascii_authorization_header(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            "Authorization": "Béarer wrong-token",
+            "X-Orvo-Operator": "operator:non-ascii-auth",
+            "X-Request-ID": "req-non-ascii-auth-denied",
+        },
+    )
+
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["error"]["code"] == "unauthorized"
+    assert body["redaction_applied"] is True
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "operator.authentication.denied"
+    assert event["actor_ref"] == "operator:non-ascii-auth"
+    assert event["request_id"] == "req-non-ascii-auth-denied"
+    assert event["data"] == {
+        "status": "denied",
+        "reason": "invalid_internal_token",
+        "method": "GET",
+        "header_present": True,
+        "scheme": "Béarer",
+    }
+
+
 def _audit_events(db_path) -> list[dict]:
     conn = sqlite3.connect(db_path)
     rows = conn.execute(
