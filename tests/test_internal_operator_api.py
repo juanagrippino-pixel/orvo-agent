@@ -1428,6 +1428,88 @@ def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkey
     assert cross.get_json()["error"]["code"] == "run_not_found"
 
 
+def test_internal_run_history_and_detail_include_redacted_dispatch_summary(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        init_schema(conn)
+        ledger = SQLiteRunLedger(conn)
+        run = ledger.create_run(
+            business_id="artemea",
+            trigger_type="forced",
+            run_id="run-multi-dispatch",
+            started_at=_utc(7),
+        )
+        ledger.append_dispatch_outcome(
+            run.run_id,
+            DispatchOutcomeRef(
+                channel="whatsapp",
+                status="sent",
+                message_id="wamid.daily",
+                metadata={"message_type": "daily_report", "access_token": "raw_dispatch_summary_secret"},
+                created_at=_utc(8),
+            ),
+        )
+        ledger.append_dispatch_outcome(
+            run.run_id,
+            DispatchOutcomeRef(
+                channel="whatsapp",
+                status="failed",
+                error_summary="case brief failed token=raw_dispatch_summary_secret",
+                metadata={"message_type": "owner_case_brief"},
+                created_at=_utc(9),
+            ),
+        )
+        ledger.update_run(run.run_id, status="partial", finished_at=_utc(10))
+
+    list_response = client.get("/internal/brain/businesses/artemea/runs", headers=AUTH)
+
+    assert list_response.status_code == 200
+    raw_list = list_response.get_data(as_text=True)
+    assert "raw_dispatch_summary_secret" not in raw_list
+    list_run = list_response.get_json()["data"]["runs"][0]
+    assert list_run["dispatch_status"] == "failed"
+    assert list_run["dispatch_summary"] == {
+        "total": 2,
+        "by_status": {"failed": 1, "sent": 1},
+        "by_message_type": {"daily_report": 1, "owner_case_brief": 1},
+        "latest": {
+            "channel": "whatsapp",
+            "status": "failed",
+            "message_type": "owner_case_brief",
+            "attempt_number": 1,
+            "message_id": None,
+            "created_at": _utc(9).isoformat(),
+        },
+        "primary_daily_report": {
+            "channel": "whatsapp",
+            "status": "sent",
+            "message_type": "daily_report",
+            "attempt_number": 1,
+            "message_id": "wamid.daily",
+            "created_at": _utc(8).isoformat(),
+        },
+        "owner_case_brief": {
+            "channel": "whatsapp",
+            "status": "failed",
+            "message_type": "owner_case_brief",
+            "attempt_number": 1,
+            "message_id": None,
+            "created_at": _utc(9).isoformat(),
+        },
+    }
+
+    detail_response = client.get(
+        "/internal/brain/businesses/artemea/runs/run-multi-dispatch",
+        headers=AUTH,
+    )
+
+    assert detail_response.status_code == 200
+    raw_detail = detail_response.get_data(as_text=True)
+    assert "raw_dispatch_summary_secret" not in raw_detail
+    detail_run = detail_response.get_json()["data"]["run"]
+    assert detail_run["dispatch_summary"] == list_run["dispatch_summary"]
+
+
 def test_internal_case_queue_summary_returns_status_severity_and_actionable_counts(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _case_detection(run_id="run-artemea-critical")

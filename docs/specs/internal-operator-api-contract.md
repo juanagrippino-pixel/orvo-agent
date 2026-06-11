@@ -69,6 +69,10 @@ GET /internal/brain/businesses/{business_id}/runs/{run_id}
 ```
 
 Returns run status, connector outcomes, artifacts, dispatch status, cases opened/updated.
+Run-history rows and run detail include a redacted `dispatch_summary` derived from
+run-ledger dispatch outcomes so operators can distinguish the primary daily
+report from the secondary owner-case-brief delivery without using WhatsApp/report
+text as source of truth.
 
 ### WhatsApp delivery status inspection
 

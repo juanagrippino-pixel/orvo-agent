@@ -164,6 +164,68 @@ def _latest_dispatch_outcome(run: RunRecord) -> Any | None:
     return max(run.dispatch_outcomes, key=lambda outcome: (outcome.created_at, outcome.attempt_number))
 
 
+def _dispatch_message_type(outcome: Any) -> str:
+    raw_value = outcome.metadata.get("message_type") if isinstance(outcome.metadata, dict) else None
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return "unknown"
+    candidate = raw_value.strip()
+    redacted = redact_text(candidate) or "[REDACTED]"
+    return candidate if redacted == candidate else "unknown"
+
+
+def _dispatch_summary_item(outcome: Any) -> dict[str, Any]:
+    return {
+        "channel": outcome.channel,
+        "status": outcome.status,
+        "message_type": _dispatch_message_type(outcome),
+        "attempt_number": outcome.attempt_number,
+        "message_id": outcome.message_id,
+        "created_at": outcome.created_at.isoformat(),
+    }
+
+
+def _latest_dispatch_by_message_type(run: RunRecord, message_type: str) -> Any | None:
+    matching = [outcome for outcome in run.dispatch_outcomes if _dispatch_message_type(outcome) == message_type]
+    if not matching:
+        return None
+    return max(matching, key=lambda outcome: (outcome.created_at, outcome.attempt_number))
+
+
+def dispatch_summary(run: RunRecord) -> dict[str, Any]:
+    """Return a redacted operator projection over run dispatch outcomes.
+
+    The summary is deliberately derived from immutable run-ledger dispatch
+    outcomes. It helps operators distinguish the primary daily report from
+    secondary owner-case-brief delivery without treating channel text or API
+    output as workflow state.
+    """
+
+    by_status = {status: 0 for status in sorted({outcome.status for outcome in run.dispatch_outcomes})}
+    by_message_type = {
+        message_type: 0 for message_type in sorted({_dispatch_message_type(outcome) for outcome in run.dispatch_outcomes})
+    }
+    for outcome in run.dispatch_outcomes:
+        by_status[outcome.status] = by_status.get(outcome.status, 0) + 1
+        message_type = _dispatch_message_type(outcome)
+        by_message_type[message_type] = by_message_type.get(message_type, 0) + 1
+
+    latest = _latest_dispatch_outcome(run)
+    primary_daily_report = _latest_dispatch_by_message_type(run, "daily_report")
+    owner_case_brief = _latest_dispatch_by_message_type(run, "owner_case_brief")
+    return _redact_run_projection(
+        {
+            "total": len(run.dispatch_outcomes),
+            "by_status": by_status,
+            "by_message_type": by_message_type,
+            "latest": _dispatch_summary_item(latest) if latest is not None else None,
+            "primary_daily_report": _dispatch_summary_item(primary_daily_report)
+            if primary_daily_report is not None
+            else None,
+            "owner_case_brief": _dispatch_summary_item(owner_case_brief) if owner_case_brief is not None else None,
+        }
+    )
+
+
 def run_history_item(run: RunRecord) -> dict[str, Any]:
     latest_dispatch = _latest_dispatch_outcome(run)
     return _redact_run_projection(
@@ -179,6 +241,7 @@ def run_history_item(run: RunRecord) -> dict[str, Any]:
             "dispatch_count": len(run.dispatch_outcomes),
             "dispatch_status": latest_dispatch.status if latest_dispatch is not None else None,
             "latest_dispatch_channel": latest_dispatch.channel if latest_dispatch is not None else None,
+            "dispatch_summary": dispatch_summary(run),
             "cases_opened": run.summary_metadata.get("cases_opened", 0),
             "cases_updated": run.summary_metadata.get("cases_updated", 0),
             "summary_metadata": run.summary_metadata,
@@ -187,6 +250,8 @@ def run_history_item(run: RunRecord) -> dict[str, Any]:
 
 
 def run_detail(run: RunRecord) -> dict[str, Any]:
-    return _redact_run_projection(run.model_dump(mode="json"))
+    projection = run.model_dump(mode="json")
+    projection["dispatch_summary"] = dispatch_summary(run)
+    return _redact_run_projection(projection)
 
 __all__ = [name for name in globals() if not name.startswith("__")]
