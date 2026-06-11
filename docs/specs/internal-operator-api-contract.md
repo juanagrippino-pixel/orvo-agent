@@ -119,12 +119,15 @@ enveloped responses. Case-view exports include the built-in view `jql` and
 `normalized_jql` alongside stable row metadata so downstream exports retain
 query provenance without becoming a saved-view source of truth. The built-in set
 should cover actionable queue primitives such as all actionable cases,
-high-priority actionable cases, unassigned actionable cases, connector-degraded
-cases, stale-data cases, and case-family views without introducing
-custom/persisted saved views in the first slice. Direct case query summaries use
-the same parser and route-owned business scope for caller-supplied JQL-lite, but
-return aggregate facets only and must not include raw case rows or persist
-saved/custom views.
+high-priority actionable cases, readiness-gated actionable cases, unassigned
+actionable cases, connector-degraded cases, stale-data cases, and case-family
+views without introducing custom/persisted saved views in the first slice.
+Readiness-gated module views (for example `readiness_gated_actionable`) must stay
+operator-facing/actionable only and must not promote readiness-gated families
+into owner-facing WhatsApp claims. Direct case query summaries use the same
+parser and route-owned business scope for caller-supplied JQL-lite, but return
+aggregate facets only and must not include raw case rows or persist saved/custom
+views.
 JQL-lite may filter evidence freshness through the
 allowlisted `freshness_state` values (`fresh`, `stale`, `degraded`, `missing`,
 `unknown`) derived from persisted case evidence snapshots, and may filter
