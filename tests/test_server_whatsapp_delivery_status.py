@@ -11,6 +11,7 @@ from app.brain.storage import init_schema
 
 
 AUTH = {"Authorization": "Bearer test-internal-token", "X-Orvo-Operator": "operator:juan", "X-Request-ID": "req-test"}
+ADMIN_AUTH = {**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Businesses": "*"}
 
 
 def _client(monkeypatch, tmp_path):
@@ -252,13 +253,37 @@ def test_internal_delivery_statuses_audits_authorization_denials(monkeypatch, tm
     assert event["data"]["permission"] == "role:known"
 
 
+def test_internal_delivery_statuses_requires_admin_with_explicit_global_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    legacy_operator = client.get("/internal/brain/whatsapp/delivery-statuses", headers=AUTH)
+    admin_without_scope = client.get(
+        "/internal/brain/whatsapp/delivery-statuses",
+        headers={**AUTH, "X-Orvo-Role": "admin"},
+    )
+
+    assert legacy_operator.status_code == 403
+    assert legacy_operator.get_json()["error"]["code"] == "forbidden"
+    assert admin_without_scope.status_code == 403
+    assert admin_without_scope.get_json()["error"]["code"] == "forbidden"
+    events = _read_audit_events(db_path)
+    assert [event["event_type"] for event in events] == [
+        "operator.authorization.denied",
+        "operator.authorization.denied",
+    ]
+    assert events[0]["data"]["reason"] == "missing_permission"
+    assert events[0]["data"]["permission"] == "operator_audit:read"
+    assert events[1]["data"]["reason"] == "explicit_global_scope_required"
+    assert events[1]["data"]["permission"] == "business:access"
+
+
 def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     assert client.post("/webhook", json=_status_payload(message_id="wamid.A", status="sent", timestamp="1748002000")).status_code == 200
     assert client.post("/webhook", json=_status_payload(message_id="wamid.A", status="delivered", timestamp="1748002100")).status_code == 200
     assert client.post("/webhook", json=_status_payload(message_id="wamid.B", status="read", timestamp="1748002200")).status_code == 200
 
-    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=AUTH)
+    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=ADMIN_AUTH)
     assert response.status_code == 200
     body = response.get_json()
     assert body["ok"] is True
@@ -268,6 +293,15 @@ def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path)
     assert len(events) == 3
     assert all(e["provider"] == "meta_cloud" for e in events)
     assert {e["message_id"] for e in events} == {"wamid.A", "wamid.B"}
+    audit_events = _read_audit_events(db_path)
+    assert len(audit_events) == 1
+    audit_event = audit_events[0]
+    assert audit_event["business_id"] == "whatsapp"
+    assert audit_event["actor_ref"] == "operator:juan"
+    assert audit_event["event_type"] == "operator.whatsapp_delivery_statuses.read"
+    assert audit_event["target_type"] == "whatsapp_delivery_statuses"
+    assert audit_event["target_id"] == "whatsapp"
+    assert audit_event["data"] == {"status": "allowed", "scope": "global", "limit": 50}
 
 
 def test_internal_delivery_statuses_redacts_failed_error_metadata(monkeypatch, tmp_path):
@@ -307,7 +341,7 @@ def test_internal_delivery_statuses_redacts_failed_error_metadata(monkeypatch, t
     }
     assert client.post("/webhook", json=failure).status_code == 200
 
-    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=AUTH)
+    response = client.get("/internal/brain/whatsapp/delivery-statuses", headers=ADMIN_AUTH)
     assert response.status_code == 200
     raw_body = response.get_data(as_text=True)
     assert "raw_endpoint_secret" not in raw_body
@@ -593,7 +627,7 @@ def test_internal_delivery_statuses_respects_limit_bounds(monkeypatch, tmp_path)
             json=_status_payload(message_id=f"wamid.X{i}", status="delivered", timestamp=str(1748000000 + i)),
         ).status_code == 200
 
-    response = client.get("/internal/brain/whatsapp/delivery-statuses?limit=3", headers=AUTH)
+    response = client.get("/internal/brain/whatsapp/delivery-statuses?limit=3", headers=ADMIN_AUTH)
     assert response.status_code == 200
     body = response.get_json()
     assert len(body["data"]["events"]) == 3
