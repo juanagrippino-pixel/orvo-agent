@@ -185,6 +185,20 @@ def test_secret_redaction_covers_common_metadata_keys_error_text_and_reference_u
     assert "safe=ok" in (artifact.uri or "")
 
 
+def test_dispatch_outcome_idempotency_key_redacts_secret_shaped_values():
+    dispatch = DispatchOutcomeRef(
+        channel="whatsapp",
+        status="failed",
+        idempotency_key="artemea/2026-05-24/daily?access_token=raw_dispatch_idempotency_secret",
+    )
+
+    assert dispatch.idempotency_key is not None
+    assert "raw_dispatch_idempotency_secret" not in dispatch.idempotency_key
+    assert "raw_dispatch_idempotency_secret" not in dispatch.model_dump_json()
+    assert "access_token=" in dispatch.idempotency_key
+    assert dispatch.idempotency_key != "artemea/2026-05-24/daily?access_token=raw_dispatch_idempotency_secret"
+
+
 def test_connector_run_outcome_defaults_registry_health_state_from_status():
     succeeded = ConnectorRunOutcome(
         connector_id="tn-main",
