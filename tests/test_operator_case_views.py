@@ -145,6 +145,9 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("priority_bracket IN (high, medium)").normalized == (
         "priority_bracket IN (high, medium) ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql('entity.label = "Campera Azul XL"').normalized == (
+        'entity.label = "Campera Azul XL" ORDER BY priority_score DESC, opened_at ASC'
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
@@ -165,6 +168,10 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     with pytest.raises(OperatorAPIError) as sql_shape:
         parse_case_jql("priority_bracket = high OR status = resolved")
     assert sql_shape.value.code == "invalid_jql"
+
+    with pytest.raises(OperatorAPIError) as quoted_sql_shape:
+        parse_case_jql('entity.label = "Campera Azul XL; DROP TABLE operational_cases"')
+    assert quoted_sql_shape.value.code == "invalid_jql"
 
 
 def test_internal_case_queue_filters_by_release_state(monkeypatch, tmp_path):
@@ -509,6 +516,61 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     cross_project_body = cross_project_response.get_json()
     assert cross_project_body["data"]["cases"] == []
     assert cross_project_body["data"]["total"] == 0
+
+
+def test_internal_case_queue_filters_by_quoted_entity_label_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    matching = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-entity-label-quoted",
+            dedupe_suffix="stockout_risk/sku/CAMPERA_AZUL_XL/commerce.inventory/daily",
+            entity_scope={"kind": "sku", "id": "CAMPERA_AZUL_XL", "label": "Campera Azul XL"},
+            priority=90,
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-entity-label-other",
+            dedupe_suffix="stockout_risk/sku/CAMPERA_ROJA_M/commerce.inventory/daily",
+            entity_scope={"kind": "sku", "id": "CAMPERA_ROJA_M", "label": "Campera Roja M"},
+            priority=100,
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-entity-label-cross-tenant",
+            entity_scope={"kind": "sku", "id": "CAMPERA_AZUL_XL", "label": "Campera Azul XL"},
+            priority=99,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": 'entity.label = "Campera Azul XL"'},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == (
+        'entity.label = "Campera Azul XL" ORDER BY priority_score DESC, opened_at ASC'
+    )
+    assert [case["case_id"] for case in body["data"]["cases"]] == [matching.case_id]
+    assert body["data"]["cases"][0]["entity_scope"]["label"] == "Campera Azul XL"
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+    injection_response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": 'entity.label = "Campera Azul XL; DROP TABLE operational_cases"'},
+    )
+    assert injection_response.status_code == 400
+    assert injection_response.get_json()["error"]["code"] == "invalid_jql"
 
 
 def test_internal_case_queue_filters_unassigned_actionable_cases_and_keeps_business_scope(monkeypatch, tmp_path):
