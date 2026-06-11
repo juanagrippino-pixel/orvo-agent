@@ -1,5 +1,54 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-11 12:13 UTC
+
+Status: **Connector failure data-stale case path promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `e01fd7c` (`merge: integrate connector failure stale cases`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean and aligned with `origin/feat/orvo-brain-control-plane` before merge.
+- Candidate worker worktree `/root/orvo-agent-worktrees/connector-failure-cases` was clean.
+- Candidate scope was intentionally bounded to the connector failure/runtime-report path: 7 files, one branch-only commit, no new dependencies, and no connector/report shortcut around registry, ledger, or OperationalCase contracts.
+
+Promoted branch:
+
+- Branch: `fix/connector-failure-cases`
+- Head before merge: `986cfeb` (`fix: record connector failures as stale cases`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- Connector/auth/HTTP/runtime failures are converted into redacted typed `PipelineConnectorFailure` evidence.
+- If all attempted data connectors fail, the pipeline raises redacted `PipelineAllConnectorsFailedError`, records each failed connector outcome, opens/updates `data_stale` Operational Cases, and dispatches an owner case brief when configured.
+- If at least one connector succeeds, the successful report path continues, failed connectors are recorded as partial outcomes, and stale data cases preserve degraded-source honesty instead of suppressing the whole report.
+- Scheduled runner and forced-report script now wire the owner-case brief dispatcher into failure finalization without making WhatsApp/report text the source of truth.
+
+Post-merge verification:
+
+- `git diff --check feat/orvo-brain-control-plane...fix/connector-failure-cases` before merge -> passed.
+- Secret-pattern scan over candidate and merge diffs -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Focused worker suite before merge: `pytest tests/test_brain_pipeline.py tests/test_brain_runner.py tests/test_run_orvo_brain_reports_script.py -q` -> `48 passed in 2.97s`.
+- Focused canonical suite after merge: same command -> `48 passed in 2.38s`.
+- Full canonical suite after merge: `pytest -q` -> `1408 passed in 37.38s`.
+
+Review notes / risks:
+
+- Architecture alignment: this closes the ARB priority that failed/stale data sources should create `data_stale` cases while preserving connector registry/runtime/ledger/case boundaries.
+- Failure text and run/case payloads stay redacted in tests; no raw access tokens or failure secrets are persisted.
+- Runtime behavior intentionally changes from fail-fast on any non-Meta connector failure to degraded partial operation when another connector succeeds. This is product-aligned for D2C control-plane honesty, but downstream operators should expect more `partial` runs rather than total report suppression.
+
+Current next integration order:
+
+1. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after current denial-audit, action-principal redaction, non-ASCII auth fail-closed, delivery-status admin-boundary, and connector-failure stale-case work.
+2. **Connector-platform reconcile:** review local sliced `codex/connector-platform` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad remote branch.
+3. **Work Management slices:** patch-id review narrow remaining SLA/evidence/timeline pieces from `codex/work-management` / `origin/codex/work-management-sla-query-status-20260611`; avoid direct broad merge of already-integrated reopen/release-state/history pieces.
+4. **Search/Analytics registry slices:** case facets and release-state query are integrated; only promote remaining `codex/search-analytics` work if it is rebased/split around canonical WorkItem query/facet/view primitives.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/service-management`, and `codex/edge-developer-platform` behind product/architecture gates and split them into D2C-control-plane primitives before promotion.
+
 ## Release integration update — 2026-06-11 08:02 UTC
 
 Status: **Worker manifest test-deletion guard promoted**.

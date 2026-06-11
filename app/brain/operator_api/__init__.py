@@ -24,3 +24,4 @@ from .views import *  # noqa: F401,F403
 from .owner_brief import *  # noqa: F401,F403
 from .actions import *  # noqa: F401,F403
 from .runs_dashboard import *  # noqa: F401,F403
+from .connectors import *  # noqa: F401,F403

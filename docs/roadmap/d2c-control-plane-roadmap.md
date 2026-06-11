@@ -78,7 +78,7 @@ Current shipped checkpoint, grounded in `app/brain/operational_cases.py`, `app/b
 
 - `OperationalCase` is still the durable work item source of truth with tenant scope via `business_id`, deterministic case types, timeline/evidence snapshots, and hardcoded lifecycle transitions.
 - A read-only WorkItem projection layer now exposes project keys, work item IDs, issue types, workflow/status definitions, and canonical status categories (`to_do`, `in_progress`, `done`) without creating a parallel task store.
-- JQL-lite and built-in operator views now support WorkItem projection fields including `project`, `issue_type`, `status_category`, and `assignee_ref`; they remain route/business-scoped projections and do not translate user input to SQL or persist custom saved views.
+- JQL-lite and built-in operator views now support WorkItem projection fields including `project`, `issue_type`, `release_state`, `status_category`, and `assignee_ref`; they remain route/business-scoped projections and do not translate user input to SQL or persist custom saved views.
 - There is still no separate persisted `Project`/`WorkItem` table, tenant-custom workflow scheme, or writable saved-view layer; treat those as post-v1 platform work until a concrete operator workflow requires them.
 
 Delivered / keep green:
@@ -87,7 +87,7 @@ Delivered / keep green:
 - internal status-category mapping for existing statuses: `open -> to_do`, `acknowledged/in_progress -> in_progress`, `resolved/dismissed -> done`;
 - explicit issue-type/case-type registry wrapper for current D2C case families, without introducing tenant-custom workflows yet;
 - workflow definition registry that documents current allowed transitions before any executor/SLA layer consumes them;
-- JQL-lite additions for canonical fields (`project`, `status_category`, `assignee_ref`, and `issue_type`), with route-owned business scope.
+- JQL-lite additions for canonical fields (`project`, `status_category`, `release_state`, `assignee_ref`, and `issue_type`), with route-owned business scope.
 
 Next hardening deliverables:
 
@@ -125,6 +125,27 @@ Exit criteria:
 - Operator can explain every claim.
 - Failures degrade honestly.
 - Follow-up history exists for open/resolved cases.
+
+## Milestone 4C — La Pyme-category OS snapshot
+
+Outcome: the MVP feels like the first slice of a PyME operating system, not a report-only tool, while still preserving the Tiendanube/WhatsApp wedge and all platform contracts.
+
+Deliverables:
+
+- operator home / OS snapshot that shows module status for sales/orders, stock/fulfillment, customer attention, ARCA/fiscal readiness, and treasury/reporting;
+- readiness-gated setup-required or `data_stale` cases for modules that are not connected or cannot prove source truth;
+- sales/orders remains the fully automated core via Tiendanube evidence;
+- stock/fulfillment and customer-attention modules remain owner-facing only when readiness gates pass;
+- ARCA and treasury appear as readiness/status lanes, not fake automation;
+- GTM copy updated from "report/brief" to "centro operativo de tu tienda".
+- WhatsApp remains a concise alert/projection channel; the operator console remains the canonical control surface.
+
+Exit criteria:
+
+- A merchant can understand what Orvo monitors today, what is stale, and what needs connecting next.
+- No module creates owner-facing claims without evidence and source freshness.
+- The OS snapshot is derived from connector/runtime/case state, not hand-written marketing copy.
+- Full suite remains green.
 
 ### Milestone 4A — Readiness-gated fulfillment backlog module
 

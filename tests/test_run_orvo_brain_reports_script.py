@@ -9,7 +9,11 @@ from pydantic import ValidationError
 from app.brain.config import BusinessConfig, ConnectorConfig, InMemoryConfigStore, ReportSchedule
 from app.brain.delivery import DeliveryResult
 from app.brain.dispatch import InMemoryIdempotencyStore
-from app.brain.pipeline import PipelineConnectorError, run_enabled_connectors_daily_report_pipeline
+from app.brain.pipeline import (
+    PipelineAllConnectorsFailedError,
+    PipelineConnectorError,
+    run_enabled_connectors_daily_report_pipeline,
+)
 from app.brain.run_ledger import InMemoryRunLedger
 from app.brain.operational_cases import InMemoryOperationalCaseStore
 import scripts.run_orvo_brain_reports as reports_script
@@ -357,6 +361,7 @@ def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():
             raise RuntimeError("401 access_token=raw_failure_secret")
 
     delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run-stale-brief", error=None)
     run_ledger = InMemoryRunLedger()
     case_store = InMemoryOperationalCaseStore()
 
@@ -388,11 +393,77 @@ def test_force_report_failure_opens_data_stale_case_and_marks_failed_run():
     assert failed_connector.error_summary is not None
     assert "raw_failure_secret" not in failed_connector.error_summary
     assert run.artifacts == []
-    assert run.dispatch_outcomes == []
+    assert [(out.channel, out.status, out.metadata.get("message_type")) for out in run.dispatch_outcomes] == [
+        ("whatsapp", "sent", "owner_case_brief")
+    ]
     assert run.summary_metadata["cases_opened"] == 1
     assert run.summary_metadata["cases_updated"] == 0
     assert "raw_failure_secret" not in run.model_dump_json()
-    delivery.send_text.assert_not_called()
+    delivery.send_text.assert_called_once()
+    brief_phone, brief_text = delivery.send_text.call_args.args
+    assert brief_phone == "+5491100000000"
+    assert "Brief operativo" in brief_text
+    assert "Datos stale o fallidos" in brief_text
+
+
+def test_force_report_all_connector_failures_records_each_outcome_and_dispatches_stale_case_brief():
+    class FailingTiendanubeHTTPClient:
+        def get(self, url, headers=None, params=None):
+            raise RuntimeError("401 access_token=raw_tn_failure_secret")
+
+    class FailingMetaHTTPClient:
+        def get(self, url, params=None):
+            response = MagicMock()
+            response.status_code = 400
+            response.json.return_value = {"error": {"message": "Bad request access_token=raw_meta_failure_secret"}}
+            return response
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="dry-run-stale-brief", error=None)
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(PipelineAllConnectorsFailedError) as raised:
+        reports_script.run_forced_report(
+            business=make_tiendanube_and_meta_ads_business(),
+            report_date=date(2026, 5, 19),
+            delivery_client=delivery,
+            idempotency_store=InMemoryIdempotencyStore(),
+            sheets_service_factory=MagicMock(side_effect=AssertionError("google sheets should not be loaded")),
+            tiendanube_http_client=FailingTiendanubeHTTPClient(),
+            meta_ads_http_client=FailingMetaHTTPClient(),
+            run_ledger=run_ledger,
+            case_store=case_store,
+        )
+
+    assert len(raised.value.connector_failures) == 2
+    assert "raw_tn_failure_secret" not in str(raised.value)
+    assert "raw_meta_failure_secret" not in str(raised.value)
+
+    cases = case_store.list_cases(business_id="artemea")
+    assert {case.dedupe_key for case in cases} == {
+        "artemea/data_stale/connector/tiendanube/runtime.freshness/daily",
+        "artemea/data_stale/connector/meta_ads/runtime.freshness/daily",
+    }
+    assert "raw_tn_failure_secret" not in "".join(case.model_dump_json() for case in cases)
+    assert "raw_meta_failure_secret" not in "".join(case.model_dump_json() for case in cases)
+
+    [run] = run_ledger.list_runs(business_id="artemea")
+    assert run.status == "failed"
+    assert {(out.connector_id, out.connector_type, out.status) for out in run.connector_outcomes} == {
+        ("artemea-tiendanube", "tiendanube", "failed"),
+        ("artemea-meta-ads", "meta_ads", "failed"),
+    }
+    assert [(out.channel, out.status, out.metadata.get("message_type")) for out in run.dispatch_outcomes] == [
+        ("whatsapp", "sent", "owner_case_brief")
+    ]
+    assert run.summary_metadata["cases_opened"] == 2
+    assert "raw_tn_failure_secret" not in run.model_dump_json()
+    assert "raw_meta_failure_secret" not in run.model_dump_json()
+    delivery.send_text.assert_called_once()
+    _phone, text = delivery.send_text.call_args.args
+    assert "Brief operativo" in text
+    assert "Datos stale o fallidos" in text
 
 
 def test_force_report_persists_operational_cases_and_links_ledger_artifact(tmp_path):
@@ -652,7 +723,7 @@ def test_enabled_connectors_pipeline_failure_carries_business_id():
         def get(self, url, headers=None, params=None):
             raise RuntimeError("401 access_token=raw_failure_secret")
 
-    with pytest.raises(PipelineConnectorError) as raised:
+    with pytest.raises(PipelineAllConnectorsFailedError) as raised:
         run_enabled_connectors_daily_report_pipeline(
             business=make_tiendanube_business(),
             report_date=date(2026, 5, 19),
@@ -663,8 +734,11 @@ def test_enabled_connectors_pipeline_failure_carries_business_id():
         )
 
     assert raised.value.business_id == "demo-shop"
-    assert raised.value.connector_type == "tiendanube"
-    assert raised.value.connector_id == "demo-tiendanube"
+    [failure] = raised.value.connector_failures
+    assert failure.business_id == "demo-shop"
+    assert failure.connector_type == "tiendanube"
+    assert failure.connector_id == "demo-tiendanube"
+    assert "raw_failure_secret" not in raised.value.args[0]
 
 
 def test_main_force_connector_failure_exits_with_terminal_redacted_failure(tmp_path, monkeypatch, capsys):

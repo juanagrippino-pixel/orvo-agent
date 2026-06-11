@@ -66,7 +66,7 @@ TimelineEventType = Literal[
     "evidence_attached",
     "operator_comment",
 ]
-ActorType = Literal["system", "operator"]
+ActorType = Literal["system", "operator", "owner", "worker"]
 
 _CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCaseStatus]] = {
     "open": {"acknowledged", "in_progress", "dismissed"},

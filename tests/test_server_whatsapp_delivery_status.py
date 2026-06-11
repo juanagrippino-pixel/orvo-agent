@@ -369,6 +369,66 @@ def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path)
     assert audit_event["data"] == {"status": "allowed", "scope": "global", "limit": 50}
 
 
+def test_internal_delivery_statuses_filters_by_status(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    assert client.post("/webhook", json=_status_payload(message_id="wamid.A", status="sent", timestamp="1748002000")).status_code == 200
+    assert client.post("/webhook", json=_status_payload(message_id="wamid.B", status="failed", timestamp="1748002100")).status_code == 200
+    assert client.post("/webhook", json=_status_payload(message_id="wamid.C", status="read", timestamp="1748002200")).status_code == 200
+
+    response = client.get(
+        "/internal/brain/whatsapp/delivery-statuses",
+        headers=ADMIN_AUTH,
+        query_string={"status": "failed"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    events = body["data"]["events"]
+    assert [event["message_id"] for event in events] == ["wamid.B"]
+    assert [event["status"] for event in events] == ["failed"]
+    audit_events = _read_audit_events(db_path)
+    assert len(audit_events) == 1
+    assert audit_events[0]["data"] == {"status": "allowed", "scope": "global", "limit": 50, "status_filter": "failed"}
+
+
+def test_internal_delivery_statuses_rejects_unknown_status_filter_without_echo(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    raw_status_secret = "raw_delivery_status_secret"
+
+    response = client.get(
+        "/internal/brain/whatsapp/delivery-statuses",
+        headers=ADMIN_AUTH,
+        query_string={"status": f"queued access_token={raw_status_secret}"},
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert raw_status_secret not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "whatsapp"
+    assert body["error"]["code"] == "invalid_delivery_status"
+    assert body["error"]["message"] == "unsupported delivery status"
+    assert body["redaction_applied"] is True
+
+    audit_events = _read_audit_events(db_path)
+    assert len(audit_events) == 1
+    audit_event = audit_events[0]
+    assert audit_event["business_id"] == "whatsapp"
+    assert audit_event["actor_ref"] == "operator:juan"
+    assert audit_event["event_type"] == "operator.whatsapp_delivery_statuses.read_failed"
+    assert audit_event["target_type"] == "whatsapp_delivery_statuses"
+    assert audit_event["target_id"] == "whatsapp"
+    assert audit_event["data"] == {
+        "status": "failed",
+        "scope": "global",
+        "error_code": "invalid_delivery_status",
+        "status_code": 400,
+        "status_filter_present": True,
+    }
+    assert raw_status_secret not in json.dumps(audit_event, sort_keys=True)
+
+
 def test_internal_delivery_statuses_redacts_failed_error_metadata(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     failure = {

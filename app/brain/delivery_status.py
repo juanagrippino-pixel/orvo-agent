@@ -27,6 +27,7 @@ from app.brain.security.redaction import redact_secrets
 
 
 META_PROVIDER = "meta_cloud"
+WHATSAPP_DELIVERY_STATUS_FILTERS = frozenset({"sent", "delivered", "read", "failed"})
 
 
 def _now_utc_iso() -> str:
@@ -41,6 +42,22 @@ def build_event_key(*, provider: str, message_id: str, status: str, timestamp: s
     """
 
     return f"{provider}|{message_id}|{status}|{timestamp or ''}"
+
+
+def normalize_delivery_status_filter(value: str | None) -> str | None:
+    """Return an allowlisted delivery status filter for operator queries.
+
+    Status webhooks are persisted append-only, but internal read filters remain
+    deliberately narrow so operator query surfaces cannot become an ad-hoc SQL
+    or echo channel for caller-controlled strings.
+    """
+
+    if value in (None, ""):
+        return None
+    normalized = value.strip()
+    if normalized not in WHATSAPP_DELIVERY_STATUS_FILTERS:
+        raise ValueError("unsupported delivery status")
+    return normalized
 
 
 class WhatsAppDeliveryStatusEvent(BaseModel):
@@ -103,10 +120,10 @@ class SQLiteWhatsAppDeliveryStatusStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    def record_event(self, event: WhatsAppDeliveryStatusEvent) -> None:
+    def record_event(self, event: WhatsAppDeliveryStatusEvent) -> bool:
         created_at = _now_utc_iso()
         data = json.dumps(event.model_dump(mode="json"), sort_keys=True)
-        self._conn.execute(
+        cursor = self._conn.execute(
             """
             INSERT OR IGNORE INTO whatsapp_delivery_status_events (
                 event_key, provider, message_id, status, recipient_id,
@@ -126,40 +143,45 @@ class SQLiteWhatsAppDeliveryStatusStore:
             ),
         )
         self._conn.commit()
+        return cursor.rowcount == 1
 
     def record_events(self, events: Iterable[WhatsAppDeliveryStatusEvent]) -> int:
         count = 0
         for event in events:
-            self.record_event(event)
-            count += 1
+            if self.record_event(event):
+                count += 1
         return count
 
-    def list_recent(self, *, limit: int = 50, business_id: str | None = None) -> list[dict[str, Any]]:
+    def list_recent(
+        self,
+        *,
+        limit: int = 50,
+        business_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
         if limit < 1:
             limit = 1
-        if business_id is None:
-            cursor = self._conn.execute(
-                """
-                SELECT provider, message_id, status, recipient_id, business_id,
-                       status_timestamp, created_at, data
-                FROM whatsapp_delivery_status_events
-                ORDER BY created_at DESC, message_id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
-        else:
-            cursor = self._conn.execute(
-                """
-                SELECT provider, message_id, status, recipient_id, business_id,
-                       status_timestamp, created_at, data
-                FROM whatsapp_delivery_status_events
-                WHERE business_id = ?
-                ORDER BY created_at DESC, message_id DESC
-                LIMIT ?
-                """,
-                (business_id, limit),
-            )
+        status_filter = normalize_delivery_status_filter(status)
+        clauses: list[str] = []
+        params: list[Any] = []
+        if business_id is not None:
+            clauses.append("business_id = ?")
+            params.append(business_id)
+        if status_filter is not None:
+            clauses.append("status = ?")
+            params.append(status_filter)
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        cursor = self._conn.execute(
+            f"""
+            SELECT provider, message_id, status, recipient_id, business_id,
+                   status_timestamp, created_at, data
+            FROM whatsapp_delivery_status_events
+            {where_clause}
+            ORDER BY created_at DESC, message_id DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        )
         rows = cursor.fetchall()
         return [_delivery_status_row_to_projection(row) for row in rows]
 

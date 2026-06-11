@@ -5,9 +5,17 @@ from contextlib import closing
 
 from flask import request
 
-from app.brain.delivery_status import SQLiteWhatsAppDeliveryStatusStore
-from app.brain.operator_api import *  # noqa: F401,F403
+from app.brain.delivery_status import SQLiteWhatsAppDeliveryStatusStore, normalize_delivery_status_filter
+from app.brain.operator_api import (
+    OperatorAPIError,
+    get_run_delivery_status_projection,
+    get_run_projection,
+    list_run_history,
+    parse_limit,
+    summarize_run_dispatch_statuses,
+)
 from app.brain.operator_auth import INTERNAL_READ_PERMISSION, OPERATOR_AUDIT_READ_PERMISSION
+from app.brain.security.redaction import redact_secrets
 from app.brain.storage import init_schema
 
 from .common import (
@@ -95,20 +103,57 @@ def register_run_delivery_routes(app):
         if permission_error is not None:
             return permission_error
         assert principal is not None
-        limit, limit_error = _delivery_status_limit_or_error(business_id)
-        if limit_error is not None:
-            return limit_error
-        assert limit is not None
+        raw_limit = request.args.get("limit")
+        raw_status = request.args.get("status")
+        try:
+            limit = parse_limit(raw_limit, default=50, max_limit=200)
+            status_filter = normalize_delivery_status_filter(raw_status)
+        except OperatorAPIError as exc:
+            _append_operator_audit_event(
+                business_id=business_id,
+                actor_ref=principal.actor_ref,
+                event_type="operator.whatsapp_delivery_statuses.read_failed",
+                target_type="whatsapp_delivery_statuses",
+                target_id=business_id,
+                data={
+                    "status": "failed",
+                    "scope": "global",
+                    "error_code": exc.code,
+                    "status_code": exc.status_code,
+                    "limit_present": raw_limit is not None,
+                    "status_filter_present": raw_status is not None,
+                },
+            )
+            return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
+        except ValueError:
+            _append_operator_audit_event(
+                business_id=business_id,
+                actor_ref=principal.actor_ref,
+                event_type="operator.whatsapp_delivery_statuses.read_failed",
+                target_type="whatsapp_delivery_statuses",
+                target_id=business_id,
+                data={
+                    "status": "failed",
+                    "scope": "global",
+                    "error_code": "invalid_delivery_status",
+                    "status_code": 400,
+                    "status_filter_present": raw_status is not None,
+                },
+            )
+            return _internal_error(business_id, "invalid_delivery_status", "unsupported delivery status", status_code=400)
         with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
             init_schema(conn)
-            events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(limit=limit)
+            events = SQLiteWhatsAppDeliveryStatusStore(conn).list_recent(limit=limit, status=status_filter)
+        audit_data = {"status": "allowed", "scope": "global", "limit": limit}
+        if status_filter is not None:
+            audit_data["status_filter"] = status_filter
         _append_operator_audit_event(
             business_id=business_id,
             actor_ref=principal.actor_ref,
             event_type="operator.whatsapp_delivery_statuses.read",
             target_type="whatsapp_delivery_statuses",
             target_id=business_id,
-            data={"status": "allowed", "scope": "global", "limit": limit},
+            data=audit_data,
         )
         return _internal_success(business_id, {"events": redact_secrets(events)})
 

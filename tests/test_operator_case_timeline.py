@@ -149,6 +149,48 @@ def test_list_case_timeline_filters_by_actor_ref():
     assert result["events"][0]["summary"] == "Second operator note"
 
 
+def test_list_case_timeline_filters_owner_and_worker_actor_events():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(_detection(), detected_at=_utc(8))
+    store.add_comment(
+        opened.case_id,
+        actor_type="owner",
+        actor_ref="owner@example.com",
+        comment="Owner confirmed the SKU is being restocked.",
+        commented_at=_utc(9),
+    )
+    store.add_comment(
+        opened.case_id,
+        actor_type="worker",
+        actor_ref="worker:case-triage",
+        comment="Autonomous worker attached fulfillment context.",
+        commented_at=_utc(10),
+    )
+
+    owner_result = list_case_timeline(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        actor_type="owner",
+    )
+    worker_result = list_case_timeline(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        actor_type="worker",
+    )
+
+    assert owner_result["filters"]["actor_type"] == "owner"
+    assert owner_result["count"] == 1
+    assert owner_result["events"][0]["actor_ref"] == "owner@example.com"
+    assert all(event["actor_type"] == "owner" for event in owner_result["events"])
+
+    assert worker_result["filters"]["actor_type"] == "worker"
+    assert worker_result["count"] == 1
+    assert worker_result["events"][0]["actor_ref"] == "worker:case-triage"
+    assert all(event["actor_type"] == "worker" for event in worker_result["events"])
+
+
 def test_list_case_timeline_limits_to_most_recent_events_in_chronological_order():
     store, case_id = _seed_full_lifecycle()
 
