@@ -10,7 +10,7 @@ config shape, and adapter kwargs before a run.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from importlib import import_module
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
@@ -223,6 +223,66 @@ class ConnectorExecutorValidationIssue:
     value: str
     message: str
     severity: str = SEVERITY_ERROR
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorSpecCertification:
+    """Aggregated release-gate diagnostics for one connector spec.
+
+    Connector-platform readiness depends on several independent contracts:
+    health taxonomy, least-privilege scopes, advertised capabilities, and safe
+    executor metadata. This value object rolls those checks into one stable shape
+    that CI, release controllers, and operator admin surfaces can consume without
+    reimplementing the registry's validation order.
+    """
+
+    connector_type: str
+    health_issues: tuple[ConnectorHealthValidationIssue, ...] = ()
+    scope_issues: tuple[ConnectorScopeValidationIssue, ...] = ()
+    capability_issues: tuple[ConnectorCapabilityValidationIssue, ...] = ()
+    executor_issues: tuple[ConnectorExecutorValidationIssue, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return self.issue_count == 0
+
+    @property
+    def issue_count(self) -> int:
+        return (
+            len(self.health_issues)
+            + len(self.scope_issues)
+            + len(self.capability_issues)
+            + len(self.executor_issues)
+        )
+
+    @property
+    def issue_codes(self) -> tuple[str, ...]:
+        return tuple(issue.code for issue in self._all_issues())
+
+    def _all_issues(self) -> tuple[Any, ...]:
+        return (
+            *self.health_issues,
+            *self.scope_issues,
+            *self.capability_issues,
+            *self.executor_issues,
+        )
+
+    def as_metadata(self) -> dict[str, Any]:
+        """Return an audit-safe serializable certification summary.
+
+        Certification issues contain registry metadata and key names only; they do
+        not inspect tenant config or secret values.
+        """
+
+        return {
+            "connector_type": self.connector_type,
+            "passed": self.passed,
+            "issue_count": self.issue_count,
+            "health_issues": [asdict(issue) for issue in self.health_issues],
+            "scope_issues": [asdict(issue) for issue in self.scope_issues],
+            "capability_issues": [asdict(issue) for issue in self.capability_issues],
+            "executor_issues": [asdict(issue) for issue in self.executor_issues],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -652,6 +712,17 @@ class ConnectorSpec:
                 )
 
         return issues
+
+    def certify_contract(self) -> ConnectorSpecCertification:
+        """Run all connector-platform release-gate checks for this spec."""
+
+        return ConnectorSpecCertification(
+            connector_type=self.connector_type,
+            health_issues=tuple(self.validate_health_policy()),
+            scope_issues=tuple(self.validate_scope_requirements()),
+            capability_issues=tuple(self.validate_capability_contract()),
+            executor_issues=tuple(self.validate_executor_contract()),
+        )
 
     def load_report_factory(self):
         """Import the configured report-builder callable from executor metadata."""
@@ -1144,6 +1215,11 @@ class ConnectorRegistry:
             strict=strict,
         )
 
+    def certify_contracts(self) -> tuple[ConnectorSpecCertification, ...]:
+        """Return release-gate certification summaries for all registered specs."""
+
+        return tuple(spec.certify_contract() for spec in self.specs())
+
 
 def _access_token_requirement(
     *,
@@ -1524,6 +1600,12 @@ def validate_connector_control_plane_config(
         secret_refs=secret_refs,
         strict=strict,
     )
+
+
+def certify_connector_contracts() -> tuple[ConnectorSpecCertification, ...]:
+    """Return aggregated connector-platform release-gate certification results."""
+
+    return default_connector_registry().certify_contracts()
 
 
 def validate_emitted_metrics_for_connector(
