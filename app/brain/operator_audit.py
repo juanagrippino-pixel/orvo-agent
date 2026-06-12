@@ -172,7 +172,7 @@ class SQLiteOperatorAuditStore:
                 redact_secrets(
                     {
                         "event_id": event_id,
-                        "business_id": row_business_id,
+                        "business_id": audit_business_display_id(row_business_id),
                         "actor_ref": actor_ref,
                         "event_type": event_type,
                         "target_type": target_type,
