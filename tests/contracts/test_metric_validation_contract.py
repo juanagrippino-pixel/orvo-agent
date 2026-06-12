@@ -2762,3 +2762,138 @@ def test_money_currency_helper_is_reexported_from_semantics_public_surface():
 
     assert hasattr(semantics, "find_money_currency_violations")
     assert "find_money_currency_violations" in semantics.__all__
+
+
+def test_duplicate_canonical_helper_flags_alias_and_canonical_pair_resolving_to_same_metric():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    # revenue_today is an alias of commerce.revenue.total. Emitting both in one
+    # payload means the same canonical metric appears twice, which would
+    # double-count in ledger aggregation and case detections. The first
+    # occurrence wins; later occurrences are flagged at their input index.
+    issues = find_duplicate_canonical_violations(
+        ("commerce.revenue.total", "commerce.orders.count", "revenue_today")
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("duplicate_canonical_metric", "revenue_today", 2, "warning"),
+    ]
+    assert "commerce.revenue.total" in issues[0].message
+    assert "revenue_today" in issues[0].message
+
+
+def test_duplicate_canonical_helper_flags_literal_repeats_and_alias_pairs_once_per_extra_occurrence():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    # Every occurrence after the first of a canonical resolution is flagged:
+    # a literal repeat and two different aliases of the same canonical metric
+    # each produce one diagnostic, in input order.
+    issues = find_duplicate_canonical_violations(
+        (
+            "commerce.orders.count",
+            "commerce.orders.count",
+            "orders_today",
+            "orders_today_tn",
+        )
+    )
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("duplicate_canonical_metric", "commerce.orders.count", 1),
+        ("duplicate_canonical_metric", "orders_today", 2),
+        ("duplicate_canonical_metric", "orders_today_tn", 3),
+    ]
+
+
+def test_duplicate_canonical_helper_returns_empty_for_distinct_canonical_metrics():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    assert (
+        find_duplicate_canonical_violations(
+            (
+                "commerce.orders.count",
+                "revenue_today",
+                "runtime.freshness.age_seconds",
+                "ad_spend_today",
+            )
+        )
+        == []
+    )
+
+
+def test_duplicate_canonical_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    # Unknown keys are owned by validate_metrics; repeating an unregistered key
+    # must not fire this diagnostic because no canonical resolution exists.
+    assert (
+        find_duplicate_canonical_violations(
+            ("custom.unknown_metric", "custom.unknown_metric")
+        )
+        == []
+    )
+
+
+def test_duplicate_canonical_helper_rejects_empty_or_non_string_metric_keys():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_duplicate_canonical_violations(("",))
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_duplicate_canonical_violations((123,))
+
+
+def test_duplicate_canonical_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    metric_keys = (
+        "commerce.revenue.total",
+        "revenue_today",
+        "custom.unknown_metric",
+        "orders_today",
+        "commerce.orders.count",
+    )
+    first = find_duplicate_canonical_violations(metric_keys)
+    second = find_duplicate_canonical_violations(metric_keys)
+    assert first == second
+    assert [(issue.code, issue.key, issue.index) for issue in first] == [
+        ("duplicate_canonical_metric", "revenue_today", 1),
+        ("duplicate_canonical_metric", "commerce.orders.count", 4),
+    ]
+
+
+def test_duplicate_canonical_helper_threads_custom_registry_through_resolution():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_duplicate_canonical_violations,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="commerce.subscriptions.count",
+                family="commerce.subscriptions",
+                label="Active subscriptions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("subscriptions_today",),
+                aggregation="latest",
+                case_allowed=True,
+            ),
+        )
+    )
+
+    issues = find_duplicate_canonical_violations(
+        ("commerce.subscriptions.count", "subscriptions_today"),
+        registry=registry,
+    )
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("duplicate_canonical_metric", "subscriptions_today", 1),
+    ]
+    assert "commerce.subscriptions.count" in issues[0].message
+
+
+def test_duplicate_canonical_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_duplicate_canonical_violations")
+    assert "find_duplicate_canonical_violations" in semantics.__all__

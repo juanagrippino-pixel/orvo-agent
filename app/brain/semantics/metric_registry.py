@@ -972,6 +972,57 @@ def find_freshness_companion_violations(
     return issues
 
 
+def find_duplicate_canonical_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys that resolve to a canonical
+    metric already present earlier in the same payload.
+
+    A ``duplicate_canonical_metric`` violation means a key (canonical or alias)
+    resolved to a canonical metric that an earlier key in the input already
+    resolved to — for example an adapter emitting both ``revenue_today`` and
+    ``commerce.revenue.total``. Such payloads would double-count the metric in
+    run-ledger aggregation and case detections. The first occurrence is
+    accepted; every later occurrence is flagged at its input index. Unknown
+    (unresolved) keys are intentionally skipped so this diagnostic composes
+    cleanly with :func:`validate_metrics` and the other envelope helpers.
+    Result order matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    first_seen: dict[str, str] = {}
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_duplicate_canonical_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        previous = first_seen.get(canonical)
+        if previous is None:
+            first_seen[canonical] = key
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="duplicate_canonical_metric",
+                key=key,
+                message=(
+                    f"Metric key '{key}' resolves to canonical metric "
+                    f"'{canonical}' which is already present in this payload "
+                    f"(first emitted as '{previous}'); duplicate canonical "
+                    f"metrics risk double-counting"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_report_allowed_violations(
     metric_keys: Iterable[str],
     *,
@@ -1454,6 +1505,7 @@ __all__ = [
     "UnknownMetricError",
     "default_metric_registry",
     "find_case_allowed_violations",
+    "find_duplicate_canonical_violations",
     "find_evidence_required_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
