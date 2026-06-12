@@ -275,6 +275,57 @@ def test_internal_run_history_and_detail_are_business_scoped_and_redacted(monkey
     assert cross.get_json()["error"]["code"] == "run_not_found"
 
 
+def test_internal_case_queue_summary_returns_scoped_counts(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    critical = _seed_case(db_path, _case_detection(run_id="run-artemea-critical"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-warn",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    ack = client.post(
+        f"/internal/brain/businesses/artemea/cases/{critical.case_id}/actions",
+        headers=AUTH,
+        json={"action_key": "acknowledge_case"},
+    )
+    assert ack.status_code == 200
+
+    response = client.get("/internal/brain/businesses/artemea/cases/queue-summary", headers=AUTH)
+
+    assert response.status_code == 200
+    assert "raw_snapshot_secret" not in response.get_data(as_text=True)
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    summary = body["data"]
+    assert summary["business_id"] == "artemea"
+    assert summary["total"] == 2
+    assert summary["by_status"] == {"open": 1, "acknowledged": 1}
+    assert summary["by_severity"] == {"critical": 1, "warning": 1}
+    assert summary["by_case_type"] == {"stockout_risk": 1, "sales_drop": 1}
+    assert summary["actionable_total"] == 2
+    assert summary["actionable_by_severity"] == {"critical": 1, "warning": 1}
+
+
+def test_internal_case_queue_summary_requires_bearer_token(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    missing = client.get("/internal/brain/businesses/artemea/cases/queue-summary")
+
+    assert missing.status_code == 401
+    assert missing.get_json()["error"]["code"] == "unauthorized"
+
+
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())
