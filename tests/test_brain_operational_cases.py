@@ -332,6 +332,68 @@ def test_resolved_case_reopens_when_same_dedupe_key_recurs():
     assert reopened.timeline[-1].event_type == "case_reopened"
 
 
+def test_operator_reopen_restores_resolved_case_and_emits_case_reopened_event(conn):
+    memory_store = InMemoryOperationalCaseStore()
+    sqlite_store = SQLiteOperationalCaseStore(conn)
+    reopened_by_store: dict[str, object] = {}
+    for name, store in (("memory", memory_store), ("sqlite", sqlite_store)):
+        opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+        store.transition_case(opened.case_id, status="acknowledged", actor_type="operator", actor_ref="juan", transitioned_at=utc_dt(9))
+        store.transition_case(opened.case_id, status="resolved", actor_type="operator", actor_ref="juan", reason="Fixed", transitioned_at=utc_dt(10))
+
+        reopened = store.reopen_case(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="operator access_token=raw_actor_secret",
+            reason="Stock volvió a caer",
+            reopened_at=utc_dt(11),
+        )
+        reopened_by_store[name] = reopened
+
+        assert reopened.status == "open"
+        assert reopened.resolved_at is None
+        assert reopened.acknowledged_at is None
+        assert reopened.updated_at == utc_dt(11)
+        event = reopened.timeline[-1]
+        assert event.event_type == "case_reopened"
+        assert event.actor_type == "operator"
+        assert event.actor_ref == "operator access_token=[REDACTED]"
+        assert event.created_at == utc_dt(11)
+        assert "Stock volvió a caer" in event.summary
+        assert event.metadata == {"from_status": "resolved", "to_status": "open"}
+        assert "raw_actor_secret" not in reopened.model_dump_json()
+
+        acknowledged_again = store.transition_case(
+            reopened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            transitioned_at=utc_dt(12),
+        )
+        assert acknowledged_again.status == "acknowledged"
+
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(reopened_by_store["sqlite"].case_id)
+    assert reloaded is not None
+    assert reloaded.status == "acknowledged"
+    assert "raw_actor_secret" not in reloaded.model_dump_json()
+    assert any(event.event_type == "case_reopened" for event in reloaded.timeline)
+
+
+def test_reopen_case_rejects_non_resolved_cases_and_unknown_case():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+
+    with pytest.raises(OperationalCaseStatusError):
+        store.reopen_case(opened.case_id, actor_type="operator", actor_ref="juan")
+
+    store.transition_case(opened.case_id, status="acknowledged", actor_type="operator", actor_ref="juan", transitioned_at=utc_dt(9))
+    with pytest.raises(OperationalCaseStatusError):
+        store.reopen_case(opened.case_id, actor_type="operator", actor_ref="juan")
+
+    with pytest.raises(KeyError):
+        store.reopen_case("missing-case", actor_type="operator", actor_ref="juan")
+
+
 def test_open_case_queue_orders_by_priority_then_age():
     store = InMemoryOperationalCaseStore()
     warning = make_stockout_detection(run_id="run-1")

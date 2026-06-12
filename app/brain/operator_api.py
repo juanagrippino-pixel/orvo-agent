@@ -20,7 +20,7 @@ from app.brain.operational_cases import (
 from app.brain.run_ledger import RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
 
-CaseActionKey = Literal["acknowledge_case", "resolve_case", "add_comment"]
+CaseActionKey = Literal["acknowledge_case", "resolve_case", "reopen_case", "add_comment"]
 _ALLOWED_CASE_ACTIONS: set[str] = set(get_args(CaseActionKey))
 _ALLOWED_CASE_STATUSES: set[str] = set(get_args(OperationalCaseStatus))
 _ALLOWED_RUN_STATUSES: set[str] = set(get_args(RunStatus))
@@ -3281,6 +3281,18 @@ def apply_case_action(
             comment=comment.strip(),
             metadata=metadata,
         )
+        return {"case": case_detail(updated)}
+
+    if action_key == "reopen_case":
+        try:
+            updated = store.reopen_case(
+                case.case_id,
+                actor_type="operator",
+                actor_ref=effective_actor_ref,
+                reason=reason or "Reopened by operator.",
+            )
+        except OperationalCaseStatusError as exc:
+            raise OperatorAPIError("invalid_case_transition", str(exc), status_code=409) from exc
         return {"case": case_detail(updated)}
 
     target_status: OperationalCaseStatus = "acknowledged" if action_key == "acknowledge_case" else "resolved"
