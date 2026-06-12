@@ -186,6 +186,36 @@ def test_owner_facing_actionable_cases_excludes_legacy_cases_without_evidence_sn
     assert [case.case_id for case in owner_cases] == [with_evidence.case_id]
 
 
+def test_owner_facing_actionable_cases_excludes_terminal_and_worker_only_families():
+    store = InMemoryOperationalCaseStore()
+    visible = store.upsert_detection(
+        make_stockout_detection(run_id="run-visible", snapshots=[make_stock_snapshot(run_id="run-visible")]),
+        detected_at=utc_dt(8),
+    )
+    resolved = OperationalCase.model_validate(
+        {
+            **visible.model_dump(),
+            "case_id": "case-resolved-owner-hidden",
+            "dedupe_key": "artemea/stockout_risk/business/resolved/commerce.inventory/daily",
+            "status": "resolved",
+            "resolved_at": utc_dt(9),
+        }
+    )
+    worker_only = OperationalCase.model_validate(
+        {
+            **visible.model_dump(),
+            "case_id": "case-worker-only",
+            "dedupe_key": "artemea/unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            "case_type": "unanswered_conversations",
+            "title": "Conversaciones sin responder",
+        }
+    )
+
+    owner_cases = owner_facing_actionable_cases([visible, resolved, worker_only])
+
+    assert [case.case_id for case in owner_cases] == [visible.case_id]
+
+
 def test_detect_cases_from_report_synthesizes_minimal_evidence_snapshots():
     source = Evidence(source="tiendanube", label="Tiendanube")
     report = DailyReport(
