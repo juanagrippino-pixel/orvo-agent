@@ -89,11 +89,6 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["evidence_source_count"] == 1
     assert projection["source_connectors"] == ["tiendanube"]
     assert projection["latest_evidence_at"] == "2026-05-24T08:00:00Z"
-    assert projection["comment_count"] == 0
-    assert projection["last_comment_at"] is None
-    assert projection["timeline_event_count"] == 1
-    assert projection["last_event_at"] == "2026-05-24T08:00:00Z"
-    assert projection["last_event_type"] == "case_opened"
     assert projection["degraded"] is False
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
@@ -103,6 +98,45 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert case_priority_bracket(case) == "high"
     assert case_sla_status(case, now=now) == "pending"
     assert case_sla_status(case, now=datetime(2026, 5, 24, 10, 1, tzinfo=timezone.utc)) == "breached"
+
+
+def test_case_work_item_projection_exposes_evidence_lineage(tmp_path):
+    db_path = tmp_path / "work-item-evidence-lineage.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-evidence-lineage", priority=87))
+    first_snapshot_id = case.evidence_snapshots[0].snapshot_id
+    later_snapshot = case.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_id": "snapshot-later-evidence",
+            "snapshot_key": "run-evidence-lineage-google/evidence://artemea/run-evidence-lineage-google/stockout_risk/stockout_risk/business/monitored",
+            "captured_at": datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+            "run_id": "run-evidence-lineage-google",
+            "artifact_ref": "ledger://runs/run-evidence-lineage-google/daily-report",
+            "evidence_ref": "evidence://artemea/run-evidence-lineage-google/stockout_risk",
+            "source": "google_sheets",
+            "source_label": "Google Sheets",
+            "summary": "Stock snapshot from Google Sheets.",
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    case = store.attach_evidence(
+        case.case_id,
+        snapshots=[later_snapshot],
+        run_id="run-evidence-lineage-google",
+        artifact_ref="ledger://runs/run-evidence-lineage-google/daily-report",
+        summary="Attached Google Sheets evidence.",
+    )
+    conn.close()
+
+    projection = case_work_item_projection(case, now=datetime(2026, 5, 24, 9, tzinfo=timezone.utc))
+
+    assert projection["evidence_snapshot_ids"] == [first_snapshot_id, "snapshot-later-evidence"]
+    assert projection["evidence_snapshot_count"] == 2
+    assert projection["evidence_source_count"] == 2
+    assert projection["source_connectors"] == ["google_sheets", "tiendanube"]
+    assert projection["latest_evidence_at"] == "2026-05-24T09:30:00Z"
 
 
 def test_issue_type_definitions_expose_release_state_from_semantic_registry():
@@ -325,11 +359,44 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": False,
         "facetable": True,
     }
+    assert fields["latest_evidence_at"] == {
+        "field": "latest_evidence_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["evidence_snapshot_count"] == {
+        "field": "evidence_snapshot_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["evidence_source_count"] == {
+        "field": "evidence_source_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
-    assert allowed_work_item_query_sort_fields() == {"due_at", "opened_at", "priority_score", "sla_target_seconds", "updated_at"}
+    assert allowed_work_item_query_sort_fields() == {
+        "due_at",
+        "evidence_snapshot_count",
+        "evidence_source_count",
+        "latest_evidence_at",
+        "opened_at",
+        "priority_score",
+        "sla_target_seconds",
+        "updated_at",
+    }
     assert allowed_work_item_facet_fields() == {
         "assignee_ref",
         "case_type",

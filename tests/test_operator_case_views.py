@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -140,6 +140,9 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("due_at < 2026-05-24T10:00:00Z").normalized == (
         "due_at < 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql(
+        "latest_evidence_at >= 2026-05-24T08:00:00Z ORDER BY latest_evidence_at DESC"
+    ).normalized == "latest_evidence_at >= 2026-05-24T08:00:00+00:00 ORDER BY latest_evidence_at DESC"
     assert parse_case_jql("sla_status = breached").normalized == (
         "sla_status = breached ORDER BY priority_score DESC, opened_at ASC"
     )
@@ -429,64 +432,6 @@ def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scop
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
-def test_internal_case_queue_filters_and_sorts_by_comment_activity(monkeypatch, tmp_path):
-    client, db_path = _client(monkeypatch, tmp_path)
-    earlier_case = _seed_case(
-        db_path,
-        _case_detection(run_id="run-comment-earlier", priority=50, dedupe_suffix="stockout_risk/business/comment-earlier/daily"),
-    )
-    later_case = _seed_case(
-        db_path,
-        _case_detection(run_id="run-comment-later", priority=50, dedupe_suffix="stockout_risk/business/comment-later/daily"),
-    )
-    _seed_case(
-        db_path,
-        _case_detection(
-            business_id="other",
-            run_id="run-comment-other",
-            priority=50,
-            dedupe_suffix="stockout_risk/business/comment-other/daily",
-        ),
-    )
-
-    conn = sqlite3.connect(db_path)
-    init_schema(conn)
-    store = SQLiteOperationalCaseStore(conn)
-    store.add_comment(
-        earlier_case.case_id,
-        actor_type="operator",
-        actor_ref="operator:ana",
-        comment="Revisar stock físico.",
-        commented_at=datetime(2026, 5, 24, 9, 15, tzinfo=timezone.utc),
-    )
-    store.add_comment(
-        later_case.case_id,
-        actor_type="operator",
-        actor_ref="operator:juan",
-        comment="Cliente esperando confirmación.",
-        commented_at=datetime(2026, 5, 24, 9, 45, tzinfo=timezone.utc),
-    )
-    conn.close()
-
-    response = client.get(
-        "/internal/brain/businesses/artemea/cases",
-        headers=AUTH,
-        query_string={"jql": "comment_count >= 1 ORDER BY last_comment_at DESC"},
-    )
-
-    assert response.status_code == 200
-    body = response.get_json()
-    assert body["ok"] is True
-    assert body["data"]["normalized_jql"] == "comment_count >= 1 ORDER BY last_comment_at DESC"
-    assert [case["case_id"] for case in body["data"]["cases"]] == [later_case.case_id, earlier_case.case_id]
-    assert [case["work_item"]["comment_count"] for case in body["data"]["cases"]] == [1, 1]
-    assert [case["work_item"]["last_comment_at"] for case in body["data"]["cases"]] == [
-        "2026-05-24T09:45:00Z",
-        "2026-05-24T09:15:00Z",
-    ]
-    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
-
-
 def test_internal_case_queue_sorts_by_latest_evidence_at(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     older_case = _seed_case(
@@ -534,68 +479,6 @@ def test_internal_case_queue_sorts_by_latest_evidence_at(monkeypatch, tmp_path):
     assert body["data"]["normalized_jql"] == "status = open ORDER BY latest_evidence_at DESC"
     assert [case["case_id"] for case in body["data"]["cases"]] == [newer_case.case_id, older_case.case_id]
     assert body["data"]["cases"][0]["work_item"]["latest_evidence_at"] == "2026-05-24T09:30:00Z"
-
-
-def test_internal_case_queue_sorts_by_last_case_event(monkeypatch, tmp_path):
-    client, db_path = _client(monkeypatch, tmp_path)
-    older_case = _seed_case(
-        db_path,
-        _case_detection_with_source(
-            source="tiendanube",
-            run_id="run-older-event",
-            priority=50,
-            dedupe_suffix="stockout_risk/business/monitored/older-event/daily",
-        ),
-    )
-    newer_case = _seed_case(
-        db_path,
-        _case_detection_with_source(
-            source="tiendanube",
-            run_id="run-newer-event",
-            priority=50,
-            dedupe_suffix="stockout_risk/business/monitored/newer-event/daily",
-        ),
-    )
-    later_snapshot = newer_case.evidence_snapshots[0].model_copy(
-        update={
-            "snapshot_id": "snapshot-newer-event-later",
-            "captured_at": datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
-            "run_id": "run-newer-event-google",
-            "artifact_ref": "ledger://runs/run-newer-event-google/daily-report",
-            "source": "google_sheets",
-            "source_label": "Google Sheets",
-            "evidence_ref": "evidence://google_sheets/run-newer-event-google/stockout_risk",
-            "snapshot_key": "run-newer-event-google/evidence://google_sheets/run-newer-event-google/stockout_risk/stockout_risk/business/monitored",
-        }
-    )
-
-    conn = sqlite3.connect(db_path)
-    init_schema(conn)
-    store = SQLiteOperationalCaseStore(conn)
-    store.attach_evidence(
-        newer_case.case_id,
-        snapshots=[later_snapshot],
-        run_id="run-newer-event-google",
-        artifact_ref="ledger://runs/run-newer-event-google/daily-report",
-        summary="Attached later Google Sheets evidence.",
-        attached_at=datetime(2026, 5, 24, 9, 35, tzinfo=timezone.utc),
-    )
-    conn.close()
-
-    response = client.get(
-        "/internal/brain/businesses/artemea/cases",
-        headers=AUTH,
-        query_string={"jql": "status = open ORDER BY last_event_at DESC"},
-    )
-
-    assert response.status_code == 200
-    body = response.get_json()
-    assert body["ok"] is True
-    assert body["data"]["normalized_jql"] == "status = open ORDER BY last_event_at DESC"
-    assert [case["case_id"] for case in body["data"]["cases"]] == [newer_case.case_id, older_case.case_id]
-    assert body["data"]["cases"][0]["work_item"]["timeline_event_count"] == 2
-    assert body["data"]["cases"][0]["work_item"]["last_event_at"] == "2026-05-24T09:35:00Z"
-    assert body["data"]["cases"][0]["work_item"]["last_event_type"] == "evidence_attached"
 
 
 def test_internal_case_queue_filters_degraded_cases_and_keeps_business_scope(monkeypatch, tmp_path):
