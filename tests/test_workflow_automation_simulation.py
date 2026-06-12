@@ -476,6 +476,73 @@ def test_simulate_case_workflow_matches_degraded_condition_from_evidence_snapsho
     assert result["actions"][0]["execution_status"] == "dry_run"
 
 
+def test_simulate_case_workflow_matches_evidence_freshness_state_condition_without_side_effects():
+    _, case = seed_case(degraded=True)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="stale-evidence-refresh-credentials",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="freshness_state", value="stale")],
+        actions=[WorkflowAction(action_key="confirm_stock", params={"note": "Confirm stale inventory evidence"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 1), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {"field": "freshness_state", "expected": "stale", "actual": ["stale"], "matched": True}
+    ]
+    assert result["actions"][0]["action_key"] == "confirm_stock"
+    assert result["actions"][0]["execution_status"] == "suggestion_only"
+    assert result["side_effects_executed"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
+def test_simulate_case_workflow_suppresses_evidence_freshness_state_mismatch_without_ledger_write():
+    _, case = seed_case(degraded=True)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="fresh-evidence-only",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="freshness_state", value="fresh")],
+        actions=[WorkflowAction(action_key="confirm_stock", params={"note": "Only fresh evidence"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 1), action_ledger=ledger)
+
+    assert result["matched"] is False
+    assert result["conditions"] == [
+        {"field": "freshness_state", "expected": "fresh", "actual": ["stale"], "matched": False}
+    ]
+    assert result["actions"] == []
+    assert result["skipped_actions"] == []
+    assert result["non_match_reasons"] == [
+        {"type": "condition_mismatch", "field": "freshness_state", "expected": "fresh", "actual": ["stale"]}
+    ]
+    assert result["side_effects_executed"] == 0
+    assert ledger.list_actions(business_id="artemea") == []
+
+
+@pytest.mark.parametrize("condition_value", ["", "current", None])
+def test_simulate_case_workflow_rejects_invalid_freshness_state_condition_value(condition_value):
+    _, case = seed_case(degraded=True)
+    rule = WorkflowRule(
+        rule_id="invalid-freshness-state-condition",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="freshness_state", value=condition_value)],
+        actions=[WorkflowAction(action_key="confirm_stock", params={"note": "Invalid freshness gate"})],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as exc:
+        simulate_case_workflow(rule, case, now=utc(13, 1))
+
+    assert exc.value.code == "invalid_workflow_condition"
+    assert "freshness_state" in exc.value.message
+
+
 def test_simulate_case_workflow_matches_status_category_condition_without_side_effects():
     store, case = seed_case()
     case = store.transition_case(

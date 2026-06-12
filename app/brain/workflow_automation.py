@@ -18,7 +18,13 @@ from typing import Any, Literal
 from app.brain.action_catalog import ActionDefinition as WorkflowActionDefinition
 from app.brain.action_catalog import workflow_action_registry
 from app.brain.operational_cases import ACTIONABLE_OPERATIONAL_CASE_STATUSES, OperationalCase
-from app.brain.operator_case_projections import entity_kind, is_case_degraded, source_connectors
+from app.brain.operator_case_projections import (
+    EVIDENCE_FRESHNESS_STATES,
+    entity_kind,
+    evidence_freshness_states,
+    is_case_degraded,
+    source_connectors,
+)
 from app.brain.work_items import allowed_priority_brackets, case_priority_bracket, case_status_category
 from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.workflow_action_ledger import WorkflowActionLedgerStore
@@ -38,6 +44,7 @@ WorkflowConditionField = Literal[
     "min_case_age_minutes",
     "max_case_age_minutes",
     "degraded",
+    "freshness_state",
     "source_connector",
     "entity_kind",
 ]
@@ -160,6 +167,8 @@ def _condition_actual(case: OperationalCase, field_name: str, now: datetime) -> 
         return _case_age_minutes(case, now)
     if field_name == "degraded":
         return is_case_degraded(case)
+    if field_name == "freshness_state":
+        return evidence_freshness_states(case)
     if field_name == "source_connector":
         return source_connectors(case)
     if field_name == "entity_kind":
@@ -203,6 +212,15 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
             raise WorkflowAutomationError(
                 "invalid_workflow_condition",
                 "source_connector condition value must be a non-empty string",
+            )
+        if not isinstance(actual, list):
+            return False
+        return condition.value in actual
+    if condition.field == "freshness_state":
+        if condition.value not in EVIDENCE_FRESHNESS_STATES:
+            raise WorkflowAutomationError(
+                "invalid_workflow_condition",
+                f"freshness_state condition value must be one of: {', '.join(sorted(EVIDENCE_FRESHNESS_STATES))}",
             )
         if not isinstance(actual, list):
             return False
