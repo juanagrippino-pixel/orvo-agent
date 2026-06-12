@@ -894,6 +894,30 @@ def test_validate_case_metric_keys_composes_unknown_then_case_not_allowed_diagno
     ]
 
 
+def test_validate_case_metric_keys_appends_duplicate_canonical_after_case_not_allowed():
+    """Parallel to :func:`validate_report_metric_keys`: the case-side key
+    composition must append duplicate_canonical_metric after the
+    unknown_metric -> case_not_allowed pair so a payload emitting both an
+    alias and its canonical key (double-counting risk in case detections)
+    is flagged at the later occurrence's input index."""
+
+    from app.brain.semantics.metric_registry import validate_case_metric_keys
+
+    metric_keys = (
+        "orders_today",
+        "avg_order_value",
+        "custom.unknown_case_metric",
+        "commerce.orders.count",
+    )
+
+    issues = validate_case_metric_keys(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_case_metric", 2, "warning"),
+        ("case_not_allowed", "avg_order_value", 1, "warning"),
+        ("duplicate_canonical_metric", "commerce.orders.count", 3, "warning"),
+    ]
+
+
 def test_validate_case_metric_keys_returns_empty_when_all_keys_are_canonical_case_allowed():
     from app.brain.semantics.metric_registry import validate_case_metric_keys
 
@@ -1230,7 +1254,7 @@ def test_validate_case_metric_objects_composes_unknown_then_case_then_evidence_t
         _metric("custom.unknown_case_metric", "tiendanube"),
         _metric("avg_order_value", "tiendanube", value=7500, unit="ARS"),
         _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
-        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+        _metric("stock_units", "tiendanube", value="not a number"),
     ]
 
     issues = validate_case_metric_objects(metrics)
@@ -1239,7 +1263,7 @@ def test_validate_case_metric_objects_composes_unknown_then_case_then_evidence_t
         ("unknown_metric", "custom.unknown_case_metric", 1, "warning"),
         ("case_not_allowed", "avg_order_value", 2, "warning"),
         ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
-        ("value_kind_mismatch", "commerce.orders.count", 4, "warning"),
+        ("value_kind_mismatch", "stock_units", 4, "warning"),
     ]
 
 
@@ -1282,7 +1306,7 @@ def test_validate_case_metric_objects_slots_evidence_missing_between_case_and_ev
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
-            "key": "commerce.orders.count",
+            "key": "stock_units",
             "value": "not a number",
             "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
@@ -1296,7 +1320,39 @@ def test_validate_case_metric_objects_slots_evidence_missing_between_case_and_ev
         ("case_not_allowed", "avg_order_value", 2, "warning"),
         ("evidence_missing", "commerce.revenue.total", 3, "warning"),
         ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
-        ("value_kind_mismatch", "commerce.orders.count", 5, "warning"),
+        ("value_kind_mismatch", "stock_units", 5, "warning"),
+    ]
+
+
+def test_validate_case_metric_objects_slots_duplicate_canonical_between_case_and_evidence_missing():
+    """Mirrors :func:`validate_report_metric_objects`: the key-level
+    diagnostics stay contiguous, so duplicate_canonical_metric must land
+    immediately after case_not_allowed and before the object-level evidence
+    diagnostics. The duplicate at index 3 is the canonical key
+    (``commerce.orders.count``) resolving to the same metric as
+    ``orders_today`` at index 0 while carrying clean evidence and a count
+    value, proving the duplicate slot fires independently of any object-level
+    violation."""
+
+    from app.brain.semantics.metric_registry import validate_case_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_case_metric", "tiendanube"),
+        _metric("avg_order_value", "tiendanube", value=7500, unit="ARS"),
+        _metric("commerce.orders.count", "tiendanube", value=15),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
+        _metric("stock_units", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_case_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_case_metric", 1, "warning"),
+        ("case_not_allowed", "avg_order_value", 2, "warning"),
+        ("duplicate_canonical_metric", "commerce.orders.count", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "stock_units", 5, "warning"),
     ]
 
 
