@@ -30,9 +30,10 @@ def test_list_events_queries_secret_shaped_business_id_using_persisted_redacted_
     )
 
     assert [event["event_id"] for event in events] == [event_id]
-    assert events[0]["business_id"] == "tenant?access_token=%5BREDACTED%5D"
+    assert events[0]["business_id"] == "[REDACTED]"
     serialized = json.dumps(events[0], sort_keys=True)
     assert "raw-business-secret" not in serialized
+    assert "access_token" not in serialized
     assert "audit_business_scope_sha256_v1:" not in serialized
 
 
