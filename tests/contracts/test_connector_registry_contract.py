@@ -101,6 +101,47 @@ def test_runtime_compiler_uses_connector_registry_contract_not_private_duplicate
     }
 
 
+def test_connector_spec_control_plane_config_validation_does_not_emit_secret_values():
+    """Strict connector config diagnostics must name legacy/unknown fields,
+    never echo inline secret values from durable control-plane config.
+
+    This pins the control-plane secret boundary for connector registry config
+    validation: adapters may still accept legacy inline tokens during execution,
+    but validation diagnostics should steer callers toward ``secret_refs``
+    without exposing the token-like values themselves.
+    """
+    from app.brain.connector_registry import CONNECTOR_TYPE_TIENDANUBE, get_connector_spec
+
+    inline_secret = "tn_inline_secret_should_not_appear"
+    unexpected_secret = "unexpected_secret_should_not_appear"
+    tiendanube = get_connector_spec(CONNECTOR_TYPE_TIENDANUBE)
+
+    issues = tiendanube.validate_control_plane_config(
+        params={
+            "store_id": "12345",
+            "access_token": inline_secret,
+            "unexpected": unexpected_secret,
+        },
+        secret_refs={
+            "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
+        },
+        strict=True,
+    )
+
+    assert {
+        (issue.code, issue.key, issue.severity)
+        for issue in issues
+    } >= {
+        ("legacy_inline_secret", "access_token", "warning"),
+        ("unknown_config_field", "unexpected", "error"),
+    }
+    rendered = repr(issues)
+    assert inline_secret not in rendered
+    assert unexpected_secret not in rendered
+    assert "tn_inline_secret" not in rendered
+    assert "unexpected_secret" not in rendered
+
+
 def test_sample_connector_is_not_declared_as_forced_or_scheduled_daily_runtime():
     from app.brain.connector_registry import CAPABILITY_DAILY_REPORT, CONNECTOR_TYPE_SAMPLE, get_connector_spec
 
