@@ -1,0 +1,582 @@
+"""Jira Service Management-style projections over Operational Cases.
+
+The functions in this module are read-only service-layer helpers. They translate
+canonical ``OperationalCase`` state into service-management views (record type,
+owner-facing status, and SLA clock state) without mutating lifecycle state or
+making surfaces a source of truth.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from app.brain.operational_cases import OperationalCase, OperationalCaseStore
+from app.brain.security.redaction import redact_secrets
+
+_SERVICE_RECORD_LABELS: dict[str, dict[str, str]] = {
+    "incident": {"label": "Incident", "label_es": "Incidente"},
+    "service_request": {"label": "Service request", "label_es": "Solicitud"},
+    "problem": {"label": "Problem", "label_es": "Problema"},
+    "change": {"label": "Change", "label_es": "Cambio"},
+}
+ALLOWED_SERVICE_MANAGEMENT_RECORD_TYPES = frozenset(_SERVICE_RECORD_LABELS)
+
+_SERVICE_RECORD_TYPE_BY_CASE_TYPE: dict[str, str] = {
+    "stockout_risk": "incident",
+    "spend_without_orders": "incident",
+    "data_stale": "incident",
+    "sales_drop": "problem",
+    "channel_mix_shift": "problem",
+    "unanswered_conversations": "service_request",
+}
+
+_OWNER_STATUS_BY_CASE_STATUS: dict[str, dict[str, str]] = {
+    "open": {"code": "new", "label_es": "Nuevo", "status_category": "to_do"},
+    "acknowledged": {"code": "triaged", "label_es": "En triage", "status_category": "in_progress"},
+    "in_progress": {"code": "in_progress", "label_es": "En progreso", "status_category": "in_progress"},
+    "resolved": {"code": "resolved", "label_es": "Resuelto", "status_category": "done"},
+    "dismissed": {"code": "dismissed", "label_es": "Descartado", "status_category": "done"},
+}
+
+_WAITING_OWNER_STATUSES: dict[str, dict[str, str]] = {
+    # Jira/Atlassian status categories are coarse buckets (to_do,
+    # in_progress, done). Waiting states remain owner-friendly Orvo status
+    # codes, but they still live in the in-progress category so downstream JQL
+    # and queue groupings do not invent a fourth source-of-truth category.
+    "owner": {
+        "code": "waiting_owner",
+        "label_es": "Esperando al dueño",
+        "status_category": "in_progress",
+    },
+    "external": {
+        "code": "waiting_external",
+        "label_es": "Esperando a un tercero",
+        "status_category": "in_progress",
+    },
+}
+ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES = frozenset(
+    {payload["code"] for payload in _OWNER_STATUS_BY_CASE_STATUS.values()}
+    | {payload["code"] for payload in _WAITING_OWNER_STATUSES.values()}
+)
+ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUS_CATEGORIES = frozenset(
+    {payload["status_category"] for payload in _OWNER_STATUS_BY_CASE_STATUS.values()}
+    | {payload["status_category"] for payload in _WAITING_OWNER_STATUSES.values()}
+)
+
+ALLOWED_SERVICE_MANAGEMENT_ESCALATION_REASONS = frozenset(
+    {
+        "critical_case_unacknowledged",
+        "first_response_sla_breached",
+        "resolution_sla_breached",
+        "waiting_external",
+        "waiting_owner",
+    }
+)
+
+_FIRST_RESPONSE_TARGET_SECONDS: dict[str, int] = {
+    "critical": 60 * 60,
+    "warning": 4 * 60 * 60,
+    "info": 24 * 60 * 60,
+}
+
+_RESOLUTION_TARGET_SECONDS: dict[str, int] = {
+    "critical": 4 * 60 * 60,
+    "warning": 24 * 60 * 60,
+    "info": 72 * 60 * 60,
+}
+
+_SLA_AT_RISK_WINDOW_SECONDS = 15 * 60
+
+ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES = frozenset(
+    {"breached", "at_risk", "on_track", "paused", "completed"}
+)
+ALLOWED_SERVICE_MANAGEMENT_ACTIVE_SLA_CLOCKS = frozenset({"first_response", "resolution"})
+ALLOWED_SERVICE_MANAGEMENT_SORTS = frozenset({"priority", "sla_urgency"})
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalize_reference_time(now: datetime | None) -> datetime:
+    if now is None:
+        return _now_utc()
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return now.astimezone(timezone.utc)
+
+
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _metadata_datetime(value: Any) -> datetime | None:
+    """Return a timezone-aware metadata timestamp, or ``None`` if unusable."""
+
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if candidate.endswith("Z"):
+            candidate = f"{candidate[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _normalize_sla_status_filter(sla_status: str | None) -> str | None:
+    if sla_status in (None, ""):
+        return None
+    if sla_status not in ALLOWED_SERVICE_MANAGEMENT_SLA_STATUSES:
+        raise ValueError(f"unsupported sla_status: {sla_status}")
+    return str(sla_status)
+
+
+def _normalize_service_record_type_filter(service_record_type: str | None) -> str | None:
+    if service_record_type in (None, ""):
+        return None
+    if service_record_type not in ALLOWED_SERVICE_MANAGEMENT_RECORD_TYPES:
+        raise ValueError(f"unsupported service_record_type: {service_record_type}")
+    return str(service_record_type)
+
+
+def _normalize_owner_status_filter(owner_status: str | None) -> str | None:
+    if owner_status in (None, ""):
+        return None
+    if owner_status not in ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUSES:
+        raise ValueError(f"unsupported owner_status: {owner_status}")
+    return str(owner_status)
+
+
+def _normalize_owner_status_category_filter(owner_status_category: str | None) -> str | None:
+    if owner_status_category in (None, ""):
+        return None
+    if owner_status_category not in ALLOWED_SERVICE_MANAGEMENT_OWNER_STATUS_CATEGORIES:
+        raise ValueError(f"unsupported owner_status_category: {owner_status_category}")
+    return str(owner_status_category)
+
+
+def _normalize_escalation_reason_filter(escalation_reason: str | None) -> str | None:
+    if escalation_reason in (None, ""):
+        return None
+    if escalation_reason not in ALLOWED_SERVICE_MANAGEMENT_ESCALATION_REASONS:
+        raise ValueError(f"unsupported escalation_reason: {escalation_reason}")
+    return str(escalation_reason)
+
+
+def _normalize_active_sla_clock_filter(active_sla_clock: str | None) -> str | None:
+    if active_sla_clock in (None, ""):
+        return None
+    if active_sla_clock not in ALLOWED_SERVICE_MANAGEMENT_ACTIVE_SLA_CLOCKS:
+        raise ValueError(f"unsupported active_sla_clock: {active_sla_clock}")
+    return str(active_sla_clock)
+
+
+def _normalize_sort_by(sort_by: str | None) -> str:
+    if sort_by in (None, ""):
+        return "priority"
+    if sort_by not in ALLOWED_SERVICE_MANAGEMENT_SORTS:
+        raise ValueError(f"unsupported sort_by: {sort_by}")
+    return str(sort_by)
+
+
+def _service_record_type(case: OperationalCase) -> dict[str, str]:
+    metadata_record_type = case.metadata.get("service_record_type")
+    if metadata_record_type in _SERVICE_RECORD_LABELS:
+        code = str(metadata_record_type)
+    else:
+        code = _SERVICE_RECORD_TYPE_BY_CASE_TYPE.get(case.case_type, "incident")
+    labels = _SERVICE_RECORD_LABELS[code]
+    return {"code": code, **labels}
+
+
+def _owner_status(case: OperationalCase) -> dict[str, str]:
+    waiting_on = case.metadata.get("waiting_on")
+    if case.status in {"acknowledged", "in_progress"} and waiting_on in _WAITING_OWNER_STATUSES:
+        payload = dict(_WAITING_OWNER_STATUSES[str(waiting_on)])
+    else:
+        payload = dict(_OWNER_STATUS_BY_CASE_STATUS[case.status])
+    payload["source_status"] = case.status
+    return payload
+
+
+def _sla_clock(
+    *,
+    case: OperationalCase,
+    target_seconds: int,
+    policy_key: str,
+    stopped_at: datetime | None,
+    paused_at: datetime | None = None,
+    pause_reason: str | None = None,
+    reference: datetime,
+) -> dict[str, Any]:
+    started_at = case.opened_at.astimezone(timezone.utc)
+    normalized_stopped_at = stopped_at.astimezone(timezone.utc) if stopped_at is not None else None
+    normalized_paused_at = paused_at.astimezone(timezone.utc) if paused_at is not None else None
+    if normalized_stopped_at is not None:
+        effective_stop = normalized_stopped_at
+    elif normalized_paused_at is not None:
+        effective_stop = normalized_paused_at
+    else:
+        effective_stop = reference
+    elapsed_seconds = max(int((effective_stop - started_at).total_seconds()), 0)
+    due_at = started_at + timedelta(seconds=target_seconds)
+    overdue_seconds = max(elapsed_seconds - target_seconds, 0)
+    payload = {
+        "policy_key": policy_key,
+        "target_seconds": target_seconds,
+        "elapsed_seconds": elapsed_seconds,
+        "remaining_seconds": max(target_seconds - elapsed_seconds, 0),
+        "overdue_seconds": overdue_seconds,
+        "breached": elapsed_seconds > target_seconds,
+        "completed": normalized_stopped_at is not None,
+        "started_at": _iso(started_at),
+        "stopped_at": _iso(normalized_stopped_at),
+        "due_at": _iso(due_at),
+    }
+    if normalized_paused_at is not None and normalized_stopped_at is None:
+        payload.update(
+            {
+                "paused": True,
+                "paused_at": _iso(normalized_paused_at),
+                "pause_reason": pause_reason,
+            }
+        )
+    return payload
+
+
+def _resolution_pause(
+    case: OperationalCase,
+    *,
+    owner_status: dict[str, str],
+    reference: datetime,
+) -> tuple[datetime | None, str | None]:
+    if owner_status["code"] not in {"waiting_owner", "waiting_external"}:
+        return None, None
+    waiting_since = _metadata_datetime(case.metadata.get("waiting_since"))
+    if waiting_since is not None and waiting_since <= reference:
+        return waiting_since, owner_status["code"]
+    return case.acknowledged_at or case.updated_at, owner_status["code"]
+
+
+def _sla_projection(case: OperationalCase, *, owner_status: dict[str, str], reference: datetime) -> dict[str, Any]:
+    severity = str(case.severity)
+    first_response_target = _FIRST_RESPONSE_TARGET_SECONDS[severity]
+    resolution_target = _RESOLUTION_TARGET_SECONDS[severity]
+    terminal_stopped_at = case.resolved_at or case.dismissed_at
+    first_response_stopped_at = case.acknowledged_at or terminal_stopped_at
+    resolution_stopped_at = terminal_stopped_at
+    resolution_paused_at, resolution_pause_reason = _resolution_pause(
+        case,
+        owner_status=owner_status,
+        reference=reference,
+    )
+    return {
+        "first_response": _sla_clock(
+            case=case,
+            target_seconds=first_response_target,
+            policy_key=f"first_response_{severity}_{first_response_target // 60}m",
+            stopped_at=first_response_stopped_at,
+            reference=reference,
+        ),
+        "resolution": _sla_clock(
+            case=case,
+            target_seconds=resolution_target,
+            policy_key=f"resolution_{severity}_{resolution_target // 60}m",
+            stopped_at=resolution_stopped_at,
+            paused_at=resolution_paused_at,
+            pause_reason=resolution_pause_reason,
+            reference=reference,
+        ),
+    }
+
+
+def _sla_status(sla: dict[str, Any]) -> dict[str, Any]:
+    """Summarize active SLA clocks into one owner/operator queue state."""
+
+    clocks = [("first_response", sla["first_response"]), ("resolution", sla["resolution"])]
+    active_clocks = [
+        (clock_name, clock)
+        for clock_name, clock in clocks
+        if not clock["completed"] and not clock.get("paused")
+    ]
+    breached_clocks = [(clock_name, clock) for clock_name, clock in active_clocks if clock["breached"]]
+    at_risk_clocks = [
+        (clock_name, clock)
+        for clock_name, clock in active_clocks
+        if not clock["breached"] and clock["remaining_seconds"] <= _SLA_AT_RISK_WINDOW_SECONDS
+    ]
+    paused_clocks = [
+        (clock_name, clock)
+        for clock_name, clock in clocks
+        if not clock["completed"] and clock.get("paused")
+    ]
+
+    def _clock_payload(
+        *,
+        code: str,
+        label_es: str,
+        clock_entry: tuple[str, dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        clock_name, clock = clock_entry if clock_entry is not None else (None, None)
+        return {
+            "code": code,
+            "label_es": label_es,
+            "active_clock": clock_name,
+            "active_policy_key": clock["policy_key"] if clock is not None else None,
+            "due_at": clock["due_at"] if clock is not None else None,
+            "remaining_seconds": clock["remaining_seconds"] if clock is not None else None,
+            "overdue_seconds": clock["overdue_seconds"] if clock is not None else None,
+        }
+
+    if breached_clocks:
+        breached = min(breached_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="breached", label_es="SLA vencido", clock_entry=breached)
+    if at_risk_clocks:
+        at_risk = min(at_risk_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="at_risk", label_es="SLA en riesgo", clock_entry=at_risk)
+    if active_clocks:
+        next_clock = min(active_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="on_track", label_es="SLA en curso", clock_entry=next_clock)
+    if paused_clocks:
+        paused = min(paused_clocks, key=lambda clock_entry: clock_entry[1]["due_at"])
+        return _clock_payload(code="paused", label_es="SLA pausado", clock_entry=paused)
+    return _clock_payload(code="completed", label_es="SLA completado", clock_entry=None)
+
+
+def _escalation_reasons(
+    case: OperationalCase,
+    *,
+    owner_status: dict[str, str],
+    sla: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Return deterministic service-management escalation reasons.
+
+    These are read-only labels for operator triage and do not mutate case
+    priority, status, SLA clocks, or workflow lifecycle.
+    """
+
+    reasons: list[dict[str, str]] = []
+    if case.severity == "critical" and case.status == "open":
+        reasons.append(
+            {
+                "code": "critical_case_unacknowledged",
+                "label_es": "Caso crítico sin acuse",
+                "source": "case_status",
+            }
+        )
+    first_response = sla["first_response"]
+    if first_response["breached"] and not first_response["completed"]:
+        reasons.append(
+            {
+                "code": "first_response_sla_breached",
+                "label_es": "SLA de primera respuesta vencido",
+                "source": "sla.first_response",
+            }
+        )
+    resolution = sla["resolution"]
+    if resolution["breached"] and not resolution["completed"]:
+        reasons.append(
+            {
+                "code": "resolution_sla_breached",
+                "label_es": "SLA de resolución vencido",
+                "source": "sla.resolution",
+            }
+        )
+    if owner_status["code"] == "waiting_external":
+        reasons.append(
+            {
+                "code": "waiting_external",
+                "label_es": "Bloqueado por un tercero",
+                "source": "owner_status",
+            }
+        )
+    elif owner_status["code"] == "waiting_owner":
+        reasons.append(
+            {
+                "code": "waiting_owner",
+                "label_es": "Esperando decisión del dueño",
+                "source": "owner_status",
+            }
+        )
+    return reasons
+
+
+def _sort_service_management_rows(rows: list[dict[str, Any]], *, sort_by: str) -> list[dict[str, Any]]:
+    if sort_by == "priority":
+        return rows
+
+    status_rank = {"breached": 0, "at_risk": 1, "on_track": 2, "paused": 3, "completed": 4}
+    far_future = "9999-12-31T23:59:59Z"
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            status_rank[row["sla_status"]["code"]],
+            row["sla_status"]["due_at"] or far_future,
+            -int(row["priority_score"]),
+            row["opened_at"],
+            row["case_id"],
+        ),
+    )
+
+
+def service_management_case_item(case: OperationalCase, *, now: datetime | None = None) -> dict[str, Any]:
+    """Project one OperationalCase into a service-management case row.
+
+    The returned status and SLA fields are deterministic projections. They do
+    not replace ``case.status`` and should not be used as lifecycle state.
+    """
+
+    reference = _normalize_reference_time(now)
+    owner_status = _owner_status(case)
+    sla = _sla_projection(case, owner_status=owner_status, reference=reference)
+    sla_status = _sla_status(sla)
+    escalation_reasons = _escalation_reasons(case, owner_status=owner_status, sla=sla)
+    return redact_secrets(
+        {
+            "case_id": case.case_id,
+            "business_id": case.business_id,
+            "case_type": case.case_type,
+            "title": case.title,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "entity_scope": case.entity_scope,
+            "service_record_type": _service_record_type(case),
+            "owner_status": owner_status,
+            "opened_at": _iso(case.opened_at),
+            "updated_at": _iso(case.updated_at),
+            "acknowledged_at": _iso(case.acknowledged_at),
+            "resolved_at": _iso(case.resolved_at),
+            "dismissed_at": _iso(case.dismissed_at),
+            "latest_run_id": case.latest_run_id,
+            "sla": sla,
+            "sla_status": sla_status,
+            "needs_escalation": bool(escalation_reasons),
+            "escalation_reasons": escalation_reasons,
+        }
+    )
+
+
+def list_service_management_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: int | None = 50,
+    now: datetime | None = None,
+    sla_status: str | None = None,
+    service_record_type: str | None = None,
+    owner_status: str | None = None,
+    owner_status_category: str | None = None,
+    escalation_reason: str | None = None,
+    needs_escalation: bool | None = None,
+    active_sla_clock: str | None = None,
+    sort_by: str | None = None,
+) -> dict[str, Any]:
+    """List service-management projections for cases in one business scope."""
+
+    reference = _normalize_reference_time(now)
+    parsed_sla_status = _normalize_sla_status_filter(sla_status)
+    parsed_service_record_type = _normalize_service_record_type_filter(service_record_type)
+    parsed_owner_status = _normalize_owner_status_filter(owner_status)
+    parsed_owner_status_category = _normalize_owner_status_category_filter(owner_status_category)
+    parsed_escalation_reason = _normalize_escalation_reason_filter(escalation_reason)
+    parsed_active_sla_clock = _normalize_active_sla_clock_filter(active_sla_clock)
+    parsed_sort_by = _normalize_sort_by(sort_by)
+    all_cases = store.list_cases(business_id=business_id, limit=None)
+    all_rows = [service_management_case_item(case, now=reference) for case in all_cases]
+    filtered_rows = all_rows
+    if parsed_sla_status is not None:
+        filtered_rows = [row for row in filtered_rows if row["sla_status"]["code"] == parsed_sla_status]
+    if parsed_service_record_type is not None:
+        filtered_rows = [
+            row for row in filtered_rows if row["service_record_type"]["code"] == parsed_service_record_type
+        ]
+    if parsed_owner_status is not None:
+        filtered_rows = [row for row in filtered_rows if row["owner_status"]["code"] == parsed_owner_status]
+    if parsed_owner_status_category is not None:
+        filtered_rows = [
+            row
+            for row in filtered_rows
+            if row["owner_status"]["status_category"] == parsed_owner_status_category
+        ]
+    if parsed_escalation_reason is not None:
+        filtered_rows = [
+            row
+            for row in filtered_rows
+            if any(reason["code"] == parsed_escalation_reason for reason in row["escalation_reasons"])
+        ]
+    if needs_escalation is not None:
+        filtered_rows = [row for row in filtered_rows if row["needs_escalation"] is needs_escalation]
+    if parsed_active_sla_clock is not None:
+        filtered_rows = [
+            row for row in filtered_rows if row["sla_status"]["active_clock"] == parsed_active_sla_clock
+        ]
+    sorted_rows = _sort_service_management_rows(filtered_rows, sort_by=parsed_sort_by)
+    rows = sorted_rows[:limit] if limit is not None else sorted_rows
+    by_record_type: dict[str, int] = {}
+    by_owner_status: dict[str, int] = {}
+    by_owner_status_category: dict[str, int] = {}
+    by_sla_status: dict[str, int] = {}
+    by_escalation_reason: dict[str, int] = {}
+    by_active_sla_clock: dict[str, int] = {}
+    for row in all_rows:
+        record_type = row["service_record_type"]["code"]
+        status = row["owner_status"]["code"]
+        status_category = row["owner_status"]["status_category"]
+        row_sla_status = row["sla_status"]["code"]
+        active_clock = row["sla_status"]["active_clock"]
+        by_record_type[record_type] = by_record_type.get(record_type, 0) + 1
+        by_owner_status[status] = by_owner_status.get(status, 0) + 1
+        by_owner_status_category[status_category] = by_owner_status_category.get(status_category, 0) + 1
+        by_sla_status[row_sla_status] = by_sla_status.get(row_sla_status, 0) + 1
+        if active_clock is not None:
+            by_active_sla_clock[active_clock] = by_active_sla_clock.get(active_clock, 0) + 1
+        for reason in row["escalation_reasons"]:
+            reason_code = reason["code"]
+            by_escalation_reason[reason_code] = by_escalation_reason.get(reason_code, 0) + 1
+    filters = {}
+    if parsed_sla_status is not None:
+        filters["sla_status"] = parsed_sla_status
+    if parsed_service_record_type is not None:
+        filters["service_record_type"] = parsed_service_record_type
+    if parsed_owner_status is not None:
+        filters["owner_status"] = parsed_owner_status
+    if parsed_owner_status_category is not None:
+        filters["owner_status_category"] = parsed_owner_status_category
+    if parsed_escalation_reason is not None:
+        filters["escalation_reason"] = parsed_escalation_reason
+    if needs_escalation is not None:
+        filters["needs_escalation"] = needs_escalation
+    if parsed_active_sla_clock is not None:
+        filters["active_sla_clock"] = parsed_active_sla_clock
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "now": _iso(reference),
+            "limit": limit,
+            "sort_by": parsed_sort_by,
+            "count": len(rows),
+            "total": len(filtered_rows),
+            "unfiltered_total": len(all_rows),
+            "filters": filters,
+            "by_service_record_type": by_record_type,
+            "by_owner_status": by_owner_status,
+            "by_owner_status_category": by_owner_status_category,
+            "by_sla_status": by_sla_status,
+            "by_active_sla_clock": by_active_sla_clock,
+            "by_escalation_reason": by_escalation_reason,
+            "service_cases": rows,
+        }
+    )
