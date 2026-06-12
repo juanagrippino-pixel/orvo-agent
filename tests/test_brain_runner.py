@@ -201,6 +201,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
                 "runtime.freshness",
                 "runtime.data_quality",
             ],
+            "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
             "health_policy": {
@@ -258,6 +259,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
             "runtime.freshness",
             "runtime.data_quality",
         ],
+        "emitted_event_families": ["connector.execution", "connector.health"],
         "required_scopes": ["spreadsheets.readonly"],
         "health_policy": {
             "readiness_check": "metadata_only",
@@ -375,6 +377,7 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
             "runtime.freshness",
             "runtime.data_quality",
         ],
+        "emitted_event_families": ["connector.execution", "connector.health"],
         "required_scopes": ["spreadsheets.readonly"],
         "health_policy": {
             "readiness_check": "metadata_only",

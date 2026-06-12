@@ -135,6 +135,7 @@ def test_record_pipeline_success_records_event_certification_for_connector_outco
         ],
         "issues": [],
     }
+    assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
 
 
 def test_record_pipeline_failure_maps_rate_limit_errors_to_typed_health_state():
@@ -234,6 +235,7 @@ def test_record_pipeline_failure_records_event_certification_for_connector_outco
         ],
         "issues": [],
     }
+    assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
 
 
 def test_record_pipeline_success_finalizes_partial_when_secondary_owner_brief_dispatcher_raises():
