@@ -25,6 +25,7 @@ from app.brain.work_items import (
     case_issue_type,
     case_priority_bracket,
     case_project_key,
+    case_sla_status,
     case_status_category,
     case_type_release_state,
     work_item_query_field_spec,
@@ -433,6 +434,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_status_category(case)
     if field == "priority_bracket":
         return case_priority_bracket(case)
+    if field == "sla_status":
+        return case_sla_status(case)
     return getattr(case, field)
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import get_args
 
 import sqlite3
@@ -14,6 +15,7 @@ from app.brain.work_items import (
     allowed_work_item_query_sort_fields,
     case_priority_bracket,
     case_project_key,
+    case_sla_status,
     case_status_category,
     case_type_release_state,
     case_work_item_projection,
@@ -61,8 +63,9 @@ def test_project_key_for_business_avoids_truncation_collisions():
 def test_case_work_item_projection_wraps_operational_case_without_changing_source_of_truth(tmp_path):
     db_path = tmp_path / "work-items.sqlite3"
     case = _seed_case(db_path, _case_detection(run_id="run-work-item", priority=87))
+    now = datetime(2026, 5, 24, 9, tzinfo=timezone.utc)
 
-    projection = case_work_item_projection(case)
+    projection = case_work_item_projection(case, now=now)
 
     assert projection["case_id"] == case.case_id
     assert projection["work_item_id"] == f"ARTEMEA:{case.case_id}"
@@ -73,12 +76,17 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["status_category"] == "to_do"
     assert projection["priority_score"] == 87
     assert projection["priority_bracket"] == "high"
+    assert projection["sla_target_seconds"] == 2 * 60 * 60
+    assert projection["due_at"] == "2026-05-24T10:00:00Z"
+    assert projection["sla_status"] == "pending"
     assert projection["assignee_ref"] is None
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
     assert case_priority_bracket(case) == "high"
+    assert case_sla_status(case, now=now) == "pending"
+    assert case_sla_status(case, now=datetime(2026, 5, 24, 10, 1, tzinfo=timezone.utc)) == "breached"
 
 
 def test_issue_type_definitions_expose_release_state_from_semantic_registry():
@@ -261,11 +269,35 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["sla_target_seconds"] == {
+        "field": "sla_target_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["due_at"] == {
+        "field": "due_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["sla_status"] == {
+        "field": "sla_status",
+        "value_type": "enum",
+        "allowed_values": ["breached", "met", "not_applicable", "not_configured", "pending"],
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+        "facetable": True,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
-    assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
+    assert allowed_work_item_query_sort_fields() == {"due_at", "opened_at", "priority_score", "sla_target_seconds", "updated_at"}
     assert allowed_work_item_facet_fields() == {
         "assignee_ref",
         "case_type",
@@ -276,6 +308,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "project",
         "release_state",
         "severity",
+        "sla_status",
         "source_connector",
         "status",
         "status_category",
