@@ -248,3 +248,46 @@ def test_verify_manifest_git_claims_allows_uncommitted_head_when_worktree_exists
 
     assert result.passed is True
     assert result.problems == ()
+
+
+
+def test_verify_manifest_git_claims_rejects_clean_status_when_worktree_is_dirty(tmp_path: Path) -> None:
+    repo, manifest_path = _make_git_repo_with_manifest(tmp_path)
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8").replace("- status: review-ready", "- status: clean"),
+        encoding="utf-8",
+    )
+    (repo / "README.md").write_text("base\ndirty\n", encoding="utf-8")
+
+    result = verify_manifest_git_claims(parse_manifest(manifest_path), repo_root=repo)
+
+    assert result.passed is False
+    assert result.problems == (
+        "status clean requires an empty git status --short at worktree_path",
+    )
+
+
+
+def test_verify_manifest_git_claims_rejects_dirty_blocked_status_when_worktree_is_clean(tmp_path: Path) -> None:
+    repo, manifest_path = _make_git_repo_with_manifest(tmp_path)
+    clean_worktree = tmp_path / "clean-worktree"
+    clean_worktree.mkdir()
+    _run_git(clean_worktree, "init")
+    _run_git(clean_worktree, "config", "user.email", "orvo-tests@example.invalid")
+    _run_git(clean_worktree, "config", "user.name", "Orvo Tests")
+    (clean_worktree / "README.md").write_text("clean\n", encoding="utf-8")
+    _run_git(clean_worktree, "add", "README.md")
+    _run_git(clean_worktree, "commit", "-m", "clean")
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        .replace("- status: review-ready", "- status: dirty-blocked")
+        .replace(str(repo), str(clean_worktree)),
+        encoding="utf-8",
+    )
+
+    result = verify_manifest_git_claims(parse_manifest(manifest_path), repo_root=repo)
+
+    assert result.passed is False
+    assert result.problems == (
+        "status dirty-blocked requires non-empty git status --short at worktree_path",
+    )
