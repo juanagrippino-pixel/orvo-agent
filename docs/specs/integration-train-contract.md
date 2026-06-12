@@ -27,7 +27,7 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ### 2026-06-12 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `f671559a` (`feat/orvo-brain-control-plane`). This supersedes the 2026-06-11 checkpoint and incorporates the latest 2026-06-12 Architecture Review Board review in `docs/architecture-reviews/2026-06-12-review.md`. The latest review keeps `N2-Pro/connector-platform`, `N2-Pro/workflow-automation`, and `N2-Pro/trust-admin-security` as merge-ready candidates, marks `N2-Pro/search-analytics` as merge-ready with rebase recommended, and keeps `n2-pro-work-management` plus `N2-Pro/operator-surfaces` as needs-work branches. Destructive `claude/*` refactor branches remain not mergeable as reviewed.
+The current repository `HEAD` before this reconciliation is `f671559a` (`feat/orvo-brain-control-plane`). This supersedes the 2026-06-11 checkpoint and incorporates the latest 2026-06-12 Architecture Review Board review in `docs/architecture-reviews/2026-06-12-review.md`, while preserving historical context from `docs/architecture-reviews/2026-06-12-architecture-board-review.md`. The latest review keeps `N2-Pro/connector-platform`, `N2-Pro/workflow-automation`, and `N2-Pro/trust-admin-security` as merge-ready candidates, marks `N2-Pro/search-analytics` as merge-ready with rebase recommended, keeps `n2-pro-work-management` plus `N2-Pro/operator-surfaces` as needs-work branches, and continues to treat destructive `claude/*` refactor branches as not mergeable.
 
 Recent shipped baseline facts, grounded in repo inspection:
 

@@ -646,6 +646,7 @@ Read:
 
 - `docs/architecture-reviews/2026-06-12-review.md`
 - `docs/architecture-reviews/2026-06-12-branch-readiness-matrix.md` — historical, superseded by the latest 2026-06-12 ARB review where verdicts conflict.
+- `docs/architecture-reviews/2026-06-11-arb-update-6457695.md` and `docs/architecture-reviews/2026-06-12-architecture-board-review.md` remain useful historical inputs when reconciling older branch verdicts.
 - `docs/specs/internal-operator-api-contract.md`
 - `docs/specs/integration-train-contract.md`
 - `docs/specs/testing-invariant-matrix.md`
