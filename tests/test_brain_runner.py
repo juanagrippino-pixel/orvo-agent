@@ -235,6 +235,19 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
     assert record.connector_outcomes[0].status == "succeeded"
     assert record.connector_outcomes[0].metadata == {
         "label": "Sheet Artemea",
+        "emitted_events": [
+            "connector.execution.succeeded",
+            "connector.health.ok",
+        ],
+        "event_certification": {
+            "status": "passed",
+            "issue_count": 0,
+            "events": [
+                "connector.execution.succeeded",
+                "connector.health.ok",
+            ],
+            "issues": [],
+        },
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
         "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
         "capabilities": ["daily_report", "sheet_import"],
@@ -338,6 +351,19 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
     assert "raw_failure_secret" not in failed_connector.error_summary
     assert failed_connector.metadata == {
         "failure_stage": "pre_dispatch",
+        "emitted_events": [
+            "connector.execution.failed",
+            "connector.health.failed",
+        ],
+        "event_certification": {
+            "status": "passed",
+            "issue_count": 0,
+            "events": [
+                "connector.execution.failed",
+                "connector.health.failed",
+            ],
+            "issues": [],
+        },
         "label": "Sheet Artemea",
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
         "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
