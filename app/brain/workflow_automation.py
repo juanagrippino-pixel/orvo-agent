@@ -193,14 +193,10 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
         maximum_age_minutes = _non_negative_int_condition_value(condition)
         return int(actual) <= maximum_age_minutes
     if condition.field == "source_connector":
-        if not _is_non_empty_string(condition.value):
-            raise WorkflowAutomationError(
-                "invalid_workflow_condition",
-                "source_connector condition value must be a non-empty string",
-            )
+        expected_values = _normalize_source_connector_condition_value(condition)
         if not isinstance(actual, list):
             return False
-        return condition.value in actual
+        return any(value in actual for value in expected_values)
     if condition.field == "entity_kind" and not _is_non_empty_string(condition.value):
         raise WorkflowAutomationError(
             "invalid_workflow_condition",
@@ -216,6 +212,28 @@ def _condition_matches(condition: CaseWorkflowCondition, actual: Any) -> bool:
 
 def _is_non_empty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _normalize_source_connector_condition_value(condition: CaseWorkflowCondition) -> list[str]:
+    if isinstance(condition.value, str):
+        if not condition.value.strip():
+            raise WorkflowAutomationError(
+                "invalid_workflow_condition",
+                "source_connector condition value must be a non-empty string or a non-empty list of strings",
+            )
+        return [condition.value.strip()]
+    if isinstance(condition.value, list) and all(isinstance(item, str) for item in condition.value):
+        normalized_values = [item.strip() for item in condition.value if item.strip()]
+        if not normalized_values:
+            raise WorkflowAutomationError(
+                "invalid_workflow_condition",
+                "source_connector condition value must be a non-empty string or a non-empty list of strings",
+            )
+        return normalized_values
+    raise WorkflowAutomationError(
+        "invalid_workflow_condition",
+        "source_connector condition value must be a non-empty string or a non-empty list of strings",
+    )
 
 
 def _missing_required_action_params(
