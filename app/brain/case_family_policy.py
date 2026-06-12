@@ -91,6 +91,14 @@ class CaseFamilyReadinessPolicy:
     )
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "detected_case_families", frozenset(self.detected_case_families))
+        object.__setattr__(self, "promoted_owner_facing", frozenset(self.promoted_owner_facing))
+        object.__setattr__(self, "deferred", frozenset(self.deferred))
+        object.__setattr__(
+            self,
+            "promotion_prerequisites",
+            MappingProxyType(dict(self.promotion_prerequisites)),
+        )
         known_case_families = self.detected_case_families | self.deferred
         extra_prerequisites = sorted(set(self.promotion_prerequisites) - known_case_families)
         if extra_prerequisites:
@@ -99,13 +107,17 @@ class CaseFamilyReadinessPolicy:
                 f"{extra_prerequisites}"
             )
         if not self.promoted_owner_facing <= self.detected_case_families:
-            raise ValueError("promoted owner-facing case families must be registered as detectable")
+            raise ValueError(
+                "promoted owner-facing case families must be registered as detectable"
+            )
         if self.deferred & self.detected_case_families:
             overlap = sorted(self.deferred & self.detected_case_families)
             raise ValueError(f"deferred case families must not be detectable yet: {overlap}")
         missing_prerequisites = sorted(known_case_families - set(self.promotion_prerequisites))
         if missing_prerequisites:
-            raise ValueError(f"case-family promotion prerequisites missing for: {missing_prerequisites}")
+            raise ValueError(
+                f"case-family promotion prerequisites missing for: {missing_prerequisites}"
+            )
 
     @property
     def readiness_gated(self) -> frozenset[str]:
