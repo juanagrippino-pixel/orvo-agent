@@ -222,6 +222,85 @@ def test_connector_run_outcome_defaults_registry_health_state_from_status():
     assert explicit.model_dump()["health_state"] == "unauthorized"
 
 
+def test_appends_are_append_only_keep_duplicates_and_preserve_insertion_order_after_reload(conn):
+    for ledger, reload_run in (
+        (in_memory := InMemoryRunLedger(), in_memory.get_run),
+        (SQLiteRunLedger(conn), lambda run_id: SQLiteRunLedger(conn).get_run(run_id)),
+    ):
+        ledger.create_run(run_id="run-audit", business_id="artemea", trigger_type="scheduled", started_at=utc_dt(8))
+
+        # Same connector retried: both outcomes must be retained, in append order,
+        # even though the later append carries an earlier started_at (backfill).
+        ledger.append_connector_outcome(
+            "run-audit",
+            ConnectorRunOutcome(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                status="failed",
+                started_at=utc_dt(8, 5),
+                finished_at=utc_dt(8, 6),
+                error_summary="HTTP 500",
+            ),
+        )
+        ledger.append_connector_outcome(
+            "run-audit",
+            ConnectorRunOutcome(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                status="succeeded",
+                started_at=utc_dt(8, 1),
+                finished_at=utc_dt(8, 2),
+                metrics_count=4,
+            ),
+        )
+
+        # Same artifact_id appended twice must not be deduplicated.
+        ledger.append_artifact_ref(
+            "run-audit",
+            ArtifactRef(artifact_id="report-json", artifact_type="daily_report", created_at=utc_dt(8, 7)),
+        )
+        ledger.append_artifact_ref(
+            "run-audit",
+            ArtifactRef(artifact_id="report-json", artifact_type="daily_report", created_at=utc_dt(8, 3)),
+        )
+
+        # Same idempotency_key across attempts: failed attempt history must survive,
+        # in append order, not re-sorted by created_at or collapsed by key.
+        ledger.append_dispatch_outcome(
+            "run-audit",
+            DispatchOutcomeRef(
+                channel="whatsapp",
+                status="failed",
+                attempt_number=1,
+                idempotency_key="artemea/2026-05-24/daily",
+                created_at=utc_dt(8, 9),
+            ),
+        )
+        ledger.append_dispatch_outcome(
+            "run-audit",
+            DispatchOutcomeRef(
+                channel="whatsapp",
+                status="sent",
+                attempt_number=2,
+                idempotency_key="artemea/2026-05-24/daily",
+                message_id="wamid.retry",
+                created_at=utc_dt(8, 4),
+            ),
+        )
+
+        reloaded = reload_run("run-audit")
+        assert reloaded is not None
+        assert [(o.status, o.started_at) for o in reloaded.connector_outcomes] == [
+            ("failed", utc_dt(8, 5)),
+            ("succeeded", utc_dt(8, 1)),
+        ]
+        assert [a.created_at for a in reloaded.artifacts] == [utc_dt(8, 7), utc_dt(8, 3)]
+        assert [(d.status, d.attempt_number) for d in reloaded.dispatch_outcomes] == [
+            ("failed", 1),
+            ("sent", 2),
+        ]
+
+
 def test_sqlite_run_ledger_persists_records_and_lists_newest_first(conn):
     first = SQLiteRunLedger(conn).create_run(
         run_id="run-old",
