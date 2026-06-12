@@ -377,6 +377,71 @@ def test_compose_daily_report_redacts_inline_secrets_from_labels_and_insights():
     assert "ROAS bajo" in text
 
 
+def test_hito0_dual_channel_ads_report_golden_text():
+    """Golden contract: the canonical Hito 0 dual-channel + ads report composes
+    byte-for-byte to the expected WhatsApp text.
+
+    Every dispatched daily report now passes through redact_text at the compose
+    boundary, so a redaction-regex change (or any section/format drift) can
+    silently corrupt benign owner-facing Spanish text. Fragment assertions in the
+    other tests would not catch e.g. a stray [REDACTED] in a metric line or a
+    reordered section. If this test fails because of an intentional format
+    change, update the snapshot deliberately and flag Hito 0 compatibility.
+    """
+    from app.brain.reporting import compose_daily_report_text
+
+    src_tn = _tn_source()
+    src_ml = _ml_source()
+    src_meta = _meta_source()
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(key="tn_revenue_today", label="Ventas TN", value=48000, unit="ARS", evidence=[src_tn]),
+            Metric(key="ml_revenue_today", label="Ventas ML", value=22000, unit="ARS", evidence=[src_ml]),
+            Metric(key="ad_spend_today", label="Gasto ads", value=3500, unit="ARS", evidence=[src_meta]),
+            Metric(key="orders_today", label="Órdenes", value=12, evidence=[src_tn]),
+        ],
+        insights=[
+            Insight(
+                severity="warning",
+                title="ROAS bajo",
+                explanation="El ROAS está por debajo de 3x.",
+                recommended_action="Pausar anuncios de bajo rendimiento.",
+                evidence=[src_meta],
+            )
+        ],
+    )
+
+    expected = (
+        "🧠 Orvo Brain — Artemea\n"
+        "Reporte diario · 2026-05-20\n"
+        "\n"
+        "📊 Métricas\n"
+        "- Ventas TN: ARS 48.000\n"
+        "- Ventas ML: ARS 22.000\n"
+        "- Gasto ads: ARS 3.500\n"
+        "- Órdenes: 12\n"
+        "\n"
+        "📦 Canales\n"
+        "- Tiendanube: ARS 48.000\n"
+        "- MercadoLibre: ARS 22.000\n"
+        "- Total: ARS 70.000\n"
+        "\n"
+        "📣 Publicidad\n"
+        "- Gasto del día: ARS 3.500\n"
+        "- ROAS estimado: 20.0x\n"
+        "\n"
+        "🚨 Alertas\n"
+        "🟡 ROAS bajo: El ROAS está por debajo de 3x.\n"
+        "   Acción: Pausar anuncios de bajo rendimiento.\n"
+        "\n"
+        "🔗 Fuentes: Tiendanube · MercadoLibre · Meta Ads"
+    )
+
+    assert compose_daily_report_text(report) == expected
+
+
 def test_full_report_under_1000_chars():
     """A realistic dual-channel + ads report should fit within 1000 chars."""
     from app.brain.reporting import compose_daily_report_text, truncate_for_whatsapp
