@@ -1,5 +1,55 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-12 01:36 UTC
+
+Status: **JQL route-owned project scope guard promoted**.
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head after integration: `ca0dfef` (`merge: integrate JQL project scope guard`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean on `feat/orvo-brain-control-plane` at `5b9bbe7` before candidate verification.
+- Candidate worker worktree `/root/orvo-agent-worktrees/qa-jql-project-scope-20260611` was clean and aligned with `origin/codex/qa-jql-project-scope-20260611`.
+- Candidate scope was intentionally test-only: one branch-only commit, one touched test file, no production code, no docs contract changes, no new dependencies, and no deleted tests.
+
+Promoted branch:
+
+- Branch: `codex/qa-jql-project-scope-20260611`
+- Head before merge: `30b3b60` (`test: enforce route-owned project scope in case JQL`)
+- Merge result: clean no-conflict merge into `feat/orvo-brain-control-plane`.
+
+Integrated scope:
+
+- Added a regression guard proving an internal case queue request for route business `artemea` cannot leak another business's cases when the JQL payload says `project = OTHER`.
+- The test asserts the route-owned business scope remains authoritative, the raw response omits the other tenant's case ID, and the empty scoped result reports truthful `count`/`total` values.
+- This strengthens the JQL/operator-surface invariant without adding endpoint-local business logic, external side effects, owner-facing projection semantics, or LLM-driven decisions.
+
+Post-merge verification:
+
+- `git diff --check HEAD...codex/qa-jql-project-scope-20260611` before merge -> passed.
+- Secret-pattern scan over candidate diff -> clean for common AWS/GitHub/Stripe/private-key/Bearer shapes.
+- Test deletion check over candidate diff -> no deleted `tests/` files.
+- Focused worker suite before merge: `pytest tests/test_operator_case_views.py -q` -> `17 passed in 4.46s`.
+- Focused canonical suite before merge: `pytest tests/test_operator_case_views.py -q` -> `21 passed in 3.39s`.
+- Focused canonical suite after merge: `pytest tests/test_operator_case_views.py -q` -> `22 passed in 3.08s`.
+- Full canonical suite after merge: `pytest -q` -> `1423 passed in 45.20s`.
+
+Review notes / risks:
+
+- Architecture alignment: this is a low-risk, test-only tenant-scope hardening slice over the existing WorkItem/JQL operator surface. It reinforces that route/context-owned business scope beats query text and that internal API responses remain scoped and enveloped.
+- No source-of-truth drift: OperationalCase/WorkItem query primitives remain canonical; the branch does not introduce a new query engine, connector shortcut, metric, workflow transition, or delivery-channel state.
+- The branch can now be treated as integrated; future JQL work should continue extending allowlisted parser/registry primitives instead of bespoke endpoint semantics.
+
+Current next integration order:
+
+1. **Product operator-home candidate:** `codex/lapyme-os-snapshot-20260611` is the highest product-priority branch, but only promote after rebase/review proves it derives from run ledger, connector readiness, and OperationalCases instead of inventing app state.
+2. **Dispatch/idempotency redaction guard:** patch-id review `codex/qa-dispatch-idempotency-redaction-20260611` and `codex/dispatch-idempotency-redaction-integration-20260611231456`; merge only one non-duplicative regression/fix slice.
+3. **Trust/Admin/Security patch-id review:** inspect `codex/trust-admin-security` for unique RBAC/audit hardening after denial-audit, action-principal redaction, non-ASCII auth fail-closed, delivery-status admin-boundary, and JQL-scope guards.
+4. **Connector-platform reconcile:** review local sliced `codex/connector-platform` / `codex/eng-factory-connector-platform-reconcile-20260606` for registry/runtime/health hardening and raw-secret exclusion; do not direct-merge stale broad remote history.
+5. **Hold/split broad surfaces:** keep `codex/operator-surfaces`, `codex/search-analytics`, `codex/service-management`, and `codex/edge-developer-platform` behind WorkItem/JQL/facet/SLA/readiness primitive gates.
+
 ## Release integration update — 2026-06-11 21:33 UTC
 
 Status: **Run-ledger partial secondary-dispatch regression guard promoted**.
