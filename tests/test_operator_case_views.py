@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import csv
 import sqlite3
+from contextlib import closing
 
 import pytest
 
 from app.brain import operator_views
 from app.brain.operational_cases import SQLiteOperationalCaseStore
-from app.brain.operator_api import OperatorAPIError
+from app.brain.operator_api import OperatorAPIError, export_case_queue_csv
 from app.brain.operator_views import parse_case_jql
 from app.brain.storage import init_schema
 from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
@@ -651,3 +653,87 @@ def test_internal_case_view_unknown_view_returns_enveloped_404(monkeypatch, tmp_
     assert body["ok"] is False
     assert body["error"]["code"] == "case_view_not_found"
     assert body["redaction_applied"] is True
+
+
+def test_case_queue_csv_export_uses_jql_scope_and_redacts_projection(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    critical = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-export-critical",
+            title="Stock crítico access_token=raw_export_secret",
+            priority=95,
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            priority=80,
+            title="Ventas bajaron",
+            run_id="run-export-warning",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-export-other", priority=99))
+
+    with closing(sqlite3.connect(db_path)) as conn:
+        export = export_case_queue_csv(
+            SQLiteOperationalCaseStore(conn),
+            business_id="artemea",
+            jql="status = open AND severity = critical",
+            limit="10",
+        )
+
+    assert export["content_type"] == "text/csv; charset=utf-8"
+    assert export["filename"] == "artemea_cases.csv"
+    rows = list(csv.DictReader(export["body"].splitlines()))
+    assert len(rows) == 1
+    assert rows[0]["case_id"] == critical.case_id
+    assert rows[0]["business_id"] == "artemea"
+    assert rows[0]["source_connectors"] == "tiendanube"
+    assert "raw_export_secret" not in export["body"]
+    assert "Stock crítico access_token=[REDACTED]" in export["body"]
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"jql": "status = open AND severity = critical"},
+    )
+    assert response.status_code == 200
+    assert response.content_type.startswith("text/csv")
+    raw_body = response.get_data(as_text=True)
+    assert "raw_export_secret" not in raw_body
+    assert "Stock crítico access_token=[REDACTED]" in raw_body
+    assert "other" not in raw_body
+    assert critical.case_id in raw_body
+
+
+def test_case_queue_csv_export_rejects_conflicting_filters_and_invalid_format(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-export-conflict"))
+
+    conflict = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"status": "open", "jql": "severity = critical"},
+    )
+    invalid_format = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"format": "xlsx"},
+    )
+    unsafe_jql = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"jql": "business_id = other"},
+    )
+
+    assert conflict.status_code == 400
+    assert conflict.get_json()["error"]["code"] == "conflicting_case_filters"
+    assert invalid_format.status_code == 400
+    assert invalid_format.get_json()["error"]["code"] == "invalid_export_format"
+    assert unsafe_jql.status_code == 400
+    assert unsafe_jql.get_json()["error"]["code"] == "unsupported_jql_field"
+    assert db_path.exists()
