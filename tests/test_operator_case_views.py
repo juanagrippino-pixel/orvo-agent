@@ -102,6 +102,12 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("assignee_ref = operator:juan").normalized == (
         "assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("due_at < 2026-05-24T10:00:00Z").normalized == (
+        "due_at < 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("sla_status = breached").normalized == (
+        "sla_status = breached ORDER BY priority_score DESC, opened_at ASC"
+    )
     assert parse_case_jql("status_category IN (to_do, done)").normalized == (
         "status_category IN (to_do, done) ORDER BY priority_score DESC, opened_at ASC"
     )
@@ -309,7 +315,7 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
         "/internal/brain/businesses/artemea/cases?jql="
         "project%20%3D%20ARTEMEA%20AND%20issue_type%20%3D%20stockout_risk%20AND%20"
         "status_category%20%3D%20in_progress%20AND%20priority_bracket%20%3D%20high%20AND%20"
-        "assignee_ref%20%3D%20operator:juan",
+        "sla_status%20%3D%20breached%20AND%20assignee_ref%20%3D%20operator:juan",
         headers=AUTH,
     )
 
@@ -318,7 +324,7 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert body["ok"] is True
     assert body["data"]["normalized_jql"] == (
         "project = ARTEMEA AND issue_type = stockout_risk AND status_category = in_progress "
-        "AND priority_bracket = high AND assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
+        "AND priority_bracket = high AND sla_status = breached AND assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
     )
     assert [case["case_id"] for case in body["data"]["cases"]] == [assigned.case_id]
     case = body["data"]["cases"][0]
@@ -327,6 +333,12 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert case["status_category"] == "in_progress"
     assert case["work_item"]["case_id"] == assigned.case_id
     assert case["work_item"]["work_item_id"] == f"ARTEMEA:{assigned.case_id}"
+    assert case["sla_target_seconds"] == 2 * 60 * 60
+    assert case["due_at"] == "2026-05-24T10:00:00+00:00"
+    assert case["sla_status"] == "breached"
+    assert case["work_item"]["sla_target_seconds"] == 2 * 60 * 60
+    assert case["work_item"]["due_at"] == "2026-05-24T10:00:00Z"
+    assert case["work_item"]["sla_status"] == "breached"
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
