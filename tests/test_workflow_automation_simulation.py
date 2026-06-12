@@ -1926,3 +1926,63 @@ def test_workflow_action_audit_events_project_planning_approval_and_decision_wit
     assert "other-business" not in str(full_audit)
     assert "raw_audit" not in str(audit)
     assert "raw_audit" not in str(full_audit)
+
+
+def test_workflow_action_audit_events_can_be_scoped_to_one_case(tmp_path):
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
+    ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approved",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/audit/case-approved/acknowledge_case/approved",
+        execution_state="dry_run",
+        approval_required=False,
+        source="workflow",
+        params={"target": "supplier-a", "reason": "Approved case"},
+        rule_id="audit-rule",
+        now=utc(22),
+    )
+    ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-pending",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/audit/case-pending/acknowledge_case/pending",
+        execution_state="dry_run",
+        approval_required=False,
+        source="workflow",
+        params={"target": "supplier-b", "reason": "Pending case"},
+        rule_id="audit-rule",
+        now=utc(22, 1),
+    )
+
+    scoped = list_workflow_action_audit_events(ledger, business_id="artemea", case_id="case-approved")
+
+    assert scoped["business_id"] == "artemea"
+    assert scoped["case_id"] == "case-approved"
+    assert scoped["total"] == 1
+    assert scoped["returned"] == 1
+    assert [event["event_type"] for event in scoped["events"]] == ["workflow_action_planned"]
+    assert scoped["events"][0]["case_id"] == "case-approved"
+    assert "case-pending" not in str(scoped)
+
+
+def test_workflow_action_audit_events_reject_blank_case_scope(tmp_path):
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
+    ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approved",
+        action_key="acknowledge_case",
+        idempotency_key="workflow/artemea/audit/case-approved/acknowledge_case/scope",
+        execution_state="dry_run",
+        approval_required=False,
+        source="workflow",
+        params={"reason": "Scope validation"},
+        rule_id="audit-rule",
+        now=utc(22, 30),
+    )
+
+    with pytest.raises(WorkflowActionLedgerError) as exc:
+        list_workflow_action_audit_events(ledger, business_id="artemea", case_id="   ")
+
+    assert exc.value.code == "invalid_workflow_audit_scope"
+    assert "case-approved" not in exc.value.message
