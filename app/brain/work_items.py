@@ -14,10 +14,9 @@ from dataclasses import dataclass
 from datetime import timezone
 from typing import Any, Literal, get_args
 
+from app.brain.case_family_policy import CASE_FAMILY_READINESS_POLICY
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
-    OWNER_FACING_OPERATIONAL_CASE_TYPES,
-    READINESS_GATED_OPERATIONAL_CASE_TYPES,
     TERMINAL_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
     OperationalCaseSeverity,
@@ -166,13 +165,7 @@ def case_type_release_state(case_type: str) -> OperationalCaseIssueTypeReleaseSt
     ``readiness_gated``.
     """
 
-    if case_type in OWNER_FACING_OPERATIONAL_CASE_TYPES:
-        return "promoted"
-    if case_type in READINESS_GATED_OPERATIONAL_CASE_TYPES:
-        return "readiness_gated"
-    if case_type in get_args(OperationalCaseType):
-        return "deferred"
-    return "internal_only"
+    return CASE_FAMILY_READINESS_POLICY.release_state(case_type)
 
 
 def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory:

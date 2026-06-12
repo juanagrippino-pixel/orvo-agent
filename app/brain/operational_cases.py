@@ -18,9 +18,15 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.brain.action_catalog import ACTION_CATALOG
+from app.brain.case_family_policy import (
+    DETECTABLE_CASE_FAMILIES,
+    OWNER_FACING_CASE_FAMILIES,
+    READINESS_GATED_CASE_FAMILIES,
+    case_family_metric_keys,
+)
 from app.brain.models import DailyReport, Insight, Metric
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
-from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
+from app.brain.semantics import default_metric_registry, validate_metrics
 
 OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved", "dismissed"]
 OperationalCaseStatusCategory = Literal["to_do", "in_progress", "done"]
@@ -44,17 +50,9 @@ OperationalCaseType = Literal[
     "unanswered_conversations",
     "channel_mix_shift",
 ]
-DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(CASE_FAMILY_METRICS)
-OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = frozenset(
-    {
-        "sales_drop",
-        "stockout_risk",
-        "data_stale",
-    }
-)
-READINESS_GATED_OPERATIONAL_CASE_TYPES: frozenset[str] = (
-    DETECTABLE_OPERATIONAL_CASE_TYPES - OWNER_FACING_OPERATIONAL_CASE_TYPES
-)
+DETECTABLE_OPERATIONAL_CASE_TYPES: frozenset[str] = DETECTABLE_CASE_FAMILIES
+OWNER_FACING_OPERATIONAL_CASE_TYPES: frozenset[str] = OWNER_FACING_CASE_FAMILIES
+READINESS_GATED_OPERATIONAL_CASE_TYPES: frozenset[str] = READINESS_GATED_CASE_FAMILIES
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
 TimelineEventType = Literal[
@@ -1081,7 +1079,7 @@ def _case_evidence_metrics_for_source(
     source: str,
 ) -> list[OperationalCaseEvidenceMetric]:
     registry = default_metric_registry()
-    allowed_case_keys = set(CASE_FAMILY_METRICS.get(case_type, ()))
+    allowed_case_keys = set(case_family_metric_keys(case_type))
     evidence_metrics: list[OperationalCaseEvidenceMetric] = []
     seen_keys: set[str] = set()
     for metric in report.metrics:
