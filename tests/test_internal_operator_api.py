@@ -3780,6 +3780,84 @@ def test_internal_top_actionable_by_age_returns_scoped_envelope(monkeypatch, tmp
     assert newest.case_id not in {case["case_id"] for case in data["cases"]}
 
 
+def test_internal_top_actionable_by_priority_returns_scoped_ordered_envelope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    high = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-high-priority",
+            dedupe_suffix="stockout_risk/product/sku-high-priority/commerce.inventory/daily",
+            priority=95,
+            severity="critical",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    low = store.upsert_detection(
+        _case_detection(
+            case_type="sales_drop",
+            run_id="run-artemea-low-priority",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=40,
+            severity="warning",
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=4),
+    )
+    resolved = store.upsert_detection(
+        _case_detection(
+            run_id="run-artemea-resolved-high-priority",
+            dedupe_suffix="stockout_risk/product/sku-resolved/commerce.inventory/daily",
+            priority=100,
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=10),
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=datetime.now(timezone.utc) - timedelta(days=9, minutes=1),
+    )
+    store.transition_case(
+        resolved.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=datetime.now(timezone.utc) - timedelta(days=9),
+        reason="fixed",
+    )
+    store.upsert_detection(
+        _case_detection(
+            business_id="other",
+            run_id="run-other-high-priority",
+            dedupe_suffix="stockout_risk/product/sku-other-priority/commerce.inventory/daily",
+            priority=100,
+        ),
+        detected_at=datetime.now(timezone.utc) - timedelta(days=20),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/top-by-priority?limit=2",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["actionable_total"] == 2
+    assert data["limit"] == 2
+    assert data["count"] == 2
+    assert [case["case_id"] for case in data["cases"]] == [high.case_id, low.case_id]
+    assert [case["priority_score"] for case in data["cases"]] == [95, 40]
+    assert resolved.case_id not in {case["case_id"] for case in data["cases"]}
+
+
 def test_internal_top_stalled_actionable_cases_endpoint_orders_by_idle_time(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
