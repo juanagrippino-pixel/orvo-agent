@@ -20,6 +20,7 @@ from typing import Iterable, Mapping
 from app.brain.semantics.metric_registry import (
     MetricRegistry,
     MetricValidationIssue,
+    find_duplicate_canonical_violations,
     find_evidence_required_violations,
     find_evidence_source_violations,
     find_family_envelope_violations,
@@ -294,14 +295,19 @@ class ConnectorSpec:
         *,
         registry: MetricRegistry | None = None,
     ) -> list[MetricValidationIssue]:
-        """Compose unknown-metric + source-envelope + family-envelope diagnostics
-        for keys emitted under this connector's envelope.
+        """Compose unknown-metric + source-envelope + family-envelope +
+        duplicate-canonical diagnostics for keys emitted under this connector's
+        envelope.
 
-        The three diagnostics are independently deterministic and composable by
+        The four diagnostics are independently deterministic and composable by
         design. Concatenating them in the fixed order ``unknown_metric`` ->
-        ``disallowed_source`` -> ``undeclared_family`` yields a stable result
-        the runtime/control-plane can compare across runs without overlap:
-        ``find_*_envelope_violations`` already skip unknown keys.
+        ``disallowed_source`` -> ``undeclared_family`` ->
+        ``duplicate_canonical_metric`` yields a stable result the
+        runtime/control-plane can compare across runs without overlap: the
+        downstream helpers already skip unknown keys. Duplicate-canonical lands
+        last on the key level because an alias/canonical pair resolving to one
+        metric is a payload-shape problem (double-counting risk in run-ledger
+        aggregation) rather than an envelope violation of any single key.
         """
 
         materialized = list(metric_keys)
@@ -320,7 +326,11 @@ class ConnectorSpec:
             declared_families=self.emitted_metric_families,
             registry=registry,
         )
-        return [*unknown_issues, *source_issues, *family_issues]
+        duplicate_issues = find_duplicate_canonical_violations(
+            materialized,
+            registry=registry,
+        )
+        return [*unknown_issues, *source_issues, *family_issues, *duplicate_issues]
 
     def validate_emitted_metric_objects(
         self,
@@ -328,23 +338,26 @@ class ConnectorSpec:
         *,
         registry: MetricRegistry | None = None,
     ) -> list[MetricValidationIssue]:
-        """Compose all seven envelope diagnostics for emitted metric objects.
+        """Compose all eight envelope diagnostics for emitted metric objects.
 
         Symmetric extension of :meth:`validate_emitted_metrics` that operates
         on metric-shaped objects (each exposing ``key``, ``value``, ``unit``,
         and ``evidence``). The fixed concatenation order ``unknown_metric`` ->
-        ``disallowed_source`` -> ``undeclared_family`` -> ``evidence_missing``
+        ``disallowed_source`` -> ``undeclared_family`` ->
+        ``duplicate_canonical_metric`` -> ``evidence_missing``
         -> ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
         ``money_currency_missing`` lets the runtime treat object-level
         validation as a superset of key-level validation: when every required
         metric carries non-empty evidence with in-envelope sources, every
         value type matches the canonical unit kind, and every money metric
         carries a currency string, the result equals
-        ``validate_emitted_metrics`` over the same keys. ``evidence_missing``
-        slots between ``undeclared_family`` and ``evidence_source_mismatch``
-        so structural ``no evidence at all`` diagnostics surface before
-        content diagnostics about wrong-source evidence; this mirrors the
-        slot reserved by :func:`validate_report_metric_objects` and
+        ``validate_emitted_metrics`` over the same keys — the four key-level
+        diagnostics stay contiguous and in the same relative order.
+        ``evidence_missing`` slots between ``duplicate_canonical_metric`` and
+        ``evidence_source_mismatch`` so structural ``no evidence at all``
+        diagnostics surface before content diagnostics about wrong-source
+        evidence; this mirrors the slot reserved by
+        :func:`validate_report_metric_objects` and
         :func:`validate_case_metric_objects`. ``money_currency_missing``
         lands last so structural and value-type diagnostics surface before
         the rendering-metadata diagnostic that money metrics must carry a
@@ -369,6 +382,10 @@ class ConnectorSpec:
             declared_families=self.emitted_metric_families,
             registry=registry,
         )
+        duplicate_issues = find_duplicate_canonical_violations(
+            keys,
+            registry=registry,
+        )
         evidence_missing_issues = find_evidence_required_violations(
             materialized, registry=registry
         )
@@ -385,6 +402,7 @@ class ConnectorSpec:
             *unknown_issues,
             *source_issues,
             *family_issues,
+            *duplicate_issues,
             *evidence_missing_issues,
             *evidence_issues,
             *value_kind_issues,
