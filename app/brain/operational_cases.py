@@ -840,6 +840,8 @@ class _OperationalCaseMutations:
         requested = _unique_snapshots(snapshots)
         requested_keys = [snapshot.snapshot_key for snapshot in requested]
         merged_snapshots = _unique_snapshots([*record.evidence_snapshots, *requested])
+        normalized_summary = summary.strip() if isinstance(summary, str) and summary.strip() else None
+        default_summary = f"Attached {len(requested)} evidence snapshot{'s' if len(requested) != 1 else ''}."
         updated = record.model_copy(
             update={
                 "updated_at": attached_at,
@@ -865,8 +867,7 @@ class _OperationalCaseMutations:
                         artifact_ref=artifact_ref,
                         evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, requested_keys),
                         created_at=attached_at,
-                        summary=summary
-                        or f"Attached {len(requested)} evidence snapshot{'s' if len(requested) != 1 else ''}.",
+                        summary=normalized_summary or default_summary,
                     ),
                 ],
             },

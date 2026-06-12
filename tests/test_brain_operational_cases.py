@@ -1227,3 +1227,18 @@ def test_attach_evidence_rejects_unknown_case_and_empty_snapshots():
         store.attach_evidence("missing-case", snapshots=[make_stock_snapshot()])
     with pytest.raises(ValueError):
         store.attach_evidence(opened.case_id, snapshots=[])
+
+
+def test_attach_evidence_normalizes_blank_summary_to_default_event_text():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+
+    attached = store.attach_evidence(
+        opened.case_id,
+        snapshots=[make_stock_snapshot(run_id="run-2")],
+        summary="   ",
+        attached_at=utc_dt(9),
+    )
+
+    assert attached.timeline[-1].event_type == "evidence_attached"
+    assert attached.timeline[-1].summary == "Attached 1 evidence snapshot."
