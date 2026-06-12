@@ -27,9 +27,9 @@
 - Project identity via `project_key`.
 - Issue type via `issue_type`.
 - Workflow/status lifecycle via deterministic status transitions.
-- Status categories remain canonical: `open -> to_do`, `acknowledged/in_progress -> in_progress`, `resolved/dismissed -> done`.
+- Status categories remain canonical: `open -> to_do`, `acknowledged/in_progress -> in_progress`, `resolved/dismissed -> done`, with projection metadata also exposing higher-level categories such as `review`, `blocked`, `ready`, and `skipped` where appropriate.
 - Workflow definitions and deterministic transition validation are projection metadata, not tenant-custom workflow schemes.
-- JQL-lite query support is centralized through WorkItem projection fields rather than endpoint-local vocabulary.
+- JQL-lite query support is centralized through WorkItem projection fields rather than endpoint-local vocabulary, covering fields such as `project_key`, `issue_type`, `status`, `priority`, `owner`, `source`, `run_id`, `case_key`, `created_at`, and `updated_at`.
 
 **Good pattern:** `app/brain/work_items.py` remains an additive projection derived from cases, metrics, and workflow actions. It does not become a second source of truth.
 
