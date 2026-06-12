@@ -72,6 +72,7 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["project_key"] == "ARTEMEA"
     assert projection["issue_type"] == "stockout_risk"
     assert projection["release_state"] == "promoted"
+    assert projection["owner_visible"] is True
     assert projection["status"] == "open"
     assert projection["status_category"] == "to_do"
     assert projection["priority_score"] == 87
@@ -93,6 +94,26 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert case_priority_bracket(case) == "high"
     assert case_sla_status(case, now=now) == "pending"
     assert case_sla_status(case, now=datetime(2026, 5, 24, 10, 1, tzinfo=timezone.utc)) == "breached"
+
+
+def test_case_work_item_projection_marks_readiness_gated_cases_operator_only(tmp_path):
+    db_path = tmp_path / "work-items-readiness-gated.sqlite3"
+    case = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            priority=70,
+            title="Conversaciones sin responder",
+            run_id="run-readiness-gated-owner-visible",
+        ),
+    )
+
+    projection = case_work_item_projection(case, now=datetime(2026, 5, 24, 9, tzinfo=timezone.utc))
+
+    assert projection["release_state"] == "readiness_gated"
+    assert projection["owner_visible"] is False
 
 
 def test_case_work_item_projection_exposes_evidence_lineage(tmp_path):
@@ -304,6 +325,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": False,
         "facetable": True,
     }
+    assert fields["owner_visible"] == {
+        "field": "owner_visible",
+        "value_type": "bool",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "="],
+        "sortable": False,
+        "facetable": True,
+    }
     assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
     assert fields["assignee_ref"]["value_type"] == "string"
     assert fields["priority_score"] == {
@@ -385,6 +414,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "priority_bracket",
         "project",
         "release_state",
+        "owner_visible",
         "severity",
         "sla_status",
         "source_connector",
