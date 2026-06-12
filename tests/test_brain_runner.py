@@ -432,6 +432,123 @@ def test_run_due_daily_reports_records_partial_when_daily_dispatch_fails_and_ski
     }
 
 
+def test_run_due_daily_reports_isolates_tenant_pipeline_failure_from_other_tenants():
+    """One tenant's connector blow-up must not starve other tenants of their due
+    daily reports. The failure is still recorded in the run ledger and re-raised
+    (cron alerting / non-zero exit keep working), but only after every due
+    schedule has been processed.
+
+    Locks the same per-tenant isolation contract that ``due_schedules`` already
+    guarantees for bad config, extended to runtime pipeline failures.
+    """
+    from app.brain.runner import run_due_daily_reports
+
+    store = InMemoryConfigStore()
+    store.save_business_config(
+        BusinessConfig(
+            business_id="aaa-failing",
+            business_name="Artemea Failing",
+            owner_phone="+5491149724933",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="sheet",
+                    connector_type="google_sheets",
+                    label="Sheet Failing",
+                    params={"spreadsheet_id": "abc123", "range_name": "Daily!A1:G1000"},
+                )
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="aaa-failing-daily-report",
+            business_id="aaa-failing",
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+    store.save_business_config(
+        BusinessConfig(
+            business_id="zzz-healthy",
+            business_name="Artemea Healthy",
+            owner_phone="+5491149724934",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn",
+                    connector_type="tiendanube",
+                    label="Tiendanube Healthy",
+                    params={"store_id": "12345", "access_token": "tn_token", "include_stock": False},
+                )
+            ],
+        )
+    )
+    store.save_schedule(
+        ReportSchedule(
+            schedule_id="zzz-healthy-daily-report",
+            business_id="zzz-healthy",
+            cron_expression="0 9 * * *",
+            report_type="daily",
+        )
+    )
+
+    class FailingExecute:
+        def execute(self):
+            raise RuntimeError("sheets 500 access_token=raw_failure_secret")
+
+    class FailingValues:
+        def get(self, spreadsheetId, range):
+            return FailingExecute()
+
+    class FailingSpreadsheets:
+        def values(self):
+            return FailingValues()
+
+    class FailingSheetsService:
+        def spreadsheets(self):
+            return FailingSpreadsheets()
+
+    delivery = MagicMock()
+    delivery.send_text.return_value = DeliveryResult(success=True, message_id="wamid.healthy", error=None)
+    idempotency = InMemoryIdempotencyStore()
+    run_ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(RuntimeError, match="raw_failure_secret"):
+        run_due_daily_reports(
+            config_store=store,
+            idempotency_store=idempotency,
+            delivery_client=delivery,
+            sheets_service=FailingSheetsService(),
+            tiendanube_http_client=FakeTiendanubeClient(),
+            now=datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc),
+            run_ledger=run_ledger,
+            case_store=case_store,
+        )
+
+    # The healthy tenant scheduled after the failing one still got its report.
+    assert delivery.send_text.call_count == 1
+    healthy_phone, healthy_text = delivery.send_text.call_args_list[0].args
+    assert healthy_phone == "+5491149724934"
+    assert "Artemea Healthy" in healthy_text
+    assert idempotency.has("zzz-healthy/2026-05-19/daily")
+
+    # The failing tenant's run is recorded as failed, with redacted error.
+    [failed_run] = run_ledger.list_runs(business_id="aaa-failing")
+    assert failed_run.status == "failed"
+    assert "raw_failure_secret" not in failed_run.model_dump_json()
+    assert case_store.list_cases(business_id="aaa-failing") != []
+
+    # The healthy tenant's run is recorded as succeeded with its dispatch.
+    [healthy_run] = run_ledger.list_runs(business_id="zzz-healthy")
+    assert healthy_run.status == "succeeded"
+    assert healthy_run.dispatch_outcomes[0].status == "sent"
+    assert healthy_run.dispatch_outcomes[0].message_id == "wamid.healthy"
+
+
 def test_run_due_daily_reports_skips_when_not_due():
     from app.brain.runner import run_due_daily_reports
 

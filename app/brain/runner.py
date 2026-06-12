@@ -77,6 +77,7 @@ def run_due_daily_reports(
     runs = due_schedules(schedules, now, business_by_id)
 
     results: list[ScheduledPipelineResult] = []
+    first_failure: Exception | None = None
     for run in runs:
         if run.report_type != "daily":
             continue
@@ -133,7 +134,15 @@ def run_due_daily_reports(
                 connector_types=connector_types,
                 summary_metadata={"schedule_id": run.schedule_id, "report_type": run.report_type},
             )
-            raise
+            # One tenant's runtime failure must not starve the remaining due
+            # tenants; the first failure is re-raised after the loop.
+            _log.warning(
+                "runner pipeline_failed business_id=%s schedule_id=%s; continuing with remaining due schedules",
+                run.business_id, run.schedule_id,
+            )
+            if first_failure is None:
+                first_failure = exc
+            continue
         case_brief_dispatch = record_pipeline_success(
             run_ledger=run_ledger,
             case_store=case_store,
@@ -161,4 +170,6 @@ def run_due_daily_reports(
                 runtime_metadata=runtime_metadata,
             )
         )
+    if first_failure is not None:
+        raise first_failure
     return results
