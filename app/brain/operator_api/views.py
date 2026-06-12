@@ -15,6 +15,7 @@ def list_builtin_case_views() -> dict[str, Any]:
 
     return {"views": builtin_case_views()}
 
+
 def execute_builtin_case_view(
     store: OperationalCaseStore,
     *,
@@ -80,29 +81,6 @@ def export_case_queue_csv(
         store,
         business_id=business_id,
         view_id=view_id,
-        jql=jql,
-        status=status,
-        limit=limit,
-        export_format=export_format,
-    )
-
-
-
-
-def export_case_queue_csv(
-    store: OperationalCaseStore,
-    *,
-    business_id: str,
-    jql: str | None = None,
-    status: str | None = None,
-    limit: str | None = None,
-    export_format: str = "csv",
-) -> dict[str, Any]:
-    from app.brain.operator_views import export_case_queue_csv as export
-
-    return export(
-        store,
-        business_id=business_id,
         jql=jql,
         status=status,
         limit=limit,
