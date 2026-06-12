@@ -6,18 +6,20 @@ not persist custom views and it never translates user input into SQL.
 
 from __future__ import annotations
 
+import csv
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from io import StringIO
 from typing import Any
 
 from app.brain.operational_cases import (
     OperationalCase,
     OperationalCaseStore,
 )
-from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
+from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_case_status, parse_limit
 from app.brain.operator_case_projections import is_case_degraded, source_connectors
-from app.brain.security.redaction import redact_secrets
+from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
     allowed_work_item_facet_fields,
@@ -35,6 +37,30 @@ _MAX_CLAUSES = 8
 _MAX_IN_VALUES = 20
 _DEFAULT_SORT: tuple[tuple[str, str], ...] = (("priority_score", "DESC"), ("opened_at", "ASC"))
 _ALLOWED_SORT_FIELDS = allowed_work_item_query_sort_fields()
+_CASE_EXPORT_COLUMNS: tuple[str, ...] = (
+    "case_id",
+    "business_id",
+    "work_item_id",
+    "case_type",
+    "issue_type",
+    "release_state",
+    "title",
+    "status",
+    "status_category",
+    "severity",
+    "priority_score",
+    "priority_bracket",
+    "opened_at",
+    "updated_at",
+    "acknowledged_at",
+    "assignee_ref",
+    "latest_run_id",
+    "evidence_snapshot_count",
+    "latest_evidence_at",
+    "source_connectors",
+    "degraded",
+)
+_CASE_EXPORT_FORMATS = {"csv"}
 
 
 @dataclass(frozen=True)
@@ -189,6 +215,51 @@ def query_case_queue(
     return redact_secrets(data)
 
 
+def export_case_queue_csv(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    jql: str | None = None,
+    status: str | None = None,
+    limit: str | None = None,
+    export_format: str = "csv",
+) -> dict[str, Any]:
+    """Return a redacted CSV export for a route-scoped case queue.
+
+    This is a read-only projection over ``OperationalCase`` state. It reuses the
+    same allowlisted JQL parser, status parser, limit guard, and WorkItem
+    projections as the JSON case queue so exports cannot become an alternate
+    source of truth or a second query language.
+    """
+
+    export_format = (export_format or "csv").strip().lower()
+    if export_format not in _CASE_EXPORT_FORMATS:
+        raise OperatorAPIError("invalid_export_format", f"Unsupported export format: {export_format}", status_code=400)
+
+    if jql not in (None, ""):
+        if status not in (None, ""):
+            raise OperatorAPIError("conflicting_case_filters", "status and jql filters are mutually exclusive", status_code=400)
+        queue = query_case_queue(store, business_id=business_id, jql=jql, limit=limit)
+        rows = [_case_export_row(item) for item in queue["cases"]]
+    else:
+        parsed_status = parse_case_status(status)
+        parsed_limit = parse_limit(limit)
+        cases = store.list_cases(business_id=business_id, status=parsed_status, limit=parsed_limit)
+        rows = [_case_export_row(case_queue_item(case)) for case in cases]
+
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=_CASE_EXPORT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return redact_secrets(
+        {
+            "content_type": "text/csv; charset=utf-8",
+            "filename": _case_export_filename(business_id),
+            "body": output.getvalue(),
+        }
+    )
+
+
 def facet_case_queue(
     store: OperationalCaseStore,
     *,
@@ -249,6 +320,47 @@ def _facet_value_sort_key(value: Any) -> tuple[str, str]:
     if isinstance(value, bool):
         return ("0", "true" if value else "false")
     return ("0", str(value))
+
+
+def _case_export_row(item: dict[str, Any]) -> dict[str, Any]:
+    work_item = item.get("work_item") or {}
+    source_connectors = item.get("source_connectors") or []
+    if isinstance(source_connectors, list):
+        source_text = "|".join(str(value) for value in source_connectors)
+    else:
+        source_text = str(source_connectors)
+    return {
+        "case_id": item.get("case_id"),
+        "business_id": item.get("business_id"),
+        "work_item_id": work_item.get("work_item_id"),
+        "case_type": item.get("case_type"),
+        "issue_type": work_item.get("issue_type"),
+        "release_state": work_item.get("release_state"),
+        "title": item.get("title"),
+        "status": item.get("status"),
+        "status_category": work_item.get("status_category"),
+        "severity": item.get("severity"),
+        "priority_score": item.get("priority_score"),
+        "priority_bracket": work_item.get("priority_bracket"),
+        "opened_at": item.get("opened_at"),
+        "updated_at": item.get("updated_at"),
+        "acknowledged_at": item.get("acknowledged_at"),
+        "assignee_ref": item.get("assignee_ref"),
+        "latest_run_id": item.get("latest_run_id"),
+        "evidence_snapshot_count": item.get("evidence_snapshot_count"),
+        "latest_evidence_at": item.get("latest_evidence_at"),
+        "source_connectors": source_text,
+        "degraded": "true" if item.get("degraded") else "false",
+    }
+
+
+def _case_export_filename(business_id: str) -> str:
+    redacted = redact_text(business_id) or "business"
+    if redacted != business_id:
+        token = "redacted"
+    else:
+        token = re.sub(r"[^A-Za-z0-9_.-]+", "_", business_id).strip("._") or "business"
+    return f"{token}_cases.csv"
 
 
 def _split_order_by(raw: str) -> tuple[str, tuple[tuple[str, str], ...]]:
