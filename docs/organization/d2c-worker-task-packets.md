@@ -336,11 +336,19 @@ Acceptance:
 
 ## Packet O — Trust/Admin/Security audit closure
 
-Goal: close the 2026-05-31 and 2026-06-01 architecture-review blockers before presenting Trust/Admin/Security as live-use ready.
+Status: satisfied in the current baseline; dispatch only as a narrow regression/fixer packet if audit route/store tests drift. Do **not** treat this as external Admin launch readiness until the legacy default role/business-grant compatibility caveat is explicitly environment-gated or removed.
+
+Goal: close the 2026-05-31 and 2026-06-01 architecture-review blockers before presenting Trust/Admin/Security as internally live-use ready.
 
 Dependency: dispatch after the current internal operator API action path is green. Do not combine with unrelated workflow or connector rewrites.
 
-Current source-of-truth check: the 2026-06-01 Architecture Review Board re-confirmed that current HEAD has role helpers but no durable `operator_audit` module/store. The narrow `/internal/brain/whatsapp/delivery-statuses` `INTERNAL_READ_PERMISSION` gap was closed by `b4f8240`; the remaining blocker is durable audit/least-privilege hardening before adding more operator surfaces.
+Current source-of-truth check:
+
+- `app/brain/operator_audit.py` defines `SQLiteOperatorAuditStore`, a SQLite-backed append-only store for internal operator events. `append_event(...)` persists into `operator_audit_events` and redacts identifiers/payloads with `redact_text(...)` and `redact_secrets(...)`; `list_events(...)` scopes by business and enforces a 90-day retention window.
+- `app/http/internal_brain/operator_audit.py` exposes `/internal/brain/businesses/<business_id>/operator-audit-events` and requires `OPERATOR_AUDIT_READ_PERMISSION` before listing audit events.
+- `app/http/internal_brain/runs_delivery.py` requires `OPERATOR_AUDIT_READ_PERMISSION` plus `require_explicit_global_scope=True` for the global `/internal/brain/whatsapp/delivery-statuses` route, then appends successful and failed delivery-status reads.
+- `app/http/internal_brain/common.py` records authentication-denial events through a safe pre-auth shape and authorization-denial events with redacted actor, role, and business payloads.
+- `app/brain/operator_auth.py` keeps role/permission constants and the explicit global-scope guard; the remaining external-Admin caveat is legacy default role/business-grant behavior.
 
 Read:
 
@@ -359,11 +367,11 @@ Likely files:
 
 Acceptance:
 
-- failed/denied case actions are audited where an authenticated actor/business/case context can be derived;
-- auth failures are either audited through a safe pre-auth event shape or explicitly documented as impossible without a trusted actor/business context;
-- audit payloads and actor/business/target fields are redacted before persistence;
-- every internal operator route, including `/internal/brain/whatsapp/delivery-statuses`, enforces the relevant role permission and has a regression test for viewer/operator/admin behavior;
-- minimal action-scope/RBAC behavior is implemented, or the branch is explicitly labeled audit-foundation-only;
+- satisfied: failed/denied case actions are audited where an authenticated actor/business/case context can be derived;
+- satisfied: auth failures are audited through a safe pre-auth event shape without persisting raw Authorization credentials;
+- satisfied: audit payloads and actor/business/target fields are redacted before persistence and export;
+- satisfied: the audit export route and `/internal/brain/whatsapp/delivery-statuses` enforce the relevant role permission, with admin plus explicit all-business scope required for global delivery-status reads;
+- satisfied with caveat: minimal action-scope/RBAC behavior is implemented, but legacy default role/business grants remain an external-Admin launch blocker until explicitly disabled or environment-gated;
 - full suite remains green.
 
 ## Packet P — Work-management lifecycle regression cleanup
