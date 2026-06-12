@@ -16,7 +16,7 @@ from app.brain.operational_cases import (
     OperationalCaseStore,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
-from app.brain.operator_case_projections import is_case_degraded, source_connectors
+from app.brain.operator_case_projections import is_case_degraded, latest_evidence_at, source_connectors
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
@@ -405,6 +405,12 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case.entity_scope.get("label")
     if field == "degraded":
         return is_case_degraded(case)
+    if field == "latest_evidence_at":
+        return latest_evidence_at(case)
+    if field == "evidence_snapshot_count":
+        return len(case.evidence_snapshots)
+    if field == "evidence_source_count":
+        return len(_case_source_connectors(case))
     if field == "project":
         return case_project_key(case)
     if field == "issue_type":

@@ -33,6 +33,7 @@ from app.brain.operational_cases import (
     operational_case_system_status_transitions,
     operational_case_status_transitions,
 )
+from app.brain.operator_case_projections import is_case_degraded, latest_evidence_at, source_connectors
 
 _PROJECT_KEY_MAX_LENGTH = 32
 _DEFAULT_CASE_TYPE_SCHEME_ID = "d2c-default-case-types"
@@ -102,6 +103,9 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("sla_target_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("evidence_snapshot_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("evidence_source_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition(
         "sla_status",
         "enum",
@@ -274,6 +278,26 @@ def case_work_item_id(case: OperationalCase) -> str:
     return f"{case_project_key(case)}:{case.case_id}"
 
 
+def case_evidence_snapshot_ids(case: OperationalCase) -> list[str]:
+    return [snapshot.snapshot_id for snapshot in case.evidence_snapshots]
+
+
+def case_latest_evidence_at(case: OperationalCase) -> datetime | None:
+    return latest_evidence_at(case)
+
+
+def case_source_connectors(case: OperationalCase) -> list[str]:
+    return source_connectors(case)
+
+
+def case_evidence_source_count(case: OperationalCase) -> int:
+    return len(case_source_connectors(case))
+
+
+def case_evidence_is_degraded(case: OperationalCase) -> bool:
+    return is_case_degraded(case)
+
+
 def case_work_item_projection(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
     """Project an OperationalCase as a WorkItem-shaped API object."""
 
@@ -290,6 +314,12 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "due_at": _iso_utc(case.due_at) if case.due_at is not None else None,
         "sla_status": case_sla_status(case, now=now),
         "assignee_ref": case.assignee_ref,
+        "evidence_snapshot_ids": case_evidence_snapshot_ids(case),
+        "evidence_snapshot_count": len(case.evidence_snapshots),
+        "evidence_source_count": case_evidence_source_count(case),
+        "source_connectors": case_source_connectors(case),
+        "latest_evidence_at": _iso_utc(case_latest_evidence_at(case)) if case_latest_evidence_at(case) is not None else None,
+        "degraded": case_evidence_is_degraded(case),
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
         "case_id": case.case_id,
