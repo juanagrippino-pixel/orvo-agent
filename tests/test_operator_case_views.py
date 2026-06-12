@@ -31,6 +31,36 @@ def _case_detection_with_source(*, source: str, run_id: str, freshness_state: st
     )
 
 
+def _case_detection_with_sources(*, sources: list[str], run_id: str, freshness_state: str = "fresh", **kwargs):
+    detection = _case_detection(run_id=run_id, **kwargs)
+    base_snapshot = detection.evidence_snapshots[0]
+    snapshots = []
+    evidence_refs = []
+    for index, source in enumerate(sources):
+        evidence_ref = f"evidence://{source}/{run_id}/{detection.case_type}/{index}"
+        snapshots.append(
+            base_snapshot.model_copy(
+                update={
+                    "snapshot_key": (
+                        f"{run_id}/evidence://{source}/{run_id}/{detection.case_type}/"
+                        f"{detection.case_type}/business/monitored/{index}"
+                    ),
+                    "source": source,
+                    "source_label": source,
+                    "evidence_ref": evidence_ref,
+                    "freshness_state": freshness_state,
+                }
+            )
+        )
+        evidence_refs.append(evidence_ref)
+    return detection.model_copy(
+        update={
+            "evidence_refs": evidence_refs,
+            "evidence_snapshots": snapshots,
+        }
+    )
+
+
 def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert not hasattr(operator_views, "_FIELD_SPECS")
     assert parse_case_jql("priority_score >= 80 ORDER BY priority_score DESC").normalized == (
@@ -506,6 +536,49 @@ def test_internal_case_facets_support_source_connector_and_bucket_limit(monkeypa
     assert body["data"]["returned"] == 1
     assert body["data"]["truncated"] is True
     assert body["data"]["buckets"] == [{"value": "meta_ads", "count": 1}]
+
+
+def test_internal_case_facets_bucket_multi_source_cases_under_single_primary_connector(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(
+        db_path,
+        _case_detection_with_sources(
+            sources=["tiendanube", "meta_ads"],
+            run_id="run-multi",
+            case_type="spend_without_orders",
+            dedupe_suffix="spend_without_orders/channel/meta_ads/marketing.spend/daily",
+            severity="warning",
+            priority=82,
+            title="Meta Ads y Tiendanube sin ventas",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-meta-only",
+            case_type="spend_without_orders",
+            dedupe_suffix="spend_without_orders/channel/meta_ads/marketing.spend/hourly",
+            severity="warning",
+            priority=74,
+            title="Meta Ads sin ventas",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "source_connector"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["field"] == "source_connector"
+    assert body["data"]["total_cases"] == 2
+    assert body["data"]["returned"] == 1
+    assert body["data"]["truncated"] is False
+    assert body["data"]["buckets"] == [{"value": "meta_ads", "count": 2}]
 
 
 def test_internal_case_facets_group_by_release_state(monkeypatch, tmp_path):

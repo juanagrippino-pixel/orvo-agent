@@ -16,7 +16,7 @@ from app.brain.operational_cases import (
     OperationalCaseStore,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_limit
-from app.brain.operator_case_projections import is_case_degraded, source_connectors
+from app.brain.operator_case_projections import is_case_degraded, primary_source_connector, source_connectors
 from app.brain.security.redaction import redact_secrets
 from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
@@ -239,7 +239,7 @@ def facet_case_queue(
 
 def _case_facet_values(case: OperationalCase, field: str) -> tuple[Any, ...]:
     if field == "source_connector":
-        return tuple(_case_source_connectors(case))
+        return (primary_source_connector(case),)
     return (_case_field_value(case, field),)
 
 

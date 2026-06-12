@@ -24,6 +24,11 @@ def source_connectors(case: OperationalCase) -> list[str]:
     return sorted({snapshot.source for snapshot in case.evidence_snapshots if snapshot.source})
 
 
+def primary_source_connector(case: OperationalCase, *, default: str = "unknown") -> str:
+    sources = source_connectors(case)
+    return sources[0] if sources else default
+
+
 def entity_kind(case: OperationalCase) -> str:
     """Return the canonical entity kind bucket used by operator projections."""
 
