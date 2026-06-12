@@ -531,15 +531,15 @@ def _detection_update_metadata(existing: OperationalCase, detection: Operational
     """Return deterministic audit metadata for a recurring detection update."""
 
     metadata: dict[str, Any] = {"dedupe_key": detection.dedupe_key}
-    if existing.severity != detection.severity:
-        metadata.update({
-            "severity_from": existing.severity,
-            "severity_to": detection.severity,
-        })
     if existing.priority_score != detection.priority_score:
         metadata.update({
-            "priority_score_from": existing.priority_score,
-            "priority_score_to": detection.priority_score,
+            "previous_priority_score": existing.priority_score,
+            "priority_score": detection.priority_score,
+        })
+    if existing.severity != detection.severity:
+        metadata.update({
+            "previous_severity": existing.severity,
+            "severity": detection.severity,
         })
     return metadata
 
@@ -799,7 +799,7 @@ class _OperationalCaseMutations:
                 "timeline": [
                     *existing.timeline,
                     OperationalCaseTimelineEvent(
-                        event_type=event_type,
+                        event_type="case_updated",
                         actor_type="system",
                         actor_ref="operational-case-engine",
                         case_id=existing.case_id,
@@ -807,7 +807,7 @@ class _OperationalCaseMutations:
                         evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"{event_verb} {detection.case_type} case from deterministic detection.",
-                        metadata=metadata,
+                        metadata=_detection_update_metadata(existing, detection),
                     ),
                 ],
             }
