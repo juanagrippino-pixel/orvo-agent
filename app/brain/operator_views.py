@@ -54,6 +54,7 @@ _CASE_EXPORT_COLUMNS: tuple[str, ...] = (
     "opened_at",
     "updated_at",
     "acknowledged_at",
+    "resolved_at",
     "assignee_ref",
     "latest_run_id",
     "evidence_snapshot_count",
@@ -119,6 +120,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "label": "Resolved cases",
         "description": "Resolved cases, most recently updated first.",
         "jql": "status = resolved ORDER BY updated_at DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "recently_resolved",
+        "label": "Recently resolved",
+        "description": "Resolved cases ordered by the canonical resolved_at timestamp.",
+        "jql": "status = resolved ORDER BY resolved_at DESC",
         "readonly": True,
     },
     {
@@ -216,6 +224,7 @@ def query_case_queue(
     filtered = _sort_cases(filtered, parsed.order_by)
     limited = filtered[:parsed_limit]
     data: dict[str, Any] = {
+        "view_id": view.get("view_id") if view is not None else None,
         "jql": parsed.raw,
         "normalized_jql": parsed.normalized,
         "cases": [case_queue_item(case) for case in limited],
@@ -359,6 +368,7 @@ def _case_export_row(item: dict[str, Any]) -> dict[str, Any]:
         "opened_at": item.get("opened_at"),
         "updated_at": item.get("updated_at"),
         "acknowledged_at": item.get("acknowledged_at"),
+        "resolved_at": item.get("resolved_at"),
         "assignee_ref": item.get("assignee_ref"),
         "latest_run_id": item.get("latest_run_id"),
         "evidence_snapshot_count": item.get("evidence_snapshot_count"),
@@ -555,4 +565,5 @@ def _sort_cases(cases: list[OperationalCase], order_by: tuple[tuple[str, str], .
 def _sort_value(case: OperationalCase, field: str) -> Any:
     if field == "case_id":
         return case.case_id
-    return _case_field_value(case, field)
+    value = _case_field_value(case, field)
+    return (0, value) if value is not None else (1, "")
