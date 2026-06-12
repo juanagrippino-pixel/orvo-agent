@@ -639,11 +639,12 @@ Current source-of-truth check:
 - `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`, and `priority_bracket`.
-- `docs/architecture-reviews/2026-06-11-arb-update-6457695.md` is the latest ARB input, and `docs/specs/integration-train-contract.md` records the post-ARB idempotency/audit-redaction/readiness-state baseline. Future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
+- `docs/architecture-reviews/2026-06-11-arb-update-6457695.md` and `docs/architecture-reviews/2026-06-12-architecture-board-review.md` are the latest ARB inputs, and `docs/specs/integration-train-contract.md` records the 2026-06-12 post-review baseline. The 2026-06-12 review keeps `N2-Pro/search-analytics` and `N2-Pro/operator-surfaces` as needs-work because they delete tests or weaken semantic validation, so future broad search/operator-surface work must consume the WorkItem field registry rather than creating local field semantics.
 
 Read:
 
 - `docs/architecture-reviews/2026-06-11-arb-update-6457695.md`
+- `docs/architecture-reviews/2026-06-12-architecture-board-review.md`
 - `docs/specs/internal-operator-api-contract.md`
 - `docs/specs/integration-train-contract.md`
 - `docs/specs/testing-invariant-matrix.md`

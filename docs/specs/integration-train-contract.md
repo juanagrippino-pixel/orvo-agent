@@ -25,9 +25,9 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ## Current next recommendations train
 
-### 2026-06-11 status checkpoint
+### 2026-06-12 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `d0c9d1c` (`codex: reserve woocommerce external toolkit`). This supersedes the 2026-06-07 checkpoint and the 2026-06-10 Architecture Review Board recommendations that still treated workflow approval/request matching, case-family release-state metadata, global delivery-status boundaries, and system reopen workflow metadata as pending items.
+The current repository `HEAD` before this reconciliation is `23c115eb` (`feat/orvo-brain-control-plane`). This supersedes the 2026-06-11 checkpoint and incorporates the 2026-06-12 Architecture Review Board review of N2-Pro branches. The 2026-06-12 review found `N2-Pro/connector-platform` to be the best merge-ready candidate, while `n2-pro-work-management`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, and `N2-Pro/search-analytics` need narrow fixer/split work because they delete tests or regress semantic validation, evidence, or audit behavior. Destructive `claude/*` refactor branches remain not mergeable as reviewed.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
@@ -39,6 +39,7 @@ Recent shipped baseline facts, grounded in repo inspection:
 - Trust/Admin hardening now includes safe actor refs, safe internal error codes/messages, audit-business scoping for secret-shaped tenant IDs, the Basic-auth audit redaction invariant, non-ASCII internal-auth fail-closed behavior, redacted operator action principals, and an admin plus explicit all-business grant boundary for the global `/internal/brain/whatsapp/delivery-statuses` route.
 - Manual case actions require idempotency at both the HTTP boundary and the shared helper boundary. `apply_case_action_with_idempotency()` calls `require_case_action_idempotency_key()` before validation, ledger reservation, or mutation, so non-HTTP/internal callers cannot accidentally bypass the ledgered idempotency path.
 - Connector secret-boundary hardening is baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and connector contract tests assert forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
+- WorkItem status-category semantics remain canonical in the current branch: `OperationalCaseStatusCategory` is `to_do`, `in_progress`, `done`; branches or docs that use `todo` are non-canonical drift.
 - Internal operator analytics continue to use thin route wrappers and shared service helpers. Endpoint count remains the largest Atlassian-pattern risk; future analytics/search/dashboard slices should converge on WorkItem/JQL/view/facet primitives rather than one route per card.
 
 Recommended order from this checkpoint:
