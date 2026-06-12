@@ -1,128 +1,107 @@
-# Reporte ejecutivo autónomo — Orvo Codex Board
+# Reporte ejecutivo autónomo — Orvo Board
 
-Fecha de corte: 2026-06-11 22:55 UTC
+Fecha de corte: 2026-06-12 22:52 UTC
 Repo: `/root/orvo-agent`
 Rama canónica: `feat/orvo-brain-control-plane`
-Baseline previo verificado: `2803542` (`docs: gate unanswered conversations roadmap`)
-Head antes de este reporte: `ddae53c` (`gtm: reposition paid pilot activation sprint`)
-Estado repo al corte: limpio; local estaba `ahead 2` de `origin/feat/orvo-brain-control-plane` por `f434a7c` y `ddae53c`.
-Inventario: 171 worktrees registrados, 0 dirty, 0 missing. Backlog: 90 ramas locales y 133 remotas no mergeadas contra la canónica.
+Board report previo: `491e9c88` (`docs: refresh autonomous board report`)
+HEAD local verificado: `23dbfdef` (`research: wismo carrier readiness`)
+HEAD remoto verificado: `74fd65cf` (`Merge branch 'N2-Pro/connector-platform' into integration/release-manager-20260612`)
+Estado repo al corte: limpio; la canónica local está `ahead 1` de `origin/feat/orvo-brain-control-plane`.
+Inventario verificado: 190 worktrees, 0 dirty, 0 missing. Backlog actual: 107 ramas locales y 148 remotas no mergeadas contra la canónica.
 
 ## 1. Lectura ejecutiva
 
-Orvo avanzó fuerte en dos frentes: **control-plane determinístico** y **posicionamiento vendible como PyME OS**. La base ahora está más cerca de un Jira/Atlassian operativo: casos como fuente de verdad, WorkItem como proyección, readiness/release state explícito, run ledger más seguro, conectores fallidos convertidos en `data_stale`, y APIs internas más inspeccionables.
+Orvo siguió avanzando en la dirección correcta: menos “bot/reporting tool” y más **centro operativo PyME** con contratos reales de runtime, cases, readiness y operador. El salto de hoy no es solo visual: la canónica ya absorbió hardening de connector-platform, más guardrails de proyección owner-facing y la primera implementación útil de **OS snapshot**.
 
-El blocker principal ya no es arquitectura: es **operacional/comercial**. El dry-run real de Artemea sigue fallando porque Tiendanube devuelve HTTP 401 y Meta Ads HTTP 400. La mejora es que ahora se crean casos `data_stale` redacted; el problema es que el piloto no puede demostrar la verdad de ventas/pedidos si Tiendanube no autentica.
+El bloqueo principal sigue siendo operacional, no conceptual: el piloto real de Artemea continúa caído por autenticación/fuente (`Tiendanube 401`, `Meta Ads 400`). La buena noticia es que el sistema ahora degrada honestamente y abre/mantiene `data_stale`; la mala es que todavía no hay una demo/piloto “source-of-truth green” para ventas/pedidos si Tiendanube no conecta.
 
 ## 2. Qué shipped desde el último board report
 
-Commits/deliverables destacados desde `2803542`:
+Commits/deliverables destacados desde `491e9c88`:
 
-- **Connector failure → `data_stale` cases integrado** — `e01fd7c` / `2f2a4d2`.
-  - Fallas de conectores ya no quedan como traceback crudo: se registran outcomes, se abren/actualizan casos `data_stale`, y el runner puede degradar honestamente.
+- **JQL scope guard integrado** — `ca0dfeff`, `30b3b600`.
+  - La ruta dueña del contexto impone project scope; baja riesgo de query drift o cruces indebidos.
 
-- **Readiness/release-state y owner-facing gates** — `72582d5`, `10440ea`, `32fc3ef`, `9d3d74a`, `f434a7c`.
-  - Se separó detectar/registrar una familia de casos de promoverla al dueño.
-  - `sales_drop`, `stockout_risk`, `data_stale` quedan promovidas; `unanswered_conversations` y `fulfillment_backlog` quedan readiness-gated.
+- **Connector readiness / setup-required surfaced** — `5b9bbe71`.
+  - Mejora clave para el enfoque “OS honesto”: módulos no conectados pueden mostrarse como setup-required en vez de fingir cobertura.
 
-- **Operador/WorkItem más Atlassian-like** — `a421de7`, `f003c00`, `a0d392e`, `b1bb9bf`, `6f4042a`.
-  - Actor taxonomy incluye `system`, `operator`, `owner`, `worker`.
-  - Hay proyecciones internas de runtime compile, connector readiness, release-state query, facets y dispatch summaries.
+- **Case queue / evidence / diagnostics hardening** — `72296223`, `4e027c04`, `1be47692`, `618e48aa`, `64319c22`, `20878741`.
+  - Se fortalecen queue summaries, eventos `evidence_attached`, validaciones duplicate-canonical y el contrato append-only del ledger.
 
-- **Trust/Admin/Security hardening** — `44f3b23`, `7cbde94`, `36e07e6`, `7ad04dd`, `5b7deba`.
-  - Delivery-status requiere admin/all-business grant, auth no ASCII falla cerrado, principals se redactionan, lecturas inválidas quedan auditadas, y el catálogo de acciones externas tiene guardia de side effects.
+- **Connector-platform absorbido a la canónica** — `39505eb3`, `3e108b4b`, `23c115eb`, `de2e77b1`, `74fd65cf`.
+  - El runtime/ledger ahora registra y expone familias emitidas por conectores y certifica mejor lo que realmente declaran/ejecutan.
 
-- **Run ledger / dispatch safety** — `347534a` / `6457695`.
-  - Nuevo guard test-only: una falla secundaria de owner-case brief queda como run terminal `partial`, redacted, sin dejar runs `running` ni permitir mutaciones después del terminal state.
+- **Owner-facing boundary guard** — `29204978`.
+  - QA reforzó que las proyecciones owner-facing respeten los límites de promoción/readiness.
 
-- **WhatsApp webhook robustness** — `adbb183`.
-  - El extractor ahora escanea payloads batched y toma el primer mensaje inbound válido, no solo `messages[0]`.
+- **OS snapshot / operator-home primer slice** — `63338fae`, `50ff50d8`, `5837bee5`.
+  - Ya existe una proyección de OS snapshot en la capa operator API y un UX brief explícito para la pantalla tipo “centro operativo”.
 
-- **Producto/GTM reposicionado** — `6041c83`, `e38523c`, `5231284`, `539772f`, `5ce89b3`, `ddae53c`.
-  - Dirección aceptada: Orvo como **centro operativo / PyME OS** con app/operator console primero; WhatsApp como alerta/proyección.
-  - ARCA/treasury quedan como readiness lanes, no emisión fiscal/reconciliación.
-  - Paid pilot renombrado como **“Orvo OS Activation Sprint — Centro operativo para tu Tiendanube en 30 días”**.
+- **Posicionamiento PyME OS profundizado** — `d2c74b57`, `60654ad6`, `3af4f21c`, `23dbfdef`.
+  - Se consolidó el plan competitivo La PyME/OS snapshot y se documentó `wismo/carrier readiness` como lane futura, sin prometer shipping falso.
 
 ## 3. Qué está corriendo
 
-- **29 jobs Orvo** registrados en Hermes; los lanes Codex principales están `scheduled` y con último estado `ok`: COO, ARB, Build Loop, QA/Red Team, Release/Integration, SRE/Ops, GTM, Knowledge/Roadmap, Work Management, Workflow, Connector, Search, Operator Surfaces, Trust/Admin, Service Management y Edge.
-- **Watchdogs** activos: repo hygiene, review queue, worktree inventory, MVP progress, agents watchdog. Últimos checks: ok/silent, sin dirty worktrees.
-- **Paused legacy Claude direct workers** siguen pausados; Codex/openai-codex es el camino activo.
-- **Daily WhatsApp report** (`09390d77dd26`) sigue en error.
-- **Worktree hygiene:** 171 worktrees, 0 dirty, 0 missing.
-- **Pruebas recientes reportadas por lanes:** suites completas entre `1419` y `1422 passed`; este reporte corre su propia verificación abajo.
+- **Departamentos/líneas activas verificadas por señales recientes:** COO/Strategic Planner, QA/Red Team, Release/Integration y SRE/Ops siguen emitiendo output; además hay worktrees activos de Product/UX, Connector Platform, Workflow, Search, Trust/Admin y Operator Surfaces.
+- **Higiene del sistema autónomo:** 190 worktrees registrados, 0 dirty, 0 missing.
+- **Modo de trabajo vigente:** canónica limpia + ramas/worktrees externos; la integración secuencial sigue siendo la política correcta.
+- **Canónica local adelantada por 1 commit** sobre origin: solo research/documentación (`23dbfdef`), no una feature crítica sin verificar.
 
 ## 4. Bloqueos y riesgos que importan
 
-1. **Bloqueo crítico de piloto: Tiendanube HTTP 401.**
-   - Verificación real al corte:
+1. **Bloqueo crítico de piloto: Artemea sigue fallando en runtime real.**
+   - Verificación ejecutada al corte:
      `python scripts/run_orvo_brain_reports.py --db /root/orvo-agent/orvo_brain.sqlite3 --business-id artemea --dry-run --force`
-   - Resultado: `status=failed`; todos los conectores habilitados fallaron.
-   - Tiendanube: HTTP 401; Meta Ads: HTTP 400.
-   - La parte buena: el sistema abrió/mantuvo casos `data_stale` para `tiendanube` y `meta_ads`.
-   - Riesgo: no hay paid pilot vendible si el source core de ventas/pedidos no está verde.
+   - Resultado real: `status=failed`.
+   - Error resumido: `Tiendanube auth failed: HTTP 401` + `Meta Ads error: HTTP 400`.
+   - Efecto correcto del sistema: permanecen abiertos casos `data_stale` para `tiendanube` y `meta_ads`.
+   - Riesgo: no hay demostración vendible del core ventas/pedidos mientras Tiendanube siga roja.
 
-2. **Producto todavía carece de operator home canónico.**
-   - Internamente hay buenos endpoints; comercialmente falta una pantalla tipo “centro operativo”.
-   - Branch candidato: `codex/lapyme-os-snapshot-20260611`.
+2. **Hay progreso en OS snapshot, pero todavía falta cerrar el loop de “operator home”.**
+   - La proyección existe en operator API.
+   - Falta terminar su amarre fino en superficie/rutas/tests y luego grabar demo V2 desde un tenant limpio.
 
-3. **Backlog de integración alto.**
-   - 90 ramas locales y 133 remotas no mergeadas.
-   - Riesgo: branches viejas reintroducen semántica ya corregida o endpoint proliferation.
+3. **Sprawl de ramas sigue alto.**
+   - 107 ramas locales + 148 remotas no mergeadas.
+   - Riesgo: volver a meter drift semántico, test deletions o endpoints bespoke por merge apurado.
 
-4. **Endpoint proliferation.**
-   - `operator-surfaces`, `search-analytics`, `service-management` y `edge` siguen valiosas pero demasiado amplias.
-   - Gate: integrar solo primitivas WorkItem/JQL/facet/SLA/readiness, no un endpoint bespoke por widget.
+4. **Las ramas amplias N2-Pro siguen necesitando split/fixer, no merge directo.**
+   - El contrato de integración 2026-06-12 sigue marcando `work-management`, `workflow-automation`, `trust-admin-security`, `operator-surfaces` y `search-analytics` como valiosas pero demasiado anchas o regresivas en su forma actual.
 
-5. **External Admin/SaaS no está listo.**
-   - RBAC/redaction interno mejoró, pero todavía hay defaults legacy (`role=None -> operator`, business grants implícitos) que no son aceptables para usuarios externos.
-
-6. **Riesgo de promesa La Pyme/ARCA/treasury.**
-   - Correcto mostrar readiness lanes.
-   - No prometer facturación, asesoría fiscal, contabilidad, movimiento de dinero ni conciliación hasta tener conectores/evidencia/redacción/gates.
-
-7. **Riesgo ops secundario: backup Hermes push.**
-   - SRE reportó `Hermes Daily Backup` fallando por auth GitHub; no bloquea Orvo product, pero debe repararse después del reporte diario.
+5. **Cuidado con scope creep comercial/técnico.**
+   - El plan correcto hoy es “centro operativo / PyME OS slice”.
+   - No vender ARCA, caja, atención o carrier visibility como automatización plena sin evidencia, readiness y fuente verde.
 
 ## 5. Branches que necesitan integración/revisión
 
-Orden recomendado por valor/riesgo:
+Orden recomendado hoy:
 
-1. **`codex/lapyme-os-snapshot-20260611`** — prioridad producto.
-   - Valor: primera proyección de operator home / PyME OS snapshot.
-   - Gate: rebase, review de source-of-truth, focused tests, full suite. Debe derivar de run ledger, connector readiness y OperationalCases.
+1. **`codex/os-snapshot-20260612`** — mejor siguiente merge chico.
+   - Diff específico actual contra canónica: route wiring + tests (`dashboard_views` + `test_internal_operator_api`).
+   - Valor: cerrar el slice visible del OS snapshot ya integrado en operator API.
+   - Gate: rebase, focused tests, suite amplia, y revisión de que derive solo de runtime/connectors/cases.
 
-2. **`codex/qa-jql-project-scope-20260611`** — small QA guard.
-   - Valor: tenant/project scope para JQL.
-   - Gate: duplicación/redundancy check y merge test-only si sigue único.
+2. **`codex/lapyme-os-snapshot-20260611`** — valiosa, pero ya está vieja para merge directo.
+   - Tiene 1 commit útil propio pero está ~58 commits detrás de la canónica.
+   - Recomendación: extraer/cherry-pick solo el valor residual; no mergear la rama completa.
 
-3. **`codex/qa-dispatch-idempotency-redaction-20260611`** y readiness owner-brief QA branches.
-   - Valor: redaction/idempotency owner surfaces.
-   - Gate: patch-id review; no duplicar guards ya integrados.
+3. **`codex/qa-case-timeline-dedupe-scope-20260612`** — QA guard chico a revisar.
+   - Puede ser buen follow-up si toca evidencia/timeline/case dedupe sin expandir superficie.
 
-4. **`codex/connector-platform` / `codex/eng-factory-connector-platform-reconcile-20260606`**.
-   - Valor: registry/runtime/health/secret-boundary hardening.
-   - Gate: selective merge; no broad remote stale merge.
+4. **Ramas N2-Pro amplias** (`n2-pro-work-management`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, `N2-Pro/search-analytics`).
+   - Mantenerlas en modo split/fixer según `docs/specs/integration-train-contract.md`.
+   - No hacer merge wholesale.
 
-5. **`codex/work-management`**, luego slices de **`codex/search-analytics`**.
-   - Valor: SLA/evidence/timeline/query primitives.
-   - Gate: mantener `OperationalCase` como source of truth; converger en WorkItem/JQL/facet registries.
+## 6. Próximas acciones autónomas recomendadas
 
-6. **Hold/split:** `codex/operator-surfaces`, `codex/service-management`, `codex/edge-developer-platform`.
-   - Integrar solo cuando estén reducidas a primitivas compatibles con el MVP D2C/PyME OS.
-
-## 6. Próximas acciones autónomas
-
-- **SRE/Ops:** tratar Tiendanube 401 como incidente #1; validar/rotar credencial o aislar el piloto a una fuente Tiendanube green. Meta Ads puede quedar fuera del Starter.
-- **Release/Integration:** promover OS Snapshot o, si prefiere riesgo mínimo primero, `qa-jql-project-scope`; no mergear broad branches.
-- **Engineering/Product:** convertir connector readiness + `data_stale` en tareas setup-required visibles: “token inválido”, “fuente stale”, “módulo no conectado”.
-- **GTM:** convertir el Activation Sprint en one-pager/landing copy usando “centro operativo diario para tu Tiendanube: casos, evidencia y próximos pasos”.
-- **QA/ARB:** seguir bloqueando claims owner-facing de ARCA/treasury/customer attention hasta tener fuentes estructuradas, freshness, privacy y human resolver.
+- **Release/Integration:** promover primero `codex/os-snapshot-20260612` por tamaño/impacto; después volver a un QA guard chico.
+- **SRE/Ops:** tratar `Tiendanube 401` como incidente #1 del negocio; validar token/credencial o mover demo/piloto a una tienda green. Meta Ads puede seguir fuera del Starter.
+- **Product/GTM:** usar el UX brief y el action plan para grabar V2 apenas exista tenant demo verde con snapshot y queue.
+- **QA/ARB:** seguir bloqueando cualquier owner-facing claim nuevo si no está conectado a readiness, evidence y promotion gates.
 
 ## Decisiones pedidas a Juan
 
-1. **Tiendanube:** ¿renovamos/validamos ya el token de Artemea, o armamos una demo/piloto con otra tienda/fuente Tiendanube green?
-2. **Producto:** ¿autorizás priorizar `codex/lapyme-os-snapshot-20260611` como próximo merge aunque Release tenga un QA guard chico en cola?
-3. **Oferta:** confirmar que el paid pilot se vende como **OS Activation Sprint USD 149 / 30 días**, no como WhatsApp bot ni ERP.
-4. **Gates:** confirmar que ARCA/treasury/customer-attention son readiness lanes en Starter, no promesas funcionales.
-5. **Ops secundario:** ¿SRE puede reparar credenciales del backup Hermes después de destrabar el daily report?
+1. **Piloto:** ¿destrabamos ya Tiendanube de Artemea o cambiamos a una tienda/demo source-of-truth verde para no frenar ventas?
+2. **Prioridad de integración:** ¿autorizás que Release meta primero `codex/os-snapshot-20260612` como próximo merge por valor demo/comercial?
+3. **Oferta:** confirmar que seguimos vendiendo **centro operativo / OS Activation Sprint**, no “bot de WhatsApp” ni ERP.
+4. **Claims:** confirmar que ARCA, caja/tesorería, atención y carrier visibility siguen como readiness lanes hasta nueva evidencia y conectores verdes.
