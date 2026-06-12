@@ -58,7 +58,9 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
     assert runtime.report_schedules[0].timezone == "America/Argentina/Buenos_Aires"
     assert [connector.connector_id for connector in runtime.connectors] == ["sheet", "tn"]
     assert runtime.connectors[0].required_params == ["spreadsheet_id", "range_name"]
+    assert runtime.connectors[0].emitted_event_families == ["connector.execution", "connector.health"]
     assert runtime.connectors[1].secret_param_names == ["access_token"]
+    assert runtime.connectors[1].emitted_event_families == ["connector.execution", "connector.health"]
     assert runtime.connectors[1].health_policy == {
         "readiness_check": "metadata_only",
         "supports_health_check": False,
@@ -112,6 +114,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "runtime.freshness",
                 "runtime.data_quality",
             ],
+            "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
             "health_policy": {
@@ -157,6 +160,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 "runtime.freshness",
                 "runtime.data_quality",
             ],
+            "emitted_event_families": ["connector.execution", "connector.health"],
             "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
             "executor_factory_path": "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube",
             "health_policy": {
