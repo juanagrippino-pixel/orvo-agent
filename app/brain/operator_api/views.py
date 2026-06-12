@@ -28,6 +28,12 @@ def execute_builtin_case_view(
     return query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
 
 
+def list_case_query_fields() -> dict[str, Any]:
+    from app.brain.operator_views import list_case_query_fields as fields
+
+    return fields()
+
+
 def list_case_facets(
     store: OperationalCaseStore,
     *,
