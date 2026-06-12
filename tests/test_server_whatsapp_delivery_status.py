@@ -261,13 +261,36 @@ def test_internal_delivery_statuses_requires_admin_with_explicit_global_scope(mo
         "/internal/brain/whatsapp/delivery-statuses",
         headers={**AUTH, "X-Orvo-Role": "admin"},
     )
+    admin_with_empty_scope = client.get(
+        "/internal/brain/whatsapp/delivery-statuses",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Businesses": "", "X-Request-ID": "req-empty-global-scope"},
+    )
+    raw_scope_secret = "raw_partial_global_scope_secret"
+    admin_with_partial_scope = client.get(
+        "/internal/brain/whatsapp/delivery-statuses",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "admin",
+            "X-Orvo-Businesses": f"artemea, other access_token={raw_scope_secret}",
+            "X-Request-ID": "req-partial-global-scope",
+        },
+    )
 
     assert legacy_operator.status_code == 403
     assert legacy_operator.get_json()["error"]["code"] == "forbidden"
     assert admin_without_scope.status_code == 403
     assert admin_without_scope.get_json()["error"]["code"] == "forbidden"
+    assert admin_with_empty_scope.status_code == 403
+    assert admin_with_empty_scope.get_json()["error"]["code"] == "forbidden"
+    assert admin_with_partial_scope.status_code == 403
+    raw_body = admin_with_partial_scope.get_data(as_text=True)
+    assert raw_scope_secret not in raw_body
+    assert admin_with_partial_scope.get_json()["error"]["code"] == "forbidden"
+
     events = _read_audit_events(db_path)
     assert [event["event_type"] for event in events] == [
+        "operator.authorization.denied",
+        "operator.authorization.denied",
         "operator.authorization.denied",
         "operator.authorization.denied",
     ]
@@ -275,6 +298,26 @@ def test_internal_delivery_statuses_requires_admin_with_explicit_global_scope(mo
     assert events[0]["data"]["permission"] == "operator_audit:read"
     assert events[1]["data"]["reason"] == "explicit_global_scope_required"
     assert events[1]["data"]["permission"] == "business:access"
+    by_request = {event["request_id"]: event for event in events}
+    assert by_request["req-empty-global-scope"]["data"] == {
+        "status": "denied",
+        "reason": "explicit_global_scope_required",
+        "status_code": 403,
+        "method": "GET",
+        "role": "admin",
+        "permission": "business:access",
+        "allowed_businesses": [],
+    }
+    assert by_request["req-partial-global-scope"]["data"] == {
+        "status": "denied",
+        "reason": "explicit_global_scope_required",
+        "status_code": 403,
+        "method": "GET",
+        "role": "admin",
+        "permission": "business:access",
+        "allowed_businesses": ["artemea", "[REDACTED]"],
+    }
+    assert raw_scope_secret not in json.dumps(by_request["req-partial-global-scope"], sort_keys=True)
 
 
 def test_internal_delivery_statuses_returns_recent_events(monkeypatch, tmp_path):
