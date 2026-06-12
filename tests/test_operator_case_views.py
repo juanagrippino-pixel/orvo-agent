@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -124,6 +125,9 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("due_at < 2026-05-24T10:00:00Z").normalized == (
         "due_at < 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql(
+        "latest_evidence_at >= 2026-05-24T08:00:00Z ORDER BY latest_evidence_at DESC"
+    ).normalized == "latest_evidence_at >= 2026-05-24T08:00:00+00:00 ORDER BY latest_evidence_at DESC"
     assert parse_case_jql("sla_status = breached").normalized == (
         "sla_status = breached ORDER BY priority_score DESC, opened_at ASC"
     )
@@ -204,6 +208,55 @@ def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scop
     assert [case["case_id"] for case in body["data"]["cases"]] == [meta_case.case_id]
     assert body["data"]["cases"][0]["source_connectors"] == ["meta_ads"]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_sorts_by_latest_evidence_at(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    older_case = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-older",
+            priority=50,
+            dedupe_suffix="stockout_risk/business/monitored/older/daily",
+        ),
+    )
+    newer_case = _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-newer", priority=50))
+    later_snapshot = newer_case.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_id": "snapshot-newer-later",
+            "captured_at": datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+            "source": "google_sheets",
+            "source_label": "Google Sheets",
+            "evidence_ref": "evidence://google_sheets/run-newer-google/stockout_risk",
+            "snapshot_key": "run-newer-google/evidence://google_sheets/run-newer-google/stockout_risk/stockout_risk/business/monitored",
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.attach_evidence(
+        newer_case.case_id,
+        snapshots=[later_snapshot],
+        run_id="run-newer-google",
+        artifact_ref="ledger://runs/run-newer-google/daily-report",
+        summary="Attached later Google Sheets evidence.",
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "status = open ORDER BY latest_evidence_at DESC"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "status = open ORDER BY latest_evidence_at DESC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [newer_case.case_id, older_case.case_id]
+    assert body["data"]["cases"][0]["work_item"]["latest_evidence_at"] == "2026-05-24T09:30:00Z"
 
 
 def test_internal_case_queue_filters_degraded_cases_and_keeps_business_scope(monkeypatch, tmp_path):
