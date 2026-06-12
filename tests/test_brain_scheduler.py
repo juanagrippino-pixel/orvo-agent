@@ -249,3 +249,50 @@ def test_artemea_08h00_schedule_fires_at_11h00_utc():
     after_before = datetime(2026, 5, 19, 10, 0, 0, tzinfo=UTC)
     nxt = next_daily_run(sched, after_before, tz)
     assert nxt == datetime(2026, 5, 19, 11, 0, 0, tzinfo=UTC)
+
+
+# ---------------------------------------------------------------------------
+# Test 14: multi-tenant fault isolation — one tenant's malformed schedule
+# config must not abort the due-check for every other tenant.
+# ReportSchedule.cron_expression and BusinessConfig.timezone are unvalidated
+# strings, so both failure modes are reachable from stored config.
+# ---------------------------------------------------------------------------
+
+def test_due_schedules_isolates_malformed_cron_expression(caplog):
+    bad = make_schedule(schedule_id="sched-bad", business_id="biz-bad", cron_expression="*/5 9 * * *")
+    good = make_schedule(schedule_id="sched-good", business_id="biz-good", cron_expression="30 8 * * *")
+    configs = {
+        "biz-bad": make_business_config(business_id="biz-bad", timezone="UTC"),
+        "biz-good": make_business_config(business_id="biz-good", timezone="UTC"),
+    }
+    now = datetime(2026, 5, 19, 8, 30, 0, tzinfo=UTC)
+
+    with caplog.at_level("WARNING", logger="app.brain.scheduler"):
+        result = due_schedules([bad, good], now, configs)
+
+    assert [run.schedule_id for run in result] == ["sched-good"]
+    assert any("sched-bad" in record.message for record in caplog.records)
+
+
+def test_due_schedules_isolates_invalid_business_timezone(caplog):
+    bad = make_schedule(schedule_id="sched-bad", business_id="biz-bad", cron_expression="30 8 * * *")
+    good = make_schedule(schedule_id="sched-good", business_id="biz-good", cron_expression="30 8 * * *")
+    configs = {
+        "biz-bad": make_business_config(business_id="biz-bad", timezone="America/Not_A_City"),
+        "biz-good": make_business_config(business_id="biz-good", timezone="UTC"),
+    }
+    now = datetime(2026, 5, 19, 8, 30, 0, tzinfo=UTC)
+
+    with caplog.at_level("WARNING", logger="app.brain.scheduler"):
+        result = due_schedules([bad, good], now, configs)
+
+    assert [run.schedule_id for run in result] == ["sched-good"]
+    assert any("sched-bad" in record.message for record in caplog.records)
+
+
+def test_should_run_schedule_still_raises_on_malformed_cron():
+    """Direct callers keep loud errors; only the batch due-check isolates."""
+    sched = make_schedule(cron_expression="daily")
+    now = datetime(2026, 5, 19, 8, 30, 0, tzinfo=UTC)
+    with pytest.raises(ValueError):
+        should_run_schedule(sched, now, "UTC")
