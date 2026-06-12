@@ -345,6 +345,7 @@ def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_act
         db_path,
         _case_detection(
             metadata={
+                "recommended_action": "delete_everything access_token=raw_owner_action_copy_secret",
                 "suggested_action_keys": [
                     "confirm_stock",
                     "delete_everything",
@@ -372,11 +373,13 @@ def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_act
     assert response.status_code == 200
     raw_body = response.get_data(as_text=True)
     assert "raw_owner_action_secret" not in raw_body
+    assert "raw_owner_action_copy_secret" not in raw_body
     assert "delete_everything" not in raw_body
     assert "check_storefront" not in raw_body
     body = response.get_json()
     assert body["redaction_applied"] is True
     data = body["data"]
+    assert "Acción sugerida: Confirm stock" in data["text"]
     assert data["case_ids"] == [case.case_id]
     assert data["suggested_action_keys"] == ["confirm_stock"]
     assert data["displayed_cases"] == [

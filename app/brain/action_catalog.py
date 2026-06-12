@@ -214,6 +214,31 @@ API_ENABLED_CASE_ACTION_KEYS: tuple[str, ...] = tuple(
 )
 
 
+def suggested_action_keys_for_case(case: Any) -> list[str]:
+    """Return registered, family-allowed suggested action keys for a case.
+
+    Case metadata can carry stale, duplicated, secret-shaped, or invented values.
+    Owner/report/operator projections should call this service helper instead of
+    trusting raw metadata or reimplementing action-key filtering per surface.
+    """
+
+    metadata = getattr(case, "metadata", {})
+    raw_keys = metadata.get("suggested_action_keys") if isinstance(metadata, dict) else None
+    if not isinstance(raw_keys, list):
+        return []
+    case_type = getattr(case, "case_type", None)
+    keys: list[str] = []
+    for raw_key in raw_keys:
+        if not isinstance(raw_key, str):
+            continue
+        definition = ACTION_CATALOG.get(raw_key)
+        if definition is None or case_type not in definition.case_families:
+            continue
+        if raw_key not in keys:
+            keys.append(raw_key)
+    return keys
+
+
 def workflow_action_registry() -> dict[str, ActionDefinition]:
     """Return registered action metadata for workflow dry-run validation."""
 

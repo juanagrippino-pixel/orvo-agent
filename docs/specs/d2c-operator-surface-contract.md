@@ -32,9 +32,11 @@ A delivered brief should include:
 6. concise language in direct Spanish.
 
 Internal preview/projection APIs must also expose the displayed case IDs and their
-registered `suggested_action_keys`/action catalog projections so operators can
+registered suggested action keys/action catalog projections so operators can
 verify that owner-facing next-action copy is backed by canonical action keys, not
-invented by the surface.
+raw free-text metadata. When registered displayed action keys exist, owner brief
+text should prefer those catalog-backed labels over `recommended_action` strings
+stored on a case.
 
 ### Example shape
 

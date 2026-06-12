@@ -3,6 +3,7 @@
 from datetime import date, datetime, timezone
 from typing import Iterable
 
+from app.brain.action_catalog import ACTION_CATALOG, suggested_action_keys_for_case
 from app.brain.models import DailyReport, Evidence, Metric
 from app.brain.operational_cases import OperationalCase, owner_facing_actionable_cases
 from app.brain.security.redaction import redact_text
@@ -187,6 +188,14 @@ def _case_is_degraded(case: OperationalCase) -> bool:
     return any(snapshot.freshness_state in {"stale", "degraded", "missing"} for snapshot in case.evidence_snapshots)
 
 
+def _case_suggested_action_label(case: OperationalCase) -> str | None:
+    labels = [ACTION_CATALOG[action_key].label for action_key in suggested_action_keys_for_case(case)]
+    if labels:
+        return " · ".join(labels)
+    recommended_action = case.metadata.get("recommended_action")
+    return recommended_action if isinstance(recommended_action, str) and recommended_action.strip() else None
+
+
 def _utc_date(value: datetime) -> date:
     return value.astimezone(timezone.utc).date()
 
@@ -274,9 +283,9 @@ def compose_owner_case_brief(
             lines.append("   Métricas: " + " · ".join(metric_lines))
         if _case_is_degraded(case):
             lines.append("   ⚠️ Evidencia degradada: revisar frescura antes de decidir.")
-        recommended_action = case.metadata.get("recommended_action")
-        if recommended_action:
-            lines.append(f"   Acción sugerida: {recommended_action}")
+        suggested_action = _case_suggested_action_label(case)
+        if suggested_action:
+            lines.append(f"   Acción sugerida: {suggested_action}")
 
     return redact_text("\n".join(lines)) or "[REDACTED]"
 

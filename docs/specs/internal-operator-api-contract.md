@@ -170,8 +170,10 @@ composed, redacted text plus projection metadata (`total_actionable_cases`,
 totals, and registered `suggested_action_keys`/action catalog projections for
 the displayed cases only). Unknown, wrong-family, duplicate, or secret-shaped
 action keys from case metadata must be dropped at the service layer before the
-API envelope is returned, and the endpoint must not dispatch, mutate cases, or
-treat brief text as state.
+API envelope is returned; when registered displayed action keys exist, brief text
+must render those catalog-backed action labels instead of raw `recommended_action`
+metadata. The endpoint must not dispatch, mutate cases, or treat brief text as
+state.
 
 ### Operator audit events
 

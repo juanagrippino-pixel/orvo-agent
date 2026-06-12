@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.brain.action_catalog import ACTION_CATALOG
+from app.brain.action_catalog import ACTION_CATALOG, suggested_action_keys_for_case
 from app.brain.run_ledger import redact_metadata
 from app.brain.work_items import case_work_item_projection
 
@@ -87,19 +87,7 @@ def timeline_event_projection(case: OperationalCase, event: Any) -> dict[str, An
 
 
 def _case_suggested_action_keys(case: OperationalCase) -> list[str]:
-    raw_keys = case.metadata.get("suggested_action_keys")
-    if not isinstance(raw_keys, list):
-        return []
-    keys: list[str] = []
-    for raw_key in raw_keys:
-        if not isinstance(raw_key, str):
-            continue
-        definition = ACTION_CATALOG.get(raw_key)
-        if definition is None or case.case_type not in definition.case_families:
-            continue
-        if raw_key not in keys:
-            keys.append(raw_key)
-    return keys
+    return suggested_action_keys_for_case(case)
 
 
 def _case_suggested_actions(case: OperationalCase) -> list[dict[str, Any]]:

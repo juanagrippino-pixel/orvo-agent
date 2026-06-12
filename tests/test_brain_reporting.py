@@ -551,6 +551,29 @@ def test_owner_brief_redacts_secret_shaped_recommended_action_text():
     assert "[REDACTED" in text
 
 
+def test_owner_brief_prefers_registered_action_keys_over_free_text_action_copy():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-action-key",
+        title="Stock crítico",
+        recommended_action="delete_everything access_token=raw_owner_action_copy_secret",
+    )
+    case.metadata["suggested_action_keys"] = [
+        "delete_everything",
+        "confirm_stock",
+        "access_token=raw_owner_action_key_secret",
+        "confirm_stock",
+    ]
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Acción sugerida: Confirm stock" in text
+    assert "delete_everything" not in text
+    assert "raw_owner_action_copy_secret" not in text
+    assert "raw_owner_action_key_secret" not in text
+
+
 def test_compose_owner_case_brief_excludes_unpromoted_case_families_from_owner_surface():
     from app.brain.reporting import compose_owner_case_brief
 
