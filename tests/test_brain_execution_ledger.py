@@ -349,6 +349,7 @@ def test_record_pipeline_success_marks_run_failed_when_case_projection_crashes(m
     assert len(reloaded.connector_outcomes) == 1
     assert reloaded.artifacts == []
     assert reloaded.dispatch_outcomes == []
+    assert reloaded.dispatch_outcomes == []
 
 
 def test_record_pipeline_failure_maps_rate_limit_errors_to_typed_health_state():
