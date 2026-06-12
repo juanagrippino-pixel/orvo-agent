@@ -109,7 +109,7 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("dedupe_key", "string", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("opened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("updated_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("resolved_at", "datetime", allowed_operators=_RANGE_OPERATORS),
+    WorkItemQueryFieldDefinition("resolved_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
 )
 
 _WORK_ITEM_QUERY_FIELD_BY_KEY = {definition.field: definition for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS}

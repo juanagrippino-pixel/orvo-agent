@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import sqlite3
+from datetime import datetime
+from pathlib import Path
 from contextlib import closing
 
 import pytest
@@ -11,7 +13,7 @@ from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.operator_api import OperatorAPIError, export_case_queue_csv
 from app.brain.operator_views import parse_case_jql
 from app.brain.storage import init_schema
-from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
+from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case, _utc
 
 
 def _case_detection_with_source(*, source: str, run_id: str, freshness_state: str = "fresh", **kwargs):
@@ -33,6 +35,27 @@ def _case_detection_with_source(*, source: str, run_id: str, freshness_state: st
     )
 
 
+def _resolve_case(db_path: Path, case_id: str, *, acknowledged_at: datetime, resolved_at: datetime) -> None:
+    with closing(sqlite3.connect(db_path)) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        store.transition_case(
+            case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            transitioned_at=acknowledged_at,
+        )
+        store.transition_case(
+            case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            reason="Fixture resolution",
+            transitioned_at=resolved_at,
+        )
+
+
 def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert not hasattr(operator_views, "_FIELD_SPECS")
     assert parse_case_jql("priority_score >= 80 ORDER BY priority_score DESC").normalized == (
@@ -41,6 +64,113 @@ def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert parse_case_jql("priority_bracket = high").normalized == (
         "priority_bracket = high ORDER BY priority_score DESC, opened_at ASC"
     )
+
+
+def test_parse_case_jql_supports_resolved_at_sort_for_recently_resolved_views():
+    assert parse_case_jql("status = resolved ORDER BY resolved_at DESC").normalized == (
+        "status = resolved ORDER BY resolved_at DESC"
+    )
+    assert parse_case_jql("resolved_at >= 2026-05-24T10:00:00+00:00").normalized == (
+        "resolved_at >= 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+
+def test_internal_case_view_recently_resolved_orders_by_resolved_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    client, db_path = _client(monkeypatch, tmp_path)
+    db_path = tmp_path / "operator.sqlite3"
+    old = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-old",
+            priority=20,
+            dedupe_suffix="run-old/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-old", "label": "Run old"},
+        ),
+    )
+    middle = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-middle",
+            priority=20,
+            dedupe_suffix="run-middle/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-middle", "label": "Run middle"},
+        ),
+    )
+    new = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-new",
+            priority=20,
+            dedupe_suffix="run-new/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-new", "label": "Run new"},
+        ),
+    )
+    other = _seed_case(
+        db_path,
+        _case_detection_with_source(source="tiendanube", run_id="run-other", business_id="other", priority=20),
+    )
+    _resolve_case(db_path, old.case_id, acknowledged_at=_utc(9), resolved_at=_utc(10))
+    _resolve_case(db_path, middle.case_id, acknowledged_at=_utc(11), resolved_at=_utc(12))
+    _resolve_case(db_path, new.case_id, acknowledged_at=_utc(13), resolved_at=_utc(14))
+    _resolve_case(db_path, other.case_id, acknowledged_at=_utc(15), resolved_at=_utc(16))
+
+    response = client.get("/internal/brain/businesses/artemea/case-views/recently_resolved/cases", headers=AUTH)
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["view_id"] == "recently_resolved"
+    assert payload["normalized_jql"] == "status = resolved ORDER BY resolved_at DESC"
+    assert payload["count"] == 3
+    assert payload["total"] == 3
+    assert [case["case_id"] for case in payload["cases"]] == [new.case_id, middle.case_id, old.case_id]
+    assert payload["cases"][0]["resolved_at"] == _utc(14).isoformat().replace("+00:00", "Z")
+
+
+def test_internal_case_view_recently_resolved_excludes_non_resolved_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    client, db_path = _client(monkeypatch, tmp_path)
+    db_path = tmp_path / "operator.sqlite3"
+    opened = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-open",
+            priority=20,
+            dedupe_suffix="run-open/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-open", "label": "Run open"},
+        ),
+    )
+    acknowledged = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-ack",
+            priority=20,
+            dedupe_suffix="run-ack/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-ack", "label": "Run acknowledged"},
+        ),
+    )
+    resolved = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-resolved",
+            priority=20,
+            dedupe_suffix="run-resolved/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-resolved", "label": "Run resolved"},
+        ),
+    )
+    _resolve_case(db_path, resolved.case_id, acknowledged_at=_utc(11), resolved_at=_utc(12))
+
+    response = client.get("/internal/brain/businesses/artemea/case-views/recently_resolved/cases", headers=AUTH)
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["count"] == 1
+    assert payload["total"] == 1
+    assert [case["case_id"] for case in payload["cases"]] == [resolved.case_id]
 
 
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():

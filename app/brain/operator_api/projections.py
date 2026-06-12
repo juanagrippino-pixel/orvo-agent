@@ -29,6 +29,7 @@ def case_queue_item(case: OperationalCase) -> dict[str, Any]:
             "opened_at": case.opened_at.isoformat(),
             "updated_at": case.updated_at.isoformat(),
             "acknowledged_at": _iso(case.acknowledged_at),
+            "resolved_at": _iso(case.resolved_at),
             "assigned_at": _iso(case.assigned_at),
             "assignee_ref": case.assignee_ref,
             "evidence_count": len(case.evidence_refs),
