@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.dispatch import ReportDispatchResult
 from app.brain.execution_ledger import record_pipeline_failure, record_pipeline_success
-from app.brain.models import DailyReport
+from app.brain.models import DailyReport, Evidence, Metric
 from app.brain.operational_cases import InMemoryOperationalCaseStore
 from app.brain.pipeline import PipelineResult
 from app.brain.run_ledger import InMemoryRunLedger
@@ -67,6 +67,76 @@ def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_stat
     assert "raw_secret" not in outcome.error_summary
 
 
+def test_record_pipeline_success_records_event_certification_for_connector_outcomes():
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="TN principal",
+                params={"store_id": "123", "access_token": "tn_test_token"},
+            )
+        ],
+    )
+    ledger = InMemoryRunLedger()
+    run = ledger.create_run(
+        run_id="run-success-events",
+        business_id=business.business_id,
+        trigger_type="scheduled",
+        started_at=utc_dt(8),
+    )
+    pipeline = PipelineResult(
+        report=DailyReport(
+            business_name=business.business_name,
+            report_date=date(2026, 5, 24),
+            metrics=[
+                Metric(
+                    key="orders_today",
+                    label="Pedidos",
+                    value=3,
+                    unit="count",
+                    evidence=[Evidence(source="tiendanube", label="TN principal")],
+                )
+            ],
+            insights=[],
+        ),
+        dispatch=ReportDispatchResult(
+            status="sent",
+            idempotency_key="artemea:2026-05-24:daily",
+        ),
+    )
+
+    record_pipeline_success(
+        run_ledger=ledger,
+        run_id=run.run_id,
+        business=business,
+        connector_types=["tiendanube"],
+        pipeline=pipeline,
+    )
+
+    reloaded = ledger.get_run(run.run_id)
+    assert reloaded is not None
+    [outcome] = reloaded.connector_outcomes
+    assert outcome.metadata["emitted_events"] == [
+        "connector.execution.succeeded",
+        "connector.health.ok",
+    ]
+    assert outcome.metadata["event_certification"] == {
+        "status": "passed",
+        "issue_count": 0,
+        "events": [
+            "connector.execution.succeeded",
+            "connector.health.ok",
+        ],
+        "issues": [],
+    }
+
+
 def test_record_pipeline_failure_maps_rate_limit_errors_to_typed_health_state():
     class RateLimitedConnectorError(RuntimeError):
         connector_type = "meta_ads"
@@ -109,6 +179,61 @@ def test_record_pipeline_failure_maps_rate_limit_errors_to_typed_health_state():
     [outcome] = reloaded.connector_outcomes
     assert outcome.status == "failed"
     assert outcome.health_state == "rate_limited"
+
+
+def test_record_pipeline_failure_records_event_certification_for_connector_outcomes():
+    class UnauthorizedConnectorError(RuntimeError):
+        connector_type = "tiendanube"
+        connector_id = "tn-main"
+
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="TN principal",
+                params={"store_id": "123", "access_token": "tn_test_token"},
+            )
+        ],
+    )
+    ledger = InMemoryRunLedger()
+    run = ledger.create_run(
+        run_id="run-failure-events",
+        business_id=business.business_id,
+        trigger_type="scheduled",
+        started_at=utc_dt(8),
+    )
+
+    record_pipeline_failure(
+        run_ledger=ledger,
+        run_id=run.run_id,
+        error=UnauthorizedConnectorError("HTTP 401 Unauthorized access_token=raw_secret"),
+        business=business,
+        business_id=business.business_id,
+        connector_types=["tiendanube"],
+    )
+
+    reloaded = ledger.get_run(run.run_id)
+    assert reloaded is not None
+    [outcome] = reloaded.connector_outcomes
+    assert outcome.metadata["emitted_events"] == [
+        "connector.execution.failed",
+        "connector.health.unauthorized",
+    ]
+    assert outcome.metadata["event_certification"] == {
+        "status": "passed",
+        "issue_count": 0,
+        "events": [
+            "connector.execution.failed",
+            "connector.health.unauthorized",
+        ],
+        "issues": [],
+    }
 
 
 def test_record_pipeline_success_finalizes_partial_when_secondary_owner_brief_dispatcher_raises():
