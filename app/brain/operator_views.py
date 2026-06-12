@@ -29,6 +29,7 @@ from app.brain.work_items import (
     case_project_key,
     case_status_category,
     case_type_release_state,
+    work_item_query_field_definitions,
     work_item_query_field_spec,
 )
 
@@ -160,6 +161,19 @@ def get_builtin_case_view(view_id: str) -> dict[str, Any]:
         if view["view_id"] == view_id:
             return redact_secrets(dict(view))
     raise OperatorAPIError("case_view_not_found", "case view not found", status_code=404)
+
+
+def list_case_query_fields() -> dict[str, Any]:
+    """Return canonical read-only WorkItem query metadata for operator surfaces."""
+
+    return redact_secrets(
+        {
+            "readonly": True,
+            "fields_by_name": {definition["field"]: definition for definition in work_item_query_field_definitions()},
+            "sort_fields": sorted(_ALLOWED_SORT_FIELDS),
+            "facet_fields": sorted(allowed_work_item_facet_fields()),
+        }
+    )
 
 
 def parse_case_jql(jql: str | None) -> ParsedCaseJQL:
