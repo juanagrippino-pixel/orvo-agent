@@ -944,6 +944,38 @@ def test_simulate_case_workflow_suppresses_actions_when_source_connector_does_no
     assert ledger.list_actions(business_id="artemea") == []
 
 
+def test_simulate_case_workflow_matches_source_connector_condition_with_any_connector():
+    _, case = seed_case(degraded=True)
+    ledger = InMemoryWorkflowActionLedgerStore()
+    rule = WorkflowRule(
+        rule_id="connector-allowlist-follow-up",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[
+            CaseWorkflowCondition(
+                field="source_connector",
+                value=["google_sheets", "commerce.inventory"],
+            )
+        ],
+        actions=[WorkflowAction(action_key="request_follow_up", params={"note": "Any matching connector"})],
+    )
+
+    result = simulate_case_workflow(rule, case, now=utc(13, 45), action_ledger=ledger)
+
+    assert result["matched"] is True
+    assert result["conditions"] == [
+        {
+            "field": "source_connector",
+            "expected": ["google_sheets", "commerce.inventory"],
+            "actual": ["commerce.inventory"],
+            "matched": True,
+        }
+    ]
+    assert result["actions"][0]["action_key"] == "request_follow_up"
+    assert result["actions"][0]["execution_status"] == "dry_run"
+    assert len(ledger.list_actions(business_id="artemea")) == 1
+
+
 def test_simulate_case_workflow_suppresses_duplicate_idempotency_key_plans_with_audit():
     _, case = seed_case()
     duplicate_params = {"reason": "token=raw_duplicate_secret"}
