@@ -267,6 +267,39 @@ def test_connector_spec_validate_emitted_metrics_is_deterministic_across_runs():
     assert first == second
 
 
+def test_connector_spec_validate_emitted_metrics_appends_duplicate_canonical_after_undeclared_family():
+    """ConnectorSpec.validate_emitted_metrics must append
+    duplicate_canonical_metric as the fourth diagnostic in the fixed
+    composition order ``unknown_metric`` -> ``disallowed_source`` ->
+    ``undeclared_family`` -> ``duplicate_canonical_metric`` so the runtime can
+    detect alias/canonical pairs that would double-count one metric in
+    run-ledger aggregation alongside the three envelope diagnostics in a
+    single call.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    issues = tiendanube.validate_emitted_metrics(
+        (
+            "orders_today",
+            "mystery_metric",
+            "ad_spend_today",
+            "commerce.orders.count",
+        )
+    )
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "ad_spend_today", 2),
+        ("undeclared_family", "ad_spend_today", 2),
+        ("duplicate_canonical_metric", "commerce.orders.count", 3),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
 def test_validate_emitted_metrics_for_connector_module_function_matches_spec_method():
     from app.brain.connector_registry import (
         get_connector_spec,
@@ -433,6 +466,69 @@ def test_connector_spec_validate_emitted_metric_objects_matches_key_path_when_no
     assert object_issues == key_issues
 
 
+def test_connector_spec_validate_emitted_metric_objects_matches_key_path_for_duplicate_canonical_payload():
+    """Duplicate-canonical detection is a key-level diagnostic, so a payload
+    whose only violation is an alias/canonical duplicate must produce identical
+    results from the key path and the object path. This pins the documented
+    superset symmetry between validate_emitted_metrics and
+    validate_emitted_metric_objects."""
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    metrics = [
+        _metric("orders_today", "tiendanube"),
+        _metric("commerce.orders.count", "tiendanube"),
+    ]
+    keys = [metric.key for metric in metrics]
+
+    object_issues = tiendanube.validate_emitted_metric_objects(metrics)
+    key_issues = tiendanube.validate_emitted_metrics(keys)
+
+    assert object_issues == key_issues
+    assert [(issue.code, issue.key, issue.index) for issue in object_issues] == [
+        ("duplicate_canonical_metric", "commerce.orders.count", 1),
+    ]
+
+
+def test_connector_spec_validate_emitted_metric_objects_slots_duplicate_canonical_between_family_and_evidence_missing():
+    """ConnectorSpec.validate_emitted_metric_objects must slot
+    duplicate_canonical_metric immediately after undeclared_family and before
+    the evidence diagnostics so the key-level diagnostics stay contiguous and
+    in the same relative order as validate_emitted_metrics. This keeps the
+    object composition shaped as ``unknown_metric`` -> ``disallowed_source`` ->
+    ``undeclared_family`` -> ``duplicate_canonical_metric`` ->
+    ``evidence_missing`` -> ``evidence_source_mismatch`` ->
+    ``value_kind_mismatch`` -> ``money_currency_missing``.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    metrics = [
+        _metric("orders_today", "tiendanube"),
+        _metric("mystery_metric", "tiendanube"),
+        _metric("revenue_today", "tiendanube", unit="ARS"),
+        _metric("tn_revenue_today", "whatsapp", unit="ARS"),
+        _metric("ad_spend_today", "tiendanube", unit="ARS"),
+    ]
+
+    issues = tiendanube.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "ad_spend_today", 4),
+        ("undeclared_family", "ad_spend_today", 4),
+        ("duplicate_canonical_metric", "tn_revenue_today", 3),
+        ("evidence_source_mismatch", "tn_revenue_today", 3),
+        ("evidence_source_mismatch", "ad_spend_today", 4),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
 def test_connector_spec_validate_emitted_metric_objects_appends_value_kind_after_evidence():
     """ConnectorSpec.validate_emitted_metric_objects must append
     value_kind_mismatch as the fifth diagnostic in the fixed composition order
@@ -466,9 +562,9 @@ def test_connector_spec_validate_emitted_metric_objects_appends_value_kind_after
 
 def test_connector_spec_validate_emitted_metric_objects_appends_money_currency_after_value_kind():
     """ConnectorSpec.validate_emitted_metric_objects must append
-    money_currency_missing as the sixth diagnostic in the fixed composition
+    money_currency_missing as the final diagnostic in the fixed composition
     order so the runtime can detect money metrics emitted without a currency
-    string alongside the five upstream diagnostics in a single call. This
+    string alongside the upstream diagnostics in a single call. This
     mirrors the slot reserved by
     :func:`validate_report_metric_objects`,
     :func:`validate_case_metric_objects`, and
@@ -495,6 +591,7 @@ def test_connector_spec_validate_emitted_metric_objects_appends_money_currency_a
         ("unknown_metric", "mystery_metric", 1),
         ("disallowed_source", "orders_today", 2),
         ("undeclared_family", "orders_today", 2),
+        ("duplicate_canonical_metric", "ad_spend_today", 4),
         ("evidence_source_mismatch", "orders_today", 2),
         ("value_kind_mismatch", "ad_roas_today", 3),
         ("money_currency_missing", "ad_spend_today", 4),
@@ -509,7 +606,8 @@ def test_connector_spec_validate_emitted_metric_objects_slots_evidence_missing_b
     diagnostics about wrong-source evidence. This mirrors the slot reserved by
     :func:`validate_report_metric_objects` and :func:`validate_case_metric_objects`
     and keeps the connector composition shaped as ``unknown_metric`` ->
-    ``disallowed_source`` -> ``undeclared_family`` -> ``evidence_missing`` ->
+    ``disallowed_source`` -> ``undeclared_family`` ->
+    ``duplicate_canonical_metric`` -> ``evidence_missing`` ->
     ``evidence_source_mismatch`` -> ``value_kind_mismatch``. Mapping form is
     required for the evidence-missing entry because Pydantic ``Metric`` enforces
     ``min_length=1`` on evidence and cannot represent the missing case directly.
@@ -560,6 +658,8 @@ def test_connector_spec_validate_emitted_metric_objects_slots_evidence_missing_b
         ("unknown_metric", "mystery_metric", 1),
         ("disallowed_source", "ad_spend_today", 2),
         ("undeclared_family", "ad_spend_today", 2),
+        ("duplicate_canonical_metric", "revenue_today", 4),
+        ("duplicate_canonical_metric", "orders_today", 5),
         ("evidence_missing", "commerce.revenue.total", 3),
         ("evidence_source_mismatch", "revenue_today", 4),
         ("value_kind_mismatch", "orders_today", 5),

@@ -704,6 +704,30 @@ def test_validate_report_metric_keys_composes_unknown_then_report_not_allowed_di
     ]
 
 
+def test_validate_report_metric_keys_appends_duplicate_canonical_after_report_not_allowed():
+    """Parallel to ``ConnectorSpec.validate_emitted_metrics``: the report-side
+    key composition must append duplicate_canonical_metric after the
+    unknown_metric -> report_not_allowed pair so a payload emitting both an
+    alias and its canonical key (double-counting risk in the rendered report)
+    is flagged at the later occurrence's input index."""
+
+    from app.brain.semantics.metric_registry import validate_report_metric_keys
+
+    metric_keys = (
+        "revenue_today",
+        "runtime.connector.status",
+        "custom.unknown_report_metric",
+        "commerce.revenue.total",
+    )
+
+    issues = validate_report_metric_keys(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 2, "warning"),
+        ("report_not_allowed", "runtime.connector.status", 1, "warning"),
+        ("duplicate_canonical_metric", "commerce.revenue.total", 3, "warning"),
+    ]
+
+
 def test_validate_report_metric_keys_returns_empty_when_all_keys_are_canonical_report_allowed():
     from app.brain.semantics.metric_registry import validate_report_metric_keys
 
@@ -982,8 +1006,9 @@ def test_validate_report_metric_objects_composes_unknown_then_report_then_eviden
 def test_validate_report_metric_objects_slots_evidence_missing_between_report_and_evidence_source():
     """Mixed bag exercising the evidence_missing slot. The composition order
     inside :func:`validate_report_metric_objects` must put evidence_missing
-    immediately after report_not_allowed and before evidence_source_mismatch
-    so structural ``no evidence at all`` diagnostics surface before content
+    immediately after the key-level block (which ends with
+    duplicate_canonical_metric) and before evidence_source_mismatch so
+    structural ``no evidence at all`` diagnostics surface before content
     diagnostics about wrong-source evidence. Each diagnostic preserves its own
     input-order index. Mapping form is required because Pydantic ``Metric``
     enforces ``min_length=1`` on evidence and cannot represent the missing
@@ -1030,7 +1055,39 @@ def test_validate_report_metric_objects_slots_evidence_missing_between_report_an
     assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
         ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
         ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("duplicate_canonical_metric", "commerce.revenue.total", 3, "warning"),
         ("evidence_missing", "commerce.revenue.total", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "orders_today", 5, "warning"),
+    ]
+
+
+def test_validate_report_metric_objects_slots_duplicate_canonical_between_report_and_evidence_source():
+    """Mirrors ``ConnectorSpec.validate_emitted_metric_objects``: the key-level
+    diagnostics stay contiguous, so duplicate_canonical_metric must land
+    immediately after report_not_allowed and before the object-level evidence
+    diagnostics. The duplicate at index 3 is an alias (``tn_revenue_today``)
+    that resolves to the same canonical metric as ``revenue_today`` at index 0
+    while carrying clean evidence and a currency, proving the duplicate slot
+    fires independently of any object-level violation."""
+
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("revenue_today", "tiendanube", value=120000, unit="ARS"),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+        _metric("tn_revenue_today", "tiendanube", value=120000, unit="ARS"),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
+        _metric("orders_today", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_report_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
+        ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("duplicate_canonical_metric", "tn_revenue_today", 3, "warning"),
         ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
         ("value_kind_mismatch", "orders_today", 5, "warning"),
     ]
@@ -2762,3 +2819,138 @@ def test_money_currency_helper_is_reexported_from_semantics_public_surface():
 
     assert hasattr(semantics, "find_money_currency_violations")
     assert "find_money_currency_violations" in semantics.__all__
+
+
+def test_duplicate_canonical_helper_flags_alias_and_canonical_pair_resolving_to_same_metric():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    # revenue_today is an alias of commerce.revenue.total. Emitting both in one
+    # payload means the same canonical metric appears twice, which would
+    # double-count in ledger aggregation and case detections. The first
+    # occurrence wins; later occurrences are flagged at their input index.
+    issues = find_duplicate_canonical_violations(
+        ("commerce.revenue.total", "commerce.orders.count", "revenue_today")
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("duplicate_canonical_metric", "revenue_today", 2, "warning"),
+    ]
+    assert "commerce.revenue.total" in issues[0].message
+    assert "revenue_today" in issues[0].message
+
+
+def test_duplicate_canonical_helper_flags_literal_repeats_and_alias_pairs_once_per_extra_occurrence():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    # Every occurrence after the first of a canonical resolution is flagged:
+    # a literal repeat and two different aliases of the same canonical metric
+    # each produce one diagnostic, in input order.
+    issues = find_duplicate_canonical_violations(
+        (
+            "commerce.orders.count",
+            "commerce.orders.count",
+            "orders_today",
+            "orders_today_tn",
+        )
+    )
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("duplicate_canonical_metric", "commerce.orders.count", 1),
+        ("duplicate_canonical_metric", "orders_today", 2),
+        ("duplicate_canonical_metric", "orders_today_tn", 3),
+    ]
+
+
+def test_duplicate_canonical_helper_returns_empty_for_distinct_canonical_metrics():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    assert (
+        find_duplicate_canonical_violations(
+            (
+                "commerce.orders.count",
+                "revenue_today",
+                "runtime.freshness.age_seconds",
+                "ad_spend_today",
+            )
+        )
+        == []
+    )
+
+
+def test_duplicate_canonical_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    # Unknown keys are owned by validate_metrics; repeating an unregistered key
+    # must not fire this diagnostic because no canonical resolution exists.
+    assert (
+        find_duplicate_canonical_violations(
+            ("custom.unknown_metric", "custom.unknown_metric")
+        )
+        == []
+    )
+
+
+def test_duplicate_canonical_helper_rejects_empty_or_non_string_metric_keys():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_duplicate_canonical_violations(("",))
+
+    with pytest.raises(ValueError, match="metric keys"):
+        find_duplicate_canonical_violations((123,))
+
+
+def test_duplicate_canonical_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_duplicate_canonical_violations
+
+    metric_keys = (
+        "commerce.revenue.total",
+        "revenue_today",
+        "custom.unknown_metric",
+        "orders_today",
+        "commerce.orders.count",
+    )
+    first = find_duplicate_canonical_violations(metric_keys)
+    second = find_duplicate_canonical_violations(metric_keys)
+    assert first == second
+    assert [(issue.code, issue.key, issue.index) for issue in first] == [
+        ("duplicate_canonical_metric", "revenue_today", 1),
+        ("duplicate_canonical_metric", "commerce.orders.count", 4),
+    ]
+
+
+def test_duplicate_canonical_helper_threads_custom_registry_through_resolution():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_duplicate_canonical_violations,
+    )
+
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="commerce.subscriptions.count",
+                family="commerce.subscriptions",
+                label="Active subscriptions",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("subscriptions_today",),
+                aggregation="latest",
+                case_allowed=True,
+            ),
+        )
+    )
+
+    issues = find_duplicate_canonical_violations(
+        ("commerce.subscriptions.count", "subscriptions_today"),
+        registry=registry,
+    )
+    assert [(issue.code, issue.key, issue.index) for issue in issues] == [
+        ("duplicate_canonical_metric", "subscriptions_today", 1),
+    ]
+    assert "commerce.subscriptions.count" in issues[0].message
+
+
+def test_duplicate_canonical_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_duplicate_canonical_violations")
+    assert "find_duplicate_canonical_violations" in semantics.__all__

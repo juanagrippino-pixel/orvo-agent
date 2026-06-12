@@ -972,6 +972,57 @@ def find_freshness_companion_violations(
     return issues
 
 
+def find_duplicate_canonical_violations(
+    metric_keys: Iterable[str],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for metric keys that resolve to a canonical
+    metric already present earlier in the same payload.
+
+    A ``duplicate_canonical_metric`` violation means a key (canonical or alias)
+    resolved to a canonical metric that an earlier key in the input already
+    resolved to — for example an adapter emitting both ``revenue_today`` and
+    ``commerce.revenue.total``. Such payloads would double-count the metric in
+    run-ledger aggregation and case detections. The first occurrence is
+    accepted; every later occurrence is flagged at its input index. Unknown
+    (unresolved) keys are intentionally skipped so this diagnostic composes
+    cleanly with :func:`validate_metrics` and the other envelope helpers.
+    Result order matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    first_seen: dict[str, str] = {}
+    for index, key in enumerate(metric_keys):
+        if not isinstance(key, str) or not key:
+            raise ValueError(
+                "find_duplicate_canonical_violations requires non-empty string metric keys"
+            )
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        previous = first_seen.get(canonical)
+        if previous is None:
+            first_seen[canonical] = key
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="duplicate_canonical_metric",
+                key=key,
+                message=(
+                    f"Metric key '{key}' resolves to canonical metric "
+                    f"'{canonical}' which is already present in this payload "
+                    f"(first emitted as '{previous}'); duplicate canonical "
+                    f"metrics risk double-counting"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_report_allowed_violations(
     metric_keys: Iterable[str],
     *,
@@ -1094,32 +1145,41 @@ def validate_report_metric_objects(
     *,
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown_metric + report_not_allowed + evidence_missing +
-    evidence_source_mismatch + value_kind_mismatch + money_currency_missing
-    diagnostics for metric-shaped objects bound for a user-facing report stage.
+    """Compose unknown_metric + report_not_allowed + duplicate_canonical_metric
+    + evidence_missing + evidence_source_mismatch + value_kind_mismatch +
+    money_currency_missing diagnostics for metric-shaped objects bound for a
+    user-facing report stage.
 
     Parallel to :meth:`ConnectorSpec.validate_emitted_metric_objects` but on the
     report-rendering side: the report renderer must reject report_not_allowed
     canonical metrics and surface evidence/value-kind/currency mismatches that
     the key-only :func:`validate_report_metric_keys` cannot see. The fixed
     concatenation order ``unknown_metric`` -> ``report_not_allowed`` ->
-    ``evidence_missing`` -> ``evidence_source_mismatch`` ->
-    ``value_kind_mismatch`` -> ``money_currency_missing`` keeps the result
-    deterministic and free of overlap because each downstream helper skips
-    unknown keys, the two evidence diagnostics are mutually exclusive
-    (evidence_missing fires only on zero entries, evidence_source_mismatch only
-    on non-empty collections), and money_currency_missing is scoped to a
-    disjoint canonical population (only ``unit="money"`` metrics) from
-    value_kind_mismatch (any unit kind). Money-currency lands last so
-    structural and value-type diagnostics surface before the rendering-metadata
-    diagnostic that money metrics must carry a currency string for reports to
-    render unambiguously.
+    ``duplicate_canonical_metric`` -> ``evidence_missing`` ->
+    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
+    ``money_currency_missing`` keeps the result deterministic and free of
+    overlap because each downstream helper skips unknown keys, the two
+    evidence diagnostics are mutually exclusive (evidence_missing fires only
+    on zero entries, evidence_source_mismatch only on non-empty collections),
+    and money_currency_missing is scoped to a disjoint canonical population
+    (only ``unit="money"`` metrics) from value_kind_mismatch (any unit kind).
+    The key-level diagnostics stay contiguous so this validator remains a
+    superset of :func:`validate_report_metric_keys` over the same keys, with
+    duplicate_canonical_metric closing the key-level block before the
+    object-level evidence/value diagnostics, mirroring
+    :meth:`ConnectorSpec.validate_emitted_metric_objects`. Money-currency
+    lands last so structural and value-type diagnostics surface before the
+    rendering-metadata diagnostic that money metrics must carry a currency
+    string for reports to render unambiguously.
     """
 
     materialized = list(metrics)
     unknown_issues = validate_metrics(materialized, registry=registry)
     keys = [_metric_key(metric) for metric in materialized]
     report_issues = find_report_allowed_violations(keys, registry=registry)
+    duplicate_issues = find_duplicate_canonical_violations(
+        keys, registry=registry
+    )
     evidence_missing_issues = find_evidence_required_violations(
         materialized, registry=registry
     )
@@ -1135,6 +1195,7 @@ def validate_report_metric_objects(
     return [
         *unknown_issues,
         *report_issues,
+        *duplicate_issues,
         *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
@@ -1201,15 +1262,19 @@ def validate_report_metric_keys(
     *,
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown-metric + report-not-allowed diagnostics for keys
-    destined for a user-facing report stage.
+    """Compose unknown-metric + report-not-allowed + duplicate-canonical
+    diagnostics for keys destined for a user-facing report stage.
 
     Parallel to ``ConnectorSpec.validate_emitted_metrics`` but on the report
     side: connector emission may legitimately surface ``report_allowed=False``
     runtime keys (e.g. ``runtime.freshness.*``); the report renderer must not.
     The fixed concatenation order ``unknown_metric`` -> ``report_not_allowed``
-    keeps the result deterministic and free of overlap because
-    :func:`find_report_allowed_violations` already skips unknown keys.
+    -> ``duplicate_canonical_metric`` keeps the result deterministic and free
+    of overlap because the downstream helpers already skip unknown keys.
+    Duplicate-canonical lands last because an alias/canonical pair resolving
+    to one metric is a payload-shape problem (the rendered report would show
+    the same metric twice) rather than a per-key envelope violation, mirroring
+    the slot in ``ConnectorSpec.validate_emitted_metrics``.
     """
 
     materialized = list(metric_keys)
@@ -1220,7 +1285,10 @@ def validate_report_metric_keys(
     report_issues = find_report_allowed_violations(
         materialized, registry=registry
     )
-    return [*unknown_issues, *report_issues]
+    duplicate_issues = find_duplicate_canonical_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *report_issues, *duplicate_issues]
 
 
 def validate_surface_metric_objects(
@@ -1454,6 +1522,7 @@ __all__ = [
     "UnknownMetricError",
     "default_metric_registry",
     "find_case_allowed_violations",
+    "find_duplicate_canonical_violations",
     "find_evidence_required_violations",
     "find_evidence_source_violations",
     "find_family_envelope_violations",
