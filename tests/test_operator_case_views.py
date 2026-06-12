@@ -655,6 +655,36 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_views_include_business_scoped_matching_counts(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-critical-open"))
+    _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="meta_ads",
+            run_id="run-data-stale",
+            case_type="data_stale",
+            dedupe_suffix="data_stale/channel/meta_ads/connector.health/daily",
+            severity="warning",
+            priority=72,
+            title="Meta Ads stale",
+            freshness_state="stale",
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-other-business", business_id="other"))
+
+    response = client.get("/internal/brain/businesses/artemea/case-views", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    views = {view["view_id"]: view for view in body["data"]["views"]}
+    assert views["open_cases"]["matching_case_count"] == 2
+    assert views["critical_open"]["matching_case_count"] == 1
+    assert views["data_stale"]["matching_case_count"] == 1
+    assert views["connector_degraded"]["matching_case_count"] == 1
+    assert all("matching_case_count" in view for view in views.values())
+
+
 def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _seed_case(db_path, _case_detection(run_id="run-critical"))

@@ -10,10 +10,14 @@ from .histograms_resolution import *  # noqa: F401,F403
 from .histograms_ack import *  # noqa: F401,F403
 
 
-def list_builtin_case_views() -> dict[str, Any]:
-    from app.brain.operator_views import builtin_case_views
+def list_builtin_case_views(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+) -> dict[str, Any]:
+    from app.brain.operator_views import builtin_case_views_with_counts
 
-    return {"views": builtin_case_views()}
+    return {"views": builtin_case_views_with_counts(store, business_id=business_id)}
 
 def execute_builtin_case_view(
     store: OperationalCaseStore,

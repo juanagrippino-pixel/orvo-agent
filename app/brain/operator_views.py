@@ -129,6 +129,22 @@ def builtin_case_views() -> list[dict[str, Any]]:
     return redact_secrets([dict(view) for view in _BUILTIN_CASE_VIEWS])
 
 
+def builtin_case_views_with_counts(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+) -> list[dict[str, Any]]:
+    """Return built-in case view metadata plus business-scoped matching counts."""
+
+    candidates = store.list_cases(business_id=business_id, limit=None)
+    summaries: list[dict[str, Any]] = []
+    for view in _BUILTIN_CASE_VIEWS:
+        parsed = parse_case_jql(str(view["jql"]))
+        matching_case_count = sum(1 for case in candidates if _matches(case, parsed.clauses))
+        summaries.append({**dict(view), "matching_case_count": matching_case_count})
+    return redact_secrets(summaries)
+
+
 def get_builtin_case_view(view_id: str) -> dict[str, Any]:
     for view in _BUILTIN_CASE_VIEWS:
         if view["view_id"] == view_id:

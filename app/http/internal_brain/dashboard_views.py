@@ -42,7 +42,10 @@ def register_dashboard_view_routes(app):
     def internal_brain_case_views(business_id: str):
         return _with_internal_stores(
             business_id,
-            lambda case_store, run_ledger: _internal_success(business_id, list_builtin_case_views()),
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_builtin_case_views(case_store, business_id=business_id),
+            ),
         )
 
 
