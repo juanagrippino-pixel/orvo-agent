@@ -5,10 +5,10 @@ import os
 import re
 import sqlite3
 from contextlib import closing
-from uuid import uuid4
 
 from flask import jsonify, request
 
+from app.brain.gateway_contracts import authorization_scheme, normalize_request_id
 from app.brain.operator_api import OperatorAPIError
 from app.brain.operator_audit import SQLiteOperatorAuditStore
 
@@ -26,7 +26,6 @@ from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.storage import SQLiteOperationalCaseStore, SQLiteRunLedger, init_schema
 
 
-_MAX_INTERNAL_REQUEST_ID_LENGTH = 128
 _MAX_INTERNAL_ERROR_CODE_LENGTH = 80
 _INTERNAL_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
 
@@ -44,14 +43,7 @@ def _safe_internal_business_id(business_id: str) -> str:
 
 
 def _internal_request_id() -> str:
-    supplied = request.headers.get("X-Request-ID")
-    if supplied is None or not supplied.strip():
-        return f"req_{uuid4().hex}"
-    candidate = supplied.strip()
-    if len(candidate) > _MAX_INTERNAL_REQUEST_ID_LENGTH:
-        return "[REDACTED]"
-    redacted = redact_text(candidate) or "[REDACTED]"
-    return redacted if redacted == candidate else "[REDACTED]"
+    return normalize_request_id(request.headers.get("X-Request-ID"))
 
 
 def _internal_success(business_id: str, data: dict, *, warnings: list[str] | None = None):
@@ -119,10 +111,7 @@ def _public_error_response(payload: dict, status_code: int):
 
 
 def _authorization_scheme(value: str) -> str | None:
-    if not value.strip():
-        return None
-    scheme = value.strip().split(None, 1)[0]
-    return redact_text(scheme) or "[REDACTED]"
+    return authorization_scheme(value)
 
 
 def _constant_time_text_equals(left: str, right: str) -> bool:

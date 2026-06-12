@@ -4050,7 +4050,7 @@ def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_pat
         "reason": "invalid_internal_token",
         "method": "GET",
         "header_present": True,
-        "scheme": "Bearer",
+        "scheme": "[REDACTED]",
     }
     serialized = json.dumps(events, sort_keys=True)
     assert "raw_bad_bearer_secret" not in serialized

@@ -1,0 +1,258 @@
+"""Gateway middleware contracts for Orvo Brain Python runtime surfaces.
+
+This module keeps request-boundary conventions in a thin service layer so Flask
+routes can remain orchestration code: request IDs, idempotency keys, auth scheme
+inspection, rate-limit decisions, and audit provenance are normalized before
+they reach case, ledger, connector, or runtime stores.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+from typing import Any, Literal, Mapping
+from uuid import uuid4
+
+from app.brain.operator_auth import safe_internal_operator_actor_ref
+from app.brain.security.redaction import redact_secrets, redact_text
+
+RequestId = str
+RouteKey = str
+Method = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+
+_REQUEST_ID_LENGTH_LIMIT: int = 128
+_IDEMPOTENCY_KEY_LENGTH_LIMIT: int = 128
+_IDEMPOTENCY_KEY_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+_ROUTE_KEY_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+_SAFE_AUTH_SCHEMES: frozenset[str] = frozenset({"Bearer", "Basic", "Token", "ApiKey", "Api-Key"})
+_SECRET_KEY_RE: re.Pattern[str] = re.compile(
+    r"(?i)\b(access_token|refresh_token|api_key|apikey|authorization|auth_header|password|private_key|credential|cookie|session|signature|secret|token)\b"
+)
+
+
+class GatewayContractError(ValueError):
+    """Safe gateway contract violation.
+
+    Messages are redacted because headers and keys are caller-controlled and may
+    accidentally contain credential material.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        self.message = redact_text(message) or "[REDACTED]"
+        super().__init__(self.message)
+
+
+@dataclass(frozen=True)
+class GatewayRequestContext:
+    """Normalized request metadata that is safe to persist in audit/ledger data."""
+
+    request_id: RequestId
+    route_key: RouteKey
+    method: Method
+    business_id: str | None = None
+    actor_ref: str | None = None
+    auth_scheme: str | None = None
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True)
+class GatewayRateLimitPolicy:
+    """Allowlisted rate-limit metadata for a gateway surface.
+
+    The first runtime slice deliberately avoids storage semantics. The decision
+    helper is deterministic and can be wired to Redis/SQLite counters later
+    without changing route code or audit contracts.
+    """
+
+    scope: Literal["business", "operator", "connector"]
+    requests_per_minute: int | None = None
+    retry_after_seconds: int = 60
+
+    def __post_init__(self) -> None:
+        if self.requests_per_minute is not None and self.requests_per_minute <= 0:
+            raise GatewayContractError(
+                "invalid_rate_limit_policy",
+                "requests_per_minute must be positive when configured.",
+            )
+        if self.retry_after_seconds <= 0:
+            raise GatewayContractError(
+                "invalid_rate_limit_policy",
+                "retry_after_seconds must be positive.",
+            )
+
+
+@dataclass(frozen=True)
+class GatewayRateLimitDecision:
+    """Deterministic rate-limit decision for middleware/storage integration."""
+
+    allowed: bool
+    retry_after_seconds: int | None = None
+
+
+def normalize_request_id(value: str | None) -> RequestId:
+    """Return a safe request ID, generating one when the caller omits it."""
+
+    if value is None or not value.strip():
+        return f"req_{uuid4().hex}"
+    request_id = value.strip()
+    if len(request_id) > _REQUEST_ID_LENGTH_LIMIT:
+        return "[REDACTED]"
+    redacted = redact_text(request_id) or "[REDACTED]"
+    return request_id if redacted == request_id else "[REDACTED]"
+
+
+def normalize_idempotency_key(value: str | None) -> str | None:
+    """Validate a mutating request idempotency key without echoing it.
+
+    Missing keys remain optional so read-only surfaces can reuse the gateway
+    context builder. When a key is present, it must be a short safe identifier
+    and must not be secret-shaped.
+    """
+
+    if value is None or not value.strip():
+        return None
+    key = value.strip()
+    if len(key) > _IDEMPOTENCY_KEY_LENGTH_LIMIT:
+        raise GatewayContractError(
+            "invalid_idempotency_key",
+            "Idempotency key is too long.",
+        )
+    if redact_text(key) != key or _IDEMPOTENCY_KEY_RE.fullmatch(key) is None:
+        raise GatewayContractError(
+            "invalid_idempotency_key",
+            "Idempotency key contains unsafe characters or secret-shaped material.",
+        )
+    return key
+
+
+def authorization_scheme(value: str | None) -> str | None:
+    """Return only the auth scheme from an Authorization header.
+
+    The credential tail is intentionally discarded. Secret-shaped credential
+    tails such as ``access_token=...`` collapse the whole header to
+    ``[REDACTED]`` so accidental credential paste is not persisted as a scheme.
+    """
+
+    if value is None or not value.strip():
+        return None
+    header = value.strip()
+    if " " not in header and "\t" not in header:
+        return "[REDACTED]"
+
+    scheme, _credential_tail = header.split(None, 1)
+    if scheme in _SAFE_AUTH_SCHEMES:
+        return "[REDACTED]" if _SECRET_KEY_RE.search(header) else scheme
+
+    redacted_scheme = redact_text(scheme) or "[REDACTED]"
+    return scheme if redacted_scheme == scheme else "[REDACTED]"
+
+
+def _header(headers: Mapping[str, str] | None, *names: str) -> str | None:
+    if headers is None:
+        return None
+    lowered = {name.lower(): name for name in names}
+    for raw_name, value in headers.items():
+        if raw_name in names or raw_name.lower() in lowered:
+            return str(value)
+    return None
+
+
+def _safe_business_id(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    business_id = value.strip()
+    redacted = redact_text(business_id) or "[REDACTED]"
+    return business_id if redacted == business_id else "[REDACTED]"
+
+
+def _normalize_method(value: str | None) -> Method:
+    if value is None or not value.strip():
+        raise GatewayContractError("invalid_method", "HTTP method is required.")
+    method = value.strip().upper()
+    if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+        raise GatewayContractError("invalid_method", "HTTP method is not allowlisted.")
+    return method  # type: ignore[return-value]
+
+
+def _normalize_route_key(route_key: str) -> RouteKey:
+    if _ROUTE_KEY_RE.fullmatch(route_key) is None:
+        raise GatewayContractError(
+            "invalid_route_key",
+            "Route key must be a short safe identifier.",
+        )
+    return route_key
+
+
+def build_gateway_context(
+    headers: Mapping[str, str] | None,
+    *,
+    route_key: str,
+    method: str | None = None,
+    business_id: str | None = None,
+    actor_ref: str | None = None,
+    idempotency_key: str | None = None,
+) -> GatewayRequestContext:
+    """Build normalized gateway context from request headers and route metadata."""
+
+    effective_actor_ref = actor_ref or _header(headers, "X-Orvo-Operator", "X-Operator")
+    effective_idempotency_key = idempotency_key or _header(
+        headers,
+        "Idempotency-Key",
+        "X-Idempotency-Key",
+    )
+
+    return GatewayRequestContext(
+        request_id=normalize_request_id(_header(headers, "X-Request-ID", "X-Orvo-Request-ID")),
+        route_key=_normalize_route_key(route_key),
+        method=_normalize_method(method or _header(headers, "X-HTTP-Method-Override")),
+        business_id=_safe_business_id(business_id),
+        actor_ref=safe_internal_operator_actor_ref(effective_actor_ref),
+        auth_scheme=authorization_scheme(_header(headers, "Authorization")),
+        idempotency_key=normalize_idempotency_key(effective_idempotency_key),
+    )
+
+
+def evaluate_gateway_rate_limit(
+    policy: GatewayRateLimitPolicy,
+    *,
+    current_requests: int,
+) -> GatewayRateLimitDecision:
+    """Evaluate a deterministic rate-limit decision from a counter snapshot."""
+
+    if policy.requests_per_minute is None:
+        return GatewayRateLimitDecision(allowed=True)
+    if current_requests < policy.requests_per_minute:
+        return GatewayRateLimitDecision(allowed=True)
+    return GatewayRateLimitDecision(
+        allowed=False,
+        retry_after_seconds=policy.retry_after_seconds,
+    )
+
+
+def build_gateway_audit_event(
+    context: GatewayRequestContext,
+    *,
+    event_type: str,
+    status: str,
+    reason: str | None = None,
+    data: Any | None = None,
+) -> dict[str, Any]:
+    """Build a redacted audit/provenance event for gateway boundaries."""
+
+    raw_event: dict[str, Any] = {
+        "event_type": event_type,
+        "status": status,
+        "reason": reason,
+        "request_id": context.request_id,
+        "route_key": context.route_key,
+        "method": context.method,
+        "business_id": context.business_id,
+        "actor_ref": context.actor_ref,
+        "auth_scheme": context.auth_scheme,
+        "idempotency_key": context.idempotency_key,
+        "data": data,
+    }
+    safe_event = redact_secrets(raw_event)
+    safe_event["redaction_applied"] = safe_event != raw_event
+    return safe_event
