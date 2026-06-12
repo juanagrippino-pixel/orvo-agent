@@ -201,6 +201,13 @@ def _git_branch_exists(repo_root: Path, branch: str) -> bool:
     return remote.returncode == 0
 
 
+def _git_status_short(repo_root: Path) -> tuple[str, ...] | None:
+    result = _git(repo_root, "status", "--short")
+    if result.returncode != 0:
+        return None
+    return tuple(line.rstrip() for line in result.stdout.splitlines() if line.strip())
+
+
 def _changed_files_between(repo_root: Path, base_sha: str, head_sha: str) -> tuple[str, ...] | None:
     result = _git(repo_root, "diff", "--name-only", f"{base_sha}...{head_sha}")
     if result.returncode != 0:
@@ -239,11 +246,23 @@ def verify_manifest_git_claims(
     repo_root = repo_root.resolve()
     worktree_path = manifest.fields.get("worktree_path", "")
     branch = manifest.fields.get("branch", "")
-    if worktree_path and not Path(worktree_path).exists() and not _git_branch_exists(repo_root, branch):
+    worktree = Path(worktree_path)
+    worktree_exists = worktree_path and worktree.exists()
+    if worktree_path and not worktree_exists and not _git_branch_exists(repo_root, branch):
         problems.append(
             "worktree_path does not exist and branch cannot be found locally or under origin: "
             f"{worktree_path} / {branch}"
         )
+
+    status = manifest.fields.get("status", "")
+    if worktree_exists:
+        worktree_status = _git_status_short(worktree)
+        if worktree_status is None:
+            problems.append(f"worktree_path is not a git repository with readable status: {worktree_path}")
+        elif status == "clean" and worktree_status:
+            problems.append("status clean requires an empty git status --short at worktree_path")
+        elif status == "dirty-blocked" and not worktree_status:
+            problems.append("status dirty-blocked requires non-empty git status --short at worktree_path")
 
     base_sha = manifest.fields.get("base_sha", "")
     head_sha = manifest.fields.get("head_sha", "")
