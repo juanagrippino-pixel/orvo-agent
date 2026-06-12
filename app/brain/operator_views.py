@@ -25,10 +25,6 @@ from app.brain.work_items import (
     case_comment_count,
     case_issue_security_level,
     case_issue_type,
-    case_last_comment_at,
-    case_last_event_at,
-    case_last_event_type,
-    case_latest_reopened_at,
     case_owner_visible,
     case_priority_bracket,
     case_project_key,
@@ -449,8 +445,6 @@ def _case_field_value(case: OperationalCase, field: str, now: datetime | None = 
         return case_type_release_state(case.case_type)
     if field == "owner_visible":
         return case_owner_visible(case)
-    if field == "issue_security_level":
-        return case_issue_security_level(case)
     if field == "status_category":
         return case_status_category(case)
     if field == "priority_bracket":
