@@ -441,20 +441,6 @@ def _case_field_value(case: OperationalCase, field: str, now: datetime | None = 
         return len(case.evidence_snapshots)
     if field == "evidence_source_count":
         return len(_case_source_connectors(case))
-    if field == "comment_count":
-        return case_comment_count(case)
-    if field == "reopen_count":
-        return case_reopen_count(case)
-    if field == "last_comment_at":
-        return case_last_comment_at(case)
-    if field == "latest_reopened_at":
-        return case_latest_reopened_at(case)
-    if field == "timeline_event_count":
-        return case_timeline_event_count(case)
-    if field == "last_event_at":
-        return case_last_event_at(case)
-    if field == "last_event_type":
-        return case_last_event_type(case)
     if field == "project":
         return case_project_key(case)
     if field == "issue_type":
