@@ -49,6 +49,7 @@ class ConnectorContract:
     allowed_public_config_keys: tuple[str, ...] = ()
     required_secret_ref_keys: tuple[str, ...] = ()
     evidence_kinds: tuple[str, ...] = ()
+    emitted_event_families: tuple[str, ...] = ()
 
 
 class ConnectorContractViolation(ValueError):
@@ -67,6 +68,7 @@ class CompiledConnectorCall:
     public_config: Mapping[str, Any]
     secret_refs: Mapping[str, str]
     evidence_kinds: tuple[str, ...] = ()
+    emitted_event_families: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -360,6 +362,7 @@ def compile_connector_call(
         public_config=dict(public_config),
         secret_refs=dict(secret_refs),
         evidence_kinds=contract.evidence_kinds,
+        emitted_event_families=contract.emitted_event_families,
     )
 
 
@@ -395,6 +398,7 @@ class ConnectorExecutor:
                 "public_config": compiled_call.public_config,
                 "secret_ref_keys": sorted(compiled_call.secret_refs.keys()),
                 "evidence_kinds": list(compiled_call.evidence_kinds),
+                "emitted_event_families": list(compiled_call.emitted_event_families),
             },
         )
         try:
@@ -550,6 +554,35 @@ def _validate_connector_result(
                 f"adapter returned undeclared evidence kind for "
                 f"{compiled_call.connector_id!r}: {kind!r}"
             )
+
+    declared_event_families = tuple(compiled_call.emitted_event_families)
+    if declared_event_families:
+        for event in result.events:
+            event_type = _event_type_from_result_event(event)
+            if event_type is None:
+                raise ConnectorContractViolation(
+                    f"adapter returned event without string type for "
+                    f"{compiled_call.connector_id!r}"
+                )
+            if not _event_type_matches_declared_family(event_type, declared_event_families):
+                raise ConnectorContractViolation(
+                    f"adapter returned event type outside declared event families for "
+                    f"{compiled_call.connector_id!r}: {event_type!r}"
+                )
+
+
+def _event_type_from_result_event(event: Mapping[str, Any]) -> str | None:
+    event_type = event.get("type", event.get("event_type"))
+    if not isinstance(event_type, str):
+        return None
+    return event_type
+
+
+def _event_type_matches_declared_family(event_type: str, declared_event_families: tuple[str, ...]) -> bool:
+    return any(
+        event_type == family or event_type.startswith(f"{family}.")
+        for family in declared_event_families
+    )
 
 
 def _failed_outcome(
