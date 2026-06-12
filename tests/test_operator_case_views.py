@@ -540,6 +540,21 @@ def test_internal_case_facets_reject_business_scope_and_redact_bad_field(monkeyp
     assert "raw_facet_secret" not in secret_field.get_data(as_text=True)
 
 
+def test_builtin_case_views_are_readonly_parseable_and_route_scoped():
+    """Built-in saved views must stay catalog-owned, parseable, and tenant-route scoped."""
+
+    views = operator_views.builtin_case_views()
+    view_ids = [view["view_id"] for view in views]
+
+    assert views
+    assert len(view_ids) == len(set(view_ids))
+    for view in views:
+        assert view["readonly"] is True
+        assert "business_id" not in view["jql"]
+        assert parse_case_jql(view["jql"]).normalized == view["jql"]
+        assert operator_views.get_builtin_case_view(view["view_id"])["jql"] == view["jql"]
+
+
 def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 
