@@ -569,6 +569,19 @@ class OperationalCaseStore(Protocol):
         assigned_at: datetime | None = None,
     ) -> OperationalCase: ...
 
+    def attach_evidence(
+        self,
+        case_id: str,
+        *,
+        snapshots: list[OperationalCaseEvidenceSnapshot],
+        actor_type: ActorType = "system",
+        actor_ref: str = "orvo_runtime",
+        run_id: str | None = None,
+        artifact_ref: str | None = None,
+        summary: str | None = None,
+        attached_at: datetime | None = None,
+    ) -> OperationalCase: ...
+
     def get_case(self, case_id: str) -> OperationalCase | None: ...
     def find_by_dedupe_key(self, business_id: str, dedupe_key: str) -> OperationalCase | None: ...
     def list_cases(
@@ -799,6 +812,61 @@ class _OperationalCaseMutations:
                         created_at=assigned_at,
                         summary=f"Assigned case to {redacted_assignee_ref}.",
                         metadata={"assignee_ref": redacted_assignee_ref},
+                    ),
+                ],
+            },
+            deep=True,
+        )
+        updated = OperationalCase.model_validate(updated.model_dump())
+        self._persist(updated)
+        return updated.model_copy(deep=True)
+
+    def attach_evidence(
+        self,
+        case_id: str,
+        *,
+        snapshots: list[OperationalCaseEvidenceSnapshot],
+        actor_type: ActorType = "system",
+        actor_ref: str = "orvo_runtime",
+        run_id: str | None = None,
+        artifact_ref: str | None = None,
+        summary: str | None = None,
+        attached_at: datetime | None = None,
+    ) -> OperationalCase:
+        if not snapshots:
+            raise ValueError("attach_evidence requires at least one evidence snapshot")
+        record = self._load_for_update(case_id)
+        attached_at = _as_utc(attached_at) if attached_at is not None else _now_utc()
+        requested = _unique_snapshots(snapshots)
+        requested_keys = [snapshot.snapshot_key for snapshot in requested]
+        merged_snapshots = _unique_snapshots([*record.evidence_snapshots, *requested])
+        updated = record.model_copy(
+            update={
+                "updated_at": attached_at,
+                "latest_run_id": run_id or record.latest_run_id,
+                "source_run_ids": _unique([*record.source_run_ids, *([run_id] if run_id else [])]),
+                "evidence_refs": _unique([
+                    *record.evidence_refs,
+                    *[snapshot.evidence_ref for snapshot in requested],
+                ]),
+                "artifact_refs": _unique([
+                    *record.artifact_refs,
+                    *([artifact_ref] if artifact_ref else []),
+                ]),
+                "evidence_snapshots": merged_snapshots,
+                "timeline": [
+                    *record.timeline,
+                    OperationalCaseTimelineEvent(
+                        event_type="evidence_attached",
+                        actor_type=actor_type,
+                        actor_ref=actor_ref,
+                        run_id=run_id,
+                        case_id=record.case_id,
+                        artifact_ref=artifact_ref,
+                        evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, requested_keys),
+                        created_at=attached_at,
+                        summary=summary
+                        or f"Attached {len(requested)} evidence snapshot{'s' if len(requested) != 1 else ''}.",
                     ),
                 ],
             },
