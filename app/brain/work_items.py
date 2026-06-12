@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
@@ -24,6 +24,11 @@ from app.brain.operational_cases import (
     OperationalCaseStatus,
     OperationalCaseStatusCategory,
     OperationalCaseType,
+    SLA_STATUS_BREACHED,
+    SLA_STATUS_MET,
+    SLA_STATUS_NOT_APPLICABLE,
+    SLA_STATUS_NOT_CONFIGURED,
+    SLA_STATUS_PENDING,
     operational_case_status_category,
     operational_case_system_status_transitions,
     operational_case_status_transitions,
@@ -44,6 +49,7 @@ class WorkItemPriorityDefinition:
 
 
 WorkItemQueryFieldValueType = Literal["bool", "enum", "int", "string", "datetime"]
+OperationalCaseSlaStatus = Literal["not_configured", "not_applicable", "pending", "breached", "met"]
 OperationalCaseIssueTypeReleaseState = Literal[
     "promoted", "readiness_gated", "deferred", "internal_only"
 ]
@@ -94,6 +100,14 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
     WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity)), facetable=True),
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("sla_target_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition(
+        "sla_status",
+        "enum",
+        frozenset(get_args(OperationalCaseSlaStatus)),
+        facetable=True,
+    ),
     WorkItemQueryFieldDefinition(
         "priority_bracket",
         "enum",
@@ -194,6 +208,19 @@ def case_priority_bracket(case: OperationalCase) -> str:
     return priority_bracket_for_score(case.priority_score)
 
 
+def case_sla_status(case: OperationalCase, now: datetime | None = None) -> OperationalCaseSlaStatus:
+    if case.due_at is None:
+        return SLA_STATUS_NOT_CONFIGURED
+    if case.status == "resolved":
+        return SLA_STATUS_MET
+    if case.status == "dismissed":
+        return SLA_STATUS_NOT_APPLICABLE
+    now = now or datetime.now(tz=timezone.utc)
+    if now >= case.due_at:
+        return SLA_STATUS_BREACHED
+    return SLA_STATUS_PENDING
+
+
 def allowed_priority_brackets() -> set[str]:
     return {definition.bracket for definition in _PRIORITY_DEFINITIONS}
 
@@ -236,7 +263,7 @@ def case_work_item_id(case: OperationalCase) -> str:
     return f"{case_project_key(case)}:{case.case_id}"
 
 
-def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
+def case_work_item_projection(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
     """Project an OperationalCase as a WorkItem-shaped API object."""
 
     return {
@@ -248,6 +275,9 @@ def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
+        "sla_target_seconds": case.sla_target_seconds,
+        "due_at": _iso_utc(case.due_at) if case.due_at is not None else None,
+        "sla_status": case_sla_status(case, now=now),
         "assignee_ref": case.assignee_ref,
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
