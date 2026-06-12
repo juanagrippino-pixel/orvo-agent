@@ -256,10 +256,12 @@ def _internal_principal_or_error(
             role=request.headers.get("X-Orvo-Role"),
             allowed_businesses_header=_internal_operator_businesses_header(),
         )
-        require_internal_business_scope(principal, business_id)
-        require_internal_permission(principal, permission)
         if require_explicit_global_scope:
+            require_internal_permission(principal, permission)
             require_explicit_global_business_scope(principal)
+        else:
+            require_internal_business_scope(principal, business_id)
+            require_internal_permission(principal, permission)
     except InternalOperatorAuthorizationError as exc:
         if audit_denial:
             _record_internal_authorization_denial(business_id=business_id, actor_ref=actor_ref or "anonymous", exc=exc)
