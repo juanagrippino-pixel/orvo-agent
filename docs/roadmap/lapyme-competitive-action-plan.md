@@ -16,6 +16,8 @@ loop, and the first real product videos — without ERP scope creep.
 1. **OS snapshot / operator home** (top priority, unblocks video V2):
    module health for Ventas / Stock / Atención / ARCA / Caja derived from
    connector/runtime/case state; setup-required cases for unconnected lanes.
+   UX bar: it must feel like a beautiful, simple operating system for a busy
+   owner — calm layout, obvious next action, no ERP wall, no AI-dashboard clutter.
 2. **Console case queue + timeline polish** for `sales_drop`,
    `stockout_risk`, `data_stale`: acknowledge / comment / resolve from the
    console; next brief reflects open/resolved state.
