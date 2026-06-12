@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime, timezone
+import json
 
 import pytest
 
@@ -193,6 +195,78 @@ def test_simulate_case_workflow_blocks_external_action_behind_approval_gate_and_
     assert planned_action["side_effect"] == "external"
     assert "raw_external_secret" not in str(result)
     assert planned_action["params"]["Authorization"] == "[REDACTED]"
+
+
+def test_sqlite_workflow_action_ledger_redacts_approval_boundary_and_scopes_by_business(tmp_path):
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-action-ledger.sqlite3"))
+    artemea_actor = "operator token=raw_workflow_actor_secret"
+    artemea_params = {
+        "Authorization": "Basic raw_workflow_approval_secret",
+        "reason": "Ask supplier token=raw_workflow_reason_secret",
+        "safe_note": "approval boundary redaction probe",
+    }
+
+    write = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-ledger-redaction-artemea",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/supplier-restock/case-ledger-redaction-artemea/request_external_action/probe",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref=artemea_actor,
+        params=artemea_params,
+        rule_id="supplier-restock",
+        now=utc(14),
+    )
+
+    assert write.created is True
+    artemea_actions = ledger.list_actions(business_id="artemea")
+    artemea_approvals = ledger.list_approval_requests(business_id="artemea")
+    assert len(artemea_actions) == 1
+    assert len(artemea_approvals) == 1
+    artemea_record = artemea_actions[0]
+    artemea_approval = artemea_approvals[0]
+    assert artemea_record.actor_ref == "operator token=[REDACTED]"
+    assert artemea_record.params == {
+        "Authorization": "[REDACTED]",
+        "reason": "Ask supplier token=[REDACTED]",
+        "safe_note": "approval boundary redaction probe",
+    }
+    assert artemea_approval.requester_ref == "operator token=[REDACTED]"
+
+    other_write = ledger.record_planned_action(
+        business_id="other",
+        case_id="case-ledger-redaction-other",
+        action_key="acknowledge_case",
+        idempotency_key=write.record.idempotency_key,
+        execution_state="dry_run",
+        approval_required=False,
+        source="workflow",
+        actor_ref="other operator token=raw_other_tenant_secret",
+        params={"safe_note": "other tenant redaction probe"},
+        rule_id="supplier-restock",
+        now=utc(14, 1),
+    )
+    other_actions = ledger.list_actions(business_id="other")
+    assert other_write.created is True
+    assert len(other_actions) == 1
+    assert other_actions[0].business_id == "other"
+    assert other_actions[0].actor_ref == "other operator token=[REDACTED]"
+    assert ledger.list_actions(business_id="artemea")[0].case_id == "case-ledger-redaction-artemea"
+
+    serialized = json.dumps(
+        [asdict(artemea_record), asdict(artemea_approval), asdict(other_actions[0])],
+        sort_keys=True,
+        default=str,
+    )
+    for secret in (
+        "raw_workflow_actor_secret",
+        "raw_workflow_approval_secret",
+        "raw_workflow_reason_secret",
+        "raw_other_tenant_secret",
+    ):
+        assert secret not in serialized
 
 
 @pytest.mark.parametrize(
