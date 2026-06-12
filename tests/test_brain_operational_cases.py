@@ -406,3 +406,75 @@ def test_detect_cases_from_report_maps_actionable_insights_to_deterministic_dedu
     assert detections[0].dedupe_key == "artemea/stockout_risk/business/monitored/commerce.inventory/daily"
     assert detections[0].evidence_refs == ["evidence://tiendanube/2026-05-24/stockout_risk"]
     assert detections[0].metadata["insight_title"] == "Stock crítico"
+
+
+def test_attach_evidence_appends_snapshot_and_emits_evidence_attached_event(conn):
+    for store in (InMemoryOperationalCaseStore(), SQLiteOperationalCaseStore(conn)):
+        opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+        snapshot = make_stock_snapshot(run_id="run-2", captured_at=utc_dt(9), token="raw_attach_secret")
+
+        attached = store.attach_evidence(
+            opened.case_id,
+            snapshots=[snapshot],
+            actor_type="system",
+            actor_ref="orvo_runtime",
+            run_id="run-2",
+            artifact_ref="ledger://runs/run-2/daily-report",
+            summary="Attached Tiendanube stock metric snapshot",
+            attached_at=utc_dt(9),
+        )
+
+        assert attached.case_id == opened.case_id
+        assert attached.status == opened.status
+        assert attached.updated_at == utc_dt(9)
+        assert [s.snapshot_key for s in attached.evidence_snapshots] == [
+            *[s.snapshot_key for s in opened.evidence_snapshots],
+            snapshot.snapshot_key,
+        ]
+        assert snapshot.evidence_ref in attached.evidence_refs
+        assert "ledger://runs/run-2/daily-report" in attached.artifact_refs
+        assert attached.latest_run_id == "run-2"
+        assert attached.source_run_ids == ["run-1", "run-2"]
+        event = attached.timeline[-1]
+        assert event.event_type == "evidence_attached"
+        assert event.actor_type == "system"
+        assert event.actor_ref == "orvo_runtime"
+        assert event.run_id == "run-2"
+        assert event.case_id == opened.case_id
+        assert event.artifact_ref == "ledger://runs/run-2/daily-report"
+        assert event.created_at == utc_dt(9)
+        assert event.summary == "Attached Tiendanube stock metric snapshot"
+        assert event.evidence_snapshot_ids == [attached.evidence_snapshots[-1].snapshot_id]
+        assert "raw_attach_secret" not in attached.model_dump_json()
+        reloaded = store.get_case(opened.case_id)
+        assert reloaded is not None
+        assert reloaded.timeline[-1].event_type == "evidence_attached"
+
+
+def test_attach_evidence_dedupes_by_snapshot_key_and_references_canonical_snapshot():
+    store = InMemoryOperationalCaseStore()
+    snapshot = make_stock_snapshot(run_id="run-1", captured_at=utc_dt(8))
+    opened = store.upsert_detection(
+        make_stockout_detection(run_id="run-1", snapshots=[snapshot]),
+        detected_at=utc_dt(8),
+    )
+
+    duplicate = make_stock_snapshot(run_id="run-1", captured_at=utc_dt(9))
+    attached = store.attach_evidence(opened.case_id, snapshots=[duplicate], attached_at=utc_dt(9))
+
+    assert len(attached.evidence_snapshots) == 1
+    assert attached.evidence_snapshots[0].snapshot_id == opened.evidence_snapshots[0].snapshot_id
+    event = attached.timeline[-1]
+    assert event.event_type == "evidence_attached"
+    assert event.evidence_snapshot_ids == [opened.evidence_snapshots[0].snapshot_id]
+    assert event.summary == "Attached 1 evidence snapshot."
+
+
+def test_attach_evidence_rejects_unknown_case_and_empty_snapshots():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+
+    with pytest.raises(KeyError):
+        store.attach_evidence("missing-case", snapshots=[make_stock_snapshot()])
+    with pytest.raises(ValueError):
+        store.attach_evidence(opened.case_id, snapshots=[])
