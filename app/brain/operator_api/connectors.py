@@ -101,6 +101,64 @@ def _readiness_state(
     return "ready"
 
 
+_HEALTH_SETUP_REASONS = {
+    "degraded": "connector_last_run_degraded",
+    "stale": "connector_last_run_stale",
+    "unauthorized": "connector_last_run_unauthorized",
+    "rate_limited": "connector_last_run_rate_limited",
+    "failed": "connector_last_run_failed",
+}
+
+_SETUP_NEXT_STEPS = {
+    "unknown_connector_type": "register_or_disable_connector",
+    "missing_required_secret_ref": "review_connector_configuration",
+    "legacy_inline_secret": "review_connector_configuration",
+    "connector_last_run_unauthorized": "refresh_connector_credentials",
+    "connector_last_run_rate_limited": "wait_or_review_connector_limits",
+    "connector_last_run_stale": "review_last_connector_run",
+    "connector_last_run_degraded": "review_last_connector_run",
+    "connector_last_run_failed": "review_last_connector_run",
+}
+
+
+def _setup_projection(
+    *,
+    connector: ConnectorConfig,
+    registered: bool,
+    validation_issues: list[ConnectorValidationIssue],
+    last_health: dict[str, Any] | None,
+    readiness_state: str,
+) -> dict[str, Any]:
+    """Return stable setup-task hints for the connector readiness surface.
+
+    The readiness endpoint remains an inspection surface: it does not execute
+    health checks or mutate configuration. These hints make already-known config
+    and last-run failures visible as setup-required tasks in the operator app.
+    """
+
+    if not connector.enabled or readiness_state == "ready":
+        return {"setup_required": False, "setup_reason": None, "operator_next_step": None}
+
+    setup_reason: str | None = None
+    if not registered:
+        setup_reason = "unknown_connector_type"
+    else:
+        errors = [issue for issue in validation_issues if issue.severity == "error"]
+        if errors:
+            setup_reason = errors[0].code
+        elif last_health is not None:
+            setup_reason = _HEALTH_SETUP_REASONS.get(str(last_health.get("health_state") or ""))
+
+    if setup_reason is None:
+        setup_reason = "review_connector_configuration"
+
+    return {
+        "setup_required": True,
+        "setup_reason": setup_reason,
+        "operator_next_step": _SETUP_NEXT_STEPS.get(setup_reason, "review_connector_configuration"),
+    }
+
+
 def _connector_projection(
     connector: ConnectorConfig,
     *,
@@ -148,6 +206,13 @@ def _connector_projection(
         validation_issues=validation_issues,
         last_health=last_health,
     )
+    setup = _setup_projection(
+        connector=connector,
+        registered=spec is not None,
+        validation_issues=validation_issues,
+        last_health=last_health,
+        readiness_state=readiness_state,
+    )
     errors = [issue for issue in validation_issues if issue.severity == "error"]
     warnings = [issue for issue in validation_issues if issue.severity != "error"]
 
@@ -158,6 +223,7 @@ def _connector_projection(
         "enabled": connector.enabled,
         "registered": spec is not None,
         "readiness_state": readiness_state,
+        **setup,
         "capabilities": capabilities,
         "emitted_metric_families": emitted_metric_families,
         "emitted_event_families": emitted_event_families,
@@ -197,6 +263,7 @@ def connector_readiness_projection(
         for connector in business.connectors
     ]
     states = [connector["readiness_state"] for connector in connectors]
+    setup_required_count = sum(1 for connector in connectors if connector["setup_required"])
     return {
         "business_id": business.business_id,
         "readiness_check": "metadata_and_last_run",
@@ -207,6 +274,7 @@ def connector_readiness_projection(
             "not_ready": states.count("not_ready"),
             "disabled": states.count("disabled"),
             "unknown": states.count("unknown"),
+            "setup_required": setup_required_count,
         },
         "connectors": connectors,
     }
