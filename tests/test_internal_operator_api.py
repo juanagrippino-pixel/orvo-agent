@@ -339,6 +339,27 @@ def test_internal_owner_case_brief_preview_is_read_only_scoped_and_redacted(monk
     assert resolved_case.case_id not in data["text"]
 
 
+def test_internal_owner_case_brief_preview_redacts_secret_shaped_business_name(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview"
+        "?business_name=Artemea%20access_token=raw_owner_business_secret&report_date=2026-05-24&max_cases=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_owner_business_secret" not in raw_body
+    body = response.get_json()
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_name"] != "Artemea access_token=raw_owner_business_secret"
+    assert "raw_owner_business_secret" not in data["business_name"]
+    assert "raw_owner_business_secret" not in data["text"]
+
+
 def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_action_keys(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(
