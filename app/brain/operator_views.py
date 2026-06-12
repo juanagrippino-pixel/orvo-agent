@@ -104,8 +104,8 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
     {
         "view_id": "acknowledged_cases",
         "label": "Acknowledged cases",
-        "description": "Cases acknowledged by an operator, most recently updated first.",
-        "jql": "status = acknowledged ORDER BY updated_at DESC",
+        "description": "Cases acknowledged by an operator, ordered by the canonical acknowledged_at timestamp.",
+        "jql": "status = acknowledged ORDER BY acknowledged_at DESC",
         "readonly": True,
     },
     {
