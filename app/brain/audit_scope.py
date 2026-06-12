@@ -17,9 +17,17 @@ AUDIT_BUSINESS_SCOPE_KEY_VERSION = "audit_business_scope_sha256_v1"
 
 
 def audit_business_display_id(business_id: str) -> str:
-    """Return the redacted tenant identifier safe to persist/export."""
+    """Return the tenant identifier safe to persist/export.
 
-    return redact_text(business_id) or "[REDACTED]"
+    Normal business ids are operational routing labels. If the label contains a
+    pasted credential shape, collapse the entire display id instead of
+    persisting a partially redacted tenant string such as ``artemea
+    token=[REDACTED]``. The raw value remains queryable via
+    ``audit_business_scope_key`` only.
+    """
+
+    redacted = redact_text(business_id) or "[REDACTED]"
+    return redacted if redacted == business_id else "[REDACTED]"
 
 
 def audit_business_scope_key(business_id: str) -> str:
