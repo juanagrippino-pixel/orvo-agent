@@ -463,9 +463,26 @@ def _canonical_snapshot_ids(
         snapshot_id = by_key.get(key)
         if snapshot_id is None or snapshot_id in seen:
             continue
-        seen.add(snapshot_id)
         ids.append(snapshot_id)
+        seen.add(snapshot_id)
     return ids
+
+
+def _detection_update_metadata(existing: OperationalCase, detection: OperationalCaseDetection) -> dict[str, Any]:
+    """Return deterministic audit metadata for a recurring detection update."""
+
+    metadata: dict[str, Any] = {"dedupe_key": detection.dedupe_key}
+    if existing.priority_score != detection.priority_score:
+        metadata.update({
+            "previous_priority_score": existing.priority_score,
+            "priority_score": detection.priority_score,
+        })
+    if existing.severity != detection.severity:
+        metadata.update({
+            "previous_severity": existing.severity,
+            "severity": detection.severity,
+        })
+    return metadata
 
 
 def _source_from_evidence_ref(evidence_ref: str) -> str:
@@ -696,16 +713,15 @@ class _OperationalCaseMutations:
                 "timeline": [
                     *existing.timeline,
                     OperationalCaseTimelineEvent(
-                        event_type=event_type,
+                        event_type="case_updated",
                         actor_type="system",
-                        actor_ref="orvo_runtime",
-                        run_id=detection.run_id,
+                        actor_ref="operational-case-engine",
                         case_id=existing.case_id,
                         artifact_ref=detection_artifact_ref,
                         evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"{event_verb} {detection.case_type} case from deterministic detection.",
-                        metadata=event_metadata,
+                        metadata=_detection_update_metadata(existing, detection),
                     ),
                 ],
             }
