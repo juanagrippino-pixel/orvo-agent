@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import sqlite3
+from datetime import datetime
+from pathlib import Path
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -64,8 +66,10 @@ def _acknowledge_case(db_path: Path, case_id: str, *, acknowledged_at: datetime)
             case_id,
             status="acknowledged",
             actor_type="operator",
-            actor_ref="operator:juan",
-            transitioned_at=acknowledged_at,
+            actor_id="operator@example.com",
+            event_type="case.acknowledged",
+            event_summary="Operator acknowledged case",
+            occurred_at=acknowledged_at,
         )
 
 
