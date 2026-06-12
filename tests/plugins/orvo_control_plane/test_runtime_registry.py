@@ -26,6 +26,7 @@ def test_compile_connector_call_uses_registry_contract_and_preserves_secret_refs
             allowed_public_config_keys=("shop_domain", "api_version"),
             required_secret_ref_keys=("admin_token",),
             evidence_kinds=("orders_snapshot",),
+            emitted_event_families=("orders",),
         )
     )
 
@@ -47,6 +48,8 @@ def test_compile_connector_call_uses_registry_contract_and_preserves_secret_refs
         "api_version": "2026-04",
     }
     assert compiled.secret_refs == {"admin_token": "secret://tenant/shopify/admin-token"}
+    assert compiled.evidence_kinds == ("orders_snapshot",)
+    assert compiled.emitted_event_families == ("orders",)
     assert "secret://tenant/shopify/admin-token" not in repr(compiled.public_config)
     assert asdict(compiled)["public_config"] == {
         "shop_domain": "orvo-test.myshopify.com",
@@ -93,6 +96,7 @@ def test_connector_executor_captures_run_scoped_outcome_and_evidence():
             allowed_public_config_keys=("shop_domain",),
             required_secret_ref_keys=("admin_token",),
             evidence_kinds=("orders_snapshot",),
+            emitted_event_families=("orders",),
         )
     )
 
@@ -141,6 +145,54 @@ def test_connector_executor_captures_run_scoped_outcome_and_evidence():
             "operation": "orders.pull",
             "type": "orders.pulled",
             "count": 2,
+        }
+    ]
+
+
+def test_connector_executor_rejects_event_type_outside_declared_event_families():
+    registry = ConnectorRegistry()
+    registry.register(
+        ConnectorContract(
+            connector_id="shopify",
+            contract_name="shopify.orders",
+            contract_version="2026-05-26",
+            operations=("orders.pull",),
+            allowed_public_config_keys=("shop_domain",),
+            required_secret_ref_keys=("admin_token",),
+            emitted_event_families=("orders",),
+        )
+    )
+
+    def invalid_event_adapter(_compiled_call):
+        return ConnectorResult(
+            status="succeeded",
+            events=[
+                {"type": "orders.pulled", "count": 2},
+                {"type": "workflow.approval.requested", "case_id": "case_1"},
+            ],
+        )
+
+    executor = ConnectorExecutor(registry=registry, adapters={"shopify": invalid_event_adapter})
+
+    outcome = executor.execute(
+        ConnectorExecutionRequest(
+            run_id="run_bad_event_family",
+            connector_id="shopify",
+            operation="orders.pull",
+            public_config={"shop_domain": "orvo-test.myshopify.com"},
+            secret_refs={"admin_token": "secret://tenant/shopify/admin-token"},
+        )
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.summary == "ConnectorContractViolation: connector adapter failed"
+    assert outcome.events == [
+        {
+            "run_id": "run_bad_event_family",
+            "connector_id": "shopify",
+            "operation": "orders.pull",
+            "type": "connector.failed",
+            "error_type": "ConnectorContractViolation",
         }
     ]
 
@@ -285,6 +337,7 @@ def test_connector_executor_records_ordered_audit_transitions_with_lineage():
             allowed_public_config_keys=("shop_domain",),
             required_secret_ref_keys=("admin_token",),
             evidence_kinds=("orders_snapshot",),
+            emitted_event_families=("orders",),
         )
     )
     ledger = ConnectorRunLedger(clock=iter([101.0, 102.0]).__next__)
@@ -330,6 +383,7 @@ def test_connector_executor_records_ordered_audit_transitions_with_lineage():
         "public_config": {"shop_domain": "orvo-test.myshopify.com"},
         "secret_ref_keys": ["admin_token"],
         "evidence_kinds": ["orders_snapshot"],
+        "emitted_event_families": ["orders"],
     }
     assert "secret://tenant/shopify/admin-token" not in repr(events)
     assert events[1].payload == {
