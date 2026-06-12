@@ -56,6 +56,19 @@ def _resolve_case(db_path: Path, case_id: str, *, acknowledged_at: datetime, res
         )
 
 
+def _acknowledge_case(db_path: Path, case_id: str, *, acknowledged_at: datetime) -> None:
+    with closing(sqlite3.connect(db_path)) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        store.transition_case(
+            case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            transitioned_at=acknowledged_at,
+        )
+
+
 def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert not hasattr(operator_views, "_FIELD_SPECS")
     assert parse_case_jql("priority_score >= 80 ORDER BY priority_score DESC").normalized == (
@@ -73,6 +86,86 @@ def test_parse_case_jql_supports_resolved_at_sort_for_recently_resolved_views():
     assert parse_case_jql("resolved_at >= 2026-05-24T10:00:00+00:00").normalized == (
         "resolved_at >= 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
     )
+
+
+def test_parse_case_jql_supports_acknowledged_at_sort_for_acknowledged_case_views():
+    assert parse_case_jql("status = acknowledged ORDER BY acknowledged_at DESC").normalized == (
+        "status = acknowledged ORDER BY acknowledged_at DESC"
+    )
+    assert parse_case_jql("acknowledged_at >= 2026-05-24T10:00:00+00:00").normalized == (
+        "acknowledged_at >= 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+
+def test_internal_case_view_acknowledged_cases_orders_by_acknowledged_at(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    db_path = tmp_path / "operator.sqlite3"
+    old = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-ack-old",
+            priority=20,
+            dedupe_suffix="run-ack-old/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-ack-old", "label": "Run ack old"},
+        ),
+    )
+    middle = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-ack-middle",
+            priority=20,
+            dedupe_suffix="run-ack-middle/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-ack-middle", "label": "Run ack middle"},
+        ),
+    )
+    new = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-ack-new",
+            priority=20,
+            dedupe_suffix="run-ack-new/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-ack-new", "label": "Run ack new"},
+        ),
+    )
+    resolved = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-ack-resolved",
+            priority=20,
+            dedupe_suffix="run-ack-resolved/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-ack-resolved", "label": "Run ack resolved"},
+        ),
+    )
+    other = _seed_case(
+        db_path,
+        _case_detection_with_source(source="tiendanube", run_id="run-ack-other", business_id="other", priority=20),
+    )
+    _acknowledge_case(db_path, old.case_id, acknowledged_at=_utc(10))
+    _acknowledge_case(db_path, middle.case_id, acknowledged_at=_utc(12))
+    _acknowledge_case(db_path, new.case_id, acknowledged_at=_utc(14))
+    _resolve_case(db_path, resolved.case_id, acknowledged_at=_utc(16), resolved_at=_utc(17))
+    _acknowledge_case(db_path, other.case_id, acknowledged_at=_utc(18))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views/acknowledged_cases/cases",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["view_id"] == "acknowledged_cases"
+    assert payload["normalized_jql"] == "status = acknowledged ORDER BY acknowledged_at DESC"
+    assert payload["count"] == 3
+    assert payload["total"] == 3
+    assert [case["case_id"] for case in payload["cases"]] == [new.case_id, middle.case_id, old.case_id]
+    assert payload["cases"][0]["acknowledged_at"] == _utc(14).isoformat().replace("+00:00", "Z")
 
 
 def test_internal_case_view_recently_resolved_orders_by_resolved_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -703,9 +796,16 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert response.status_code == 200
     body = response.get_json()
     views = {view["view_id"]: view for view in body["data"]["views"]}
-    assert {"open_cases", "in_progress_cases", "critical_open", "data_stale", "stockout_risk", "connector_degraded"}.issubset(
-        views
-    )
+    assert {
+        "open_cases",
+        "acknowledged_cases",
+        "in_progress_cases",
+        "critical_open",
+        "data_stale",
+        "stockout_risk",
+        "connector_degraded",
+    }.issubset(views)
+    assert views["acknowledged_cases"]["jql"] == "status = acknowledged ORDER BY acknowledged_at DESC"
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"
     )
@@ -744,6 +844,15 @@ def test_internal_case_query_fields_expose_canonical_metadata(monkeypatch, tmp_p
         "facetable": True,
     }
     assert body["data"]["fields_by_name"]["degraded"]["value_type"] == "bool"
+    assert body["data"]["fields_by_name"]["acknowledged_at"] == {
+        "field": "acknowledged_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert "acknowledged_at" in body["data"]["sort_fields"]
     assert "priority_score" in body["data"]["sort_fields"]
     assert "updated_at" in body["data"]["sort_fields"]
     assert "source_connector" in body["data"]["facet_fields"]
