@@ -29,6 +29,7 @@ from app.brain.operational_cases import (
     SLA_STATUS_NOT_APPLICABLE,
     SLA_STATUS_NOT_CONFIGURED,
     SLA_STATUS_PENDING,
+    is_owner_facing_operational_case,
     operational_case_status_category,
     operational_case_system_status_transitions,
     operational_case_status_transitions,
@@ -95,6 +96,12 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
         "release_state",
         "enum",
         frozenset(get_args(OperationalCaseIssueTypeReleaseState)),
+        facetable=True,
+    ),
+    WorkItemQueryFieldDefinition(
+        "owner_visible",
+        "bool",
+        allowed_operators=frozenset({"=", "!="}),
         facetable=True,
     ),
     WorkItemQueryFieldDefinition("assignee_ref", "string", facetable=True),
@@ -195,6 +202,12 @@ def case_type_release_state(case_type: str) -> OperationalCaseIssueTypeReleaseSt
 
 def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory:
     return operational_case_status_category(case.status)
+
+
+def case_owner_visible(case: OperationalCase) -> bool:
+    """Return whether a case instance can appear in owner-facing surfaces."""
+
+    return is_owner_facing_operational_case(case)
 
 
 def priority_bracket_for_score(priority_score: int) -> str:
@@ -306,6 +319,7 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "project_key": case_project_key(case),
         "issue_type": case_issue_type(case),
         "release_state": case_type_release_state(case.case_type),
+        "owner_visible": case_owner_visible(case),
         "status": case.status,
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,
