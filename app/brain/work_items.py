@@ -30,8 +30,6 @@ from app.brain.operational_cases import (
     SLA_STATUS_NOT_APPLICABLE,
     SLA_STATUS_NOT_CONFIGURED,
     SLA_STATUS_PENDING,
-    TimelineEventType,
-    is_owner_facing_operational_case,
     operational_case_status_category,
     operational_case_system_status_transitions,
     operational_case_status_transitions,
@@ -53,7 +51,6 @@ class WorkItemPriorityDefinition:
 
 
 WorkItemQueryFieldValueType = Literal["bool", "enum", "int", "string", "datetime"]
-WorkItemIssueSecurityLevel = Literal["internal", "owner"]
 OperationalCaseSlaStatus = Literal["not_configured", "not_applicable", "pending", "breached", "met"]
 OperationalCaseIssueTypeReleaseState = Literal[
     "promoted", "readiness_gated", "deferred", "internal_only"
@@ -118,26 +115,8 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
     WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity)), facetable=True),
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("reopen_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("sla_target_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("sla_elapsed_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("sla_remaining_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("assigned_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("evidence_snapshot_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("evidence_source_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("comment_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("last_comment_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("latest_reopened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("timeline_event_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("last_event_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition(
-        "last_event_type",
-        "enum",
-        frozenset(get_args(TimelineEventType)),
-        facetable=True,
-    ),
     WorkItemQueryFieldDefinition(
         "sla_status",
         "enum",
@@ -260,8 +239,6 @@ def case_sla_status(case: OperationalCase, now: datetime | None = None) -> Opera
     if case.due_at is None:
         return SLA_STATUS_NOT_CONFIGURED
     if case.status == "resolved":
-        if case.resolved_at is not None and case.resolved_at > case.due_at:
-            return SLA_STATUS_BREACHED
         return SLA_STATUS_MET
     if case.status == "dismissed":
         return SLA_STATUS_NOT_APPLICABLE
@@ -269,32 +246,6 @@ def case_sla_status(case: OperationalCase, now: datetime | None = None) -> Opera
     if now >= case.due_at:
         return SLA_STATUS_BREACHED
     return SLA_STATUS_PENDING
-
-
-def _case_sla_clock_at(case: OperationalCase, now: datetime | None = None) -> datetime | None:
-    if case.status == "resolved":
-        return case.resolved_at
-    if case.status == "dismissed":
-        return case.dismissed_at
-    return now or datetime.now(tz=timezone.utc)
-
-
-def case_sla_elapsed_seconds(case: OperationalCase, now: datetime | None = None) -> int | None:
-    if case.due_at is None:
-        return None
-    clock_at = _case_sla_clock_at(case, now=now)
-    if clock_at is None:
-        return None
-    return max(0, int((clock_at - case.opened_at).total_seconds()))
-
-
-def case_sla_remaining_seconds(case: OperationalCase, now: datetime | None = None) -> int | None:
-    if case.due_at is None or case.status == "dismissed":
-        return None
-    clock_at = _case_sla_clock_at(case, now=now)
-    if clock_at is None:
-        return None
-    return int((case.due_at - clock_at).total_seconds())
 
 
 def allowed_priority_brackets() -> set[str]:
@@ -350,85 +301,6 @@ def case_work_item_id(case: OperationalCase) -> str:
     return f"{case_project_key(case)}:{case.case_id}"
 
 
-def case_evidence_snapshot_ids(case: OperationalCase) -> list[str]:
-    return [snapshot.snapshot_id for snapshot in case.evidence_snapshots]
-
-
-def case_latest_evidence_at(case: OperationalCase) -> datetime | None:
-    return latest_evidence_at(case)
-
-
-def case_timeline_event_count(case: OperationalCase) -> int:
-    return len(case.timeline)
-
-
-def case_comment_count(case: OperationalCase) -> int:
-    return sum(1 for event in case.timeline if event.event_type == "operator_comment")
-
-
-def case_last_comment_at(case: OperationalCase) -> datetime | None:
-    comment_events = [event.created_at for event in case.timeline if event.event_type == "operator_comment"]
-    if not comment_events:
-        return None
-    return max(comment_events)
-
-
-def case_reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
-    reopen_count = 0
-    latest_reopened_at: datetime | None = None
-    for event in case.timeline:
-        if event.event_type != "case_reopened":
-            continue
-        reopen_count += 1
-        event_at = event.created_at.astimezone(timezone.utc)
-        if latest_reopened_at is None or event_at > latest_reopened_at:
-            latest_reopened_at = event_at
-    return reopen_count, latest_reopened_at
-
-
-def case_reopen_count(case: OperationalCase) -> int:
-    reopen_count, _latest_reopened_at = case_reopen_stats(case)
-    return reopen_count
-
-
-def case_latest_reopened_at(case: OperationalCase) -> datetime | None:
-    _reopen_count, latest_reopened_at = case_reopen_stats(case)
-    return latest_reopened_at
-
-
-def _last_timeline_event(case: OperationalCase) -> OperationalCaseTimelineEvent | None:
-    if not case.timeline:
-        return None
-    _, event = max(enumerate(case.timeline), key=lambda item: (item[1].created_at, item[0]))
-    return event
-
-
-def case_last_event_at(case: OperationalCase) -> datetime | None:
-    event = _last_timeline_event(case)
-    if event is None:
-        return None
-    return event.created_at
-
-
-def case_last_event_type(case: OperationalCase) -> str | None:
-    event = _last_timeline_event(case)
-    if event is None:
-        return None
-    return event.event_type
-
-
-def case_source_connectors(case: OperationalCase) -> list[str]:
-    return source_connectors(case)
-
-
-def case_evidence_source_count(case: OperationalCase) -> int:
-    return len(case_source_connectors(case))
-
-
-def case_evidence_is_degraded(case: OperationalCase) -> bool:
-    return is_case_degraded(case)
-
-
 def case_work_item_projection(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
     """Project an OperationalCase as a WorkItem-shaped API object."""
 
@@ -443,11 +315,7 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
-        "reopen_count": case_reopen_count(case),
         "sla_target_seconds": case.sla_target_seconds,
-        "sla_elapsed_seconds": case_sla_elapsed_seconds(case, now=now),
-        "sla_remaining_seconds": case_sla_remaining_seconds(case, now=now),
-        "assigned_at": _iso_utc(case.assigned_at) if case.assigned_at is not None else None,
         "due_at": _iso_utc(case.due_at) if case.due_at is not None else None,
         "sla_status": case_sla_status(case, now=now),
         "assignee_ref": case.assignee_ref,

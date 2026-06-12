@@ -750,22 +750,11 @@ class _OperationalCaseMutations:
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
             merged_snapshots = _unique_snapshots([*existing.evidence_snapshots, *detection_snapshots])
-            event_metadata = _detection_update_metadata(existing, detection)
-            # Detection-sourced advisory keys (`metric_registry_mode`,
-            # `metric_registry_issues`) are recomputed fresh from the report on
-            # every detection. They must NOT leak from a prior run when the
-            # latest detection is registry-clean — otherwise operators see
-            # phantom advisory state on the case after metric drift is fixed.
-            existing_metadata_carryover = {
-                key: value
-                for key, value in existing.metadata.items()
-                if key not in {"metric_registry_mode", "metric_registry_issues"}
-            }
             if is_recurrence:
                 sla_target_seconds, due_at = _merge_sla_for_new_or_reopened_case(detection, detected_at, sla_target_seconds)
             else:
                 sla_target_seconds, due_at = _merge_sla_for_open_case(existing, detection, detected_at, sla_target_seconds)
-            metadata = event_metadata
+            metadata = _detection_update_metadata(existing, detection)
             if existing.sla_target_seconds != sla_target_seconds:
                 metadata.update({
                     "previous_sla_target_seconds": existing.sla_target_seconds,
@@ -776,8 +765,6 @@ class _OperationalCaseMutations:
                     "previous_due_at": existing.due_at.isoformat() if existing.due_at is not None else None,
                     "due_at": due_at.isoformat(),
                 })
-            if is_recurrence and existing.assignee_ref is not None:
-                metadata["previous_assignee_ref"] = existing.assignee_ref
             update: dict[str, Any] = {
                 "title": detection.title,
                 "status": "open" if is_recurrence else existing.status,
@@ -799,7 +786,7 @@ class _OperationalCaseMutations:
                 "timeline": [
                     *existing.timeline,
                     OperationalCaseTimelineEvent(
-                        event_type="case_updated",
+                        event_type=event_type,
                         actor_type="system",
                         actor_ref="operational-case-engine",
                         case_id=existing.case_id,
@@ -807,7 +794,7 @@ class _OperationalCaseMutations:
                         evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"{event_verb} {detection.case_type} case from deterministic detection.",
-                        metadata=_detection_update_metadata(existing, detection),
+                        metadata=metadata,
                     ),
                 ],
             }
