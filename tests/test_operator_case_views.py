@@ -269,6 +269,9 @@ def test_parse_case_jql_supports_latest_evidence_timestamp_filter():
     assert parse_case_jql("latest_evidence_at >= 2026-05-24T09:00:00+00:00").normalized == (
         "latest_evidence_at >= 2026-05-24T09:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("status = open ORDER BY latest_evidence_at DESC").normalized == (
+        "status = open ORDER BY latest_evidence_at DESC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_value:
         parse_case_jql("latest_evidence_at >= 2026-05-24T09:00:00")
@@ -324,6 +327,69 @@ def test_internal_case_queue_filters_by_latest_evidence_at_and_keeps_business_sc
     )
     assert [case["case_id"] for case in body["data"]["cases"]] == [late_case.case_id]
     assert body["data"]["cases"][0]["latest_evidence_at"] == "2026-05-24T09:00:00Z"
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_sorts_by_latest_evidence_at_with_nulls_last(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    no_evidence = _seed_case(
+        db_path,
+        _case_detection_with_evidence_count(
+            evidence_count=0,
+            run_id="run-no-evidence-sort",
+            dedupe_suffix="stockout_risk/sku/NO_EVIDENCE_SORT/inventory.on_hand/daily",
+            priority=100,
+        ),
+    )
+    early_evidence = _seed_case(
+        db_path,
+        _case_detection_with_latest_evidence_at(
+            run_id="run-early-evidence-sort",
+            captured_at=datetime(2026, 5, 24, 7, tzinfo=timezone.utc),
+            dedupe_suffix="stockout_risk/sku/EARLY_EVIDENCE_SORT/inventory.on_hand/daily",
+            priority=80,
+        ),
+    )
+    latest_evidence = _seed_case(
+        db_path,
+        _case_detection_with_latest_evidence_at(
+            run_id="run-latest-evidence-sort",
+            captured_at=datetime(2026, 5, 24, 10, tzinfo=timezone.utc),
+            dedupe_suffix="stockout_risk/sku/LATEST_EVIDENCE_SORT/inventory.on_hand/daily",
+            priority=60,
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection_with_latest_evidence_at(
+            business_id="other",
+            run_id="run-other-evidence-sort",
+            captured_at=datetime(2026, 5, 24, 11, tzinfo=timezone.utc),
+            dedupe_suffix="stockout_risk/sku/OTHER_EVIDENCE_SORT/inventory.on_hand/daily",
+            priority=99,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "status = open ORDER BY latest_evidence_at DESC"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "status = open ORDER BY latest_evidence_at DESC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [
+        latest_evidence.case_id,
+        early_evidence.case_id,
+        no_evidence.case_id,
+    ]
+    assert [case["latest_evidence_at"] for case in body["data"]["cases"]] == [
+        "2026-05-24T10:00:00Z",
+        "2026-05-24T07:00:00Z",
+        None,
+    ]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
@@ -1114,7 +1180,8 @@ def test_internal_case_query_fields_exposes_canonical_registry_without_business_
     assert fields["priority_score"]["sortable"] is True
     assert fields["priority_score"]["facetable"] is False
     assert fields["source_connector"]["source"] == "evidence_projection"
-    assert body["data"]["sort_fields"] == ["opened_at", "priority_score", "updated_at"]
+    assert fields["latest_evidence_at"]["sortable"] is True
+    assert body["data"]["sort_fields"] == ["latest_evidence_at", "opened_at", "priority_score", "updated_at"]
     assert body["data"]["facet_fields"] == [
         "assigned",
         "assignee_ref",

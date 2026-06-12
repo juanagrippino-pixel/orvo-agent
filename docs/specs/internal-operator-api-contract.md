@@ -99,8 +99,9 @@ allowlisted query-field registry; supported fields include `project`,
 `issue_type`, `release_state`, `status_category`, `assignee_ref`,
 `priority_bracket`, `source_connector`, `freshness_state`,
 `latest_evidence_at`, and `degraded`. The `case-query-fields`
-response exposes route-owned business scope metadata plus `sort_fields` and
-`facet_fields`; callers must not supply tenant/business scope inside JQL. Query
+response exposes route-owned business scope metadata plus `sort_fields` (including
+`latest_evidence_at` for evidence-recency ordering) and `facet_fields`; callers
+must not supply tenant/business scope inside JQL. Query
 summaries and built-in view summaries are aggregate projections only and must
 not return raw case rows. The API must reject unsupported fields/operators/values
 instead of translating user input into SQL or allowing query text to own business

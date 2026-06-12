@@ -38,7 +38,7 @@ _QUERY_OPERATOR_ORDER: tuple[str, ...] = ("=", "!=", "IN", ">", ">=", "<", "<=")
 _EQUALITY_OPERATORS = frozenset({"=", "!=", "IN"})
 _COMPARISON_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
 _BOOLEAN_OPERATORS = frozenset({"=", "!="})
-_CASE_QUERY_SORT_FIELDS = frozenset({"priority_score", "opened_at", "updated_at"})
+_CASE_QUERY_SORT_FIELDS = frozenset({"priority_score", "opened_at", "updated_at", "latest_evidence_at"})
 _CASE_QUERY_FACET_FIELDS = frozenset(
     {
         "assignee_ref",
@@ -122,7 +122,7 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
         facetable=True,
     ),
     WorkItemQueryFieldDefinition("evidence_count", "int", allowed_operators=_RANGE_OPERATORS),
-    WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS),
+    WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("entity.kind", "string", facetable=True),
     WorkItemQueryFieldDefinition("entity.id", "string"),
     WorkItemQueryFieldDefinition("entity.label", "string", allowed_operators=frozenset({"=", "!="})),

@@ -699,10 +699,20 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
 
 def _sort_cases(cases: list[OperationalCase], order_by: tuple[tuple[str, str], ...]) -> list[OperationalCase]:
     result = list(cases)
-    # Apply stable sorts from last to first so mixed directions work.
+    # Apply stable sorts from last to first so mixed directions work. Nullable
+    # evidence-backed fields (for example latest_evidence_at) must not raise
+    # Python comparison errors and should stay last for both ASC and DESC views.
     for field, direction in reversed(order_by + (("case_id", "ASC"),)):
         reverse = direction == "DESC"
-        result.sort(key=lambda case, sort_field=field: _sort_value(case, sort_field), reverse=reverse)
+        non_null: list[OperationalCase] = []
+        nulls: list[OperationalCase] = []
+        for case in result:
+            if _sort_value(case, field) is None:
+                nulls.append(case)
+            else:
+                non_null.append(case)
+        non_null.sort(key=lambda case, sort_field=field: _sort_value(case, sort_field), reverse=reverse)
+        result = non_null + nulls
     return result
 
 

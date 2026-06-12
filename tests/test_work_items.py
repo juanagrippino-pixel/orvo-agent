@@ -271,7 +271,8 @@ def test_query_field_registry_is_canonical_work_item_semantics():
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
-    assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
+    assert fields["latest_evidence_at"]["sortable"] is True
+    assert allowed_work_item_query_sort_fields() == {"latest_evidence_at", "opened_at", "priority_score", "updated_at"}
     assert allowed_work_item_facet_fields() == {
         "assignee_ref",
         "assigned",
@@ -296,7 +297,7 @@ def test_work_item_query_field_registry_is_canonical_for_case_search_fields():
 
     assert "business_id" not in by_field
     assert allowed_case_query_field_names() == set(by_field)
-    assert allowed_case_query_sort_fields() == {"priority_score", "opened_at", "updated_at"}
+    assert allowed_case_query_sort_fields() == {"priority_score", "opened_at", "updated_at", "latest_evidence_at"}
     assert allowed_case_query_sort_fields() <= allowed_case_query_field_names()
     assert allowed_case_query_facet_fields() == {
         "assignee_ref",
@@ -328,7 +329,7 @@ def test_work_item_query_field_registry_is_canonical_for_case_search_fields():
     assert by_field["latest_evidence_at"]["source"] == "evidence_projection"
     assert by_field["latest_evidence_at"]["value_type"] == "datetime"
     assert by_field["latest_evidence_at"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
-    assert by_field["latest_evidence_at"]["sortable"] is False
+    assert by_field["latest_evidence_at"]["sortable"] is True
     assert by_field["latest_evidence_at"]["facetable"] is False
     assert by_field["priority_score"]["operators"] == ["=", "!=", ">", ">=", "<", "<="]
     assert by_field["priority_score"]["sortable"] is True
