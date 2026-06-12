@@ -704,6 +704,30 @@ def test_validate_report_metric_keys_composes_unknown_then_report_not_allowed_di
     ]
 
 
+def test_validate_report_metric_keys_appends_duplicate_canonical_after_report_not_allowed():
+    """Parallel to ``ConnectorSpec.validate_emitted_metrics``: the report-side
+    key composition must append duplicate_canonical_metric after the
+    unknown_metric -> report_not_allowed pair so a payload emitting both an
+    alias and its canonical key (double-counting risk in the rendered report)
+    is flagged at the later occurrence's input index."""
+
+    from app.brain.semantics.metric_registry import validate_report_metric_keys
+
+    metric_keys = (
+        "revenue_today",
+        "runtime.connector.status",
+        "custom.unknown_report_metric",
+        "commerce.revenue.total",
+    )
+
+    issues = validate_report_metric_keys(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 2, "warning"),
+        ("report_not_allowed", "runtime.connector.status", 1, "warning"),
+        ("duplicate_canonical_metric", "commerce.revenue.total", 3, "warning"),
+    ]
+
+
 def test_validate_report_metric_keys_returns_empty_when_all_keys_are_canonical_report_allowed():
     from app.brain.semantics.metric_registry import validate_report_metric_keys
 
@@ -982,8 +1006,9 @@ def test_validate_report_metric_objects_composes_unknown_then_report_then_eviden
 def test_validate_report_metric_objects_slots_evidence_missing_between_report_and_evidence_source():
     """Mixed bag exercising the evidence_missing slot. The composition order
     inside :func:`validate_report_metric_objects` must put evidence_missing
-    immediately after report_not_allowed and before evidence_source_mismatch
-    so structural ``no evidence at all`` diagnostics surface before content
+    immediately after the key-level block (which ends with
+    duplicate_canonical_metric) and before evidence_source_mismatch so
+    structural ``no evidence at all`` diagnostics surface before content
     diagnostics about wrong-source evidence. Each diagnostic preserves its own
     input-order index. Mapping form is required because Pydantic ``Metric``
     enforces ``min_length=1`` on evidence and cannot represent the missing
@@ -1030,7 +1055,39 @@ def test_validate_report_metric_objects_slots_evidence_missing_between_report_an
     assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
         ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
         ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("duplicate_canonical_metric", "commerce.revenue.total", 3, "warning"),
         ("evidence_missing", "commerce.revenue.total", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "orders_today", 5, "warning"),
+    ]
+
+
+def test_validate_report_metric_objects_slots_duplicate_canonical_between_report_and_evidence_source():
+    """Mirrors ``ConnectorSpec.validate_emitted_metric_objects``: the key-level
+    diagnostics stay contiguous, so duplicate_canonical_metric must land
+    immediately after report_not_allowed and before the object-level evidence
+    diagnostics. The duplicate at index 3 is an alias (``tn_revenue_today``)
+    that resolves to the same canonical metric as ``revenue_today`` at index 0
+    while carrying clean evidence and a currency, proving the duplicate slot
+    fires independently of any object-level violation."""
+
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("revenue_today", "tiendanube", value=120000, unit="ARS"),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+        _metric("tn_revenue_today", "tiendanube", value=120000, unit="ARS"),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
+        _metric("orders_today", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_report_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
+        ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("duplicate_canonical_metric", "tn_revenue_today", 3, "warning"),
         ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
         ("value_kind_mismatch", "orders_today", 5, "warning"),
     ]
