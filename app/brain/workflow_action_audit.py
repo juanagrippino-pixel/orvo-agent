@@ -13,6 +13,7 @@ from typing import Any
 
 from app.brain.security.redaction import redact_secrets
 from app.brain.workflow_action_ledger import (
+    WorkflowActionLedgerError,
     WorkflowActionLedgerRecord,
     WorkflowActionLedgerStore,
     WorkflowApprovalRequest,
@@ -119,21 +120,30 @@ def list_workflow_action_audit_events(
     ledger: WorkflowActionLedgerStore,
     *,
     business_id: str,
+    case_id: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Project workflow action audit events for one business.
 
     The projection is derived only from canonical ledger/approval records scoped
-    by ``business_id``. It emits planning, approval-request, and approval-decision
-    events in deterministic timestamp order, redacts at the service boundary, and
-    explicitly declares that no workflow action or approval side effects were
-    executed by this read path.
+    by ``business_id`` and optionally by ``case_id``. It emits planning,
+    approval-request, and approval-decision events in deterministic timestamp
+    order, redacts at the service boundary, and explicitly declares that no
+    workflow action or approval side effects were executed by this read path.
     """
 
-    records = ledger.list_actions(business_id=business_id)
+    if case_id is not None and not case_id.strip():
+        raise WorkflowActionLedgerError("invalid_workflow_audit_scope", "workflow audit case_id must be non-empty")
+    if case_id is not None:
+        records = [record for record in ledger.list_actions(business_id=business_id) if record.case_id == case_id]
+    else:
+        records = ledger.list_actions(business_id=business_id)
     records_by_id = _records_by_ledger_id(records)
     events: list[dict[str, Any]] = [_planned_event(record) for record in records]
-    for request in ledger.list_approval_requests(business_id=business_id):
+    approval_requests = ledger.list_approval_requests(business_id=business_id)
+    if case_id is not None:
+        approval_requests = [request for request in approval_requests if request.case_id == case_id]
+    for request in approval_requests:
         record = records_by_id.get(request.ledger_id)
         request_event = _request_event(request, record)
         if request_event is not None:
@@ -152,6 +162,7 @@ def list_workflow_action_audit_events(
     selected = events if limit is None else events[: max(limit, 0)]
     payload = {
         "business_id": business_id,
+        **({"case_id": case_id} if case_id is not None else {}),
         "audit_projection_enabled": True,
         "side_effects_executed": 0,
         "total": len(events),
