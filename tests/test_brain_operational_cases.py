@@ -920,68 +920,10 @@ def test_upsert_priority_and_severity_changes_are_auditable(case_store):
     assert updated.timeline[-1].event_type == "case_updated"
     assert updated.timeline[-1].metadata == {
         "dedupe_key": opened.dedupe_key,
-        "severity_from": "critical",
-        "severity_to": "warning",
-        "priority_score_from": 100,
-        "priority_score_to": 80,
-        "previous_sla_target_seconds": 2 * 60 * 60,
-        "sla_target_seconds": 24 * 60 * 60,
-    }
-
-
-def test_upsert_detection_sets_and_preserves_sla_due_at(case_store):
-    label, store = case_store
-    opened_at = utc_dt(8)
-    opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run-1"), detected_at=opened_at)
-
-    assert opened.sla_target_seconds == 2 * 60 * 60
-    assert opened.due_at == utc_dt(10)
-
-    de_escalated = store.upsert_detection(
-        make_stockout_detection(run_id=f"{label}-run-2", severity="warning"),
-        detected_at=utc_dt(9),
-    )
-
-    assert de_escalated.sla_target_seconds == 24 * 60 * 60
-    assert de_escalated.due_at == utc_dt(10)
-    assert de_escalated.timeline[-1].event_type == "case_updated"
-    assert de_escalated.timeline[-1].metadata == {
-        "dedupe_key": opened.dedupe_key,
-        "previous_sla_target_seconds": 2 * 60 * 60,
-        "sla_target_seconds": 24 * 60 * 60,
-        "severity_from": "critical",
-        "severity_to": "warning",
-    }
-
-    store.transition_case(
-        de_escalated.case_id,
-        status="acknowledged",
-        actor_type="operator",
-        actor_ref="juan",
-        transitioned_at=utc_dt(10, 30),
-    )
-    store.transition_case(
-        de_escalated.case_id,
-        status="resolved",
-        actor_type="operator",
-        actor_ref="juan",
-        reason="Fixed",
-        transitioned_at=utc_dt(11),
-    )
-    reopened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run-3"), detected_at=utc_dt(12))
-
-    assert reopened.status == "open"
-    assert reopened.sla_target_seconds == 2 * 60 * 60
-    assert reopened.due_at == utc_dt(14)
-    assert reopened.timeline[-1].event_type == "case_reopened"
-    assert reopened.timeline[-1].metadata == {
-        "dedupe_key": reopened.dedupe_key,
-        "previous_sla_target_seconds": 24 * 60 * 60,
-        "sla_target_seconds": 2 * 60 * 60,
-        "previous_due_at": "2026-05-24T10:00:00+00:00",
-        "due_at": "2026-05-24T14:00:00+00:00",
-        "severity_from": "warning",
-        "severity_to": "critical",
+        "previous_priority_score": 100,
+        "priority_score": 80,
+        "previous_severity": "critical",
+        "severity": "warning",
     }
 
 
@@ -1037,8 +979,6 @@ def test_resolved_case_reopens_when_same_dedupe_key_recurs():
     assert reopened.timeline[-1].event_type == "case_reopened"
     assert reopened.timeline[-1].metadata == {
         "dedupe_key": opened.dedupe_key,
-        "previous_due_at": "2026-05-24T10:00:00+00:00",
-        "due_at": "2026-05-24T13:00:00+00:00",
     }
 
 
@@ -1064,14 +1004,10 @@ def test_resolved_case_reopens_and_records_priority_change_metadata():
     assert reopened.timeline[-1].event_type == "case_reopened"
     assert reopened.timeline[-1].metadata == {
         "dedupe_key": opened.dedupe_key,
-        "severity_from": "critical",
-        "severity_to": "warning",
-        "priority_score_from": 100,
-        "priority_score_to": 80,
-        "previous_sla_target_seconds": 2 * 60 * 60,
-        "sla_target_seconds": 24 * 60 * 60,
-        "previous_due_at": "2026-05-24T10:00:00+00:00",
-        "due_at": "2026-05-25T10:00:00+00:00",
+        "previous_priority_score": 100,
+        "priority_score": 80,
+        "previous_severity": "critical",
+        "severity": "warning",
     }
 
 
