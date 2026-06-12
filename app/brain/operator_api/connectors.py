@@ -180,6 +180,7 @@ def _connector_projection(
         rate_limit_policy: dict[str, Any] | None = None
         lifecycle: dict[str, Any] | None = None
         capabilities: list[str] = []
+        required_scopes: list[str] = []
         emitted_metric_families: list[str] = []
         emitted_event_families: list[str] = []
     else:
@@ -193,6 +194,7 @@ def _connector_projection(
         rate_limit_policy = spec.rate_limit_policy_metadata()
         lifecycle = spec.lifecycle_metadata()
         capabilities = list(spec.capabilities)
+        required_scopes = list(spec.scopes.required)
         emitted_metric_families = list(spec.emitted_metric_families)
         emitted_event_families = list(spec.emitted_event_families)
 
@@ -225,6 +227,7 @@ def _connector_projection(
         "readiness_state": readiness_state,
         **setup,
         "capabilities": capabilities,
+        "required_scopes": required_scopes,
         "emitted_metric_families": emitted_metric_families,
         "emitted_event_families": emitted_event_families,
         "required_config_fields": list(spec.required_config_fields) if spec is not None else [],

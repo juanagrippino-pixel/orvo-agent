@@ -43,7 +43,8 @@ Returns redacted `CompiledBusinessRuntime` summary and validation errors. Does n
 GET /internal/brain/businesses/{business_id}/connectors/readiness
 ```
 
-Returns registry validation, secret-ref presence, and last health state.
+Returns registry validation, secret-ref presence, required scopes/capabilities,
+and last health state.
 
 ### Force dry run
 
