@@ -114,6 +114,28 @@ Until that promotion lands:
 - workers must not treat it as owner-facing merely because it appears in the case-family catalog;
 - the metric-registry contract test should continue to reflect the shipped mapping rather than the aspirational catalog.
 
+## Case-family readiness/promotion policy
+
+`CASE_FAMILY_METRICS` is the canonical evidence contract for detectable case families.
+It is not by itself the owner-facing release gate. `app.brain.case_family_policy`
+owns the explicit release/readiness policy consumed by Operational Case and
+WorkItem projections:
+
+- `promoted` — deliberately owner-facing and backed by registered case metrics:
+  `sales_drop`, `stockout_risk`, and `data_stale`;
+- `readiness_gated` — registered and detectable, but not yet owner-facing until
+  connector/source, stale-source, dedupe, evidence/redaction, action, and
+  projection gates are implemented and tested;
+- `deferred` — cataloged design targets such as `channel_mix_shift` that are not
+  yet registered in `CASE_FAMILY_METRICS`;
+- `internal_only` — unknown/internal case-type identifiers that must not appear
+  in owner-facing or cataloged operator issue-type definitions.
+
+When adding or promoting a case family, update the case-family catalog, metric
+registry, action catalog, deterministic detection/evidence tests, and
+`CASE_FAMILY_READINESS_POLICY` together. Do not make WhatsApp, reports, or
+operator surfaces the source of truth for promotion state.
+
 ## Required tests
 
 - every metric emitted by enabled connector wrappers validates or is explicitly ignored;
