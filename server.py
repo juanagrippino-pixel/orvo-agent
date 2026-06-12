@@ -141,9 +141,9 @@ def _first_inbound_message(data: dict) -> dict | None:
             messages = value.get("messages")
             if not isinstance(messages, list) or not messages:
                 continue
-            first = messages[0]
-            if isinstance(first, dict) and "from" in first:
-                return first
+            for message in messages:
+                if isinstance(message, dict) and "from" in message:
+                    return message
     return None
 
 

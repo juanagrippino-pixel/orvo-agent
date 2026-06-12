@@ -114,6 +114,7 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "not_ready": 0,
         "disabled": 1,
         "unknown": 0,
+        "setup_required": 1,
     }
     connectors = {item["connector_id"]: item for item in data["connectors"]}
 
@@ -121,6 +122,9 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
     assert tiendanube["connector_type"] == "tiendanube"
     assert tiendanube["registered"] is True
     assert tiendanube["readiness_state"] == "degraded"
+    assert tiendanube["setup_required"] is True
+    assert tiendanube["setup_reason"] == "connector_last_run_unauthorized"
+    assert tiendanube["operator_next_step"] == "refresh_connector_credentials"
     assert tiendanube["validation"] == {"error_count": 0, "warning_count": 0, "issues": []}
     assert tiendanube["auth_requirements"] == [
         {
@@ -142,6 +146,9 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
 
     disabled = connectors["csv-disabled"]
     assert disabled["readiness_state"] == "disabled"
+    assert disabled["setup_required"] is False
+    assert disabled["setup_reason"] is None
+    assert disabled["operator_next_step"] is None
     assert disabled["last_health"] is None
 
 
@@ -177,6 +184,9 @@ def test_internal_connector_readiness_fails_closed_on_legacy_inline_secret(monke
     body = response.get_json()
     connector = body["data"]["connectors"][0]
     assert connector["readiness_state"] == "not_ready"
+    assert connector["setup_required"] is True
+    assert connector["setup_reason"] == "missing_required_secret_ref"
+    assert connector["operator_next_step"] == "review_connector_configuration"
     assert connector["auth_requirements"][0]["present"] is False
     assert connector["validation"]["error_count"] == 1
     assert connector["validation"]["warning_count"] == 1
@@ -220,6 +230,10 @@ def test_internal_connector_readiness_redacts_secret_shaped_connector_identifier
     connector = response.get_json()["data"]["connectors"][0]
     assert connector["connector_id"] == "[REDACTED]"
     assert connector["connector_type"] == "[REDACTED]"
+    assert connector["readiness_state"] == "unknown"
+    assert connector["setup_required"] is True
+    assert connector["setup_reason"] == "unknown_connector_type"
+    assert connector["operator_next_step"] == "register_or_disable_connector"
     assert connector["label"] == "Connector token=[REDACTED]"
     assert "raw_type_secret" not in connector["validation"]["issues"][0]["message"]
 

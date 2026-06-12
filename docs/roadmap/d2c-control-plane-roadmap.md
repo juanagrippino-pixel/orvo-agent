@@ -2,7 +2,7 @@
 
 Status: Working roadmap
 Date: 2026-05-24
-Last reconciled: 2026-06-10
+Last reconciled: 2026-06-11
 Related: `docs/plans/2026-05-24-d2c-control-plane-first-product.md`
 
 ## Priority rule
@@ -179,7 +179,7 @@ Outcome: Orvo can safely decide whether a WhatsApp-heavy Tiendanube merchant is 
 Source-of-truth checkpoint:
 
 - `app/brain/semantics/metric_registry.py` registers `unanswered_conversations` metrics (`support.conversations.unanswered_count`, `support.conversations.oldest_unanswered_age_minutes`) with low-PII semantics and source restrictions.
-- `app/brain/operational_cases.py` includes `unanswered_conversations` in the registered owner-facing/detectable family set because it derives from `CASE_FAMILY_METRICS`.
+- `app/brain/operational_cases.py` includes `unanswered_conversations` in the registered/detectable family set because it derives from `CASE_FAMILY_METRICS`, but owner-facing promotion is now explicitly limited to `sales_drop`, `stockout_risk`, and `data_stale`; `unanswered_conversations` is readiness-gated until the source/SLA/PII/resolver gates below pass.
 - The legacy report/Sheets/sample path can still emit a “Conversaciones sin responder” insight from `unanswered_conversations`; that compatibility path is not enough to sell a live WhatsApp backlog workflow. The Growth module requires the activation gates in `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md`.
 
 Deliverables:

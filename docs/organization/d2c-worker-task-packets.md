@@ -631,11 +631,11 @@ Current source-of-truth check:
 - `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`, and `priority_bracket`.
-- `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md` is the latest ARB input, and `docs/specs/integration-train-contract.md` records the post-ARB idempotency/audit-redaction baseline. Future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
+- `docs/architecture-reviews/2026-06-11-arb-update-6457695.md` is the latest ARB input, and `docs/specs/integration-train-contract.md` records the post-ARB idempotency/audit-redaction/readiness-state baseline. Future broad `search-analytics` or `operator-surfaces` work must consume this registry rather than creating local field semantics.
 
 Read:
 
-- `docs/architecture-reviews/2026-06-07-arb-review-ca6c078.md`
+- `docs/architecture-reviews/2026-06-11-arb-update-6457695.md`
 - `docs/specs/internal-operator-api-contract.md`
 - `docs/specs/integration-train-contract.md`
 - `docs/specs/testing-invariant-matrix.md`
@@ -665,7 +665,7 @@ Dependency: dispatch after current metric registry, case evidence snapshot, data
 Current source-of-truth check:
 
 - `app/brain/semantics/metric_registry.py` includes `unanswered_conversations` in `CASE_FAMILY_METRICS` with `support.conversations.unanswered_count` and `support.conversations.oldest_unanswered_age_minutes`.
-- `app/brain/operational_cases.py` includes the `unanswered_conversations` case type and derives owner-facing/detectable families from `CASE_FAMILY_METRICS`.
+- `app/brain/operational_cases.py` includes the `unanswered_conversations` case type and derives detectable families from `CASE_FAMILY_METRICS`, while owner-facing projection is limited to the explicit promoted subset (`sales_drop`, `stockout_risk`, `data_stale`). `unanswered_conversations` remains readiness-gated until a structured WhatsApp/support source proves the gates below.
 - `app/brain/insights.py` still supports the legacy report insight from `unanswered_conversations`; that is compatibility behavior, not proof that a live WhatsApp/support connector is ready for owner-facing backlog cases.
 - `docs/research/2026-06-10-unanswered-whatsapp-conversations-readiness.md` packages this as a Growth/readiness-gated module, not a default Starter promise.
 
