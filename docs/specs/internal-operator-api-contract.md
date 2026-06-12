@@ -104,8 +104,6 @@ not persist custom views or translate query text into SQL. The export is a
 projection over `OperationalCase`/WorkItem state, not an alternate source of
 truth; raw response bodies are redacted at the HTTP boundary.
 
-Case queue and detail projections include WorkItem envelope fields derived from
-`OperationalCase`, including `project_key`, `issue_type`, `release_state`,
 `status_category`, and `work_item_id`. JQL-lite and case facets are read-only,
 route-scoped projections over the canonical WorkItem field registry; supported
 fields include `project`, `issue_type`, `release_state`, `status_category`,
