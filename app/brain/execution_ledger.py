@@ -160,6 +160,33 @@ def _event_certification_metadata(connector_type: str, events: Sequence[str]) ->
     }
 
 
+def _connector_emitted_events(status: str, health_state: str | None = None) -> tuple[str, ...]:
+    if status == "succeeded":
+        return ("connector.execution.succeeded", "connector.health.ok")
+    if status == "skipped":
+        return ("connector.execution.skipped", "connector.health.degraded")
+
+    health_state = health_state or default_connector_health_state(status)
+    return ("connector.execution.failed", f"connector.health.{health_state}")
+
+
+def _event_certification_metadata(connector_type: str, events: Sequence[str]) -> dict[str, Any]:
+    issues = validate_emitted_events_for_connector(connector_type, list(events))
+    return {
+        "status": "passed" if not issues else "warning",
+        "issue_count": len(issues),
+        "events": list(events),
+        "issues": [
+            {
+                "code": issue.code,
+                "event_type": issue.event_type,
+                "index": issue.index,
+            }
+            for issue in issues
+        ],
+    }
+
+
 def _metric_certification_metadata(connector_type: str, metrics: Sequence[Any]) -> dict[str, Any]:
     try:
         issues = validate_emitted_metric_objects_for_connector(connector_type, metrics)
