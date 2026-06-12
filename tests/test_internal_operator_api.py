@@ -39,6 +39,7 @@ def _case_detection(
     source_label: str = "Tiendanube access_token=raw_snapshot_secret",
     freshness_state: str = "fresh",
     entity_scope: dict[str, str] | None = None,
+    metadata: dict | None = None,
 ) -> OperationalCaseDetection:
     scope = entity_scope or {"kind": "business", "id": "monitored", "label": "Monitoreado"}
     return OperationalCaseDetection(
@@ -78,7 +79,7 @@ def _case_detection(
                 metadata={"source": "test", "access_token": "raw_snapshot_secret"},
             )
         ],
-        metadata={"source": "test"},
+        metadata={"source": "test", **(metadata or {})},
     )
 
 
@@ -1327,6 +1328,85 @@ def test_internal_case_queue_summary_empty_store_returns_zero_counts(monkeypatch
     assert summary["actionable_degraded"] == 0
     assert summary["by_status"] == {}
     assert summary["by_severity"] == {}
+
+
+def test_internal_service_management_cases_returns_filtered_projection(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    waiting_owner = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="conversations/channel/whatsapp/support/daily",
+            priority=65,
+            severity="warning",
+            title="Chats pendientes token=route-secret",
+            run_id="run-request-owner",
+            metadata={
+                "waiting_on": "owner",
+                "waiting_since": _utc(9).isoformat(),
+            },
+        ),
+    )
+    _seed_case(db_path, _case_detection(run_id="run-artemea-incident"))
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-request"))
+
+    with sqlite3.connect(db_path) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        store.transition_case(
+            waiting_owner.case_id,
+            status="in_progress",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            transitioned_at=_utc(10),
+        )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/service-management"
+        "?owner_status=waiting_owner&service_record_type=service_request&limit=5",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "route-secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["filters"] == {
+        "owner_status": "waiting_owner",
+        "service_record_type": "service_request",
+    }
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["by_owner_status"]["waiting_owner"] == 1
+    assert data["by_owner_status"]["new"] == 1
+    assert data["by_service_record_type"]["service_request"] == 1
+    assert data["by_service_record_type"]["incident"] == 1
+    assert [item["case_id"] for item in data["service_cases"]] == [waiting_owner.case_id]
+    assert data["service_cases"][0]["owner_status"]["code"] == "waiting_owner"
+
+
+
+def test_internal_service_management_cases_rejects_invalid_filters(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/service-management?owner_status=not-real",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    assert body["error"]["code"] == "invalid_request"
+    assert body["error"]["message"] == "Unsupported owner_status filter."
+
 
 
 def test_internal_case_queue_summary_by_severity_returns_scoped_envelope(monkeypatch, tmp_path):

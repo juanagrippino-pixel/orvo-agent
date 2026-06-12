@@ -76,6 +76,7 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/cases/facets
+GET /internal/brain/businesses/{business_id}/cases/service-management
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
 
@@ -87,6 +88,14 @@ fields include `project`, `issue_type`, `release_state`, `status_category`,
 `assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. The
 API must reject unsupported fields/operators/values instead of translating user
 input into SQL or allowing query text to own business scope.
+
+`GET /cases/service-management` is a nested read-only Jira Service
+Management-style projection over canonical cases. It must keep canonical
+WorkItem status categories unchanged while exposing owner/service fields such as
+`service_record_type`, `owner_status`, `owner_status_category`, `sla_status`,
+`escalation_reason`, `needs_escalation`, and `active_sla_clock`. Unsupported
+filters or boolean values must fail with a stable safe envelope instead of
+silently widening the queue.
 
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
@@ -164,4 +173,5 @@ Before exposing beyond local/dev:
 - run detail cannot cross business scope;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
 - case action rejects unknown action keys;
+- service-management projection stays business-scoped, redacted, and rejects unsupported filters with a safe `400` envelope;
 - responses include `redaction_applied=true`.
