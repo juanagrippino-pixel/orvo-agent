@@ -654,7 +654,6 @@ Current source-of-truth check:
 Read:
 
 - `docs/architecture-reviews/2026-06-13-arb-cron-review.md`
-- `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`
 - `docs/architecture-reviews/2026-06-12-review.md` and `docs/architecture-reviews/2026-06-12-branch-readiness-matrix.md` — historical inputs for reconciling older verdict drift.
 - `docs/architecture-reviews/2026-06-11-arb-update-6457695.md` and `docs/architecture-reviews/2026-06-12-architecture-board-review.md` — historical context when branch-readiness notes disagree.
 - `docs/specs/internal-operator-api-contract.md`
