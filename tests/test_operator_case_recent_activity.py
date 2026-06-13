@@ -86,6 +86,21 @@ def test_accepts_hyphenated_in_progress_activity_type():
     assert result["cases"][0]["time_to_in_progress_seconds"] > 0
 
 
+def test_accepts_legacy_recently_prefixed_activity_type_alias():
+    store = InMemoryOperationalCaseStore()
+    case = store.upsert_detection(
+        _detection(dedupe_suffix="recent-activity/recently-opened", run_id="run-opened"),
+        detected_at=NOW - timedelta(minutes=15),
+    )
+
+    result = list_recent_case_activity(store, business_id="artemea", activity_type="recently-opened")
+
+    assert result["activity_type"] == "opened"
+    assert result["total"] == 1
+    assert result["cases"][0]["case_id"] == case.case_id
+    assert result["cases"][0]["status"] == "open"
+
+
 def test_rejects_unsupported_recent_activity_type():
     store = InMemoryOperationalCaseStore()
 

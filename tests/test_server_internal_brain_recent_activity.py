@@ -187,6 +187,41 @@ def test_recent_activity_enforces_explicit_business_scope(_isolate_db):
     assert body["redaction_applied"] is True
 
 
+def test_recent_activity_accepts_legacy_recently_prefixed_aliases(_isolate_db):
+    from server import app
+
+    opened = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=2,
+        run_id="run-opened",
+        dedupe_suffix="recent/activity/recently-opened",
+    )
+    resolved = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=8,
+        run_id="run-resolved-alias",
+        dedupe_suffix="recent/activity/recently-resolved",
+    )
+    _resolve_case(_isolate_db, resolved, resolved_minutes_ago=1)
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/recent?activity_type=recently-opened",
+        headers=AUTH_WITH_SCOPE,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["activity_type"] == "opened"
+    assert data["total"] == 1
+    assert data["cases"][0]["case_id"] == opened
+    assert data["cases"][0]["status"] == "open"
+    returned_ids = {case["case_id"] for case in data["cases"]}
+    assert resolved not in returned_ids
+
+
 def test_recent_activity_rejects_invalid_type_with_safe_error(_isolate_db):
     from server import app
 

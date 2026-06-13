@@ -47,6 +47,8 @@ def parse_recent_case_activity_type(value: str | None) -> RecentCaseActivityType
     if value in (None, ""):
         return _RECENT_ACTIVITY_DEFAULT
     normalized = value.strip().lower().replace("-", "_")
+    if normalized.startswith("recently_"):
+        normalized = normalized.removeprefix("recently_")
     if normalized not in _RECENT_ACTIVITY_PROJECTIONS:
         raise OperatorAPIError(
             "invalid_recent_activity_type",
