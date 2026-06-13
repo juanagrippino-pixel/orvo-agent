@@ -1696,6 +1696,74 @@ def test_workflow_execution_queue_projects_only_approved_pending_actions_without
     assert "raw_queue" not in str(queue)
 
 
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_execution_queue_can_be_scoped_to_one_case(tmp_path, store_factory):
+    ledger = store_factory(tmp_path)
+    approved = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-approved",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-scope/case-approved/request_external_action/approved",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-a", "reason": "Approved case"},
+        rule_id="execution-scope",
+        now=utc(20),
+    )
+    pending = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-pending",
+        action_key="request_external_action",
+        idempotency_key="workflow/artemea/execution-scope/case-pending/request_external_action/pending",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        params={"target": "supplier-b", "reason": "Pending case"},
+        rule_id="execution-scope",
+        now=utc(20, 5),
+    )
+    assert approved.approval_request is not None
+    assert pending.approval_request is not None
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=approved.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Approved case",
+        now=utc(20, 10),
+    )
+    ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=pending.approval_request.approval_request_id,
+        decision="approved",
+        actor_ref="manager",
+        reason="Pending case",
+        now=utc(20, 15),
+    )
+
+    scoped = list_workflow_execution_queue(ledger, business_id="artemea", case_id="case-approved")
+
+    assert scoped["business_id"] == "artemea"
+    assert scoped["case_id"] == "case-approved"
+    assert scoped["execution_enabled"] is False
+    assert scoped["side_effects_executed"] == 0
+    assert scoped["total"] == 1
+    assert scoped["returned"] == 1
+    assert [action["case_id"] for action in scoped["actions"]] == ["case-approved"]
+    assert "case-pending" not in str(scoped)
+
+    with pytest.raises(WorkflowActionLedgerError) as exc:
+        list_workflow_execution_queue(ledger, business_id="artemea", case_id="   ")
+
+    assert exc.value.code == "invalid_workflow_execution_queue_scope"
+    assert "case-approved" not in exc.value.message
+
+
 def test_workflow_execution_queue_requires_matching_approved_approval_request():
     valid_record = WorkflowActionLedgerRecord(
         ledger_id="workflow-action/artemea/valid",
