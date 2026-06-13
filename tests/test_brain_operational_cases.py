@@ -899,6 +899,63 @@ def test_recurrence_clears_ack_state_preserves_full_audit_timeline_and_supports_
         ], f"{label}: full recurrence cycle must accumulate audit events without dropping any"
 
 
+def test_case_update_records_severity_and_priority_change_audit_metadata():
+    store = InMemoryOperationalCaseStore()
+    initial = make_stockout_detection(run_id="run-1").model_copy(
+        update={"severity": "warning", "priority_score": 70}
+    )
+    escalated = make_stockout_detection(run_id="run-2")
+
+    store.upsert_detection(initial, detected_at=utc_dt(8))
+    updated = store.upsert_detection(escalated, detected_at=utc_dt(9))
+
+    event = updated.timeline[-1]
+    assert event.event_type == "case_updated"
+    assert event.metadata["dedupe_key"] == initial.dedupe_key
+    assert event.metadata["severity_from"] == "warning"
+    assert event.metadata["severity_to"] == "critical"
+    assert event.metadata["priority_score_from"] == 70
+    assert event.metadata["priority_score_to"] == 100
+
+    unchanged = store.upsert_detection(
+        make_stockout_detection(run_id="run-3"), detected_at=utc_dt(10)
+    )
+    event = unchanged.timeline[-1]
+    assert event.event_type == "case_updated"
+    assert "severity_from" not in event.metadata
+    assert "severity_to" not in event.metadata
+    assert "priority_score_from" not in event.metadata
+    assert "priority_score_to" not in event.metadata
+
+
+def test_case_recurrence_reopen_records_severity_change_audit_metadata():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(
+        make_stockout_detection(run_id="run-1").model_copy(
+            update={"severity": "warning", "priority_score": 70}
+        ),
+        detected_at=utc_dt(8),
+    )
+    store.transition_case(opened.case_id, status="acknowledged", actor_type="operator", actor_ref="juan", transitioned_at=utc_dt(9))
+    store.transition_case(
+        opened.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Resolved test fixture",
+        transitioned_at=utc_dt(10),
+    )
+
+    reopened = store.upsert_detection(make_stockout_detection(run_id="run-2"), detected_at=utc_dt(11))
+
+    event = reopened.timeline[-1]
+    assert event.event_type == "case_reopened"
+    assert event.metadata["severity_from"] == "warning"
+    assert event.metadata["severity_to"] == "critical"
+    assert event.metadata["priority_score_from"] == 70
+    assert event.metadata["priority_score_to"] == 100
+
+
 def test_operator_reopen_restores_resolved_case_and_emits_case_reopened_event(conn):
     memory_store = InMemoryOperationalCaseStore()
     sqlite_store = SQLiteOperationalCaseStore(conn)
