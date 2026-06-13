@@ -55,6 +55,36 @@ def test_compiled_runtime_serializes_secret_refs_not_legacy_raw_secret_values():
     assert connector.legacy_secret_param_names == ["access_token"]
 
 
+def test_compiled_runtime_rejects_inline_secret_values_in_secret_refs():
+    from app.brain.runtime import RuntimeCompileError, compile_business_runtime
+
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="Tiendanube principal",
+                params={"store_id": "12345"},
+                secret_refs={"access_token": "raw-token-value"},
+            )
+        ],
+    )
+
+    with pytest.raises(RuntimeCompileError) as exc_info:
+        compile_business_runtime(business, schedules=[_daily_schedule()], run_mode="forced")
+
+    assert any(
+        "tn-main (tiendanube) has invalid secret_refs.access_token" in error
+        for error in exc_info.value.errors
+    )
+    assert "raw-token-value" not in str(exc_info.value)
+
+
 def test_runtime_metadata_redacts_secret_shaped_connector_identifiers():
     from app.brain.models import InsightThresholds
     from app.brain.runtime import (

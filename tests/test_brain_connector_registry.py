@@ -237,6 +237,23 @@ def test_control_plane_validation_returns_structured_issue_shape_for_public_fiel
     assert all(issue.message for issue in issues)
 
 
+def test_control_plane_validation_rejects_inline_secret_values_in_secret_refs():
+    from app.brain.connector_registry import get_connector_spec
+
+    issues = get_connector_spec("tiendanube").validate_control_plane_config(
+        params={"store_id": "123"},
+        secret_refs={"access_token": "raw-token-value"},
+    )
+
+    assert [(issue.code, issue.key, issue.severity) for issue in issues] == [
+        ("invalid_secret_ref", "access_token", "error"),
+    ]
+    assert issues[0].message == (
+        "tiendanube connector secret_refs.access_token must be an opaque secret:// handle"
+    )
+    assert "raw-token-value" not in issues[0].message
+
+
 def test_control_plane_validation_distinguishes_missing_and_empty_values():
     from app.brain.connector_registry import get_connector_spec
 
