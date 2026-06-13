@@ -2936,6 +2936,74 @@ def summarize_case_acknowledgment_latency_histogram_by_priority_bracket(
     )
 
 
+def summarize_case_acknowledgment_latency_histogram_by_severity(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Severity-split deterministic histogram of time-to-acknowledge.
+
+    Mirrors :func:`summarize_case_acknowledgment_latency_histogram_by_priority_bracket`
+    but groups each acknowledgment-latency bucket by case severity
+    (info / warning / critical) instead of priority bracket, matching the
+    attribution used by :func:`summarize_case_resolution_latency_histogram_by_severity`,
+    :func:`summarize_case_queue_aging_by_severity` and
+    :func:`summarize_case_queue_stagnation_by_severity`. Operator surfaces
+    use it to spot when long-tail first-touch latency is concentrated in
+    critical cases even though the overall median, case_type, entity_kind,
+    source-connector and priority-bracket distributions look healthy.
+    Resolved cases are still counted (they were acknowledged at some
+    point); only open-only cases without ``acknowledged_at`` are excluded.
+    Strictly scoped per tenant.
+    """
+
+    buckets: dict[str, int] = {name: 0 for name, _ in _AGE_BUCKETS}
+    severity_by_bucket: dict[str, dict[str, int]] = {name: {} for name, _ in _AGE_BUCKETS}
+    acknowledged_total = 0
+    fastest_seconds = -1
+    fastest_case: OperationalCase | None = None
+    slowest_seconds = -1
+    slowest_case: OperationalCase | None = None
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.acknowledged_at is None:
+            continue
+        acknowledged_total += 1
+        opened_at = case.opened_at.astimezone(timezone.utc)
+        acknowledged_at = case.acknowledged_at.astimezone(timezone.utc)
+        time_to_ack = max(int((acknowledged_at - opened_at).total_seconds()), 0)
+        bucket = _classify_age_bucket(time_to_ack)
+        buckets[bucket] += 1
+        severity_counts = severity_by_bucket[bucket]
+        severity_counts[case.severity] = severity_counts.get(case.severity, 0) + 1
+        if fastest_seconds < 0 or time_to_ack < fastest_seconds:
+            fastest_seconds = time_to_ack
+            fastest_case = case
+        if time_to_ack > slowest_seconds:
+            slowest_seconds = time_to_ack
+            slowest_case = case
+
+    def _payload(case: OperationalCase | None, seconds: int) -> dict[str, Any] | None:
+        if case is None or case.acknowledged_at is None:
+            return None
+        return {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "severity": case.severity,
+            "opened_at": case.opened_at.isoformat(),
+            "acknowledged_at": case.acknowledged_at.isoformat(),
+            "time_to_acknowledge_seconds": seconds,
+        }
+
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "acknowledged_total": acknowledged_total,
+            "by_acknowledgment_bucket": buckets,
+            "by_acknowledgment_bucket_severity": severity_by_bucket,
+            "fastest_acknowledged": _payload(fastest_case, fastest_seconds),
+            "slowest_acknowledged": _payload(slowest_case, slowest_seconds),
+        }
+    )
+
+
 def summarize_case_handling_latency_histogram(
     store: OperationalCaseStore, *, business_id: str
 ) -> dict[str, Any]:
