@@ -12,17 +12,25 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
+from app.brain.security.redaction import redact_text
+
 _METRIC_UNITS = {"count", "money", "percent", "duration", "boolean", "timestamp"}
 _AGGREGATIONS = {"sum", "latest", "average", "min", "max", "ratio", "none"}
 _PII_CLASSES = {"none", "low", "sensitive"}
+
+
+def _safe_metric_key(key: str) -> str:
+    """Return a diagnostic-safe metric key string for errors and API surfaces."""
+
+    return redact_text(key) or "[REDACTED]"
 
 
 class UnknownMetricError(ValueError):
     """Raised when strict semantic metric validation sees an unknown key."""
 
     def __init__(self, key: str) -> None:
-        self.key = key
-        super().__init__(f"Metric key '{key}' is not registered in the semantic metric registry")
+        self.key = _safe_metric_key(key)
+        super().__init__(f"Metric key '{self.key}' is not registered in the semantic metric registry")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1547,11 +1555,12 @@ def validate_metrics(
             continue
         if strict:
             raise UnknownMetricError(key)
+        safe_key = _safe_metric_key(key)
         issues.append(
             MetricValidationIssue(
                 code="unknown_metric",
-                key=key,
-                message=f"Metric key '{key}' is not registered in the semantic metric registry",
+                key=safe_key,
+                message=f"Metric key '{safe_key}' is not registered in the semantic metric registry",
                 severity="warning",
                 index=index,
             )

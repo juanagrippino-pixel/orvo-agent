@@ -143,6 +143,25 @@ def test_strict_metric_validation_raises_on_unknown_metric_without_mutating_inpu
     assert metrics[0].model_dump(mode="json") == original_dump
 
 
+def test_unknown_metric_diagnostics_redact_secret_shaped_keys():
+    from app.brain.semantics.metric_registry import UnknownMetricError, validate_metrics
+
+    raw_key = "commerce.orders.count?access_token=raw_metric_secret"
+    metrics = [Metric(key=raw_key, label="Mystery", value=1, evidence=[_evidence("sample")])]
+
+    issues = validate_metrics(metrics)
+
+    assert issues[0].key == "commerce.orders.count?access_token=[REDACTED]"
+    assert "raw_metric_secret" not in issues[0].message
+    assert "access_token=[REDACTED]" in issues[0].message
+
+    with pytest.raises(UnknownMetricError) as excinfo:
+        validate_metrics(metrics, strict=True)
+    assert excinfo.value.key == "commerce.orders.count?access_token=[REDACTED]"
+    assert "raw_metric_secret" not in str(excinfo.value)
+    assert "access_token=[REDACTED]" in str(excinfo.value)
+
+
 def test_family_envelope_helper_flags_metrics_outside_connector_declared_families():
     from app.brain.semantics.metric_registry import find_family_envelope_violations
 
