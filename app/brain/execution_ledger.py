@@ -181,6 +181,7 @@ def _event_certification_metadata(connector_type: str, events: Sequence[str]) ->
                 "code": issue.code,
                 "event_type": issue.event_type,
                 "index": issue.index,
+                "message": issue.message,
             }
             for issue in issues
         ],
