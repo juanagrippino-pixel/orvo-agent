@@ -715,6 +715,36 @@ def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_pa
     assert [case["case_id"] for case in view_body["data"]["cases"]] == [critical.case_id]
 
 
+def test_internal_case_view_execution_includes_matching_count(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-critical-open"))
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            priority=80,
+            title="Ventas bajaron",
+            run_id="run-warning",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.get("/internal/brain/businesses/artemea/case-views/critical_open/cases", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data"]["view"] == {
+        "view_id": "critical_open",
+        "label": "Critical open cases",
+        "readonly": True,
+        "matching_case_count": 1,
+    }
+    assert body["data"]["total"] == 1
+    assert body["data"]["matching_case_count"] == 1
+
+
 def test_internal_case_view_unknown_view_returns_enveloped_404(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 

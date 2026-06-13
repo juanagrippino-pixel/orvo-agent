@@ -202,6 +202,8 @@ def query_case_queue(
     }
     if view is not None:
         data["view"] = {key: view[key] for key in ("view_id", "label", "readonly")}
+        data["view"]["matching_case_count"] = total
+        data["matching_case_count"] = total
     return redact_secrets(data)
 
 
