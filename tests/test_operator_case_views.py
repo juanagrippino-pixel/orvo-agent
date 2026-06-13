@@ -800,12 +800,16 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
         "open_cases",
         "acknowledged_cases",
         "in_progress_cases",
+        "high_priority",
         "critical_open",
         "data_stale",
         "stockout_risk",
         "connector_degraded",
     }.issubset(views)
     assert views["acknowledged_cases"]["jql"] == "status = acknowledged ORDER BY acknowledged_at DESC"
+    assert views["high_priority"]["jql"] == (
+        "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC"
+    )
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"
     )
@@ -949,6 +953,60 @@ def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_pa
     assert view_body["data"]["view"]["view_id"] == "critical_open"
     assert view_body["data"]["cases"] == direct_body["data"]["cases"]
     assert [case["case_id"] for case in view_body["data"]["cases"]] == [critical.case_id]
+
+
+def test_internal_high_priority_case_view_matches_equivalent_jql(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    high_open = _seed_case(db_path, _case_detection(run_id="run-high-open", priority=95))
+    high_acknowledged = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-high-ack",
+            priority=82,
+            dedupe_suffix="run-high-ack/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-high-ack", "label": "Run high acknowledged"},
+        ),
+    )
+    medium_open = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-medium-open",
+            priority=79,
+            dedupe_suffix="run-medium-open/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-medium-open", "label": "Run medium open"},
+        ),
+    )
+    resolved_high = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-resolved-high",
+            priority=92,
+            dedupe_suffix="run-resolved-high/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-resolved-high", "label": "Run resolved high"},
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-high", priority=99))
+    _acknowledge_case(db_path, high_acknowledged.case_id, acknowledged_at=_utc(12))
+    _resolve_case(db_path, resolved_high.case_id, acknowledged_at=_utc(13), resolved_at=_utc(14))
+
+    view_response = client.get("/internal/brain/businesses/artemea/case-views/high_priority/cases", headers=AUTH)
+    direct_response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql=status%20IN%20(open,%20acknowledged,%20in_progress)%20AND%20priority_bracket%20%3D%20high%20ORDER%20BY%20priority_score%20DESC",
+        headers=AUTH,
+    )
+
+    assert view_response.status_code == 200
+    assert direct_response.status_code == 200
+    view_body = view_response.get_json()
+    direct_body = direct_response.get_json()
+    assert view_body["data"]["view"]["view_id"] == "high_priority"
+    assert view_body["data"]["normalized_jql"] == (
+        "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC"
+    )
+    assert view_body["data"]["cases"] == direct_body["data"]["cases"]
+    assert [case["case_id"] for case in view_body["data"]["cases"]] == [high_open.case_id, high_acknowledged.case_id]
+    assert medium_open.case_id not in [case["case_id"] for case in view_body["data"]["cases"]]
+    assert resolved_high.case_id not in [case["case_id"] for case in view_body["data"]["cases"]]
 
 
 def test_internal_case_view_execution_keeps_route_business_scope(monkeypatch, tmp_path):

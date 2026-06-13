@@ -130,6 +130,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "readonly": True,
     },
     {
+        "view_id": "high_priority",
+        "label": "High priority",
+        "description": "Actionable high-priority cases ordered by priority score.",
+        "jql": "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC",
+        "readonly": True,
+    },
+    {
         "view_id": "critical_open",
         "label": "Critical open cases",
         "description": "Open critical cases first.",
