@@ -310,6 +310,7 @@ def facet_case_queue(
     *,
     business_id: str,
     field: str | None,
+    view_id: str | None,
     jql: str | None,
     limit: str | None,
 ) -> dict[str, Any]:
@@ -326,7 +327,19 @@ def facet_case_queue(
         label = facet_field or "[missing]"
         raise OperatorAPIError("unsupported_facet_field", f"Unsupported facet field: {label}", status_code=400)
 
-    parsed = parse_case_jql(jql)
+    selected_view: dict[str, Any] | None = None
+    selected_jql = jql
+    if view_id not in (None, ""):
+        if jql not in (None, ""):
+            raise OperatorAPIError(
+                "conflicting_case_filters",
+                "view_id and jql filters are mutually exclusive",
+                status_code=400,
+            )
+        selected_view = get_builtin_case_view(str(view_id).strip())
+        selected_jql = selected_view["jql"]
+
+    parsed = parse_case_jql(selected_jql)
     bucket_limit = parse_limit(limit, default=20)
     candidates = store.list_cases(business_id=business_id, limit=None)
     filtered = [case for case in candidates if _matches(case, parsed.clauses)]
@@ -350,6 +363,9 @@ def facet_case_queue(
         "truncated": len(buckets) > len(selected),
         "buckets": selected,
     }
+    if selected_view is not None:
+        data["view_id"] = selected_view["view_id"]
+        data["view"] = {key: selected_view[key] for key in ("view_id", "label", "readonly")}
     return redact_secrets(data)
 
 

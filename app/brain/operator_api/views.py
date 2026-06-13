@@ -48,12 +48,20 @@ def list_case_facets(
     *,
     business_id: str,
     field: str | None,
+    view_id: str | None,
     jql: str | None,
     limit: str | None,
 ) -> dict[str, Any]:
     from app.brain.operator_views import facet_case_queue
 
-    return facet_case_queue(store, business_id=business_id, field=field, jql=jql, limit=limit)
+    return facet_case_queue(
+        store,
+        business_id=business_id,
+        field=field,
+        view_id=view_id,
+        jql=jql,
+        limit=limit,
+    )
 
 
 def export_case_queue_csv(

@@ -99,9 +99,11 @@ Case queue and detail projections include WorkItem envelope fields derived from
 `status_category`, and `work_item_id`. JQL-lite and case facets are read-only,
 route-scoped projections over the canonical WorkItem field registry; supported
 fields include `project`, `issue_type`, `release_state`, `status_category`,
-`assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. The
-API must reject unsupported fields/operators/values instead of translating user
-input into SQL or allowing query text to own business scope.
+`assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. Case
+facets may be scoped either by allowlisted `jql` or by a built-in read-only
+`view_id`, but never both at once. The API must reject unsupported
+fields/operators/values instead of translating user input into SQL or allowing
+query text to own business scope.
 
 `/case-query-fields` is a read-only metadata projection over the same canonical
 WorkItem field registry. Without `field`, it returns allowlisted fields, value

@@ -99,6 +99,7 @@ def register_dashboard_view_routes(app):
                     case_store,
                     business_id=business_id,
                     field=request.args.get("field"),
+                    view_id=request.args.get("view_id"),
                     jql=request.args.get("jql"),
                     limit=request.args.get("limit"),
                 ),

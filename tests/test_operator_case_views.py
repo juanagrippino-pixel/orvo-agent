@@ -815,6 +815,65 @@ def test_internal_case_facets_reject_sqlish_jql_without_echoing_input(monkeypatc
     assert "raw_facet_jql_secret" not in raw_body
 
 
+def test_internal_case_facets_support_builtin_view_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-high-open", priority=95))
+    high_ack = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-high-ack",
+            priority=93,
+            dedupe_suffix="stockout_risk/business/high-ack/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "high-ack", "label": "High ack"},
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-medium-open",
+            priority=70,
+            dedupe_suffix="stockout_risk/business/medium-open/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "medium-open", "label": "Medium open"},
+        ),
+    )
+    _acknowledge_case(db_path, high_ack.case_id, acknowledged_at=_utc(12))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "status", "view_id": "high_priority"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["field"] == "status"
+    assert body["data"]["view_id"] == "high_priority"
+    assert body["data"]["view"] == {"view_id": "high_priority", "label": "High priority", "readonly": True}
+    assert body["data"]["normalized_jql"] == (
+        "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC"
+    )
+    assert body["data"]["total_cases"] == 2
+    assert body["data"]["buckets"] == [
+        {"value": "acknowledged", "count": 1},
+        {"value": "open", "count": 1},
+    ]
+
+
+def test_internal_case_facets_reject_conflicting_view_scope_and_jql(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-facet-conflict"))
+
+    conflict = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={"field": "status", "view_id": "high_priority", "jql": "status = open"},
+    )
+
+    assert conflict.status_code == 400
+    assert conflict.get_json()["error"]["code"] == "conflicting_case_filters"
+
+
 def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 
