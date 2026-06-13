@@ -127,6 +127,13 @@ types, operators, sortability, and facetability for UI/query builders. With
 `unsupported_jql_field` error; unsupported values never become source-of-truth
 state or SQL fragments.
 
+`/case-query-fields` is a read-only metadata projection over the same canonical
+WorkItem field registry. Without `field`, it returns allowlisted fields, value
+types, operators, sortability, and facetability for UI/query builders. With
+`field={field}`, it returns one allowlisted field definition or a stable redacted
+`unsupported_jql_field` error; unsupported values never become source-of-truth
+state or SQL fragments.
+
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
 mutation with a stable error envelope and redacted audit event. Valid keys are
