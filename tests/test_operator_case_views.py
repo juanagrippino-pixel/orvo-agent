@@ -137,6 +137,9 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("assignee_ref = operator:juan").normalized == (
         "assignee_ref = operator:juan ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("assigned_at >= 2026-05-24T09:00:00Z ORDER BY assigned_at DESC").normalized == (
+        "assigned_at >= 2026-05-24T09:00:00+00:00 ORDER BY assigned_at DESC"
+    )
     assert parse_case_jql("due_at < 2026-05-24T10:00:00Z").normalized == (
         "due_at < 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
     )
@@ -672,7 +675,9 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert case["sla_target_seconds"] == 2 * 60 * 60
     assert case["due_at"] == "2026-05-24T10:00:00+00:00"
     assert case["sla_status"] == "breached"
+    assert case["assigned_at"] == "2026-05-24T09:00:00Z"
     assert case["work_item"]["sla_target_seconds"] == 2 * 60 * 60
+    assert case["work_item"]["assigned_at"] == "2026-05-24T09:00:00Z"
     assert case["work_item"]["due_at"] == "2026-05-24T10:00:00Z"
     assert case["work_item"]["sla_status"] == "breached"
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
