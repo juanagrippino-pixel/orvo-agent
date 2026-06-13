@@ -145,10 +145,27 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
     }
     assert tiendanube["health_policy"]["readiness_check"] == "metadata_only"
     assert tiendanube["required_scopes"] == ["orders.read", "products.read"]
+    assert tiendanube["supported_runtime_modes"] == [
+        "preview",
+        "forced",
+        "scheduled",
+        "operator_triggered",
+    ]
+    assert (
+        tiendanube["executor_factory_path"]
+        == "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube"
+    )
 
     disabled = connectors["csv-disabled"]
     assert disabled["readiness_state"] == "disabled"
     assert disabled["required_scopes"] == []
+    assert disabled["supported_runtime_modes"] == [
+        "preview",
+        "forced",
+        "scheduled",
+        "operator_triggered",
+    ]
+    assert disabled["executor_factory_path"] == "app.brain.adapters.csv_file.build_daily_report_from_csv_file"
     assert disabled["setup_required"] is False
     assert disabled["setup_reason"] is None
     assert disabled["operator_next_step"] is None
@@ -234,6 +251,8 @@ def test_internal_connector_readiness_redacts_secret_shaped_connector_identifier
     assert connector["connector_id"] == "[REDACTED]"
     assert connector["connector_type"] == "[REDACTED]"
     assert connector["readiness_state"] == "unknown"
+    assert connector["supported_runtime_modes"] == []
+    assert connector["executor_factory_path"] is None
     assert connector["setup_required"] is True
     assert connector["setup_reason"] == "unknown_connector_type"
     assert connector["operator_next_step"] == "register_or_disable_connector"
