@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
@@ -73,6 +73,7 @@ _PRIORITY_DEFINITIONS: tuple[WorkItemPriorityDefinition, ...] = (
 )
 
 _RANGE_OPERATORS = frozenset({"=", "!=", ">", ">=", "<", "<="})
+_RANGE_OR_NULL_OPERATORS = frozenset({*_RANGE_OPERATORS, "IS NULL", "IS NOT NULL"})
 
 _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("status", "enum", frozenset(get_args(OperationalCaseStatus)), facetable=True),
@@ -109,7 +110,9 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("dedupe_key", "string", allowed_operators=frozenset({"=", "!="})),
     WorkItemQueryFieldDefinition("opened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("updated_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
-    WorkItemQueryFieldDefinition("resolved_at", "datetime", allowed_operators=_RANGE_OPERATORS),
+    WorkItemQueryFieldDefinition("resolved_at", "datetime", allowed_operators=_RANGE_OR_NULL_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("acknowledged_at", "datetime", allowed_operators=_RANGE_OR_NULL_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("in_progress_at", "datetime", allowed_operators=_RANGE_OR_NULL_OPERATORS, sortable=True),
 )
 
 _WORK_ITEM_QUERY_FIELD_BY_KEY = {definition.field: definition for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS}
@@ -177,6 +180,21 @@ def case_type_release_state(case_type: str) -> OperationalCaseIssueTypeReleaseSt
 
 def case_status_category(case: OperationalCase) -> OperationalCaseStatusCategory:
     return operational_case_status_category(case.status)
+
+
+def latest_in_progress_at(case: OperationalCase) -> datetime | None:
+    """Return the latest canonical in-progress status-change timestamp."""
+
+    latest: datetime | None = None
+    for event in case.timeline:
+        if event.event_type != "status_changed":
+            continue
+        if event.metadata.get("to_status") != "in_progress":
+            continue
+        created_at = event.created_at.astimezone(timezone.utc)
+        if latest is None or created_at > latest:
+            latest = created_at
+    return latest
 
 
 def priority_bracket_for_score(priority_score: int) -> str:
@@ -251,6 +269,9 @@ def case_work_item_projection(case: OperationalCase) -> dict[str, Any]:
         "assignee_ref": case.assignee_ref,
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
+        "resolved_at": _iso_utc(case.resolved_at) if case.resolved_at is not None else None,
+        "acknowledged_at": _iso_utc(case.acknowledged_at) if case.acknowledged_at is not None else None,
+        "in_progress_at": _iso_utc(in_progress_at) if (in_progress_at := latest_in_progress_at(case)) is not None else None,
         "case_id": case.case_id,
     }
 

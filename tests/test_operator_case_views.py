@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -31,6 +32,20 @@ def _case_detection_with_source(*, source: str, run_id: str, freshness_state: st
     )
 
 
+def _transition_case(db_path, case_id, status, transitioned_at):
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.transition_case(
+        case_id,
+        status=status,
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=transitioned_at,
+    )
+    conn.close()
+
+
 def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert not hasattr(operator_views, "_FIELD_SPECS")
     assert parse_case_jql("priority_score >= 80 ORDER BY priority_score DESC").normalized == (
@@ -39,6 +54,15 @@ def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert parse_case_jql("priority_bracket = high").normalized == (
         "priority_bracket = high ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql(
+        "status = acknowledged AND acknowledged_at IS NOT NULL ORDER BY acknowledged_at DESC"
+    ).normalized == (
+        "status = acknowledged AND acknowledged_at IS NOT NULL ORDER BY acknowledged_at DESC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_null:
+        parse_case_jql("status IS NOT NULL")
+    assert unsupported_null.value.code == "unsupported_jql_operator"
 
 
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
@@ -330,6 +354,50 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
+def test_internal_case_queue_filters_and_sorts_by_lifecycle_timestamp_fields(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    ack_late = _seed_case(db_path, _case_detection(run_id="run-ack-late", dedupe_suffix="lifecycle/ack/late", priority=90))
+    ack_early = _seed_case(db_path, _case_detection(run_id="run-ack-early", dedupe_suffix="lifecycle/ack/early", priority=95))
+    progress_late = _seed_case(
+        db_path,
+        _case_detection(run_id="run-progress-late", dedupe_suffix="lifecycle/progress/late", priority=88),
+    )
+    progress_early = _seed_case(
+        db_path,
+        _case_detection(run_id="run-progress-early", dedupe_suffix="lifecycle/progress/early", priority=91),
+    )
+    open_case = _seed_case(db_path, _case_detection(run_id="run-open", dedupe_suffix="lifecycle/open", priority=100))
+
+    _transition_case(db_path, ack_late.case_id, "acknowledged", datetime(2026, 5, 24, 12, tzinfo=timezone.utc))
+    _transition_case(db_path, ack_early.case_id, "acknowledged", datetime(2026, 5, 24, 10, tzinfo=timezone.utc))
+    _transition_case(db_path, progress_late.case_id, "in_progress", datetime(2026, 5, 24, 13, tzinfo=timezone.utc))
+    _transition_case(db_path, progress_early.case_id, "in_progress", datetime(2026, 5, 24, 11, tzinfo=timezone.utc))
+
+    ack_response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql="
+        "status%20%3D%20acknowledged%20AND%20acknowledged_at%20IS%20NOT%20NULL%20"
+        "ORDER%20BY%20acknowledged_at%20DESC",
+        headers=AUTH,
+    )
+    progress_response = client.get(
+        "/internal/brain/businesses/artemea/cases?jql="
+        "status%20%3D%20in_progress%20AND%20in_progress_at%20IS%20NOT%20NULL%20"
+        "ORDER%20BY%20in_progress_at%20DESC",
+        headers=AUTH,
+    )
+
+    assert ack_response.status_code == 200
+    assert [case["case_id"] for case in ack_response.get_json()["data"]["cases"]] == [ack_late.case_id, ack_early.case_id]
+    assert ack_response.get_json()["data"]["cases"][0]["work_item"]["acknowledged_at"] == "2026-05-24T12:00:00Z"
+    assert progress_response.status_code == 200
+    assert [case["case_id"] for case in progress_response.get_json()["data"]["cases"]] == [
+        progress_late.case_id,
+        progress_early.case_id,
+    ]
+    assert progress_response.get_json()["data"]["cases"][0]["work_item"]["in_progress_at"] == "2026-05-24T13:00:00Z"
+    assert open_case.case_id not in [case["case_id"] for case in progress_response.get_json()["data"]["cases"]]
+
+
 def test_internal_case_queue_project_jql_cannot_override_route_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-artemea", priority=80))
@@ -573,6 +641,15 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     views = {view["view_id"]: view for view in body["data"]["views"]}
     assert {"open_cases", "in_progress_cases", "critical_open", "data_stale", "stockout_risk", "connector_degraded"}.issubset(
         views
+    )
+    assert views["recently_acknowledged"]["jql"] == (
+        "status = acknowledged AND acknowledged_at IS NOT NULL ORDER BY acknowledged_at DESC"
+    )
+    assert views["recently_in_progress"]["jql"] == (
+        "status = in_progress AND in_progress_at IS NOT NULL ORDER BY in_progress_at DESC"
+    )
+    assert views["recently_resolved"]["jql"] == (
+        "status = resolved AND resolved_at IS NOT NULL ORDER BY resolved_at DESC"
     )
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"

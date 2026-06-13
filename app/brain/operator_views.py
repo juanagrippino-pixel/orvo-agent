@@ -27,6 +27,7 @@ from app.brain.work_items import (
     case_project_key,
     case_status_category,
     case_type_release_state,
+    latest_in_progress_at,
     work_item_query_field_spec,
 )
 
@@ -57,6 +58,8 @@ class ParsedCaseJQL:
             if clause.operator == "IN":
                 values = ", ".join(_format_value(value) for value in clause.values)
                 clause_parts.append(f"{clause.field} IN ({values})")
+            elif clause.operator in {"IS NULL", "IS NOT NULL"}:
+                clause_parts.append(f"{clause.field} {clause.operator}")
             else:
                 clause_parts.append(f"{clause.field} {clause.operator} {_format_value(clause.values[0])}")
         order = ", ".join(f"{field} {direction}" for field, direction in self.order_by)
@@ -76,22 +79,43 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
     {
         "view_id": "acknowledged_cases",
         "label": "Acknowledged cases",
-        "description": "Cases acknowledged by an operator, most recently updated first.",
-        "jql": "status = acknowledged ORDER BY updated_at DESC",
+        "description": "Cases acknowledged by an operator, most recently acknowledged first.",
+        "jql": "status = acknowledged AND acknowledged_at IS NOT NULL ORDER BY acknowledged_at DESC",
         "readonly": True,
     },
     {
         "view_id": "in_progress_cases",
         "label": "In-progress cases",
-        "description": "Cases actively being worked by an operator, most recently updated first.",
-        "jql": "status = in_progress ORDER BY updated_at DESC",
+        "description": "Cases actively being worked by an operator, most recently started first.",
+        "jql": "status = in_progress AND in_progress_at IS NOT NULL ORDER BY in_progress_at DESC",
         "readonly": True,
     },
     {
         "view_id": "resolved_cases",
         "label": "Resolved cases",
-        "description": "Resolved cases, most recently updated first.",
-        "jql": "status = resolved ORDER BY updated_at DESC",
+        "description": "Resolved cases, most recently resolved first.",
+        "jql": "status = resolved AND resolved_at IS NOT NULL ORDER BY resolved_at DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "recently_acknowledged",
+        "label": "Recently acknowledged",
+        "description": "Acknowledged cases ordered by acknowledgement time.",
+        "jql": "status = acknowledged AND acknowledged_at IS NOT NULL ORDER BY acknowledged_at DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "recently_in_progress",
+        "label": "Recently in progress",
+        "description": "In-progress cases ordered by latest in-progress transition.",
+        "jql": "status = in_progress AND in_progress_at IS NOT NULL ORDER BY in_progress_at DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "recently_resolved",
+        "label": "Recently resolved",
+        "description": "Resolved cases ordered by latest resolution time.",
+        "jql": "status = resolved AND resolved_at IS NOT NULL ORDER BY resolved_at DESC",
         "readonly": True,
     },
     {
@@ -142,7 +166,7 @@ def parse_case_jql(jql: str | None) -> ParsedCaseJQL:
         return ParsedCaseJQL(raw="", clauses=(), order_by=_DEFAULT_SORT)
     if len(raw) > _MAX_JQL_LENGTH:
         raise OperatorAPIError("jql_too_long", "JQL query is too long", status_code=400)
-    if re.search(r"(;|--|/\*|\*/|\bOR\b|\bNOT\b|\bDROP\b|\bSELECT\b|\bUPDATE\b|\bDELETE\b)", raw, re.IGNORECASE):
+    if re.search(r"(;|--|/\*|\*/|\bOR\b|\bDROP\b|\bSELECT\b|\bUPDATE\b|\bDELETE\b)", raw, re.IGNORECASE):
         raise OperatorAPIError("invalid_jql", "JQL contains unsupported syntax", status_code=400)
 
     query_body, order_by = _split_order_by(raw)
@@ -286,6 +310,14 @@ def _parse_clause(text: str) -> CaseJQLClause:
         _ensure_operator(field, "IN", spec)
         return CaseJQLClause(field=field, operator="IN", values=tuple(_coerce_value(field, value, spec) for value in raw_values))
 
+    null_match = re.fullmatch(r"([A-Za-z_.]+)\s+IS\s+(NOT\s+NULL|NULL)", text, flags=re.IGNORECASE)
+    if null_match is not None:
+        field = null_match.group(1)
+        operator = "IS NOT NULL" if null_match.group(2).startswith("NOT") else "IS NULL"
+        spec = _field_spec(field)
+        _ensure_operator(field, operator, spec)
+        return CaseJQLClause(field=field, operator=operator, values=())
+
     match = re.fullmatch(r"([A-Za-z_.]+)\s*(=|!=|>=|<=|>|<)\s*(.+)", text)
     if match is None:
         raise OperatorAPIError("invalid_jql", "Invalid JQL clause", status_code=400)
@@ -361,6 +393,10 @@ def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
     actual = _case_field_value(case, clause.field)
     if clause.operator == "IN":
         return actual in clause.values
+    if clause.operator == "IS NULL":
+        return actual is None
+    if clause.operator == "IS NOT NULL":
+        return actual is not None
     expected = clause.values[0]
     if clause.operator == "=":
         return actual == expected
@@ -412,6 +448,10 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_type_release_state(case.case_type)
     if field == "status_category":
         return case_status_category(case)
+    if field == "acknowledged_at":
+        return case.acknowledged_at
+    if field == "in_progress_at":
+        return latest_in_progress_at(case)
     if field == "priority_bracket":
         return case_priority_bracket(case)
     return getattr(case, field)

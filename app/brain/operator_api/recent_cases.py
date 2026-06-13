@@ -4,6 +4,55 @@ from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 
 
+def _parse_iso(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def _recent_timestamp(item: dict[str, Any], timestamp_key: str) -> str:
+    value: Any = item
+    for part in timestamp_key.split("."):
+        value = value[part]
+    return value
+
+
+def _recent_case_payload(
+    *,
+    timestamp_key: str,
+    duration_key: str,
+    total_key: str,
+    business_id: str,
+    limit: str | None,
+    query_result: dict[str, Any],
+) -> dict[str, Any]:
+    parsed_limit = parse_limit(limit)
+    output_timestamp_key = timestamp_key.rsplit(".", 1)[-1]
+    cases_payload: list[dict[str, Any]] = []
+    for item in query_result["cases"]:
+        timestamp_value = _parse_iso(_recent_timestamp(item, timestamp_key))
+        opened_at_value = _parse_iso(item["opened_at"])
+        cases_payload.append(
+            {
+                "case_id": item["case_id"],
+                "case_type": item["case_type"],
+                "status": item["status"],
+                "severity": item["severity"],
+                "priority_score": item["priority_score"],
+                "opened_at": opened_at_value.isoformat(),
+                output_timestamp_key: timestamp_value.isoformat(),
+                duration_key: int((timestamp_value - opened_at_value).total_seconds()),
+            }
+        )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            total_key: query_result["total"],
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def list_recently_resolved_cases(
     store: OperationalCaseStore,
     *,
@@ -18,42 +67,28 @@ def list_recently_resolved_cases(
     ``resolved_at`` DESC with ``case_id`` ASC as a deterministic tie-breaker.
     Each row includes ``resolution_seconds`` (opened_at -> resolved_at) so the
     surface can render time-to-resolve without extra lookups. Strictly scoped
-    per tenant; the projection reads ``resolved_at`` directly from the case
-    store, so it needs no ``now`` parameter.
+    per tenant; filtering and sorting are delegated to the canonical WorkItem
+    query layer so endpoint-specific scans cannot drift from built-in views.
     """
 
-    parsed_limit = parse_limit(limit)
-    resolved: list[tuple[datetime, str, OperationalCase]] = []
-    for case in store.list_cases(business_id=business_id, status="resolved", limit=None):
-        if case.resolved_at is None:
-            continue
-        resolved.append((case.resolved_at.astimezone(timezone.utc), case.case_id, case))
+    from app.brain.operator_views import query_case_queue
 
-    # Most recently resolved first; tie-break by case_id ASC for deterministic order.
-    resolved.sort(key=lambda item: (-item[0].timestamp(), item[1]))
-    limited = resolved[:parsed_limit]
-    cases_payload = [
-        {
-            "case_id": case.case_id,
-            "case_type": case.case_type,
-            "status": case.status,
-            "severity": case.severity,
-            "priority_score": case.priority_score,
-            "opened_at": case.opened_at.isoformat(),
-            "resolved_at": case.resolved_at.isoformat(),
-            "resolution_seconds": int((case.resolved_at - case.opened_at).total_seconds()),
-        }
-        for _resolved_at, _case_id, case in limited
-    ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "resolved_total": len(resolved),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    parsed_limit = parse_limit(limit)
+    query_result = query_case_queue(
+        store,
+        business_id=business_id,
+        jql="status = resolved AND resolved_at IS NOT NULL ORDER BY resolved_at DESC",
+        limit=str(parsed_limit),
     )
+    return _recent_case_payload(
+        timestamp_key="work_item.resolved_at",
+        duration_key="resolution_seconds",
+        total_key="resolved_total",
+        business_id=business_id,
+        limit=limit,
+        query_result=query_result,
+    )
+
 
 def list_recently_opened_cases(
     store: OperationalCaseStore,
@@ -69,39 +104,28 @@ def list_recently_opened_cases(
     fresh work before it goes stale. Only cases currently in ``open`` status
     are included; once acknowledged they belong to the recently-acknowledged
     projection. Ordered by ``opened_at`` DESC with ``case_id`` ASC as a
-    deterministic tie-breaker. Strictly scoped per tenant; the projection
-    reads ``opened_at`` directly from the case store, so it needs no ``now``
-    parameter.
+    deterministic tie-breaker. Strictly scoped per tenant; filtering and sorting
+    are delegated to the canonical WorkItem query layer.
     """
 
-    parsed_limit = parse_limit(limit)
-    opened: list[tuple[datetime, str, OperationalCase]] = []
-    for case in store.list_cases(business_id=business_id, status="open", limit=None):
-        opened.append((case.opened_at.astimezone(timezone.utc), case.case_id, case))
+    from app.brain.operator_views import query_case_queue
 
-    # Most recently opened first; tie-break by case_id ASC for deterministic order.
-    opened.sort(key=lambda item: (-item[0].timestamp(), item[1]))
-    limited = opened[:parsed_limit]
-    cases_payload = [
-        {
-            "case_id": case.case_id,
-            "case_type": case.case_type,
-            "status": case.status,
-            "severity": case.severity,
-            "priority_score": case.priority_score,
-            "opened_at": case.opened_at.isoformat(),
-        }
-        for _opened_at, _case_id, case in limited
-    ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "open_total": len(opened),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    parsed_limit = parse_limit(limit)
+    query_result = query_case_queue(
+        store,
+        business_id=business_id,
+        jql="status = open ORDER BY opened_at DESC",
+        limit=str(parsed_limit),
     )
+    return _recent_case_payload(
+        timestamp_key="opened_at",
+        duration_key="age_seconds",
+        total_key="open_total",
+        business_id=business_id,
+        limit=limit,
+        query_result=query_result,
+    )
+
 
 def list_recently_acknowledged_cases(
     store: OperationalCaseStore,
@@ -118,58 +142,27 @@ def list_recently_acknowledged_cases(
     projection. Ordered by ``acknowledged_at`` DESC with ``case_id`` ASC as a
     deterministic tie-breaker. Each row includes ``acknowledgment_seconds``
     (opened_at -> acknowledged_at) so the surface can render time-to-acknowledge
-    without extra lookups. Strictly scoped per tenant; the projection reads
-    ``acknowledged_at`` directly from the case store, so it needs no ``now``
-    parameter.
+    without extra lookups. Strictly scoped per tenant; filtering and sorting are
+    delegated to the canonical WorkItem query layer.
     """
 
+    from app.brain.operator_views import query_case_queue
+
     parsed_limit = parse_limit(limit)
-    acknowledged: list[tuple[datetime, str, OperationalCase]] = []
-    for case in store.list_cases(business_id=business_id, status="acknowledged", limit=None):
-        if case.acknowledged_at is None:
-            continue
-        acknowledged.append((case.acknowledged_at.astimezone(timezone.utc), case.case_id, case))
-
-    # Most recently acknowledged first; tie-break by case_id ASC for deterministic order.
-    acknowledged.sort(key=lambda item: (-item[0].timestamp(), item[1]))
-    limited = acknowledged[:parsed_limit]
-    cases_payload = [
-        {
-            "case_id": case.case_id,
-            "case_type": case.case_type,
-            "status": case.status,
-            "severity": case.severity,
-            "priority_score": case.priority_score,
-            "opened_at": case.opened_at.isoformat(),
-            "acknowledged_at": case.acknowledged_at.isoformat(),
-            "acknowledgment_seconds": int((case.acknowledged_at - case.opened_at).total_seconds()),
-        }
-        for _acknowledged_at, _case_id, case in limited
-    ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "acknowledged_total": len(acknowledged),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    query_result = query_case_queue(
+        store,
+        business_id=business_id,
+        jql="status = acknowledged AND acknowledged_at IS NOT NULL ORDER BY acknowledged_at DESC",
+        limit=str(parsed_limit),
     )
-
-
-def _latest_in_progress_at(case: OperationalCase) -> datetime | None:
-    """Return the latest canonical status-change timestamp for in-progress work."""
-
-    latest: datetime | None = None
-    for event in case.timeline:
-        if event.event_type != "status_changed":
-            continue
-        if event.metadata.get("to_status") != "in_progress":
-            continue
-        created_at = event.created_at.astimezone(timezone.utc)
-        if latest is None or created_at > latest:
-            latest = created_at
-    return latest
+    return _recent_case_payload(
+        timestamp_key="acknowledged_at",
+        duration_key="acknowledgment_seconds",
+        total_key="acknowledged_total",
+        business_id=business_id,
+        limit=limit,
+        query_result=query_result,
+    )
 
 
 def list_recently_in_progress_cases(
@@ -183,42 +176,27 @@ def list_recently_in_progress_cases(
     This projection fills the operator handoff gap between recently acknowledged
     and recently resolved work. It includes only cases whose current status is
     ``in_progress`` and derives the start timestamp from canonical
-    ``status_changed`` timeline events rather than ad-hoc surface state. Ordered
-    by latest in-progress transition DESC with ``case_id`` ASC as a
+    ``status_changed`` timeline events through the WorkItem query field registry.
+    Ordered by latest in-progress transition DESC with ``case_id`` ASC as a
     deterministic tie-breaker.
     """
 
-    parsed_limit = parse_limit(limit)
-    in_progress: list[tuple[datetime, str, OperationalCase]] = []
-    for case in store.list_cases(business_id=business_id, status="in_progress", limit=None):
-        in_progress_at = _latest_in_progress_at(case)
-        if in_progress_at is None:
-            continue
-        in_progress.append((in_progress_at, case.case_id, case))
+    from app.brain.operator_views import query_case_queue
 
-    in_progress.sort(key=lambda item: (-item[0].timestamp(), item[1]))
-    limited = in_progress[:parsed_limit]
-    cases_payload = [
-        {
-            "case_id": case.case_id,
-            "case_type": case.case_type,
-            "status": case.status,
-            "severity": case.severity,
-            "priority_score": case.priority_score,
-            "opened_at": case.opened_at.isoformat(),
-            "in_progress_at": in_progress_at.isoformat(),
-            "handling_seconds": int((in_progress_at - case.opened_at).total_seconds()),
-        }
-        for in_progress_at, _case_id, case in limited
-    ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "in_progress_total": len(in_progress),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    parsed_limit = parse_limit(limit)
+    query_result = query_case_queue(
+        store,
+        business_id=business_id,
+        jql="status = in_progress AND in_progress_at IS NOT NULL ORDER BY in_progress_at DESC",
+        limit=str(parsed_limit),
+    )
+    return _recent_case_payload(
+        timestamp_key="work_item.in_progress_at",
+        duration_key="handling_seconds",
+        total_key="in_progress_total",
+        business_id=business_id,
+        limit=limit,
+        query_result=query_result,
     )
 
 
