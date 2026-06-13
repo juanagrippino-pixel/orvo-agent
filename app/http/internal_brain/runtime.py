@@ -11,6 +11,7 @@ from app.brain.runtime import RuntimeCompileError, compile_business_runtime, run
 from app.brain.storage import SQLiteConfigStore, init_schema
 
 from .common import (
+    _append_operator_audit_event,
     _authorize_internal_operator,
     _internal_brain_db_path,
     _internal_error,
@@ -55,6 +56,14 @@ def register_runtime_routes(app):
         if payload is None:
             payload = {}
         if not isinstance(payload, dict):
+            _append_operator_audit_event(
+                business_id=business_id,
+                actor_ref=request.headers.get("X-Orvo-Operator", ""),
+                event_type="operator.runtime_compile_preview.invalid_payload",
+                target_type="runtime_compile_preview",
+                target_id=business_id,
+                data={"method": request.method, "payload_type": type(payload).__name__},
+            )
             return _internal_error(
                 business_id,
                 "invalid_runtime_compile_preview_payload",
