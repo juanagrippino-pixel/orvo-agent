@@ -355,142 +355,159 @@ def record_pipeline_success(
         for connector in _connector_by_type(business, connector_types)
         if not _connector_failed_in_partial_run(connector.connector_id, connector.connector_type, partial_failures)
     ]
-    connector_count = max(len(connectors), 1)
-    for connector in connectors:
-        connector_metrics = _metrics_for_connector(pipeline, connector.connector_type, connector_count)
-        connector_metadata = _connector_contract_metadata(
-            connector.connector_type,
-            connector_label=connector.label,
-        )
-        emitted_events = _connector_emitted_events("succeeded")
-        connector_metadata.update(
-            {
-                "emitted_events": list(emitted_events),
-                "event_certification": _event_certification_metadata(connector.connector_type, emitted_events),
-            }
-        )
-        connector_metadata["metric_certification"] = _metric_certification_metadata(
-            connector.connector_type,
-            connector_metrics,
-        )
-        run_ledger.append_connector_outcome(
-            run_id,
-            ConnectorRunOutcome(
-                connector_id=connector.connector_id,
-                connector_type=connector.connector_type,
-                status="succeeded",
-                started_at=finished_at,
-                finished_at=finished_at,
-                metrics_count=len(connector_metrics),
-                evidence_refs=[f"evidence://{connector.connector_id}/{pipeline.report.report_date.isoformat()}"],
-                metadata=connector_metadata,
-            ),
-        )
+    try:
+        connector_count = max(len(connectors), 1)
+        for connector in connectors:
+            connector_metrics = _metrics_for_connector(pipeline, connector.connector_type, connector_count)
+            connector_metadata = _connector_contract_metadata(
+                connector.connector_type,
+                connector_label=connector.label,
+            )
+            emitted_events = _connector_emitted_events("succeeded")
+            connector_metadata.update(
+                {
+                    "emitted_events": list(emitted_events),
+                    "event_certification": _event_certification_metadata(connector.connector_type, emitted_events),
+                }
+            )
+            connector_metadata["metric_certification"] = _metric_certification_metadata(
+                connector.connector_type,
+                connector_metrics,
+            )
+            run_ledger.append_connector_outcome(
+                run_id,
+                ConnectorRunOutcome(
+                    connector_id=connector.connector_id,
+                    connector_type=connector.connector_type,
+                    status="succeeded",
+                    started_at=finished_at,
+                    finished_at=finished_at,
+                    metrics_count=len(connector_metrics),
+                    evidence_refs=[f"evidence://{connector.connector_id}/{pipeline.report.report_date.isoformat()}"],
+                    metadata=connector_metadata,
+                ),
+            )
 
-    for failure in partial_failures:
-        run_ledger.append_connector_outcome(
-            run_id,
-            _partial_failed_connector_outcome(
-                business=business,
-                failure=failure,
-                failed_at=finished_at,
-            ),
-        )
+        for failure in partial_failures:
+            run_ledger.append_connector_outcome(
+                run_id,
+                _partial_failed_connector_outcome(
+                    business=business,
+                    failure=failure,
+                    failed_at=finished_at,
+                ),
+            )
 
-    artifact_uri = f"ledger://runs/{run_id}/daily-report"
-    case_summary = upsert_cases_from_report(
-        case_store=case_store,
-        business_id=business.business_id,
-        report=pipeline.report,
-        run_id=run_id,
-        artifact_ref=artifact_uri,
-    )
-    stale_case_ids: list[str] = []
-    stale_opened_count = 0
-    stale_updated_count = 0
-    for failure in partial_failures:
-        stale_summary = upsert_data_stale_cases(
+        artifact_uri = f"ledger://runs/{run_id}/daily-report"
+        case_summary = upsert_cases_from_report(
             case_store=case_store,
             business_id=business.business_id,
-            connector_types=[failure.connector_type],
+            report=pipeline.report,
             run_id=run_id,
-            error_summary=failure.error_summary,
+            artifact_ref=artifact_uri,
         )
-        stale_case_ids.extend(stale_summary.case_ids)
-        stale_opened_count += stale_summary.opened_count
-        stale_updated_count += stale_summary.updated_count
-    operational_case_ids = [*case_summary.case_ids, *stale_case_ids]
-
-    run_ledger.append_artifact_ref(
-        run_id,
-        ArtifactRef(
-            artifact_id=f"{run_id}:daily_report",
-            artifact_type="daily_report",
-            uri=artifact_uri,
-            evidence_refs=[
-                f"evidence://{connector.connector_id}/{pipeline.report.report_date.isoformat()}"
-                for connector in connectors
-            ],
-            operational_case_ids=operational_case_ids,
-            metadata={
-                "report_date": pipeline.report.report_date.isoformat(),
-                "metrics_count": len(pipeline.report.metrics),
-                "insights_count": len(pipeline.report.insights),
-            },
-        ),
-    )
-
-    dispatch = pipeline.dispatch
-    run_ledger.append_dispatch_outcome(
-        run_id,
-        _dispatch_outcome(dispatch, message_type="daily_report"),
-    )
-
-    case_brief_dispatch: ReportDispatchResult | None = None
-    if case_store is not None and case_brief_dispatcher is not None and dispatch.status in {"sent", "skipped_duplicate"}:
-        owner_cases = _owner_brief_cases(case_store, business.business_id)
-        try:
-            case_brief_dispatch = case_brief_dispatcher(owner_cases)
-        except Exception as exc:  # keep the run ledger terminal even if the secondary brief fails unexpectedly
-            case_brief_dispatch = ReportDispatchResult(
-                status="failed",
-                idempotency_key=make_idempotency_key(
-                    business.business_id,
-                    pipeline.report.report_date,
-                    "owner_case_brief",
-                ),
-                error=redact_text(f"{type(exc).__name__}: {exc}"),
+        stale_case_ids: list[str] = []
+        stale_opened_count = 0
+        stale_updated_count = 0
+        for failure in partial_failures:
+            stale_summary = upsert_data_stale_cases(
+                case_store=case_store,
+                business_id=business.business_id,
+                connector_types=[failure.connector_type],
+                run_id=run_id,
+                error_summary=failure.error_summary,
             )
+            stale_case_ids.extend(stale_summary.case_ids)
+            stale_opened_count += stale_summary.opened_count
+            stale_updated_count += stale_summary.updated_count
+        operational_case_ids = [*case_summary.case_ids, *stale_case_ids]
+
+        run_ledger.append_artifact_ref(
+            run_id,
+            ArtifactRef(
+                artifact_id=f"{run_id}:daily_report",
+                artifact_type="daily_report",
+                uri=artifact_uri,
+                evidence_refs=[
+                    f"evidence://{connector.connector_id}/{pipeline.report.report_date.isoformat()}"
+                    for connector in connectors
+                ],
+                operational_case_ids=operational_case_ids,
+                metadata={
+                    "report_date": pipeline.report.report_date.isoformat(),
+                    "metrics_count": len(pipeline.report.metrics),
+                    "insights_count": len(pipeline.report.insights),
+                },
+            ),
+        )
+
+        dispatch = pipeline.dispatch
+        run_ledger.append_dispatch_outcome(
+            run_id,
+            _dispatch_outcome(dispatch, message_type="daily_report"),
+        )
+
+        case_brief_dispatch: ReportDispatchResult | None = None
+        if case_store is not None and case_brief_dispatcher is not None and dispatch.status in {"sent", "skipped_duplicate"}:
+            owner_cases = _owner_brief_cases(case_store, business.business_id)
+            try:
+                case_brief_dispatch = case_brief_dispatcher(owner_cases)
+            except Exception as exc:  # keep the run ledger terminal even if the secondary brief fails unexpectedly
+                case_brief_dispatch = ReportDispatchResult(
+                    status="failed",
+                    idempotency_key=make_idempotency_key(
+                        business.business_id,
+                        pipeline.report.report_date,
+                        "owner_case_brief",
+                    ),
+                    error=redact_text(f"{type(exc).__name__}: {exc}"),
+                )
+            if case_brief_dispatch is not None:
+                run_ledger.append_dispatch_outcome(
+                    run_id,
+                    _dispatch_outcome(
+                        case_brief_dispatch,
+                        message_type="owner_case_brief",
+                        metadata={"case_count": len(owner_cases)},
+                    ),
+                )
+
+        dispatch_ok = dispatch.status in {"sent", "skipped_duplicate"}
+        case_brief_ok = case_brief_dispatch is None or case_brief_dispatch.status in {"sent", "skipped_duplicate"}
+        final_status = "succeeded" if dispatch_ok and case_brief_ok and not partial_failures else "partial"
+        final_summary = {
+            "report_type": "daily",
+            "cases_opened": case_summary.opened_count + stale_opened_count,
+            "cases_updated": case_summary.updated_count + stale_updated_count,
+            **(summary_metadata or {}),
+        }
+        if partial_failures:
+            final_summary["partial_connector_failures"] = len(partial_failures)
         if case_brief_dispatch is not None:
-            run_ledger.append_dispatch_outcome(
+            final_summary["case_brief_dispatch_status"] = case_brief_dispatch.status
+        run_ledger.update_run(
+            run_id,
+            status=final_status,  # type: ignore[arg-type]
+            finished_at=finished_at,
+            summary_metadata=final_summary,
+        )
+        return case_brief_dispatch
+    except Exception as exc:
+        try:
+            run_ledger.update_run(
                 run_id,
-                _dispatch_outcome(
-                    case_brief_dispatch,
-                    message_type="owner_case_brief",
-                    metadata={"case_count": len(owner_cases)},
-                ),
+                status="failed",
+                finished_at=_now_utc(),
+                summary_metadata={
+                    "report_type": "daily",
+                    **(summary_metadata or {}),
+                    "failure_stage": "post_connector_success_recording",
+                },
+                error_summary=redact_text(f"{type(exc).__name__}: {exc}"),
             )
-
-    dispatch_ok = dispatch.status in {"sent", "skipped_duplicate"}
-    case_brief_ok = case_brief_dispatch is None or case_brief_dispatch.status in {"sent", "skipped_duplicate"}
-    final_status = "succeeded" if dispatch_ok and case_brief_ok and not partial_failures else "partial"
-    final_summary = {
-        "report_type": "daily",
-        "cases_opened": case_summary.opened_count + stale_opened_count,
-        "cases_updated": case_summary.updated_count + stale_updated_count,
-        **(summary_metadata or {}),
-    }
-    if partial_failures:
-        final_summary["partial_connector_failures"] = len(partial_failures)
-    if case_brief_dispatch is not None:
-        final_summary["case_brief_dispatch_status"] = case_brief_dispatch.status
-    run_ledger.update_run(
-        run_id,
-        status=final_status,  # type: ignore[arg-type]
-        finished_at=finished_at,
-        summary_metadata=final_summary,
-    )
-    return case_brief_dispatch
+        except Exception:
+            pass
+        raise
 
 
 def record_pipeline_failure(

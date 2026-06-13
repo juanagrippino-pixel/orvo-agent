@@ -1,5 +1,7 @@
 from datetime import date, datetime, timezone
 
+import pytest
+
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.dispatch import ReportDispatchResult
 from app.brain.execution_ledger import record_pipeline_failure, record_pipeline_success
@@ -136,6 +138,78 @@ def test_record_pipeline_success_records_event_certification_for_connector_outco
         "issues": [],
     }
     assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
+
+
+def test_record_pipeline_success_marks_run_failed_when_case_projection_crashes(monkeypatch):
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="TN principal",
+                params={"store_id": "123", "access_token": "tn_test_token"},
+            )
+        ],
+    )
+    ledger = InMemoryRunLedger()
+    run = ledger.create_run(
+        run_id="run-success-post-processing-failure",
+        business_id=business.business_id,
+        trigger_type="scheduled",
+        started_at=utc_dt(8),
+    )
+    pipeline = PipelineResult(
+        report=DailyReport(
+            business_name=business.business_name,
+            report_date=date(2026, 5, 24),
+            metrics=[
+                Metric(
+                    key="orders_today",
+                    label="Pedidos",
+                    value=3,
+                    unit="count",
+                    evidence=[Evidence(source="tiendanube", label="TN principal")],
+                )
+            ],
+            insights=[],
+        ),
+        dispatch=ReportDispatchResult(
+            status="sent",
+            idempotency_key="artemea:2026-05-24:daily",
+        ),
+    )
+
+    def explode(**_kwargs):
+        raise RuntimeError("case projection exploded access_token=raw_runtime_secret")
+
+    monkeypatch.setattr("app.brain.execution_ledger.upsert_cases_from_report", explode)
+
+    with pytest.raises(RuntimeError, match="case projection exploded"):
+        record_pipeline_success(
+            run_ledger=ledger,
+            run_id=run.run_id,
+            business=business,
+            connector_types=["tiendanube"],
+            pipeline=pipeline,
+            summary_metadata={"schedule_id": "sched-1"},
+        )
+
+    reloaded = ledger.get_run(run.run_id)
+    assert reloaded is not None
+    assert reloaded.status == "failed"
+    assert reloaded.finished_at is not None
+    assert reloaded.summary_metadata["report_type"] == "daily"
+    assert reloaded.summary_metadata["schedule_id"] == "sched-1"
+    assert reloaded.summary_metadata["failure_stage"] == "post_connector_success_recording"
+    assert reloaded.error_summary == "RuntimeError: case projection exploded access_token=[REDACTED]"
+    assert len(reloaded.connector_outcomes) == 1
+    assert reloaded.artifacts == []
+    assert reloaded.dispatch_outcomes == []
 
 
 def test_record_pipeline_failure_maps_rate_limit_errors_to_typed_health_state():
