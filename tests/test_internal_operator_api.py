@@ -403,6 +403,21 @@ def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_act
     assert "Acción sugerida: Confirm stock" in data["text"]
     assert data["case_ids"] == [case.case_id]
     assert data["suggested_action_keys"] == ["confirm_stock"]
+    assert data["action_catalog"] == [
+        {
+            "action_key": "confirm_stock",
+            "label": "Confirm stock",
+            "mode": "suggestion_only",
+            "api_enabled": False,
+            "operator_executable": False,
+            "status_effect": None,
+            "requires_reason": False,
+            "requires_comment": False,
+            "approval_required": False,
+            "disabled_reason": "api_disabled",
+            "case_families": ["stockout_risk"],
+        }
+    ]
     assert data["displayed_cases"] == [
         {
             "case_id": case.case_id,

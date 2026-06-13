@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from app.brain.action_catalog import ACTION_CATALOG
 from app.brain.operational_cases import (
     ACTIONABLE_OPERATIONAL_CASE_STATUSES,
     OperationalCase,
@@ -79,6 +80,14 @@ def _owner_brief_suggested_action_keys(cases: list[OperationalCase]) -> list[str
     return keys
 
 
+def _owner_brief_action_catalog(action_keys: list[str]) -> list[dict[str, Any]]:
+    return [
+        ACTION_CATALOG[action_key].operator_projection(can_execute_case_actions=False)
+        for action_key in action_keys
+        if action_key in ACTION_CATALOG
+    ]
+
+
 def preview_owner_case_brief(
     store: OperationalCaseStore,
     *,
@@ -100,6 +109,7 @@ def preview_owner_case_brief(
     safe_business_name = redact_text((business_name or business_id).strip() or business_id) or "[REDACTED]"
     actionable = _owner_brief_cases(store, business_id)
     visible = actionable[:parsed_max_cases]
+    displayed_action_keys = _owner_brief_suggested_action_keys(visible)
     text = compose_owner_case_brief(
         safe_business_name,
         actionable,
@@ -118,7 +128,8 @@ def preview_owner_case_brief(
         "truncated": len(actionable) > len(visible),
         "case_ids": [case.case_id for case in visible],
         "displayed_cases": _owner_brief_displayed_cases(visible),
-        "suggested_action_keys": _owner_brief_suggested_action_keys(visible),
+        "suggested_action_keys": displayed_action_keys,
+        "action_catalog": _owner_brief_action_catalog(displayed_action_keys),
         "evidence_freshness": _owner_brief_evidence_freshness(visible=visible, actionable=actionable),
         "text": text,
     }
