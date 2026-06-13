@@ -747,6 +747,69 @@ def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reop
     assert reopened.timeline[-1].event_type == "case_reopened"
 
 
+# Lifecycle-contract regression: lock down the full transition_case matrix so
+# that a future refactor of `_CASE_STATUS_TRANSITIONS` (e.g. allowing operators
+# to "un-resolve" a case, skip acknowledgement, or no-op self-transitions) is
+# caught before it silently invalidates the audit trail or the
+# acknowledged-before-resolved safety property.
+@pytest.mark.parametrize(
+    "from_status,to_status",
+    [
+        ("open", "open"),
+        ("open", "resolved"),
+        ("acknowledged", "open"),
+        ("acknowledged", "acknowledged"),
+        ("resolved", "open"),
+        ("resolved", "acknowledged"),
+        ("resolved", "resolved"),
+    ],
+)
+def test_transition_case_rejects_every_forbidden_status_transition(from_status, to_status):
+    store = InMemoryOperationalCaseStore()
+    case = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+    if from_status in {"acknowledged", "resolved"}:
+        store.transition_case(
+            case.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            transitioned_at=utc_dt(9),
+        )
+    if from_status == "resolved":
+        store.transition_case(
+            case.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Resolved test fixture",
+            transitioned_at=utc_dt(10),
+        )
+
+    before = store.get_case(case.case_id)
+    assert before is not None and before.status == from_status
+
+    with pytest.raises(OperationalCaseStatusError):
+        store.transition_case(
+            case.case_id,
+            status=to_status,
+            actor_type="operator",
+            actor_ref="juan",
+            transitioned_at=utc_dt(11),
+        )
+
+    after = store.get_case(case.case_id)
+    assert after is not None
+    assert after.status == from_status, (
+        f"rejected transition {from_status}->{to_status} must not mutate case status"
+    )
+    assert after.timeline == before.timeline, (
+        f"rejected transition {from_status}->{to_status} must not append a timeline event"
+    )
+    assert after.updated_at == before.updated_at, (
+        f"rejected transition {from_status}->{to_status} must not bump updated_at"
+    )
+
+
 def test_sqlite_operational_case_store_persists_and_filters_by_status(conn):
     store = SQLiteOperationalCaseStore(conn)
     opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
