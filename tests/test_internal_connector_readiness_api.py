@@ -34,21 +34,28 @@ def _save_business(db_path, business: BusinessConfig) -> None:
         SQLiteConfigStore(conn).save_business_config(business)
 
 
-def _append_connector_outcome(db_path) -> None:
+def _append_connector_outcome(
+    db_path,
+    *,
+    business_id: str = "artemea",
+    run_id: str = "run-readiness-latest",
+    connector_id: str = "tn-main",
+    connector_type: str = "tiendanube",
+) -> None:
     with closing(sqlite3.connect(db_path)) as conn:
         init_schema(conn)
         ledger = SQLiteRunLedger(conn)
         run = ledger.create_run(
-            business_id="artemea",
+            business_id=business_id,
             trigger_type="forced",
-            run_id="run-readiness-latest",
+            run_id=run_id,
             started_at=_utc(7),
         )
         ledger.append_connector_outcome(
             run.run_id,
             ConnectorRunOutcome(
-                connector_id="tn-main",
-                connector_type="tiendanube",
+                connector_id=connector_id,
+                connector_type=connector_type,
                 status="failed",
                 health_state="unauthorized",
                 started_at=_utc(7),
@@ -153,6 +160,50 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
     assert disabled["setup_reason"] is None
     assert disabled["operator_next_step"] is None
     assert disabled["last_health"] is None
+
+
+def test_internal_connector_readiness_does_not_borrow_same_type_health_from_other_connector(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _save_business(
+        db_path,
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn-main",
+                    connector_type="tiendanube",
+                    label="TiendaNube principal",
+                    params={"store_id": "123"},
+                    secret_refs={"access_token": "secret://tenant/artemea/tiendanube/main"},
+                ),
+                ConnectorConfig(
+                    connector_id="tn-secondary",
+                    connector_type="tiendanube",
+                    label="TiendaNube secundaria",
+                    params={"store_id": "456"},
+                    secret_refs={"access_token": "secret://tenant/artemea/tiendanube/secondary"},
+                ),
+            ],
+        ),
+    )
+    _append_connector_outcome(db_path, connector_id="tn-main", run_id="run-main-latest")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    connectors = {item["connector_id"]: item for item in response.get_json()["data"]["connectors"]}
+    assert connectors["tn-main"]["last_health"]["run_id"] == "run-main-latest"
+    assert connectors["tn-main"]["readiness_state"] == "degraded"
+    assert connectors["tn-secondary"]["last_health"] is None
+    assert connectors["tn-secondary"]["readiness_state"] == "ready"
+    assert connectors["tn-secondary"]["setup_required"] is False
 
 
 def test_internal_connector_readiness_fails_closed_on_legacy_inline_secret(monkeypatch, tmp_path):
