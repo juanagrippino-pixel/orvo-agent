@@ -40,12 +40,20 @@ def register_operator_audit_routes(app):
         except OperatorAuditExportError as exc:
             return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
 
-        with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
-            init_schema(conn)
-            events = SQLiteOperatorAuditStore(conn).list_events(
-                business_id=business_id,
-                limit=limit,
-                retention_days=retention_days,
+        try:
+            with closing(sqlite3.connect(_internal_brain_db_path())) as conn:
+                init_schema(conn)
+                events = SQLiteOperatorAuditStore(conn).list_events(
+                    business_id=business_id,
+                    limit=limit,
+                    retention_days=retention_days,
+                )
+        except sqlite3.Error:
+            return _internal_error(
+                business_id,
+                "internal_store_unavailable",
+                "Internal store unavailable.",
+                status_code=503,
             )
         return _internal_success(
             business_id,

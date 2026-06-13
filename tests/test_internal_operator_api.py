@@ -4597,6 +4597,29 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     assert denial["data"]["permission"] == "operator_audit:read"
 
 
+def test_internal_operator_audit_export_returns_safe_error_when_store_unavailable(monkeypatch, tmp_path):
+    missing_parent_db_path = tmp_path / "missing-parent" / "operator-audit.sqlite3"
+    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(missing_parent_db_path))
+    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
+    from server import app
+
+    response = app.test_client().get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 503
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"] == {
+        "code": "internal_store_unavailable",
+        "message": "Internal store unavailable.",
+        "safe_to_show_owner": False,
+    }
+    assert body["redaction_applied"] is True
+
+
 def test_internal_operator_audit_export_orders_by_occurred_at_not_insert_order(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
