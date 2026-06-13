@@ -114,6 +114,8 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("evidence_snapshot_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("evidence_source_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("comment_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("last_comment_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("timeline_event_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("last_event_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition(
@@ -301,6 +303,17 @@ def case_timeline_event_count(case: OperationalCase) -> int:
     return len(case.timeline)
 
 
+def case_comment_count(case: OperationalCase) -> int:
+    return sum(1 for event in case.timeline if event.event_type == "operator_comment")
+
+
+def case_last_comment_at(case: OperationalCase) -> datetime | None:
+    comment_events = [event.created_at for event in case.timeline if event.event_type == "operator_comment"]
+    if not comment_events:
+        return None
+    return max(comment_events)
+
+
 def case_last_event_at(case: OperationalCase) -> datetime | None:
     if not case.timeline:
         return None
@@ -348,6 +361,8 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "source_connectors": case_source_connectors(case),
         "latest_evidence_at": _iso_utc(case_latest_evidence_at(case)) if case_latest_evidence_at(case) is not None else None,
         "degraded": case_evidence_is_degraded(case),
+        "comment_count": case_comment_count(case),
+        "last_comment_at": _iso_utc(case_last_comment_at(case)) if case_last_comment_at(case) is not None else None,
         "timeline_event_count": case_timeline_event_count(case),
         "last_event_at": _iso_utc(case_last_event_at(case)) if case_last_event_at(case) is not None else None,
         "last_event_type": case_last_event_type(case),
