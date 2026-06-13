@@ -4729,3 +4729,90 @@ def test_internal_operator_audit_export_rejects_retention_abuse(monkeypatch, tmp
     assert body["ok"] is False
     assert body["error"]["code"] == "invalid_retention_days"
     assert body["redaction_applied"] is True
+
+
+def test_internal_operator_audit_export_collapses_secret_shaped_nested_business_ids(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    store.append_event(
+        business_id="artemea",
+        actor_ref="admin:sol",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        request_id="req-audit-business-id-redaction",
+        data={
+            "projection": {
+                "business_id": "artemea access_token=raw_nested_business_secret",
+                "related": [
+                    {"business_id": "other"},
+                    {"business_id": "other access_token=raw_list_business_secret"},
+                ],
+            }
+        },
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?limit=10",
+        headers={**AUTH, "X-Orvo-Role": "admin", "X-Orvo-Operator": "admin:sol"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_nested_business_secret" not in raw_body
+    assert "raw_list_business_secret" not in raw_body
+    body = response.get_json()
+    event = {item["request_id"]: item for item in body["data"]["events"]}["req-audit-business-id-redaction"]
+    assert event["data"]["projection"] == {
+        "business_id": "[REDACTED]",
+        "related": [
+            {"business_id": "other"},
+            {"business_id": "[REDACTED]"},
+        ],
+    }
+
+
+
+def test_operator_audit_store_collapses_secret_shaped_nested_business_ids_before_persist_and_export(tmp_path):
+    db_path = tmp_path / "operator_audit.sqlite3"
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperatorAuditStore(conn)
+    store.append_event(
+        business_id="artemea",
+        actor_ref="admin:sol",
+        event_type="operator.case_action.failed",
+        target_type="operational_case",
+        request_id="req-audit-store-business-id-redaction",
+        data={
+            "projection": {
+                "business_id": "artemea access_token=raw_nested_business_secret",
+                "related": [
+                    {"business_id": "other"},
+                    {"business_id": "other access_token=raw_list_business_secret"},
+                ],
+            }
+        },
+    )
+
+    stored_data = conn.execute(
+        "SELECT data FROM operator_audit_events WHERE request_id = ?",
+        ("req-audit-store-business-id-redaction",),
+    ).fetchone()[0]
+    events = store.list_events(business_id="artemea")
+    conn.close()
+
+    assert "raw_nested_business_secret" not in stored_data
+    assert "raw_list_business_secret" not in stored_data
+    assert 'artemea access_token=[REDACTED]' not in stored_data
+    assert 'other access_token=[REDACTED]' not in stored_data
+    event = {item["request_id"]: item for item in events}["req-audit-store-business-id-redaction"]
+    assert event["data"]["projection"] == {
+        "business_id": "[REDACTED]",
+        "related": [
+            {"business_id": "other"},
+            {"business_id": "[REDACTED]"},
+        ],
+    }
