@@ -221,16 +221,29 @@ def work_item_query_field_definitions() -> list[dict[str, Any]]:
     """Expose canonical query-field metadata for tests/docs/operator surfaces."""
 
     return [
-        {
-            "field": definition.field,
-            "value_type": definition.value_type,
-            "allowed_values": sorted(definition.allowed_values) if definition.allowed_values is not None else None,
-            "allowed_operators": sorted(definition.allowed_operators),
-            "sortable": definition.sortable,
-            "facetable": definition.facetable,
-        }
+        _work_item_query_field_definition_dict(definition)
         for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS
     ]
+
+
+def work_item_query_field_definition(field: str) -> dict[str, Any] | None:
+    """Return one canonical query-field definition, if allowlisted."""
+
+    spec = work_item_query_field_spec(field)
+    if spec is None:
+        return None
+    return _work_item_query_field_definition_dict(spec)
+
+
+def _work_item_query_field_definition_dict(definition: WorkItemQueryFieldDefinition) -> dict[str, Any]:
+    return {
+        "field": definition.field,
+        "value_type": definition.value_type,
+        "allowed_values": sorted(definition.allowed_values) if definition.allowed_values is not None else None,
+        "allowed_operators": sorted(definition.allowed_operators),
+        "sortable": definition.sortable,
+        "facetable": definition.facetable,
+    }
 
 
 def case_work_item_id(case: OperationalCase) -> str:

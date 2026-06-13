@@ -79,6 +79,8 @@ GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/export
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/cases/facets
+GET /internal/brain/businesses/{business_id}/case-query-fields
+GET /internal/brain/businesses/{business_id}/case-query-fields?field={field}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
 
@@ -97,6 +99,13 @@ fields include `project`, `issue_type`, `release_state`, `status_category`,
 `assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. The
 API must reject unsupported fields/operators/values instead of translating user
 input into SQL or allowing query text to own business scope.
+
+`/case-query-fields` is a read-only metadata projection over the same canonical
+WorkItem field registry. Without `field`, it returns allowlisted fields, value
+types, operators, sortability, and facetability for UI/query builders. With
+`field={field}`, it returns one allowlisted field definition or a stable redacted
+`unsupported_jql_field` error; unsupported values never become source-of-truth
+state or SQL fragments.
 
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before

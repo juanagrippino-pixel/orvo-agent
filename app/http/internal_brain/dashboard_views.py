@@ -66,7 +66,10 @@ def register_dashboard_view_routes(app):
     def internal_brain_case_query_fields(business_id: str):
         return _with_internal_stores(
             business_id,
-            lambda case_store, run_ledger: _internal_success(business_id, list_case_query_fields()),
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_case_query_fields(field=request.args.get("field")),
+            ),
         )
 
 
