@@ -40,6 +40,15 @@ def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert parse_case_jql("priority_bracket = high").normalized == (
         "priority_bracket = high ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("timeline_event_count >= 2").normalized == (
+        "timeline_event_count >= 2 ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("last_event_at >= 2026-05-24T09:00:00Z").normalized == (
+        "last_event_at >= 2026-05-24T09:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("last_event_type IN (case_opened, evidence_attached)").normalized == (
+        "last_event_type IN (case_opened, evidence_attached) ORDER BY priority_score DESC, opened_at ASC"
+    )
 
 
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
@@ -272,6 +281,68 @@ def test_internal_case_queue_sorts_by_latest_evidence_at(monkeypatch, tmp_path):
     assert body["data"]["normalized_jql"] == "status = open ORDER BY latest_evidence_at DESC"
     assert [case["case_id"] for case in body["data"]["cases"]] == [newer_case.case_id, older_case.case_id]
     assert body["data"]["cases"][0]["work_item"]["latest_evidence_at"] == "2026-05-24T09:30:00Z"
+
+
+def test_internal_case_queue_sorts_by_last_case_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    older_case = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-older-event",
+            priority=50,
+            dedupe_suffix="stockout_risk/business/monitored/older-event/daily",
+        ),
+    )
+    newer_case = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-newer-event",
+            priority=50,
+            dedupe_suffix="stockout_risk/business/monitored/newer-event/daily",
+        ),
+    )
+    later_snapshot = newer_case.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_id": "snapshot-newer-event-later",
+            "captured_at": datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+            "run_id": "run-newer-event-google",
+            "artifact_ref": "ledger://runs/run-newer-event-google/daily-report",
+            "source": "google_sheets",
+            "source_label": "Google Sheets",
+            "evidence_ref": "evidence://google_sheets/run-newer-event-google/stockout_risk",
+            "snapshot_key": "run-newer-event-google/evidence://google_sheets/run-newer-event-google/stockout_risk/stockout_risk/business/monitored",
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.attach_evidence(
+        newer_case.case_id,
+        snapshots=[later_snapshot],
+        run_id="run-newer-event-google",
+        artifact_ref="ledger://runs/run-newer-event-google/daily-report",
+        summary="Attached later Google Sheets evidence.",
+        attached_at=datetime(2026, 5, 24, 9, 35, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "status = open ORDER BY last_event_at DESC"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "status = open ORDER BY last_event_at DESC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [newer_case.case_id, older_case.case_id]
+    assert body["data"]["cases"][0]["work_item"]["timeline_event_count"] == 2
+    assert body["data"]["cases"][0]["work_item"]["last_event_at"] == "2026-05-24T09:35:00Z"
+    assert body["data"]["cases"][0]["work_item"]["last_event_type"] == "evidence_attached"
 
 
 def test_internal_case_queue_filters_degraded_cases_and_keeps_business_scope(monkeypatch, tmp_path):
