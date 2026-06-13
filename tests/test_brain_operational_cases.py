@@ -724,6 +724,23 @@ def test_operator_reopen_restores_resolved_case_and_emits_case_reopened_event(co
     assert any(event.event_type == "case_reopened" for event in reloaded.timeline)
 
 
+def test_reopen_case_normalizes_blank_reason_to_default_summary():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))
+    store.transition_case(opened.case_id, status="acknowledged", actor_type="operator", actor_ref="juan", transitioned_at=utc_dt(9))
+    store.transition_case(opened.case_id, status="resolved", actor_type="operator", actor_ref="juan", reason="Fixed", transitioned_at=utc_dt(10))
+
+    reopened = store.reopen_case(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="juan",
+        reason="   ",
+        reopened_at=utc_dt(11),
+    )
+
+    assert reopened.timeline[-1].summary == "Case reopened by operator."
+
+
 def test_reopen_case_rejects_non_resolved_cases_and_unknown_case():
     store = InMemoryOperationalCaseStore()
     opened = store.upsert_detection(make_stockout_detection(), detected_at=utc_dt(8))

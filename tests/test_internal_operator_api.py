@@ -799,6 +799,7 @@ def test_internal_case_action_catalog_returns_canonical_action_contract(monkeypa
         "dismiss_case",
         "mark_in_progress",
         "resolve_case",
+        "reopen_case",
     ]
     assert data["operator_executable_action_keys"] == data["api_enabled_action_keys"]
     actions = {item["action_key"]: item for item in data["actions"]}
@@ -858,6 +859,7 @@ def test_internal_case_action_catalog_marks_viewer_actions_not_executable(monkey
         "dismiss_case",
         "mark_in_progress",
         "resolve_case",
+        "reopen_case",
     ]
     assert data["operator_executable_action_keys"] == []
     actions = {item["action_key"]: item for item in data["actions"]}

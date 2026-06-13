@@ -764,6 +764,7 @@ class _OperationalCaseMutations:
         if record.status != "resolved":
             raise OperationalCaseStatusError(f"case {case_id} cannot be reopened from status {record.status}")
         reopened_at = _as_utc(reopened_at) if reopened_at is not None else _now_utc()
+        normalized_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
         updated = record.model_copy(
             update={
                 "status": "open",
@@ -778,7 +779,7 @@ class _OperationalCaseMutations:
                         actor_ref=actor_ref,
                         case_id=record.case_id,
                         created_at=reopened_at,
-                        summary=reason or "Case reopened by operator.",
+                        summary=normalized_reason or "Case reopened by operator.",
                         metadata={"from_status": record.status, "to_status": "open"},
                     ),
                 ],

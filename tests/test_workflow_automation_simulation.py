@@ -95,6 +95,7 @@ def test_action_catalog_is_canonical_for_workflow_and_operator_projections():
         "dismiss_case",
         "mark_in_progress",
         "resolve_case",
+        "reopen_case",
     }
     assert actions["resolve_case"]["requires_reason"] is True
     assert actions["dismiss_case"]["requires_reason"] is True
