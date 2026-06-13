@@ -524,18 +524,41 @@ python scripts/run_orvo_brain_reports.py \
     --force
 ```
 
-When `--dry-run` is **omitted** the script:
+When `--dry-run` is **omitted** the script uses the current compatibility
+runtime path:
 
-1. Builds the daily report from the configured connector.
-2. Computes the idempotency key `<business_id>/<date>/daily`.
-3. Skips if already marked, else POSTs to Meta and stores the key in the
+1. Compiles/loads the configured runtime for the requested business and date.
+2. Executes the configured connector path and normalizes available evidence.
+3. Preserves the existing daily-report projection behavior for compatibility.
+4. Computes the idempotency key `<business_id>/<date>/daily`.
+5. Skips if already marked, else POSTs to Meta and stores the key in the
    `idempotency_keys` SQLite table.
+
+The WhatsApp message and daily report are **projections**, not the source of
+truth for business state. As the compiled runtime, connector registry, metric
+registry, run ledger, and Operational Case engine mature, this entrypoint should
+continue to converge on:
+
+```text
+connector execution -> normalized metrics/evidence -> deterministic detections
+-> Operational Cases -> owner/operator projections -> audited dispatch
+```
+
+See the canonical contracts before changing this path:
+
+- [Compiled Runtime Contract](specs/compiled-runtime-contract.md)
+- [Connector Registry Contract](specs/connector-registry-contract.md)
+- [Metric Registry Contract](specs/metric-registry-contract.md)
+- [Operational Case Engine Contract](specs/operational-case-engine-contract.md)
+- [Tenant, Secret Reference, and Redaction Contract](specs/tenant-secret-redaction-contract.md)
 
 ### Scheduled execution (cron / scheduler)
 
 Drop the script in cron / a Railway scheduled job. Without `--force` the
 script consults `ReportSchedule.cron_expression` and only runs schedules
-whose UTC time matches. Typical cron entry:
+whose UTC time matches. This is the current compatibility runner; scheduled
+work should ultimately be orchestrated by the compiled runtime and run ledger
+rather than by report-specific logic.
 
 ```cron
 */5 * * * * cd /app && python scripts/run_orvo_brain_reports.py >> /var/log/orvo_brain.log 2>&1
