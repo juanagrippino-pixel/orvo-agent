@@ -103,6 +103,7 @@ should use the business route instead.
 
 ```http
 GET /internal/brain/businesses/{business_id}/cases
+GET /internal/brain/businesses/{business_id}/cases/recent?activity_type=updated
 GET /internal/brain/businesses/{business_id}/cases/recently-opened
 GET /internal/brain/businesses/{business_id}/cases/recently-acknowledged
 GET /internal/brain/businesses/{business_id}/cases/recently-in-progress
@@ -138,6 +139,15 @@ mutation with a stable error envelope and redacted audit event. Valid keys are
 reserved in the durable workflow action ledger before the case mutation, duplicate
 completed requests replay the current case with `data.action.status = "skipped_duplicate"`,
 and duplicate pending/failed keys are rejected with a safe `409` envelope. The
+`cases/recent` endpoint is the shared recent-activity query model for operator
+surfaces: it accepts allowlisted `activity_type` values (`opened`,
+`acknowledged`, `in_progress`, `assigned`, `commented`, `updated`, `reopened`,
+`resolved`, `dismissed`), defaults to `updated`, returns a normalized top-level
+envelope (`projection_type`, `activity_type`, `total`, `count`, `limit`,
+`cases`), and keeps the underlying case rows as projections over canonical
+`OperationalCase` state. Legacy `recently-*` endpoints remain supported for
+compatibility, but new operator clients should prefer the shared route instead
+of multiplying specialized HTTP paths. The
 `recently-assigned` endpoint is a read-only projection over actionable cases with
 `assigned_at`/`assignee_ref`; it does not mutate lifecycle state or treat
 assignment as a source of truth. The `recently-commented` endpoint is a

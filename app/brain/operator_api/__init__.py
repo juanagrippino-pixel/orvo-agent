@@ -13,6 +13,7 @@ from .stagnation_core import *  # noqa: F401,F403
 from .stagnation_splits import *  # noqa: F401,F403
 from .top_cases import *  # noqa: F401,F403
 from .recent_cases import *  # noqa: F401,F403
+from .recent_activity import *  # noqa: F401,F403
 from .commented_cases import *  # noqa: F401,F403
 from .updated_cases import *  # noqa: F401,F403
 from .suggested_actions import *  # noqa: F401,F403

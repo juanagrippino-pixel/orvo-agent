@@ -8,6 +8,21 @@ from .common import _internal_success, _with_internal_stores
 
 
 def register_case_recent_routes(app):
+    @app.get("/internal/brain/businesses/<business_id>/cases/recent")
+    def internal_brain_cases_recent(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_recent_case_activity(
+                    case_store,
+                    business_id=business_id,
+                    activity_type=request.args.get("activity_type"),
+                    limit=request.args.get("limit"),
+                ),
+            ),
+        )
+
     @app.get("/internal/brain/businesses/<business_id>/cases/recently-opened")
     def internal_brain_cases_recently_opened(business_id: str):
         return _with_internal_stores(
