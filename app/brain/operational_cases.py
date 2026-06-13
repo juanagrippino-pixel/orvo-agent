@@ -1231,6 +1231,21 @@ def _case_evidence_metrics_for_source(
     return evidence_metrics
 
 
+def _report_metric_objects_for_sources(
+    *,
+    report: DailyReport,
+    sources: Iterable[str],
+) -> list[Metric]:
+    source_set = set(sources)
+    scoped_metrics: list[Metric] = []
+    for metric in report.metrics:
+        metric_sources = _metric_sources(metric)
+        if source_set and metric_sources and not source_set.intersection(metric_sources):
+            continue
+        scoped_metrics.append(metric)
+    return scoped_metrics
+
+
 def _case_metric_objects_for_sources(
     *,
     report: DailyReport,
@@ -1239,12 +1254,8 @@ def _case_metric_objects_for_sources(
 ) -> list[Metric]:
     registry = default_metric_registry()
     allowed_case_keys = set(CASE_FAMILY_METRICS.get(case_type, ()))
-    source_set = set(sources)
     case_metrics: list[Metric] = []
-    for metric in report.metrics:
-        metric_sources = _metric_sources(metric)
-        if source_set and not source_set.intersection(metric_sources):
-            continue
+    for metric in _report_metric_objects_for_sources(report=report, sources=sources):
         canonical_key = registry.try_resolve_key(metric.key)
         if canonical_key is None or canonical_key not in allowed_case_keys:
             continue
@@ -1261,10 +1272,13 @@ def _case_detection_allowed_by_metric_registry(
 ) -> bool:
     if mode != "enforced":
         return True
+    source_scope = [evidence.source for evidence in insight.evidence]
+    if validate_metrics(_report_metric_objects_for_sources(report=report, sources=source_scope), strict=False):
+        return False
     case_metrics = _case_metric_objects_for_sources(
         report=report,
         case_type=case_type,
-        sources=[evidence.source for evidence in insight.evidence],
+        sources=source_scope,
     )
     if not case_metrics:
         return False
