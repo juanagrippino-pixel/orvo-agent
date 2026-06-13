@@ -178,27 +178,32 @@ def test_orders_by_priority_desc_then_case_id_asc_and_filters_to_actionable_degr
     assert result["actionable_degraded_total"] == 3
     assert result["limit"] == 50
     assert result["count"] == 3
-    # priority 100 -> 70 (run-b case_id < run-c case_id by deterministic creation order;
-    # we assert via case_type ordering since dedupe-derived case_ids are stable per run).
+    # priority 100 first; priority-70 ties are ordered by deterministic case_id ASC.
     cases = result["cases"]
-    assert [case["case_type"] for case in cases] == [
-        "stockout_risk",
-        "sales_drop",
-        "data_stale",
-    ]
+    assert cases[0]["case_type"] == "stockout_risk"
     assert [case["priority_score"] for case in cases] == [100, 70, 70]
-    assert [case["status"] for case in cases] == ["open", "open", "acknowledged"]
-    assert [case["freshness_state"] for case in cases] == ["degraded", "stale", "missing"]
+    assert [case["case_id"] for case in cases[1:]] == sorted(
+        case["case_id"] for case in cases[1:]
+    )
+
+    by_type = {case["case_type"]: case for case in cases}
+    assert set(by_type) == {"stockout_risk", "sales_drop", "data_stale"}
+    assert by_type["stockout_risk"]["status"] == "open"
+    assert by_type["sales_drop"]["status"] == "open"
+    assert by_type["data_stale"]["status"] == "acknowledged"
+    assert by_type["stockout_risk"]["freshness_state"] == "degraded"
+    assert by_type["sales_drop"]["freshness_state"] == "stale"
+    assert by_type["data_stale"]["freshness_state"] == "missing"
     # age_seconds derived from now (12:00) - opened_at; opened equals detected_at.
-    assert cases[0]["age_seconds"] == 4 * 3600
-    assert cases[1]["age_seconds"] == 3 * 3600
-    assert cases[2]["age_seconds"] == 2 * 3600
-    assert cases[0]["source_connectors"] == ["tiendanube"]
-    assert cases[1]["source_connectors"] == ["meta_ads"]
-    assert cases[2]["source_connectors"] == ["tiendanube"]
-    assert cases[0]["latest_evidence_at"] == "2026-05-24T07:00:00Z"
-    assert cases[1]["latest_evidence_at"] == "2026-05-24T06:00:00Z"
-    assert cases[2]["latest_evidence_at"] == "2026-05-24T05:00:00Z"
+    assert by_type["stockout_risk"]["age_seconds"] == 4 * 3600
+    assert by_type["sales_drop"]["age_seconds"] == 3 * 3600
+    assert by_type["data_stale"]["age_seconds"] == 2 * 3600
+    assert by_type["stockout_risk"]["source_connectors"] == ["tiendanube"]
+    assert by_type["sales_drop"]["source_connectors"] == ["meta_ads"]
+    assert by_type["data_stale"]["source_connectors"] == ["tiendanube"]
+    assert by_type["stockout_risk"]["latest_evidence_at"] == "2026-05-24T07:00:00Z"
+    assert by_type["sales_drop"]["latest_evidence_at"] == "2026-05-24T06:00:00Z"
+    assert by_type["data_stale"]["latest_evidence_at"] == "2026-05-24T05:00:00Z"
 
 
 def test_freshness_state_collapses_to_most_severe_when_multiple_snapshots():
