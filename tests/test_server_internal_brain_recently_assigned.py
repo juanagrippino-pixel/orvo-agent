@@ -186,6 +186,9 @@ def test_recently_assigned_returns_scoped_in_flight_cases_ordered_newest_first_a
     assert body["redaction_applied"] is True
     data = body["data"]
     assert data["business_id"] == "artemea"
+    assert data["projection_type"] == "recent_case_activity"
+    assert data["activity_type"] == "assigned"
+    assert data["total"] == 2
     assert data["assigned_total"] == 2
     assert data["limit"] == 1
     assert data["count"] == 1

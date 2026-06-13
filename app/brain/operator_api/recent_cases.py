@@ -57,14 +57,13 @@ def list_recently_resolved_cases(
         }
         for _resolved_at, _case_id, case in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "resolved_total": len(resolved),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="resolved",
+        legacy_total_key="resolved_total",
+        total=len(resolved),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 def list_recently_opened_cases(
@@ -104,14 +103,13 @@ def list_recently_opened_cases(
         }
         for _opened_at, _case_id, case in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "open_total": len(opened),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="opened",
+        legacy_total_key="open_total",
+        total=len(opened),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 def list_recently_acknowledged_cases(
@@ -156,14 +154,13 @@ def list_recently_acknowledged_cases(
         }
         for _acknowledged_at, _case_id, case in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "acknowledged_total": len(acknowledged),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="acknowledged",
+        legacy_total_key="acknowledged_total",
+        total=len(acknowledged),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 def list_recently_assigned_cases(
@@ -205,14 +202,13 @@ def list_recently_assigned_cases(
         }
         for assigned_at, _case_id, case in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "assigned_total": len(assigned),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="assigned",
+        legacy_total_key="assigned_total",
+        total=len(assigned),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 def _latest_transition_to_at(case: OperationalCase, status: str) -> datetime | None:
@@ -280,14 +276,13 @@ def list_recently_in_progress_cases(
         }
         for in_progress_at, _case_id, case in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "in_progress_total": len(in_progress),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="in_progress",
+        legacy_total_key="in_progress_total",
+        total=len(in_progress),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 
@@ -332,14 +327,13 @@ def list_recently_reopened_cases(
         }
         for reopened_at, _case_id, case in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "reopened_total": len(reopened),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="reopened",
+        legacy_total_key="reopened_total",
+        total=len(reopened),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 
@@ -381,14 +375,13 @@ def list_recently_dismissed_cases(
         }
         for dismissed_at, _case_id, case in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "dismissed_total": len(dismissed),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="dismissed",
+        legacy_total_key="dismissed_total",
+        total=len(dismissed),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 

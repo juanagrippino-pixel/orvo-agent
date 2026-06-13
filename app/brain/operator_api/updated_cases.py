@@ -61,14 +61,13 @@ def list_recently_updated_cases(
         }
         for latest_at, _case_id, case, latest_event in limited
     ]
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "updated_total": len(updated),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="updated",
+        legacy_total_key="updated_total",
+        total=len(updated),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )
 
 

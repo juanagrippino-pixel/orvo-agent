@@ -65,6 +65,9 @@ def test_returns_empty_when_no_cases():
 
     assert result == {
         "business_id": "artemea",
+        "projection_type": "recent_case_activity",
+        "activity_type": "opened",
+        "total": 0,
         "open_total": 0,
         "cases": [],
         "limit": 50,

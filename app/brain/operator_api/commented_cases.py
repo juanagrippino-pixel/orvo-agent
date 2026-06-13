@@ -63,12 +63,11 @@ def list_recently_commented_cases(
             }
         )
 
-    return redact_secrets(
-        {
-            "business_id": business_id,
-            "commented_total": len(commented),
-            "cases": cases_payload,
-            "limit": parsed_limit,
-            "count": len(cases_payload),
-        }
+    return build_recent_case_activity_payload(
+        business_id=business_id,
+        activity_type="commented",
+        legacy_total_key="commented_total",
+        total=len(commented),
+        cases_payload=cases_payload,
+        limit=parsed_limit,
     )

@@ -184,6 +184,9 @@ def test_recently_opened_returns_scoped_open_cases_ordered_newest_first(_isolate
     assert body["redaction_applied"] is True
     data = body["data"]
     assert data["business_id"] == "artemea"
+    assert data["projection_type"] == "recent_case_activity"
+    assert data["activity_type"] == "opened"
+    assert data["total"] == 2
     assert data["open_total"] == 2
     assert data["limit"] == 1
     assert data["count"] == 1

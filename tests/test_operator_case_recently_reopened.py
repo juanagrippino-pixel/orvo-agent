@@ -114,13 +114,16 @@ def _reopen(
     )
 
 
-def test_returns_empty_when_no_reopened_cases():
+def test_returns_empty_when_no_cases():
     store = InMemoryOperationalCaseStore()
 
     result = list_recently_reopened_cases(store, business_id="artemea")
 
     assert result == {
         "business_id": "artemea",
+        "projection_type": "recent_case_activity",
+        "activity_type": "reopened",
+        "total": 0,
         "reopened_total": 0,
         "cases": [],
         "limit": 50,

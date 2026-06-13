@@ -178,6 +178,38 @@ def normalize_case_assignee(assignee_ref: Any, owner_ref: Any) -> str:
         raise OperatorAPIError("invalid_assignee_ref", "assignee_ref must be a non-empty string", status_code=400)
     return redact_text(normalized) or "[REDACTED]"
 
+
+def build_recent_case_activity_payload(
+    *,
+    business_id: str,
+    activity_type: str,
+    legacy_total_key: str,
+    total: int,
+    cases_payload: list[dict[str, Any]],
+    limit: int,
+) -> dict[str, Any]:
+    """Return a normalized recent-activity envelope for canonical and legacy routes.
+
+    Specialized ``recently-*`` projections remain backward-compatible by keeping
+    their legacy ``*_total`` keys, but they also expose the shared
+    ``recent_case_activity`` metadata used by the consolidated recent-activity
+    surface. This lets legacy aliases stay thin projections over the same
+    semantic model instead of drifting into bespoke envelopes.
+    """
+
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "projection_type": "recent_case_activity",
+            "activity_type": activity_type,
+            "total": total,
+            legacy_total_key: total,
+            "cases": cases_payload,
+            "limit": limit,
+            "count": len(cases_payload),
+        }
+    )
+
 _ACTIONABLE_STATUSES = ACTIONABLE_OPERATIONAL_CASE_STATUSES
 
 

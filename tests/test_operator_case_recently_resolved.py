@@ -68,13 +68,16 @@ def _resolve(
     )
 
 
-def test_list_recently_resolved_cases_returns_empty_when_no_cases():
+def test_returns_empty_when_no_cases():
     store = InMemoryOperationalCaseStore()
 
     result = list_recently_resolved_cases(store, business_id="artemea")
 
     assert result == {
         "business_id": "artemea",
+        "projection_type": "recent_case_activity",
+        "activity_type": "resolved",
+        "total": 0,
         "resolved_total": 0,
         "cases": [],
         "limit": 50,
