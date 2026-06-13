@@ -575,6 +575,54 @@ def summarize_case_queue_by_source_connector(
     )
 
 
+def summarize_case_queue_by_severity(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Severity-split deterministic counts over the case queue.
+
+    Mirrors :func:`summarize_case_queue` but groups lifecycle, actionable, and
+    actionable-degraded counts by case ``severity`` (info / warning / critical),
+    matching the attribution used by
+    :func:`summarize_case_queue_aging_by_severity`,
+    :func:`summarize_case_queue_stagnation_by_severity`, and
+    :func:`summarize_case_workflow_throughput_by_severity`. Lets operator
+    surfaces lead with how much of the in-flight backlog is critical work and
+    where degraded evidence concentrates by severity even when the
+    priority-bracket / case-type / entity-kind / source-connector distributions
+    look balanced. ``total`` counts the full lifecycle (open + acknowledged +
+    resolved); ``actionable_*`` counts isolate the in-flight slice. Strictly
+    scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    totals_by_severity: dict[str, int] = {}
+    actionable_by_severity: dict[str, int] = {}
+    actionable_degraded_by_severity: dict[str, int] = {}
+    actionable_total = 0
+    for case in cases:
+        severity = case.severity
+        totals_by_severity[severity] = totals_by_severity.get(severity, 0) + 1
+        if case.status in _ACTIONABLE_STATUSES:
+            actionable_total += 1
+            actionable_by_severity[severity] = (
+                actionable_by_severity.get(severity, 0) + 1
+            )
+            if _is_degraded(case):
+                actionable_degraded_by_severity[severity] = (
+                    actionable_degraded_by_severity.get(severity, 0) + 1
+                )
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "total": len(cases),
+            "actionable_total": actionable_total,
+            "totals_by_severity": totals_by_severity,
+            "actionable_by_severity": actionable_by_severity,
+            "actionable_degraded_by_severity": actionable_degraded_by_severity,
+        }
+    )
+
+
 def summarize_case_queue_aging(
     store: OperationalCaseStore,
     *,
