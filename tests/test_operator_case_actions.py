@@ -305,6 +305,42 @@ def test_apply_case_action_with_idempotency_requires_key_before_mutation_or_ledg
     assert len(reloaded.timeline) == original_timeline_length
 
 
+def test_apply_case_action_with_idempotency_rejects_secret_shaped_key_before_ledger_or_case_lookup():
+    """Idempotency keys are audit identifiers, not credential carriers."""
+
+    store = InMemoryOperationalCaseStore()
+    ledger = InMemoryWorkflowActionLedgerStore()
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+    original_timeline_length = len(opened.timeline)
+
+    for bad_key in (
+        "access_token=raw_idempotency_secret",
+        "Bearer live_token_123",
+        "https://callback.example.test/orders?access_token=raw_idempotency_secret",
+    ):
+        with pytest.raises(OperatorAPIError) as exc:
+            apply_case_action_with_idempotency(
+                store,
+                ledger,
+                business_id="artemea",
+                case_id=opened.case_id,
+                action_key="add_comment",
+                idempotency_key=bad_key,
+                actor_ref="operator@example.com",
+                comment="Secret-shaped idempotency key must not be persisted",
+            )
+
+        assert exc.value.code == "invalid_idempotency_key"
+        assert exc.value.status_code == 400
+        assert "raw_idempotency_secret" not in str(exc.value)
+        assert "live_token_123" not in str(exc.value)
+
+    assert ledger.list_actions(business_id="artemea") == []
+    reloaded = store.get_case(opened.case_id)
+    assert reloaded is not None
+    assert len(reloaded.timeline) == original_timeline_length
+
+
 def test_apply_case_action_with_idempotency_failed_existing_key_blocks_replay_and_mutation():
     store = InMemoryOperationalCaseStore()
     ledger = InMemoryWorkflowActionLedgerStore()
