@@ -21,6 +21,7 @@ from app.brain.operational_cases import (
     OperationalCaseStatusError,
     SQLiteOperationalCaseStore,
     detect_cases_from_report,
+    make_data_stale_detection,
     owner_facing_actionable_cases,
 )
 from app.brain.operator_api.projections import case_detail
@@ -343,6 +344,70 @@ def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():
 
     with pytest.raises(OperationalCaseStatusError):
         store.transition_case(opened.case_id, status="open", actor_type="operator", actor_ref="juan")
+
+
+def test_data_stale_recurrence_reopens_terminal_case_without_manual_transition():
+    store = InMemoryOperationalCaseStore()
+
+    opened = store.upsert_detection(
+        make_data_stale_detection(
+            business_id="artemea",
+            connector_type="tiendanube",
+            run_id="run-stale-1",
+            error_summary="Connector token expired",
+        ),
+        detected_at=utc_dt(8),
+    )
+    acknowledged = store.transition_case(
+        opened.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        reason="Lo reviso hoy",
+        transitioned_at=utc_dt(9),
+    )
+    resolved = store.transition_case(
+        opened.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        reason="Token renovado",
+        transitioned_at=utc_dt(10),
+    )
+
+    assert acknowledged.status == "acknowledged"
+    assert resolved.status == "resolved"
+    assert resolved.resolved_at == utc_dt(10)
+
+    reopened = store.upsert_detection(
+        make_data_stale_detection(
+            business_id="artemea",
+            connector_type="tiendanube",
+            run_id="run-stale-2",
+            error_summary="Connector failed again",
+        ),
+        detected_at=utc_dt(12),
+    )
+
+    assert reopened.case_id == opened.case_id
+    assert reopened.status == "open"
+    assert reopened.resolved_at is None
+    assert reopened.dismissed_at is None
+    assert reopened.acknowledged_at is None
+    assert reopened.latest_run_id == "run-stale-2"
+    assert reopened.source_run_ids == ["run-stale-1", "run-stale-2"]
+    assert reopened.evidence_refs == [
+        "evidence://tiendanube/run-stale-1/data_stale",
+        "evidence://tiendanube/run-stale-2/data_stale",
+    ]
+    assert reopened.artifact_refs == [
+        "ledger://runs/run-stale-1/failure",
+        "ledger://runs/run-stale-2/failure",
+    ]
+    assert reopened.timeline[-1].event_type == "case_reopened"
+    assert reopened.timeline[-1].actor_type == "system"
+    assert reopened.timeline[-1].summary == "Reopened data_stale case from deterministic detection."
+    assert len(store.list_cases(business_id="artemea", status="open")) == 1
 
 
 def test_operational_case_model_enforces_dismissed_at_lifecycle_invariants():
