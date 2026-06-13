@@ -80,6 +80,7 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["sla_target_seconds"] == 2 * 60 * 60
     assert projection["due_at"] == "2026-05-24T10:00:00Z"
     assert projection["sla_status"] == "pending"
+    assert projection["assigned_at"] is None
     assert projection["assignee_ref"] is None
     assert projection["evidence_snapshot_ids"] == [case.evidence_snapshots[0].snapshot_id]
     assert projection["evidence_snapshot_count"] == 1
@@ -403,6 +404,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["assigned_at"] == {
+        "field": "assigned_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert fields["due_at"] == {
         "field": "due_at",
         "value_type": "datetime",
@@ -488,6 +497,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {
+        "assigned_at",
         "comment_count",
         "last_event_at",
         "last_comment_at",
