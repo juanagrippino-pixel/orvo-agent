@@ -278,7 +278,7 @@ def test_detect_cases_from_report_attaches_canonical_case_metrics_and_advisory_i
         report=report,
         run_id="run-1",
         artifact_ref="ledger://runs/run-1/daily-report",
-        metric_registry_mode="enforced",
+        metric_registry_mode="advisory",
     )
 
     assert report.model_dump(mode="json") == original_report_dump
@@ -292,7 +292,7 @@ def test_detect_cases_from_report_attaches_canonical_case_metrics_and_advisory_i
             "index": 1,
         }
     ]
-    assert detections[0].metadata["metric_registry_mode"] == "enforced"
+    assert detections[0].metadata["metric_registry_mode"] == "advisory"
     assert detections[0].title == "Stock crítico"
     assert detections[0].metadata["recommended_action"] == "Reponer stock."
     assert len(detections[0].evidence_snapshots) == 1
@@ -301,6 +301,79 @@ def test_detect_cases_from_report_attaches_canonical_case_metrics_and_advisory_i
     assert snapshot.metrics[0].label == "Unidades en stock"
     assert snapshot.metrics[0].value == 3
     assert snapshot.metrics[0].unit == "units"
+
+
+def test_detect_cases_from_report_enforced_mode_suppresses_case_when_insight_source_has_unknown_metric():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source]),
+            Metric(key="custom.owner_note_metric", label="Owner note", value="manual", evidence=[source]),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    advisory_detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-advisory",
+        metric_registry_mode="advisory",
+    )
+    enforced_detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-enforced",
+        metric_registry_mode="enforced",
+    )
+
+    assert [detection.case_type for detection in advisory_detections] == ["stockout_risk"]
+    assert enforced_detections == []
+
+
+def test_detect_cases_from_report_enforced_mode_ignores_unknown_metric_from_unrelated_source():
+    case_source = Evidence(source="tiendanube", label="Tiendanube")
+    unrelated_source = Evidence(source="google_sheets", label="Ventas manuales")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[case_source]),
+            Metric(
+                key="custom.owner_note_metric",
+                label="Owner note",
+                value="manual",
+                evidence=[unrelated_source],
+            ),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[case_source],
+            )
+        ],
+    )
+
+    detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-enforced",
+        metric_registry_mode="enforced",
+    )
+
+    assert [detection.case_type for detection in detections] == ["stockout_risk"]
 
 
 def test_detect_cases_from_report_enforced_mode_suppresses_case_without_registered_case_metrics():
