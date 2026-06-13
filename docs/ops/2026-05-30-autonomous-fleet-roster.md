@@ -1,15 +1,15 @@
 # Orvo autonomous fleet roster
 
-Status: Active
+Status: Historical roster snapshot
 Generated: 2026-05-30
-Provider policy: LLM-driven Orvo jobs use `openai-codex` / `gpt-5.5`; OpenRouter is fallback only.
-Source of truth: `docs/organization/2026-05-30-codex-24-7-autonomous-operating-system.md`
+Provider policy: Historical Codex-first policy; current provider/model is governed by the active job charter, with current N2 Pro jobs documented in `docs/organization/2026-05-30-N2-Pro-24-7-autonomous-operating-system.md`.
+Source of truth: `docs/organization/2026-05-30-N2-Pro-24-7-autonomous-operating-system.md` plus historical `docs/organization/2026-05-30-codex-24-7-autonomous-operating-system.md`.
 
 ## Summary
 
 - Total relevant jobs: 29
 - Script/no-agent watchdog/runtime jobs: 10
-- LLM-driven Codex/org jobs: 19
+- LLM-driven Codex/org jobs at 2026-05-30 snapshot: 19
 - All agent-driven Orvo jobs must have `workdir=/root/orvo-agent`.
 - Cron-run agents must not create/update/pause/remove/schedule cron jobs unless their explicit charter is ops/controller work from the current human session.
 
@@ -28,9 +28,9 @@ Source of truth: `docs/organization/2026-05-30-codex-24-7-autonomous-operating-s
 | `1a9687d40758` | Orvo Claude Code QA-review direct worker | every 180m | `orvo_claude_qa_review.sh` |
 | `a6c402fefa1c` | Hermes Daily Backup | daily 06:00 UTC | `hermes_backup.sh` |
 
-## LLM-driven Codex jobs
+## LLM-driven jobs (historical Codex roster)
 
-All jobs in this table are pinned to `openai-codex/gpt-5.5` and `workdir=/root/orvo-agent`.
+At the 2026-05-30 snapshot, these jobs were pinned to `openai-codex/gpt-5.5` and `workdir=/root/orvo-agent`; current provider/model routing is governed by the active job charter.
 
 | Job ID | Name | Schedule | Department |
 |---|---|---|---|
