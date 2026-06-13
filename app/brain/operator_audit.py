@@ -14,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.brain.audit_scope import audit_business_display_id, audit_business_scope_key
-from app.brain.security.redaction import redact_secrets, redact_text
+from app.brain.security.redaction import is_secret_key, redact_secrets, redact_text
 
 
 DEFAULT_OPERATOR_AUDIT_RETENTION_DAYS = 90
@@ -80,6 +80,25 @@ def _redact_audit_identifier(value: str | None) -> str | None:
         return None
     redacted = redact_text(value) or "[REDACTED]"
     return redacted if redacted == value else "[REDACTED]"
+
+
+def _redact_audit_payload(value: Any) -> Any:
+    """Redact audit payloads and remove secret-key labels from operator exports."""
+
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            key = str(raw_key)
+            if is_secret_key(key):
+                redacted["[REDACTED]"] = "[REDACTED]"
+            else:
+                redacted[key] = _redact_audit_payload(raw_value)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_audit_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_audit_payload(item) for item in value)
+    return redact_secrets(value)
 
 
 class SQLiteOperatorAuditStore:
@@ -173,13 +192,13 @@ class SQLiteOperatorAuditStore:
                     {
                         "event_id": event_id,
                         "business_id": audit_business_display_id(row_business_id),
-                        "actor_ref": actor_ref,
-                        "event_type": event_type,
-                        "target_type": target_type,
-                        "target_id": target_id,
-                        "request_id": request_id,
+                        "actor_ref": _redact_audit_identifier(actor_ref),
+                        "event_type": _redact_audit_identifier(event_type),
+                        "target_type": _redact_audit_identifier(target_type),
+                        "target_id": _redact_audit_identifier(target_id),
+                        "request_id": _redact_audit_identifier(request_id),
                         "created_at": created_at,
-                        "data": data,
+                        "data": _redact_audit_payload(data),
                     }
                 )
             )

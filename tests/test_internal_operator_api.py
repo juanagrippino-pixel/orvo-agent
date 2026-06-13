@@ -4364,6 +4364,7 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     raw_body = admin.get_data(as_text=True)
     assert "raw_audit_secret" not in raw_body
     assert "cmF3X2F1ZGl0X3NlY3JldA==" not in raw_body
+    assert "access_token" not in raw_body
     body = admin.get_json()
     assert body["ok"] is True
     assert body["redaction_applied"] is True
@@ -4377,7 +4378,7 @@ def test_internal_operator_audit_export_is_admin_only_and_redacted(monkeypatch, 
     assert event["target_type"] == "operational_case"
     assert event["target_id"] == case.case_id
     assert event["data"]["error_code"] == "unknown_action_key"
-    assert event["data"]["payload"]["metadata"]["access_token"] == "[REDACTED]"
+    assert event["data"]["payload"]["metadata"]["[REDACTED]"] == "[REDACTED]"
     denial = events_by_request["req-audit-export-denied"]
     assert denial["event_type"] == "operator.authorization.denied"
     assert denial["data"]["permission"] == "operator_audit:read"
