@@ -99,6 +99,7 @@ def export_case_queue_csv(
     store: OperationalCaseStore,
     *,
     business_id: str,
+    view_id: str | None = None,
     jql: str | None = None,
     status: str | None = None,
     limit: str | None = None,
@@ -109,6 +110,7 @@ def export_case_queue_csv(
     return export(
         store,
         business_id=business_id,
+        view_id=view_id,
         jql=jql,
         status=status,
         limit=limit,
