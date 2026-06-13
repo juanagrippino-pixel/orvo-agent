@@ -10,6 +10,7 @@ from .operator_audit import register_operator_audit_routes
 from .runs_delivery import register_run_delivery_routes
 from .runtime import register_runtime_routes
 from .session import register_session_routes
+from .workflow_actions import register_workflow_action_routes
 
 
 def register_internal_brain_routes(app):
@@ -23,3 +24,4 @@ def register_internal_brain_routes(app):
     register_dashboard_view_routes(app)
     register_operator_audit_routes(app)
     register_run_delivery_routes(app)
+    register_workflow_action_routes(app)
