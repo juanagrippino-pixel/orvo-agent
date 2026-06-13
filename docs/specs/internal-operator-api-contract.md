@@ -44,7 +44,8 @@ GET /internal/brain/businesses/{business_id}/connectors/readiness
 ```
 
 Returns registry validation, secret-ref presence, required scopes/capabilities,
-and last health state.
+and last health state. Last-health projections include connector timestamps and
+derived `duration_ms` when a finished timestamp is available.
 
 ### Force dry run
 
