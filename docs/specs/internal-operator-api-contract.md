@@ -111,28 +111,15 @@ including the stable JQL string plus normalized filter/sort metadata for UI
 selection. Unknown view IDs fail with the same stable redacted
 `case_view_not_found` envelope used by other case-view selectors.
 
-`status_category`, and `work_item_id`. JQL-lite and case facets are read-only,
-route-scoped projections over the canonical WorkItem field registry; supported
-fields include `project`, `issue_type`, `release_state`, `status_category`,
-`assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. Case
-facets may be scoped either by allowlisted `jql` or by a built-in read-only
-`view_id`, but never both at once. The API must reject unsupported
-fields/operators/values instead of translating user input into SQL or allowing
-query text to own business scope.
-
-`/case-query-fields` is a read-only metadata projection over the same canonical
-WorkItem field registry. Without `field`, it returns allowlisted fields, value
-types, operators, sortability, and facetability for UI/query builders. With
-`field={field}`, it returns one allowlisted field definition or a stable redacted
-`unsupported_jql_field` error; unsupported values never become source-of-truth
-state or SQL fragments.
-
-`/case-query-fields` is a read-only metadata projection over the same canonical
-WorkItem field registry. Without `field`, it returns allowlisted fields, value
-types, operators, sortability, and facetability for UI/query builders. With
-`field={field}`, it returns one allowlisted field definition or a stable redacted
-`unsupported_jql_field` error; unsupported values never become source-of-truth
-state or SQL fragments.
+Case facets accept allowlisted filters such as `status`, `status_category`,
+and `work_item_id`. JQL-lite and case facets are read-only, route-scoped
+projections over the canonical WorkItem field registry; supported fields include
+`project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`,
+`priority_bracket`, `source_connector`, and `degraded`. Case facets may be
+scoped either by allowlisted `jql` or by a built-in read-only `view_id`, but
+never both at once. The API must reject unsupported fields/operators/values
+instead of translating user input into SQL or allowing query text to own
+business scope.
 
 `/case-query-fields` is a read-only metadata projection over the same canonical
 WorkItem field registry. Without `field`, it returns allowlisted fields, value
