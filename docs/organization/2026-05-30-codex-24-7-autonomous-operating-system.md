@@ -1,16 +1,17 @@
 # Orvo Brain + Atlassian control-plane 24/7 operating system
 
-Status: Active operating mode
+Status: Historical provider-specific operating mode
 Date: 2026-05-30
 Codex provider: `openai-codex`
 Model: `gpt-5.5`
 Canonical branch: `feat/orvo-brain-control-plane`
 Canonical repo: `/root/orvo-agent`
 Worker root: `/root/orvo-agent-worktrees`
+Superseded by: [`2026-05-30-N2-Pro-24-7-autonomous-operating-system.md`](2026-05-30-N2-Pro-24-7-autonomous-operating-system.md) for current N2 Pro jobs.
 
 ## Operating decision
 
-The Codex plan is renewed and becomes the primary execution path again. OpenRouter is not the normal route for Orvo work; it remains an emergency fallback only when explicitly requested or when Codex is hard-blocked.
+The Codex plan was renewed on 2026-05-30 and became the primary execution path at that time. For current N2 Pro cron jobs, see [`2026-05-30-N2-Pro-24-7-autonomous-operating-system.md`](2026-05-30-N2-Pro-24-7-autonomous-operating-system.md); that note supersedes only provider routing rules, not this product/control-plane operating model.
 
 The autonomous system must now run as a real product organization building an Atlassian-like D2C ecommerce operations control plane, not as a report bot or generic agent demo.
 
@@ -58,8 +59,8 @@ The organization is split by bounded ownership, not by random feature generation
 
 ## 24/7 execution rules
 
-1. **Codex-first**: recurring LLM-driven jobs should run on `openai-codex` / `gpt-5.5` unless explicitly overridden.
-2. **No stale OpenRouter mode**: do not route normal Orvo work to qwen/OpenRouter.
+1. **Provider note**: this historical Codex document is superseded for current N2 Pro cron jobs by `2026-05-30-N2-Pro-24-7-autonomous-operating-system.md`; use the active job charter for model/provider routing.
+2. **No stale mode assumptions**: do not assume Codex/OpenRouter rules from this file still apply; current jobs must state their provider explicitly.
 3. **No recursive cron changes**: cron-run agents must not create/update/pause/resume/remove/schedule cron jobs unless their explicit charter is Orvo ops under controller supervision.
 4. **External worktrees only**: implementation jobs create/edit `/root/orvo-agent-worktrees/<lane>`; parent repo stays clean unless an integration controller is explicitly committing verified docs/integrations.
 5. **One bounded slice per implementation run**: TDD first, focused tests, then broader `pytest -q` when feasible.

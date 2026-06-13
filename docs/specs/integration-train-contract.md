@@ -27,7 +27,7 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ### 2026-06-12 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `23c115eb` (`feat/orvo-brain-control-plane`). This supersedes the 2026-06-11 checkpoint and incorporates the 2026-06-12 Architecture Review Board review of N2-Pro branches. The 2026-06-12 review found `N2-Pro/connector-platform` to be the best merge-ready candidate, while `n2-pro-work-management`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, and `N2-Pro/search-analytics` need narrow fixer/split work because they delete tests or regress semantic validation, evidence, or audit behavior. Destructive `claude/*` refactor branches remain not mergeable as reviewed.
+The current repository `HEAD` before this reconciliation is `f671559a` (`feat/orvo-brain-control-plane`). This supersedes the 2026-06-11 checkpoint and incorporates the latest 2026-06-12 Architecture Review Board review in `docs/architecture-reviews/2026-06-12-review.md`. The latest review keeps `N2-Pro/connector-platform`, `N2-Pro/workflow-automation`, and `N2-Pro/trust-admin-security` as merge-ready candidates, marks `N2-Pro/search-analytics` as merge-ready with rebase recommended, and keeps `n2-pro-work-management` plus `N2-Pro/operator-surfaces` as needs-work branches. Destructive `claude/*` refactor branches remain not mergeable as reviewed.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
@@ -44,25 +44,26 @@ Recent shipped baseline facts, grounded in repo inspection:
 
 Recommended order from this checkpoint:
 
-1. **Patch-id review and split remaining Work Management value**
-   - Treat case-family release-state metadata, system reopen workflow metadata, and owner/worker timeline actor taxonomy as integrated. Do not revive or direct-merge broad `codex/work-management` history just to re-land those pieces.
-   - Gate: remaining slices must be narrow and additive, such as evidence-lineage refinements or SLA-compatible metadata. They must preserve `OperationalCase` as lifecycle source of truth and keep manual/operator transitions separate from deterministic system transitions.
+1. **Merge connector-platform after normal test pass**
+   - Treat `N2-Pro/connector-platform` as the best small merge-ready candidate because it projects connector readiness from registry metadata and preserves the compiled-runtime/ledger path.
+   - Gate: full `pytest -q`, diff check, and no regression to connector secret/runtime behavior.
 
-2. **Keep workflow automation projection-only until executor foundations exist**
-   - Treat approval-request matching as integrated. Future workflow work can improve audit projections and trigger coverage, but broad side-effect execution remains blocked.
-   - Gate: any real executor requires provider idempotency proof, an execution-attempt ledger, RBAC/action-scope checks, retry/failure semantics, redacted external response audit, and tests proving no side-effect path can bypass approval/idempotency/audit.
+2. **Merge workflow automation and trust/admin hardening after rebase/test verification**
+   - Treat `N2-Pro/workflow-automation` as merge-ready because it preserves deterministic/idempotent workflow architecture and adds useful case-scoped audit and multi-connector condition matching.
+   - Treat `N2-Pro/trust-admin-security` as merge-ready for internal operator hardening, while keeping the caveat that RBAC remains transitional/header-derived and is not external Admin/SaaS launch readiness.
+   - Gate: rebase onto the current baseline, run focused workflow/audit/operator tests, and confirm no semantic-validation or audit-redaction regressions.
 
-3. **Trust/Admin patch-id review after global delivery-status hardening**
-   - Treat safe actor refs, safe internal error codes, Basic-auth redaction, denial audits, non-ASCII auth fail-closed behavior, redacted action principals, and the delivery-status admin/all-business boundary as integrated.
-   - Gate: external Admin launch still requires explicit role and explicit business claims everywhere; legacy default role=`operator` and `allowed_businesses=None` remain internal-migration compatibility only.
+3. **Rebase and merge search analytics as a canonical query-layer slice**
+   - Treat `N2-Pro/search-analytics` as merge-ready with rebase recommended because it exposes canonical query metadata and CSV export through the shared case-query layer.
+   - Gate: rebase first; keep WorkItem/JQL/facet/view registries as the source of truth for query vocabulary; reject any local KPI or endpoint-local field semantics.
 
-4. **Connector-platform hardening after resolved-secret bindings**
-   - Treat Packet Q's resolved-secret binding work as integrated; the next connector milestone is connector instance/health-history/provisioning audit storage plus typed stale/unauthorized/rate-limit paths.
-   - Gate: registry -> compiled runtime -> run ledger -> semantic validation -> cases remains the execution path; runtime hashes and operator metadata never include secret values; raw secret material exists only on execution-scoped resolved copies.
+4. **Split Work Management value upward into SLA/policy primitives**
+   - Keep the useful WorkItem/SLA projection ideas from `n2-pro-work-management`, but do not merge the branch as-is.
+   - Gate: move default SLA seconds and policy semantics out of low-level case mutation helpers into an explicit policy/scheme object before treating SLA as merge-complete.
 
-5. **Split broad operator/search surface branches by generic primitives**
-   - Decompose `codex/operator-surfaces` and `codex/search-analytics`; do not merge wholesale while they conflict with newer activity/API/test files or invent local query vocabulary.
-   - Gate: every endpoint remains read-only, business-scoped, redacted at the API boundary, and backed by shared service/query helpers over `OperationalCase`, WorkItem projections, JQL-lite, facets, or the run ledger. Owner brief previews must expose case IDs, evidence/freshness, and registered action keys; WhatsApp copy is never the action/state contract.
+5. **Refactor operator surfaces toward shared case-query/view primitives**
+   - Keep `N2-Pro/operator-surfaces` in needs-work mode until bespoke endpoints are reduced or backed by shared query/view helpers.
+   - Gate: no new surface may duplicate `store.list_cases(...)` projection logic; use built-in views, WorkItem query fields, facets, and canonical case projections instead.
 
 6. **Service-management/SLA as nested projections**
    - Integrate `codex/service-management` only as Jira Service Management-style projections over canonical cases and only when the slice is D2C-pilot useful.

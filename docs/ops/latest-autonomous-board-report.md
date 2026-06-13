@@ -65,8 +65,8 @@ Commits/deliverables destacados desde `491e9c88`:
    - 107 ramas locales + 148 remotas no mergeadas.
    - Riesgo: volver a meter drift semántico, test deletions o endpoints bespoke por merge apurado.
 
-4. **Las ramas amplias N2-Pro siguen necesitando split/fixer, no merge directo.**
-   - El contrato de integración 2026-06-12 sigue marcando `work-management`, `workflow-automation`, `trust-admin-security`, `operator-surfaces` y `search-analytics` como valiosas pero demasiado anchas o regresivas en su forma actual.
+4. **Latest ARB reconciliation supersedes this pre-review line.**
+   - `docs/architecture-reviews/2026-06-12-review.md` now marks `N2-Pro/connector-platform`, `N2-Pro/workflow-automation`, and `N2-Pro/trust-admin-security` as merge-ready; `N2-Pro/search-analytics` as merge-ready with rebase recommended; and `n2-pro-work-management` plus `N2-Pro/operator-surfaces` as needs-work.
 
 5. **Cuidado con scope creep comercial/técnico.**
    - El plan correcto hoy es “centro operativo / PyME OS slice”.
@@ -89,8 +89,7 @@ Orden recomendado hoy:
    - Puede ser buen follow-up si toca evidencia/timeline/case dedupe sin expandir superficie.
 
 4. **Ramas N2-Pro amplias** (`n2-pro-work-management`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, `N2-Pro/search-analytics`).
-   - Mantenerlas en modo split/fixer según `docs/specs/integration-train-contract.md`.
-   - No hacer merge wholesale.
+   - Mantener el orden de integración según `docs/specs/integration-train-contract.md` y la revisión ARB más reciente: no hacer merge wholesale; `connector-platform`, `workflow-automation`, `trust-admin-security` y `search-analytics` requieren gates de rebase/tests, mientras `work-management` y `operator-surfaces` siguen en needs-work.
 
 ## 6. Próximas acciones autónomas recomendadas
 
