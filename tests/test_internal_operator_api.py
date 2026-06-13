@@ -143,6 +143,26 @@ def _client(monkeypatch, tmp_path):
     return app.test_client(), db_path
 
 
+def test_internal_read_routes_return_safe_error_when_store_unavailable(monkeypatch, tmp_path):
+    missing_parent_db_path = tmp_path / "missing-parent" / "operator.sqlite3"
+    monkeypatch.setenv("ORVO_BRAIN_DB_PATH", str(missing_parent_db_path))
+    monkeypatch.setenv("ORVO_INTERNAL_OPERATOR_TOKEN", "test-internal-token")
+    from server import app
+
+    response = app.test_client().get("/internal/brain/businesses/artemea/cases", headers=AUTH)
+
+    assert response.status_code == 503
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"] == {
+        "code": "internal_store_unavailable",
+        "message": "Internal store unavailable.",
+        "safe_to_show_owner": False,
+    }
+    assert body["redaction_applied"] is True
+
+
 def test_internal_success_envelope_redacts_secret_shaped_request_id(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())
