@@ -813,4 +813,54 @@ def test_upsert_data_stale_cases_is_noop_when_store_or_business_missing():
     assert no_business.case_ids == []
     assert no_business.opened_count == 0
     assert no_business.updated_count == 0
-    assert store.list_cases() == [], "missing business_id must not persist any case"
+
+
+# Audit contract regression: a single report can carry two actionable insights
+# that map to the same case family (e.g. "Stock crítico" + "Ads activos con
+# stock bajo — pausar campañas" both route to stockout_risk). They must merge
+# into one case via dedupe_key, and the mutation summary — which feeds run
+# ledger `operational_case_ids` and the audited `cases_opened`/`cases_updated`
+# counters — must count that case exactly once, not once per insight.
+def test_upsert_cases_from_report_counts_same_run_dedupe_collision_once():
+    from app.brain.operational_cases import upsert_cases_from_report
+
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            ),
+            Insight(
+                severity="critical",
+                title="Ads activos con stock bajo — pausar campañas",
+                explanation="Campañas activas apuntan a productos sin stock.",
+                recommended_action="Pausar campañas.",
+                evidence=[source],
+            ),
+        ],
+    )
+    store = InMemoryOperationalCaseStore()
+
+    summary = upsert_cases_from_report(
+        case_store=store,
+        business_id="artemea",
+        report=report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+
+    [case] = store.list_cases(business_id="artemea")
+    assert case.dedupe_key == "artemea/stockout_risk/business/monitored/commerce.inventory/daily"
+    assert summary.case_ids == [case.case_id], "run ledger must not reference the same case twice"
+    assert summary.opened_count == 1
+    assert summary.updated_count == 0, "a case opened by this run must not also count as updated"
+    timeline_types = [event.event_type for event in case.timeline]
+    assert timeline_types == ["case_opened", "case_updated"], (
+        "both detections must remain audited on the case timeline"
+    )
