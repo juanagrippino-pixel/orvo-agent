@@ -185,6 +185,8 @@ def _connector_projection(
         required_scopes: list[str] = []
         emitted_metric_families: list[str] = []
         emitted_event_families: list[str] = []
+        supported_runtime_modes: list[str] = []
+        executor_factory_path: str | None = None
     else:
         validation_issues = spec.validate_control_plane_config(
             params=connector.params,
@@ -199,6 +201,9 @@ def _connector_projection(
         required_scopes = list(spec.scopes.required)
         emitted_metric_families = list(spec.emitted_metric_families)
         emitted_event_families = list(spec.emitted_event_families)
+        assert spec.executor is not None
+        supported_runtime_modes = list(spec.executor.supported_runtime_modes)
+        executor_factory_path = spec.factory_path
 
     latest = latest_outcomes.get(f"id:{connector.connector_id}")
     if latest is None and connector_type_counts.get(connector.connector_type, 0) == 1:
@@ -230,6 +235,8 @@ def _connector_projection(
         **setup,
         "capabilities": capabilities,
         "required_scopes": required_scopes,
+        "supported_runtime_modes": supported_runtime_modes,
+        "executor_factory_path": executor_factory_path,
         "emitted_metric_families": emitted_metric_families,
         "emitted_event_families": emitted_event_families,
         "required_config_fields": list(spec.required_config_fields) if spec is not None else [],
