@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from importlib import import_module
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
+from urllib.parse import parse_qsl, urlsplit
 
 from app.brain.connector_health import CONNECTOR_HEALTH_STATES, ConnectorHealthState
+from app.brain.security.redaction import is_secret_key
 from app.brain.semantics.metric_registry import (
     MetricRegistry,
     MetricValidationIssue,
@@ -112,7 +114,22 @@ def _declared_health_state_for_event(
 def is_secret_ref_handle(value: object) -> bool:
     """Return True when a value is an opaque secret manager reference."""
 
-    return isinstance(value, str) and value.startswith("secret://") and len(value) > len("secret://")
+    if not isinstance(value, str) or not value.startswith("secret://") or len(value) <= len("secret://"):
+        return False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    if parts.scheme != "secret":
+        return False
+    if not parts.netloc and not parts.path:
+        return False
+    if parts.username is not None or parts.password is not None:
+        return False
+    return not any(
+        key.lower().replace("-", "_") == "code" or is_secret_key(key)
+        for key, _ in parse_qsl(parts.query, keep_blank_values=True)
+    )
 
 
 class UnknownConnectorError(ValueError):
