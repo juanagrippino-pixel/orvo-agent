@@ -2291,7 +2291,7 @@ def test_internal_case_acknowledgment_latency_by_severity_redacts_secret_busines
     assert body["business_id"] == "[REDACTED]"
     assert body["redaction_applied"] is True
     data = body["data"]
-    assert data["business_id"] == "artemea access_token=[REDACTED]"
+    assert data["business_id"] == "[REDACTED]"
     assert data["acknowledged_total"] == 1
     assert data["by_acknowledgment_bucket_severity"]["under_1h"] == {"critical": 1}
     assert data["fastest_acknowledged"]["case_id"] == case.case_id
@@ -4000,6 +4000,37 @@ def test_internal_dashboard_endpoint_rejects_non_integer_limit_with_safe_envelop
     assert body["error"]["code"] == "invalid_limit"
     assert body["error"]["message"] == "limit must be an integer"
     assert body["redaction_applied"] is True
+
+
+def test_internal_dashboard_endpoint_collapses_secret_shaped_business_id_in_data(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    secret_business_id = "artemea refresh_token=raw_dashboard_business_secret"
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id=secret_business_id,
+            run_id="run-secret-dashboard-business",
+            dedupe_suffix="stockout_risk/product/sku-secret-dashboard/commerce.inventory/daily",
+        ),
+    )
+    _seed_run(db_path, business_id=secret_business_id, run_id="run-secret-dashboard-business")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea%20refresh_token=raw_dashboard_business_secret/dashboard",
+        headers={**AUTH, "X-Request-ID": "req-secret-dashboard-business"},
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_dashboard_business_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "[REDACTED]"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "[REDACTED]"
+    assert data["case_queue_summary"]["business_id"] == "[REDACTED]"
+    assert data["run_history"]["runs"][0]["business_id"] == "[REDACTED]"
 
 
 def test_internal_endpoints_require_configured_bearer_token(monkeypatch, tmp_path):
