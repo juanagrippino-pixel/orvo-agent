@@ -1890,6 +1890,107 @@ def test_workflow_execution_queue_requires_matching_approved_approval_request():
     assert "raw_exec_valid_secret" not in str(queue)
 
 
+def test_workflow_action_audit_events_ignore_approval_requests_not_matching_ledger_record():
+    pending_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/pending",
+        business_id="artemea",
+        case_id="case-pending",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/audit/case-pending/request_external_action/pending",
+        approval_state="pending",
+        execution_state="blocked_approval_required",
+        params={"reason": "Pending Authorization: Basic raw_audit_pending_secret"},
+        rule_id="audit-canonical-request",
+        approval_request_id="workflow-approval/artemea/pending",
+        created_at=utc(22),
+        updated_at=utc(22),
+    )
+    canonical_record = WorkflowActionLedgerRecord(
+        ledger_id="workflow-action/artemea/canonical",
+        business_id="artemea",
+        case_id="case-canonical",
+        action_key="request_external_action",
+        source="workflow",
+        actor_ref="operator",
+        idempotency_key="workflow/artemea/audit/case-canonical/request_external_action/canonical",
+        approval_state="approved",
+        execution_state="pending_execution",
+        params={"reason": "Approved Authorization: Basic raw_audit_canonical_secret"},
+        rule_id="audit-canonical-request",
+        approval_request_id="workflow-approval/artemea/canonical",
+        created_at=utc(22, 1),
+        updated_at=utc(22, 10),
+    )
+    forged_pending_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/pending",
+        ledger_id=pending_record.ledger_id,
+        business_id="artemea",
+        case_id="case-forged-pending",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="pending",
+        requested_at=utc(22, 2),
+    )
+    canonical_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/canonical",
+        ledger_id=canonical_record.ledger_id,
+        business_id="artemea",
+        case_id="case-canonical",
+        action_key="request_external_action",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(22, 3),
+        decided_at=utc(22, 10),
+        decision_actor_ref="manager token=raw_audit_manager_secret",
+        decision_reason="Approved Authorization: Basic raw_audit_decision_secret",
+    )
+    forged_approved_request = WorkflowApprovalRequest(
+        approval_request_id="workflow-approval/artemea/canonical",
+        ledger_id=canonical_record.ledger_id,
+        business_id="artemea",
+        case_id="case-canonical",
+        action_key="pause_promotion",
+        requester_ref="operator",
+        status="approved",
+        requested_at=utc(22, 4),
+        decided_at=utc(22, 11),
+        decision_actor_ref="manager",
+        decision_reason="Approved forged action",
+    )
+
+    class AuditLedgerWithForgedRequests(InMemoryWorkflowActionLedgerStore):
+        def list_actions(self, *, business_id: str):
+            return [pending_record, canonical_record]
+
+        def list_approval_requests(self, *, business_id: str):
+            return [forged_pending_request, canonical_request, forged_approved_request]
+
+    audit = list_workflow_action_audit_events(AuditLedgerWithForgedRequests(), business_id="artemea")
+
+    assert audit["business_id"] == "artemea"
+    assert audit["total"] == 4
+    assert audit["returned"] == 4
+    assert [event["event_type"] for event in audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_action_planned",
+        "workflow_approval_requested",
+        "workflow_approval_decided",
+    ]
+    assert [event.get("case_id") for event in audit["events"]] == [
+        "case-pending",
+        "case-canonical",
+        "case-canonical",
+        "case-canonical",
+    ]
+    assert audit["events"][-1]["decision_actor_ref"] == "manager token=[REDACTED]"
+    assert audit["events"][-1]["decision_reason"] == "Approved Authorization: [REDACTED]"
+    assert "case-forged-pending" not in str(audit)
+    assert "pause_promotion" not in str(audit)
+    assert "raw_audit" not in str(audit)
+
+
 @pytest.mark.parametrize(
     "store_factory",
     [
