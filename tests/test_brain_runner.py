@@ -292,6 +292,14 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
                     "code": "undeclared_family",
                     "key": "unanswered_conversations",
                     "index": 4,
+                    "message": (
+                        "Metric key 'unanswered_conversations' (canonical "
+                        "'support.conversations.unanswered_count') has family "
+                        "'support.conversations' which is not declared in connector "
+                        "'google_sheets' emitted_metric_families=['commerce.orders', "
+                        "'commerce.revenue', 'commerce.inventory', 'runtime.freshness', "
+                        "'runtime.data_quality']"
+                    ),
                 }
             ],
         },

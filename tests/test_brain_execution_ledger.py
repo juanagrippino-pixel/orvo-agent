@@ -4,7 +4,12 @@ import pytest
 
 from app.brain.config import BusinessConfig, ConnectorConfig
 from app.brain.dispatch import ReportDispatchResult
-from app.brain.execution_ledger import record_pipeline_failure, record_pipeline_success
+from app.brain.execution_ledger import (
+    _event_certification_metadata,
+    _metric_certification_metadata,
+    record_pipeline_failure,
+    record_pipeline_success,
+)
 from app.brain.models import DailyReport, Evidence, Metric
 from app.brain.operational_cases import InMemoryOperationalCaseStore
 from app.brain.pipeline import PipelineResult
@@ -13,6 +18,68 @@ from app.brain.run_ledger import InMemoryRunLedger
 
 def utc_dt(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 5, 24, hour, minute, tzinfo=timezone.utc)
+
+
+def test_event_certification_metadata_includes_issue_messages_for_connector_logging():
+    certification = _event_certification_metadata(
+        "google_sheets",
+        ["connector.execution.succeeded", "connector.health.paused"],
+    )
+
+    assert certification == {
+        "status": "warning",
+        "issue_count": 1,
+        "events": [
+            "connector.execution.succeeded",
+            "connector.health.paused",
+        ],
+        "issues": [
+            {
+                "code": "undeclared_health_state",
+                "event_type": "connector.health.paused",
+                "index": 1,
+                "message": (
+                    "google_sheets connector emitted health state paused outside declared "
+                    "health states: ok, degraded, stale, unauthorized, rate_limited, failed"
+                ),
+            }
+        ],
+    }
+
+
+def test_metric_certification_metadata_includes_issue_messages_for_connector_logging():
+    certification = _metric_certification_metadata(
+        "google_sheets",
+        [
+            Metric(
+                key="unanswered_conversations",
+                label="Chats sin responder",
+                value=5,
+                unit="count",
+                evidence=[Evidence(source="google_sheets", label="Sheet Artemea")],
+            )
+        ],
+    )
+
+    assert certification == {
+        "status": "warning",
+        "issue_count": 1,
+        "issues": [
+            {
+                "code": "undeclared_family",
+                "key": "unanswered_conversations",
+                "index": 0,
+                "message": (
+                    "Metric key 'unanswered_conversations' (canonical "
+                    "'support.conversations.unanswered_count') has family "
+                    "'support.conversations' which is not declared in connector "
+                    "'google_sheets' emitted_metric_families=['commerce.orders', "
+                    "'commerce.revenue', 'commerce.inventory', 'runtime.freshness', "
+                    "'runtime.data_quality']"
+                ),
+            }
+        ],
+    }
 
 
 def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_state():
