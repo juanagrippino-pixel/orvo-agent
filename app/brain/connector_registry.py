@@ -90,6 +90,25 @@ def _event_type_value(event: object) -> str:
     return event_type
 
 
+def _declared_health_state_for_event(
+    health_event_suffix: str,
+    *,
+    allowed_health_states: tuple[ConnectorHealthState, ...],
+) -> ConnectorHealthState | None:
+    """Resolve the canonical declared health state for a concrete health event.
+
+    Health event types may append detail after the canonical registry state, such
+    as ``connector.health.rate_limited.retry_scheduled``. Certification should
+    accept those detailed events only when their leading canonical health state
+    is declared for the connector.
+    """
+
+    for allowed_state in allowed_health_states:
+        if health_event_suffix == allowed_state or health_event_suffix.startswith(f"{allowed_state}."):
+            return allowed_state
+    return None
+
+
 def is_secret_ref_handle(value: object) -> bool:
     """Return True when a value is an opaque secret manager reference."""
 
@@ -669,7 +688,11 @@ class ConnectorSpec:
                 and event_type.startswith(health_prefix)
             ):
                 health_state = event_type.removeprefix(health_prefix)
-                if health_state not in allowed_health_states:
+                declared_health_state = _declared_health_state_for_event(
+                    health_state,
+                    allowed_health_states=allowed_health_states,
+                )
+                if declared_health_state is None:
                     issues.append(
                         ConnectorEventValidationIssue(
                             code="undeclared_health_state",
