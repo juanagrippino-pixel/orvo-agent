@@ -23,11 +23,14 @@ from app.brain.work_items import (
     allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
     case_issue_type,
+    case_last_event_at,
+    case_last_event_type,
     case_owner_visible,
     case_priority_bracket,
     case_project_key,
     case_sla_status,
     case_status_category,
+    case_timeline_event_count,
     case_type_release_state,
     work_item_query_field_spec,
 )
@@ -431,6 +434,12 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return len(case.evidence_snapshots)
     if field == "evidence_source_count":
         return len(_case_source_connectors(case))
+    if field == "timeline_event_count":
+        return case_timeline_event_count(case)
+    if field == "last_event_at":
+        return case_last_event_at(case)
+    if field == "last_event_type":
+        return case_last_event_type(case)
     if field == "project":
         return case_project_key(case)
     if field == "issue_type":

@@ -29,6 +29,7 @@ from app.brain.operational_cases import (
     SLA_STATUS_NOT_APPLICABLE,
     SLA_STATUS_NOT_CONFIGURED,
     SLA_STATUS_PENDING,
+    TimelineEventType,
     is_owner_facing_operational_case,
     operational_case_status_category,
     operational_case_system_status_transitions,
@@ -113,6 +114,14 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("evidence_snapshot_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("evidence_source_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("timeline_event_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("last_event_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition(
+        "last_event_type",
+        "enum",
+        frozenset(get_args(TimelineEventType)),
+        facetable=True,
+    ),
     WorkItemQueryFieldDefinition(
         "sla_status",
         "enum",
@@ -299,6 +308,22 @@ def case_latest_evidence_at(case: OperationalCase) -> datetime | None:
     return latest_evidence_at(case)
 
 
+def case_timeline_event_count(case: OperationalCase) -> int:
+    return len(case.timeline)
+
+
+def case_last_event_at(case: OperationalCase) -> datetime | None:
+    if not case.timeline:
+        return None
+    return max(event.created_at for event in case.timeline)
+
+
+def case_last_event_type(case: OperationalCase) -> str | None:
+    if not case.timeline:
+        return None
+    return max(case.timeline, key=lambda event: event.created_at).event_type
+
+
 def case_source_connectors(case: OperationalCase) -> list[str]:
     return source_connectors(case)
 
@@ -334,6 +359,9 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "source_connectors": case_source_connectors(case),
         "latest_evidence_at": _iso_utc(case_latest_evidence_at(case)) if case_latest_evidence_at(case) is not None else None,
         "degraded": case_evidence_is_degraded(case),
+        "timeline_event_count": case_timeline_event_count(case),
+        "last_event_at": _iso_utc(case_last_event_at(case)) if case_last_event_at(case) is not None else None,
+        "last_event_type": case_last_event_type(case),
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
         "case_id": case.case_id,
