@@ -20,7 +20,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.brain.action_catalog import ACTION_CATALOG
 from app.brain.models import DailyReport, Insight, Metric
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
-from app.brain.semantics import CASE_FAMILY_METRICS, default_metric_registry, validate_metrics
+from app.brain.semantics import (
+    CASE_FAMILY_METRICS,
+    default_metric_registry,
+    validate_case_metric_objects,
+    validate_metrics,
+)
 
 OperationalCaseStatus = Literal["open", "acknowledged", "in_progress", "resolved", "dismissed"]
 OperationalCaseStatusCategory = Literal["to_do", "in_progress", "done"]
@@ -57,6 +62,7 @@ READINESS_GATED_OPERATIONAL_CASE_TYPES: frozenset[str] = (
 )
 OperationalCaseSeverity = Literal["info", "warning", "critical"]
 EvidenceFreshnessState = Literal["fresh", "stale", "degraded", "missing", "unknown"]
+MetricRegistryMode = Literal["advisory", "enforced"]
 TimelineEventType = Literal[
     "case_opened",
     "case_updated",
@@ -1148,6 +1154,7 @@ def _data_stale_detection_for_suppressed_case(
     suppressed_case_type: OperationalCaseType,
     source: str,
     freshness_state: EvidenceFreshnessState,
+    metric_registry_mode: MetricRegistryMode = "advisory",
     run_id: str | None,
     artifact_ref: str | None,
 ) -> OperationalCaseDetection:
@@ -1183,7 +1190,7 @@ def _data_stale_detection_for_suppressed_case(
                     "suppressed_case_families": [suppressed_case_type],
                     "insight_title": insight.title,
                     "suggested_action_keys": _suggested_action_keys_for_case_type("data_stale"),
-                    **_metric_registry_metadata(report),
+                    **_metric_registry_metadata(report, mode=metric_registry_mode),
                 },
                 "evidence_snapshots": [snapshot],
             },
@@ -1224,12 +1231,52 @@ def _case_evidence_metrics_for_source(
     return evidence_metrics
 
 
-def _metric_registry_metadata(report: DailyReport) -> dict[str, Any]:
+def _case_metric_objects_for_sources(
+    *,
+    report: DailyReport,
+    case_type: OperationalCaseType,
+    sources: Iterable[str],
+) -> list[Metric]:
+    registry = default_metric_registry()
+    allowed_case_keys = set(CASE_FAMILY_METRICS.get(case_type, ()))
+    source_set = set(sources)
+    case_metrics: list[Metric] = []
+    for metric in report.metrics:
+        metric_sources = _metric_sources(metric)
+        if source_set and not source_set.intersection(metric_sources):
+            continue
+        canonical_key = registry.try_resolve_key(metric.key)
+        if canonical_key is None or canonical_key not in allowed_case_keys:
+            continue
+        case_metrics.append(metric)
+    return case_metrics
+
+
+def _case_detection_allowed_by_metric_registry(
+    *,
+    report: DailyReport,
+    insight: Insight,
+    case_type: OperationalCaseType,
+    mode: MetricRegistryMode,
+) -> bool:
+    if mode != "enforced":
+        return True
+    case_metrics = _case_metric_objects_for_sources(
+        report=report,
+        case_type=case_type,
+        sources=[evidence.source for evidence in insight.evidence],
+    )
+    if not case_metrics:
+        return False
+    return not validate_case_metric_objects(case_metrics)
+
+
+def _metric_registry_metadata(report: DailyReport, *, mode: MetricRegistryMode = "advisory") -> dict[str, Any]:
     issues = validate_metrics(report.metrics, strict=False)
     if not issues:
         return {}
     return {
-        "metric_registry_mode": "advisory",
+        "metric_registry_mode": mode,
         "metric_registry_issues": [asdict(issue) for issue in issues],
     }
 
@@ -1326,6 +1373,7 @@ def detect_cases_from_report(
     report: DailyReport,
     run_id: str | None = None,
     artifact_ref: str | None = None,
+    metric_registry_mode: MetricRegistryMode = "advisory",
 ) -> list[OperationalCaseDetection]:
     detections: list[OperationalCaseDetection] = []
     seen_dedupe_keys: set[str] = set()
@@ -1343,12 +1391,20 @@ def detect_cases_from_report(
                     suppressed_case_type=case_type,
                     source=source,
                     freshness_state=freshness_state,
+                    metric_registry_mode=metric_registry_mode,
                     run_id=run_id,
                     artifact_ref=artifact_ref,
                 )
                 if stale_detection.dedupe_key not in seen_dedupe_keys:
                     detections.append(stale_detection)
                     seen_dedupe_keys.add(stale_detection.dedupe_key)
+            continue
+        if not _case_detection_allowed_by_metric_registry(
+            report=report,
+            insight=insight,
+            case_type=case_type,
+            mode=metric_registry_mode,
+        ):
             continue
         detection = OperationalCaseDetection(
             business_id=business_id,
@@ -1366,7 +1422,7 @@ def detect_cases_from_report(
                 "insight_explanation": insight.explanation,
                 "recommended_action": insight.recommended_action,
                 "suggested_action_keys": _suggested_action_keys_for_case_type(case_type),
-                **_metric_registry_metadata(report),
+                **_metric_registry_metadata(report, mode=metric_registry_mode),
             },
         )
         source_states = {evidence.source: _source_freshness_state(report, source=evidence.source) for evidence in insight.evidence}
@@ -1418,6 +1474,7 @@ def upsert_cases_from_report(
         report=report,
         run_id=run_id,
         artifact_ref=artifact_ref,
+        metric_registry_mode="enforced",
     ):
         existing = case_store.find_by_dedupe_key(detection.business_id, detection.dedupe_key)
         case = case_store.upsert_detection(detection)

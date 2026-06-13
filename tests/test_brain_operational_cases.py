@@ -23,6 +23,7 @@ from app.brain.operational_cases import (
     detect_cases_from_report,
     make_data_stale_detection,
     owner_facing_actionable_cases,
+    upsert_cases_from_report,
 )
 from app.brain.operator_api.projections import case_detail
 from app.brain.storage import init_schema
@@ -277,6 +278,7 @@ def test_detect_cases_from_report_attaches_canonical_case_metrics_and_advisory_i
         report=report,
         run_id="run-1",
         artifact_ref="ledger://runs/run-1/daily-report",
+        metric_registry_mode="enforced",
     )
 
     assert report.model_dump(mode="json") == original_report_dump
@@ -290,7 +292,7 @@ def test_detect_cases_from_report_attaches_canonical_case_metrics_and_advisory_i
             "index": 1,
         }
     ]
-    assert detections[0].metadata["metric_registry_mode"] == "advisory"
+    assert detections[0].metadata["metric_registry_mode"] == "enforced"
     assert detections[0].title == "Stock crítico"
     assert detections[0].metadata["recommended_action"] == "Reponer stock."
     assert len(detections[0].evidence_snapshots) == 1
@@ -299,6 +301,88 @@ def test_detect_cases_from_report_attaches_canonical_case_metrics_and_advisory_i
     assert snapshot.metrics[0].label == "Unidades en stock"
     assert snapshot.metrics[0].value == 3
     assert snapshot.metrics[0].unit == "units"
+
+
+def test_detect_cases_from_report_enforced_mode_suppresses_case_without_registered_case_metrics():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(
+                key="custom.stock_alarm",
+                label="Alerta de stock importada",
+                value=2,
+                unit="units",
+                evidence=[source],
+            )
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="La alerta vino de una métrica no registrada.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    advisory_detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-advisory",
+        metric_registry_mode="advisory",
+    )
+    enforced_detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-enforced",
+        metric_registry_mode="enforced",
+    )
+
+    assert [detection.case_type for detection in advisory_detections] == ["stockout_risk"]
+    assert enforced_detections == []
+
+
+def test_upsert_cases_from_report_uses_enforced_metric_registry_gate():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(
+                key="custom.stock_alarm",
+                label="Alerta de stock importada",
+                value=2,
+                unit="units",
+                evidence=[source],
+            )
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="La alerta vino de una métrica no registrada.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+    store = InMemoryOperationalCaseStore()
+
+    summary = upsert_cases_from_report(
+        case_store=store,
+        business_id="artemea",
+        report=report,
+        run_id="run-upsert",
+        artifact_ref="ledger://runs/run-upsert/daily-report",
+    )
+
+    assert summary.case_ids == []
+    assert summary.opened_count == 0
+    assert summary.updated_count == 0
+    assert store.list_cases(business_id="artemea") == []
 
 
 def test_in_memory_operational_case_store_upserts_dedupe_and_tracks_lifecycle():
@@ -1432,6 +1516,7 @@ def test_upsert_cases_from_report_counts_same_run_dedupe_collision_once():
     report = DailyReport(
         business_name="Artemea",
         report_date=date(2026, 5, 24),
+        metrics=[Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source])],
         insights=[
             Insight(
                 severity="critical",
