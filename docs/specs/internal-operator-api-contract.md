@@ -86,8 +86,11 @@ POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 
 `/cases/export` returns a read-only CSV projection of the same route-scoped
 case queue. It accepts the same allowlisted `jql`, `status`, and `limit` guards
-as `/cases`, rejects unsupported query syntax with stable redacted errors, and
-does not persist custom views or translate query text into SQL. The export is a
+as `/cases`, plus a read-only built-in `view_id` selector that reuses the
+canonical case-view registry rather than creating endpoint-local filters.
+`view_id`, `jql`, and `status` are mutually exclusive; the API rejects
+unsupported query syntax or unknown views with stable redacted errors and does
+not persist custom views or translate query text into SQL. The export is a
 projection over `OperationalCase`/WorkItem state, not an alternate source of
 truth; raw response bodies are redacted at the HTTP boundary.
 

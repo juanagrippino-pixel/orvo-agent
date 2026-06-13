@@ -1047,6 +1047,55 @@ def test_case_queue_csv_export_uses_jql_scope_and_redacts_projection(monkeypatch
     assert critical.case_id in raw_body
 
 
+def test_case_queue_csv_export_supports_builtin_view_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    critical = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-export-view-critical",
+            priority=95,
+            title="Critical export view case",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            priority=80,
+            title="Warning export view case",
+            run_id="run-export-view-warning",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-export-view-other", priority=99))
+
+    with closing(sqlite3.connect(db_path)) as conn:
+        export = export_case_queue_csv(
+            SQLiteOperationalCaseStore(conn),
+            business_id="artemea",
+            view_id="critical_open",
+            limit="10",
+        )
+
+    rows = list(csv.DictReader(export["body"].splitlines()))
+    assert len(rows) == 1
+    assert rows[0]["case_id"] == critical.case_id
+    assert rows[0]["business_id"] == "artemea"
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"view_id": "critical_open"},
+    )
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert critical.case_id in raw_body
+    assert "Warning export view case" not in raw_body
+    assert "other" not in raw_body
+
+
+
 def test_case_queue_csv_export_rejects_conflicting_filters_and_invalid_format(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-export-conflict"))
@@ -1055,6 +1104,16 @@ def test_case_queue_csv_export_rejects_conflicting_filters_and_invalid_format(mo
         "/internal/brain/businesses/artemea/cases/export",
         headers=AUTH,
         query_string={"status": "open", "jql": "severity = critical"},
+    )
+    view_conflict = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"view_id": "critical_open", "jql": "severity = critical"},
+    )
+    missing_view = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"view_id": "missing"},
     )
     invalid_format = client.get(
         "/internal/brain/businesses/artemea/cases/export",
@@ -1069,6 +1128,10 @@ def test_case_queue_csv_export_rejects_conflicting_filters_and_invalid_format(mo
 
     assert conflict.status_code == 400
     assert conflict.get_json()["error"]["code"] == "conflicting_case_filters"
+    assert view_conflict.status_code == 400
+    assert view_conflict.get_json()["error"]["code"] == "conflicting_case_filters"
+    assert missing_view.status_code == 404
+    assert missing_view.get_json()["error"]["code"] == "case_view_not_found"
     assert invalid_format.status_code == 400
     assert invalid_format.get_json()["error"]["code"] == "invalid_export_format"
     assert unsafe_jql.status_code == 400

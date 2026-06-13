@@ -41,6 +41,7 @@ def register_case_summary_routes(app):
             export = export_case_queue_csv(
                 case_store,
                 business_id=business_id,
+                view_id=request.args.get("view_id"),
                 status=request.args.get("status"),
                 jql=request.args.get("jql"),
                 limit=request.args.get("limit"),

@@ -242,6 +242,7 @@ def export_case_queue_csv(
     store: OperationalCaseStore,
     *,
     business_id: str,
+    view_id: str | None = None,
     jql: str | None = None,
     status: str | None = None,
     limit: str | None = None,
@@ -259,9 +260,23 @@ def export_case_queue_csv(
     if export_format not in _CASE_EXPORT_FORMATS:
         raise OperatorAPIError("invalid_export_format", f"Unsupported export format: {export_format}", status_code=400)
 
-    if jql not in (None, ""):
-        if status not in (None, ""):
-            raise OperatorAPIError("conflicting_case_filters", "status and jql filters are mutually exclusive", status_code=400)
+    selected_filters = [
+        filter_name
+        for filter_name, filter_value in (("view_id", view_id), ("status", status), ("jql", jql))
+        if filter_value not in (None, "")
+    ]
+    if len(selected_filters) > 1:
+        raise OperatorAPIError(
+            "conflicting_case_filters",
+            "view_id, status, and jql filters are mutually exclusive",
+            status_code=400,
+        )
+
+    if view_id not in (None, ""):
+        view = get_builtin_case_view(str(view_id).strip())
+        queue = query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
+        rows = [_case_export_row(item) for item in queue["cases"]]
+    elif jql not in (None, ""):
         queue = query_case_queue(store, business_id=business_id, jql=jql, limit=limit)
         rows = [_case_export_row(item) for item in queue["cases"]]
     else:
