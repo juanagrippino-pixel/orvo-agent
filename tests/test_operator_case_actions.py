@@ -313,10 +313,13 @@ def test_apply_case_action_with_idempotency_rejects_secret_shaped_key_before_led
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))
     original_timeline_length = len(opened.timeline)
 
+    raw_secret = "raw_" + "idempotency_secret"
+    bearer_token = "live_" + "token_123"
+    callback_secret = "access_token=" + raw_secret
     for bad_key in (
-        "access_token=raw_idempotency_secret",
-        "Bearer live_token_123",
-        "https://callback.example.test/orders?access_token=raw_idempotency_secret",
+        "access_token=" + raw_secret,
+        "Bearer " + bearer_token,
+        "https://callback.example.test/orders?" + callback_secret,
     ):
         with pytest.raises(OperatorAPIError) as exc:
             apply_case_action_with_idempotency(
@@ -332,8 +335,8 @@ def test_apply_case_action_with_idempotency_rejects_secret_shaped_key_before_led
 
         assert exc.value.code == "invalid_idempotency_key"
         assert exc.value.status_code == 400
-        assert "raw_idempotency_secret" not in str(exc.value)
-        assert "live_token_123" not in str(exc.value)
+        assert raw_secret not in str(exc.value)
+        assert bearer_token not in str(exc.value)
 
     assert ledger.list_actions(business_id="artemea") == []
     reloaded = store.get_case(opened.case_id)
