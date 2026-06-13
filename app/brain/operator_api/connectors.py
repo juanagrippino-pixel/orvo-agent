@@ -165,6 +165,7 @@ def _connector_projection(
     *,
     registry: ConnectorRegistry,
     latest_outcomes: dict[str, tuple[str, ConnectorRunOutcome]],
+    connector_type_counts: dict[str, int],
 ) -> dict[str, Any]:
     spec: ConnectorSpec | None = registry.get(connector.connector_type) if registry.has(connector.connector_type) else None
     validation_issues: list[ConnectorValidationIssue]
@@ -199,9 +200,9 @@ def _connector_projection(
         emitted_metric_families = list(spec.emitted_metric_families)
         emitted_event_families = list(spec.emitted_event_families)
 
-    latest = latest_outcomes.get(f"id:{connector.connector_id}") or latest_outcomes.get(
-        f"type:{connector.connector_type}"
-    )
+    latest = latest_outcomes.get(f"id:{connector.connector_id}")
+    if latest is None and connector_type_counts.get(connector.connector_type, 0) == 1:
+        latest = latest_outcomes.get(f"type:{connector.connector_type}")
     last_health = _last_health_projection(latest)
     readiness_state = _readiness_state(
         connector=connector,
@@ -262,8 +263,18 @@ def connector_readiness_projection(
 
     effective_registry = registry or default_connector_registry()
     latest_outcomes = _last_connector_outcomes(ledger, business.business_id)
+    connector_type_counts: dict[str, int] = {}
+    for connector in business.connectors:
+        connector_type_counts[connector.connector_type] = (
+            connector_type_counts.get(connector.connector_type, 0) + 1
+        )
     connectors = [
-        _connector_projection(connector, registry=effective_registry, latest_outcomes=latest_outcomes)
+        _connector_projection(
+            connector,
+            registry=effective_registry,
+            latest_outcomes=latest_outcomes,
+            connector_type_counts=connector_type_counts,
+        )
         for connector in business.connectors
     ]
     states = [connector["readiness_state"] for connector in connectors]
