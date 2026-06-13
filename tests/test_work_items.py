@@ -261,11 +261,33 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["resolved_at"] == {
+        "field": "resolved_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["acknowledged_at"] == {
+        "field": "acknowledged_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
-    assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
+    assert allowed_work_item_query_sort_fields() == {
+        "acknowledged_at",
+        "opened_at",
+        "priority_score",
+        "resolved_at",
+        "updated_at",
+    }
     assert allowed_work_item_facet_fields() == {
         "assignee_ref",
         "case_type",

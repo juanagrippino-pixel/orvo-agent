@@ -76,10 +76,23 @@ Returns run status, connector outcomes, artifacts, dispatch status, cases opened
 
 ```http
 GET /internal/brain/businesses/{business_id}/cases
+GET /internal/brain/businesses/{business_id}/cases/export
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/cases/facets
+GET /internal/brain/businesses/{business_id}/case-query-fields
+GET /internal/brain/businesses/{business_id}/case-query-fields?field={field}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 ```
+
+`/cases/export` returns a read-only CSV projection of the same route-scoped
+case queue. It accepts the same allowlisted `jql`, `status`, and `limit` guards
+as `/cases`, plus a read-only built-in `view_id` selector that reuses the
+canonical case-view registry rather than creating endpoint-local filters.
+`view_id`, `jql`, and `status` are mutually exclusive; the API rejects
+unsupported query syntax or unknown views with stable redacted errors and does
+not persist custom views or translate query text into SQL. The export is a
+projection over `OperationalCase`/WorkItem state, not an alternate source of
+truth; raw response bodies are redacted at the HTTP boundary.
 
 Case queue and detail projections include WorkItem envelope fields derived from
 `OperationalCase`, including `project_key`, `issue_type`, `release_state`,
@@ -89,6 +102,13 @@ fields include `project`, `issue_type`, `release_state`, `status_category`,
 `assignee_ref`, `priority_bracket`, `source_connector`, and `degraded`. The
 API must reject unsupported fields/operators/values instead of translating user
 input into SQL or allowing query text to own business scope.
+
+`/case-query-fields` is a read-only metadata projection over the same canonical
+WorkItem field registry. Without `field`, it returns allowlisted fields, value
+types, operators, sortability, and facetability for UI/query builders. With
+`field={field}`, it returns one allowlisted field definition or a stable redacted
+`unsupported_jql_field` error; unsupported values never become source-of-truth
+state or SQL fragments.
 
 Actions must use registered action keys and append timeline events. Manual case-action
 requests must include a safe `X-Idempotency-Key`; missing/blank keys fail before
