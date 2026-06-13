@@ -95,10 +95,14 @@ stable redacted errors and does not persist custom views or translate query
 text into SQL.
 
 `/cases/export` returns a read-only CSV projection of the same route-scoped
-case queue and accepts the same `view_id` / `jql` / `status` guardrail.
-The export is a projection over `OperationalCase`/WorkItem state, not an
-alternate source of truth; raw response bodies are redacted at the HTTP
-boundary.
+case queue. It accepts the same allowlisted `jql`, `status`, and `limit` guards
+as `/cases`, plus a read-only built-in `view_id` selector that reuses the
+canonical case-view registry rather than creating endpoint-local filters.
+`view_id`, `jql`, and `status` are mutually exclusive; the API rejects
+unsupported query syntax or unknown views with stable redacted errors and does
+not persist custom views or translate query text into SQL. The export is a
+projection over `OperationalCase`/WorkItem state, not an alternate source of
+truth; raw response bodies are redacted at the HTTP boundary.
 
 Case queue and detail projections include WorkItem envelope fields derived from
 `OperationalCase`, including `project_key`, `issue_type`, `release_state`,
