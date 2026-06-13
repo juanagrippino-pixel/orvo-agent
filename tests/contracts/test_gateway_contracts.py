@@ -5,12 +5,15 @@ from app.brain.gateway_contracts import (
     GatewayRateLimitDecision,
     GatewayRateLimitPolicy,
     GatewayRequestContext,
+    GatewayRouteDecision,
+    GatewayRoutePolicy,
     authorization_scheme,
     build_gateway_context,
     build_gateway_audit_event,
     evaluate_gateway_rate_limit,
     normalize_idempotency_key,
     normalize_request_id,
+    validate_gateway_route_policy,
 )
 
 
@@ -146,3 +149,86 @@ def test_gateway_rate_limit_policy_without_limit_allows_by_default():
     assert evaluate_gateway_rate_limit(
         GatewayRateLimitPolicy(scope="operator"), current_requests=100
     ) == GatewayRateLimitDecision(allowed=True, retry_after_seconds=None)
+
+
+def test_gateway_route_policy_accepts_matching_context_and_rate_limit_snapshot():
+    context = build_gateway_context(
+        {
+            "X-Request-ID": "route-req",
+            "Idempotency-Key": "route:artemea:1",
+        },
+        route_key="internal.cases.ack",
+        business_id="artemea",
+        method="POST",
+    )
+    policy = GatewayRoutePolicy(
+        route_key="internal.cases.ack",
+        method="POST",
+        idempotency_mode="required",
+        requires_business_id=True,
+        rate_limit_policy=GatewayRateLimitPolicy(scope="business", requests_per_minute=2),
+    )
+
+    assert validate_gateway_route_policy(policy, context, current_requests=1) == GatewayRouteDecision(
+        allowed=True
+    )
+
+
+def test_gateway_route_policy_rejects_missing_idempotency_without_echoing_route_or_key():
+    context = build_gateway_context(
+        {},
+        route_key="internal.cases.ack",
+        business_id="artemea",
+        method="POST",
+    )
+    policy = GatewayRoutePolicy(
+        route_key="internal.cases.ack",
+        method="POST",
+        idempotency_mode="required",
+    )
+
+    decision = validate_gateway_route_policy(policy, context, current_requests=0)
+
+    assert decision == GatewayRouteDecision(allowed=False, reason="idempotency_key_required")
+
+
+def test_gateway_route_policy_rejects_rate_limit_without_echoing_secret_shaped_route_key():
+    context = build_gateway_context(
+        {"Idempotency-Key": "rate:artemea:1"},
+        route_key="internal.cases.ack",
+        business_id="artemea",
+        method="POST",
+    )
+    policy = GatewayRoutePolicy(
+        route_key="internal.cases.ack",
+        method="POST",
+        idempotency_mode="required",
+        rate_limit_policy=GatewayRateLimitPolicy(scope="business", requests_per_minute=1),
+    )
+
+    decision = validate_gateway_route_policy(policy, context, current_requests=1)
+
+    assert decision == GatewayRouteDecision(allowed=False, reason="rate_limited", retry_after_seconds=60)
+    with pytest.raises(GatewayContractError) as exc:
+        GatewayRoutePolicy(route_key="internal.access_token=raw_route_secret", method="POST")
+    assert exc.value.code == "invalid_route_key"
+    assert "raw_route_secret" not in str(exc.value)
+
+
+def test_gateway_route_policy_rejects_forbidden_idempotency_key():
+    context = build_gateway_context(
+        {"Idempotency-Key": "get:artemea:1"},
+        route_key="internal.cases.summary",
+        business_id="artemea",
+        method="GET",
+    )
+    policy = GatewayRoutePolicy(
+        route_key="internal.cases.summary",
+        method="GET",
+        idempotency_mode="forbidden",
+    )
+
+    assert validate_gateway_route_policy(policy, context, current_requests=0) == GatewayRouteDecision(
+        allowed=False,
+        reason="idempotency_key_forbidden",
+    )

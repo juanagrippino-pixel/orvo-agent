@@ -19,6 +19,7 @@ from app.brain.security.redaction import redact_secrets, redact_text
 RequestId = str
 RouteKey = str
 Method = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+GatewayIdempotencyMode = Literal["optional", "required", "forbidden"]
 
 _REQUEST_ID_LENGTH_LIMIT: int = 128
 _IDEMPOTENCY_KEY_LENGTH_LIMIT: int = 128
@@ -87,6 +88,40 @@ class GatewayRateLimitDecision:
     """Deterministic rate-limit decision for middleware/storage integration."""
 
     allowed: bool
+    retry_after_seconds: int | None = None
+
+
+@dataclass(frozen=True)
+class GatewayRoutePolicy:
+    """Allowlisted gateway policy for one route/method pair.
+
+    This is still deterministic and storage-agnostic. It lets future middleware
+    enforce idempotency, business scoping, and rate-limit decisions without
+    copying validation rules into Flask handlers.
+    """
+
+    route_key: RouteKey
+    method: Method
+    idempotency_mode: GatewayIdempotencyMode = "optional"
+    requires_business_id: bool = False
+    rate_limit_policy: GatewayRateLimitPolicy | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "route_key", _normalize_route_key(self.route_key))
+        object.__setattr__(self, "method", _normalize_method(self.method))
+        if self.idempotency_mode not in {"optional", "required", "forbidden"}:
+            raise GatewayContractError(
+                "invalid_gateway_route_policy",
+                "Idempotency mode must be optional, required, or forbidden.",
+            )
+
+
+@dataclass(frozen=True)
+class GatewayRouteDecision:
+    """Decision returned by a gateway route-policy evaluation."""
+
+    allowed: bool
+    reason: str | None = None
     retry_after_seconds: int | None = None
 
 
@@ -176,6 +211,12 @@ def _normalize_method(value: str | None) -> Method:
 
 
 def _normalize_route_key(route_key: str) -> RouteKey:
+    redacted = redact_text(route_key) or "[REDACTED]"
+    if redacted != route_key:
+        raise GatewayContractError(
+            "invalid_route_key",
+            "Route key contains unsafe material.",
+        )
     if _ROUTE_KEY_RE.fullmatch(route_key) is None:
         raise GatewayContractError(
             "invalid_route_key",
@@ -228,6 +269,38 @@ def evaluate_gateway_rate_limit(
         allowed=False,
         retry_after_seconds=policy.retry_after_seconds,
     )
+
+
+def validate_gateway_route_policy(
+    policy: GatewayRoutePolicy,
+    context: GatewayRequestContext,
+    *,
+    current_requests: int = 0,
+) -> GatewayRouteDecision:
+    """Evaluate a route policy against normalized gateway request context."""
+
+    if policy.route_key != context.route_key:
+        return GatewayRouteDecision(allowed=False, reason="route_key_mismatch")
+    if policy.method != context.method:
+        return GatewayRouteDecision(allowed=False, reason="method_mismatch")
+    if policy.requires_business_id and context.business_id is None:
+        return GatewayRouteDecision(allowed=False, reason="business_id_required")
+    if policy.idempotency_mode == "required" and context.idempotency_key is None:
+        return GatewayRouteDecision(allowed=False, reason="idempotency_key_required")
+    if policy.idempotency_mode == "forbidden" and context.idempotency_key is not None:
+        return GatewayRouteDecision(allowed=False, reason="idempotency_key_forbidden")
+    if policy.rate_limit_policy is not None:
+        rate_decision = evaluate_gateway_rate_limit(
+            policy.rate_limit_policy,
+            current_requests=current_requests,
+        )
+        if not rate_decision.allowed:
+            return GatewayRouteDecision(
+                allowed=False,
+                reason="rate_limited",
+                retry_after_seconds=rate_decision.retry_after_seconds,
+            )
+    return GatewayRouteDecision(allowed=True)
 
 
 def build_gateway_audit_event(

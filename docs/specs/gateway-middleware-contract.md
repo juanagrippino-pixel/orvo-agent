@@ -66,6 +66,22 @@ as `[REDACTED]`.
 a counter snapshot and returns `GatewayRateLimitDecision(allowed,
 retry_after_seconds)`.
 
+### Route policies
+
+`GatewayRoutePolicy` ties one normalized route/method pair to gateway
+expectations before a future Flask middleware delegates to business handlers:
+
+- `idempotency_mode`: `optional`, `required`, or `forbidden`;
+- `requires_business_id`: whether the normalized context must carry a business
+  routing label;
+- `rate_limit_policy`: optional `GatewayRateLimitPolicy` evaluated from a
+  deterministic counter snapshot.
+
+`validate_gateway_route_policy()` returns `GatewayRouteDecision(allowed,
+reason, retry_after_seconds)`. Denial reasons are stable strings such as
+`idempotency_key_required`, `rate_limited`, or `business_id_required`; they never
+echo caller-controlled route keys or idempotency values.
+
 ### Audit provenance
 
 `build_gateway_audit_event()` builds a redacted event envelope for gateway
@@ -82,7 +98,9 @@ The test suite verifies:
 - idempotency key validation without echoing invalid values;
 - safe authorization scheme extraction;
 - redacted audit event envelopes;
-- deterministic rate-limit decisions.
+- deterministic rate-limit decisions;
+- route-policy enforcement for idempotency, business scoping, rate limits, and
+  unsafe route-key material.
 
 ## Integration notes
 
