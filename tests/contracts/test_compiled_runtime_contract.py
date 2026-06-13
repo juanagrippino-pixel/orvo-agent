@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.brain.config import BusinessConfig, ConnectorConfig, ReportSchedule
@@ -51,6 +53,69 @@ def test_compiled_runtime_serializes_secret_refs_not_legacy_raw_secret_values():
         "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
     }
     assert connector.legacy_secret_param_names == ["access_token"]
+
+
+def test_runtime_metadata_redacts_secret_shaped_connector_identifiers():
+    from app.brain.models import InsightThresholds
+    from app.brain.runtime import (
+        CompiledBusinessRuntime,
+        CompiledConnectorRuntime,
+        CompiledDeliverySettings,
+        CompiledExecutionPlan,
+        CompiledReportSettings,
+        runtime_run_metadata,
+    )
+
+    runtime = CompiledBusinessRuntime(
+        runtime_id="runtime:artemea:test",
+        compiled_from_hash="sha256:test",
+        run_mode="forced",
+        business_id="artemea",
+        business_name="Artemea",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            CompiledConnectorRuntime(
+                connector_id="tn?access_token=raw_identifier_secret",
+                connector_type="tiendanube?api_key=raw_type_secret",
+                label="Connector token=raw_label_secret",
+                params={},
+                secret_refs={
+                    "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
+                },
+                required_params=[],
+                secret_param_names=["access_token"],
+                legacy_secret_param_names=["access_token"],
+                capabilities=["daily_report"],
+                emitted_metric_families=["commerce.revenue"],
+                emitted_event_families=["connector.execution"],
+                supported_runtime_modes=["forced"],
+                executor_factory_path="app.brain.adapters.tiendanube.build_daily_report_from_tiendanube",
+                health_policy={"readiness_check": "metadata_only"},
+                required_scopes=["orders.read"],
+                rate_limit_policy={"default_timeout_seconds": 30},
+                lifecycle={"status": "active"},
+            )
+        ],
+        report_schedules=[],
+        report_settings=CompiledReportSettings(insight_thresholds=InsightThresholds()),
+        delivery=CompiledDeliverySettings(owner_phone="+5491100000000"),
+        execution_plan=CompiledExecutionPlan(daily_connector_types=[], report_types=[]),
+    )
+
+    metadata = runtime_run_metadata(runtime)
+    serialized = json.dumps(metadata, sort_keys=True)
+
+    assert "raw_identifier_secret" not in serialized
+    assert "raw_type_secret" not in serialized
+    assert "raw_label_secret" not in serialized
+    connector = metadata["connector_refs"][0]
+    assert connector["connector_id"] == "[REDACTED]"
+    assert connector["connector_type"] == "[REDACTED]"
+    assert connector["label"] == "Connector token=[REDACTED]"
+    assert connector["secret_refs"] == {
+        "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
+    }
 
 
 def test_compiled_runtime_hash_is_stable_when_only_raw_legacy_secret_value_changes():

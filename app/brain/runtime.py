@@ -23,7 +23,7 @@ from app.brain.connector_registry import (
     default_connector_registry,
 )
 from app.brain.models import InsightThresholds
-from app.brain.security.redaction import is_secret_key, redact_secrets
+from app.brain.security.redaction import is_secret_key, redact_secrets, redact_uri
 
 RuntimeMode = Literal["preview", "forced", "scheduled", "operator_triggered"]
 
@@ -150,13 +150,26 @@ def runtime_run_metadata(runtime: CompiledBusinessRuntime) -> dict[str, Any]:
     }
 
 
+def _safe_runtime_identifier(value: str) -> str:
+    """Return an identifier safe for run-ledger metadata."""
+
+    redacted = redact_uri(value) or "[REDACTED]"
+    return redacted if redacted == value else "[REDACTED]"
+
+
+def _safe_runtime_label(value: str) -> str:
+    """Return a label safe for run-ledger metadata."""
+
+    return redact_uri(value) or "[REDACTED]"
+
+
 def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, Any]:
     """Return a safe registry-contract summary for run metadata."""
 
     return {
-        "connector_id": connector.connector_id,
-        "connector_type": connector.connector_type,
-        "label": connector.label,
+        "connector_id": _safe_runtime_identifier(connector.connector_id),
+        "connector_type": _safe_runtime_identifier(connector.connector_type),
+        "label": _safe_runtime_label(connector.label),
         "secret_refs": dict(connector.secret_refs),
         "required_params": list(connector.required_params),
         "secret_param_names": list(connector.secret_param_names),
