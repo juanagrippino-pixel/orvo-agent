@@ -30,6 +30,9 @@ _SAFE_OPERATIONAL_SECRET_NAMED_KEYS = {"legacy_token_scoped"}
 
 
 _BEARER_RE = re.compile(r"Bearer\s+[^\s,;]+", flags=re.IGNORECASE)
+_MULTI_TOKEN_AUTH_SCHEME_HEADER_RE = re.compile(
+    r"(?i)([\"']?\bauthorization\b[\"']?\s*[:=]\s*)(?:Digest|OAuth|AWS4-HMAC-SHA256)\s+[^;\r\n]+"
+)
 _AUTH_SCHEME_HEADER_RE = re.compile(
     r"(?i)([\"']?\bauthorization\b[\"']?\s*[:=]\s*)(?:Basic|Token|ApiKey|Api-Key)\s+[^\s,;]+"
 )
@@ -72,6 +75,7 @@ def redact_text(value: str | None) -> str | None:
     if value is None:
         return None
     redacted = _PRIVATE_KEY_BLOCK_RE.sub("[REDACTED_PRIVATE_KEY]", value)
+    redacted = _MULTI_TOKEN_AUTH_SCHEME_HEADER_RE.sub(lambda match: f"{match.group(1)}[REDACTED]", redacted)
     redacted = _AUTH_SCHEME_HEADER_RE.sub(lambda match: f"{match.group(1)}[REDACTED]", redacted)
     redacted = _BEARER_RE.sub("Bearer [REDACTED]", redacted)
     redacted = _QUOTED_KEY_VALUE_SECRET_RE.sub(

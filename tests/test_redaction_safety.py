@@ -36,3 +36,20 @@ def test_authorization_headers_are_redacted_without_credential_tail_leaks():
     assert redacted_structured["headers"]["Authorization"] == "[REDACTED]"
     assert redacted_structured["headers"]["x-request-id"] == "req-123"
     assert '"Authorization": "[REDACTED]"' in redacted_structured["error"]
+
+
+def test_digest_authorization_headers_are_redacted_without_parameter_tail_leaks():
+    digest_response = "digest_response_" + "raw_tail_secret"
+    oauth_signature = "oauth_signature_" + "raw_tail_secret"
+    inline = (
+        f'upstream failed Authorization: Digest username="orvo", response="{digest_response}"; '
+        f'retry with Authorization: OAuth oauth_consumer_key="orvo", oauth_signature="{oauth_signature}"'
+    )
+
+    redacted_inline = redact_text(inline)
+
+    assert redacted_inline is not None
+    assert digest_response not in redacted_inline
+    assert oauth_signature not in redacted_inline
+    assert "raw_tail_secret" not in redacted_inline
+    assert redacted_inline.count("Authorization: [REDACTED]") == 2
