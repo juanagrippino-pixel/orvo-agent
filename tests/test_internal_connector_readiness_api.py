@@ -206,6 +206,13 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         tiendanube["executor_factory_path"]
         == "app.brain.adapters.tiendanube.build_daily_report_from_tiendanube"
     )
+    assert tiendanube["executor_factory_params"][2] == {
+        "argument": "access_token",
+        "source": "resolved_secret_param",
+        "key": "access_token",
+        "required": True,
+        "fallback": None,
+    }
 
     disabled = connectors["csv-disabled"]
     assert disabled["readiness_state"] == "disabled"
@@ -518,6 +525,7 @@ def test_internal_connector_readiness_redacts_secret_shaped_connector_identifier
     assert connector["readiness_state"] == "unknown"
     assert connector["supported_runtime_modes"] == []
     assert connector["executor_factory_path"] is None
+    assert connector["executor_factory_params"] == []
     assert connector["setup_required"] is True
     assert connector["setup_reason"] == "unknown_connector_type"
     assert connector["operator_next_step"] == "register_or_disable_connector"

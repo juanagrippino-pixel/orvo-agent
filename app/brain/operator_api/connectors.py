@@ -224,6 +224,7 @@ def _connector_projection(
         emitted_event_families: list[str] = []
         supported_runtime_modes: list[str] = []
         executor_factory_path: str | None = None
+        executor_factory_params: list[dict[str, Any]] = []
     else:
         validation_issues = spec.validate_control_plane_config(
             params=connector.params,
@@ -242,6 +243,7 @@ def _connector_projection(
         emitted_event_families = contract_metadata["emitted_event_families"]
         supported_runtime_modes = contract_metadata["supported_runtime_modes"]
         executor_factory_path = contract_metadata["executor_factory_path"]
+        executor_factory_params = contract_metadata["executor_factory_params"]
 
     latest = latest_outcomes.get(f"id:{connector.connector_id}")
     if latest is None and connector_type_counts.get(connector.connector_type, 0) == 1:
@@ -276,6 +278,7 @@ def _connector_projection(
         "scope_notes": scope_notes,
         "supported_runtime_modes": supported_runtime_modes,
         "executor_factory_path": executor_factory_path,
+        "executor_factory_params": executor_factory_params,
         "emitted_metric_families": emitted_metric_families,
         "emitted_event_families": emitted_event_families,
         "required_config_fields": list(spec.required_config_fields) if spec is not None else [],
