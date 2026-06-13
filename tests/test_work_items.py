@@ -86,6 +86,8 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["evidence_source_count"] == 1
     assert projection["source_connectors"] == ["tiendanube"]
     assert projection["latest_evidence_at"] == "2026-05-24T08:00:00Z"
+    assert projection["comment_count"] == 0
+    assert projection["last_comment_at"] is None
     assert projection["timeline_event_count"] == 1
     assert projection["last_event_at"] == "2026-05-24T08:00:00Z"
     assert projection["last_event_type"] == "case_opened"
@@ -155,6 +157,53 @@ def test_case_work_item_projection_exposes_evidence_lineage(tmp_path):
     assert projection["evidence_snapshot_count"] == 2
     assert projection["evidence_source_count"] == 2
     assert projection["source_connectors"] == ["google_sheets", "tiendanube"]
+    assert projection["latest_evidence_at"] == "2026-05-24T09:30:00Z"
+
+
+def test_case_work_item_projection_tracks_comment_activity_separately_from_last_event(tmp_path):
+    db_path = tmp_path / "work-item-comment-activity.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-comment-activity", priority=87))
+    later_snapshot = case.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_id": "snapshot-comment-activity-google",
+            "snapshot_key": "run-comment-activity-google/evidence://artemea/run-comment-activity-google/stockout_risk/stockout_risk/business/monitored",
+            "captured_at": datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+            "run_id": "run-comment-activity-google",
+            "artifact_ref": "ledger://runs/run-comment-activity-google/daily-report",
+            "evidence_ref": "evidence://artemea/run-comment-activity-google/stockout_risk",
+            "source": "google_sheets",
+            "source_label": "Google Sheets",
+            "summary": "Stock snapshot from Google Sheets.",
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    case = store.add_comment(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Necesita seguimiento manual.",
+        commented_at=datetime(2026, 5, 24, 9, 15, tzinfo=timezone.utc),
+    )
+    case = store.attach_evidence(
+        case.case_id,
+        snapshots=[later_snapshot],
+        run_id="run-comment-activity-google",
+        artifact_ref="ledger://runs/run-comment-activity-google/daily-report",
+        summary="Attached Google Sheets evidence.",
+        attached_at=datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    projection = case_work_item_projection(case, now=datetime(2026, 5, 24, 10, tzinfo=timezone.utc))
+
+    assert projection["comment_count"] == 1
+    assert projection["last_comment_at"] == "2026-05-24T09:15:00Z"
+    assert projection["timeline_event_count"] == 3
+    assert projection["last_event_at"] == "2026-05-24T09:30:00Z"
+    assert projection["last_event_type"] == "evidence_attached"
     assert projection["latest_evidence_at"] == "2026-05-24T09:30:00Z"
 
 
@@ -394,6 +443,22 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["comment_count"] == {
+        "field": "comment_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["last_comment_at"] == {
+        "field": "last_comment_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert fields["timeline_event_count"] == {
         "field": "timeline_event_count",
         "value_type": "int",
@@ -423,7 +488,9 @@ def test_query_field_registry_is_canonical_work_item_semantics():
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {
+        "comment_count",
         "last_event_at",
+        "last_comment_at",
         "due_at",
         "evidence_snapshot_count",
         "evidence_source_count",
