@@ -2496,7 +2496,7 @@ def test_validate_freshness_envelope_metric_objects_composes_unknown_then_freshn
     )
 
     metrics = [
-        _metric("orders_today", "tiendanube", value=12),
+        _metric("stock_units", "tiendanube", value=12),
         _metric("custom.unknown_freshness_metric", "tiendanube"),
         _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
         _metric("commerce.orders.count", "tiendanube", value="not a number"),
@@ -2506,7 +2506,7 @@ def test_validate_freshness_envelope_metric_objects_composes_unknown_then_freshn
 
     assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
         ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
-        ("freshness_companion_missing", "orders_today", 0, "warning"),
+        ("freshness_companion_missing", "stock_units", 0, "warning"),
         ("freshness_companion_missing", "ad_spend_today", 2, "warning"),
         ("freshness_companion_missing", "commerce.orders.count", 3, "warning"),
         ("evidence_source_mismatch", "ad_spend_today", 2, "warning"),
@@ -2530,7 +2530,7 @@ def test_validate_freshness_envelope_metric_objects_slots_evidence_missing_betwe
 
     metrics = [
         {
-            "key": "orders_today",
+            "key": "stock_units",
             "value": 12,
             "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
@@ -2560,7 +2560,7 @@ def test_validate_freshness_envelope_metric_objects_slots_evidence_missing_betwe
 
     assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
         ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
-        ("freshness_companion_missing", "orders_today", 0, "warning"),
+        ("freshness_companion_missing", "stock_units", 0, "warning"),
         ("freshness_companion_missing", "commerce.revenue.total", 2, "warning"),
         ("freshness_companion_missing", "ad_spend_today", 3, "warning"),
         ("freshness_companion_missing", "commerce.orders.count", 4, "warning"),
@@ -2704,6 +2704,94 @@ def test_validate_freshness_envelope_metric_objects_is_reexported_from_semantics
 
     assert hasattr(semantics, "validate_freshness_envelope_metric_objects")
     assert "validate_freshness_envelope_metric_objects" in semantics.__all__
+
+
+def test_validate_freshness_envelope_metric_keys_appends_duplicate_canonical_after_freshness_companion_missing():
+    """Parallel to :func:`validate_report_metric_keys` and
+    :func:`validate_case_metric_keys`: the freshness-envelope key composition
+    must append duplicate_canonical_metric after the unknown_metric ->
+    freshness_companion_missing pair so a payload emitting both an alias and
+    its canonical key (double-counting risk when the runtime inspects the
+    freshness envelope) is flagged at the later occurrence's input index."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_keys,
+    )
+
+    # stock_units is the alias for commerce.inventory.available_units which is
+    # freshness_required=True. With no runtime.freshness companion in the input
+    # the freshness slot fires on every freshness_required key and the
+    # duplicate slot fires once at the later occurrence's input index.
+    metric_keys = (
+        "stock_units",
+        "custom.unknown_freshness_metric",
+        "commerce.inventory.available_units",
+    )
+
+    issues = validate_freshness_envelope_metric_keys(metric_keys)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
+        ("freshness_companion_missing", "stock_units", 0, "warning"),
+        (
+            "freshness_companion_missing",
+            "commerce.inventory.available_units",
+            2,
+            "warning",
+        ),
+        (
+            "duplicate_canonical_metric",
+            "commerce.inventory.available_units",
+            2,
+            "warning",
+        ),
+    ]
+
+
+def test_validate_freshness_envelope_metric_objects_slots_duplicate_canonical_between_freshness_and_evidence_missing():
+    """Mirrors :func:`validate_report_metric_objects` and
+    :func:`validate_case_metric_objects`: the key-level diagnostics stay
+    contiguous, so duplicate_canonical_metric must land immediately after
+    freshness_companion_missing and before the object-level evidence,
+    value_kind, and money_currency diagnostics. The duplicate at index 2 is a
+    canonical key (``commerce.inventory.available_units``) that resolves to
+    the same metric as the alias ``stock_units`` at index 0 while carrying
+    clean evidence and a value, proving the duplicate slot fires independently
+    of any object-level violation."""
+
+    from app.brain.semantics.metric_registry import (
+        validate_freshness_envelope_metric_objects,
+    )
+
+    metrics = [
+        _metric("stock_units", "tiendanube", value=12),
+        _metric("custom.unknown_freshness_metric", "tiendanube"),
+        _metric("commerce.inventory.available_units", "tiendanube", value=8),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
+        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_freshness_envelope_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_freshness_metric", 1, "warning"),
+        ("freshness_companion_missing", "stock_units", 0, "warning"),
+        (
+            "freshness_companion_missing",
+            "commerce.inventory.available_units",
+            2,
+            "warning",
+        ),
+        ("freshness_companion_missing", "ad_spend_today", 3, "warning"),
+        ("freshness_companion_missing", "commerce.orders.count", 4, "warning"),
+        (
+            "duplicate_canonical_metric",
+            "commerce.inventory.available_units",
+            2,
+            "warning",
+        ),
+        ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
+        ("value_kind_mismatch", "commerce.orders.count", 4, "warning"),
+    ]
 
 
 def test_money_currency_helper_flags_money_metric_missing_currency_context():

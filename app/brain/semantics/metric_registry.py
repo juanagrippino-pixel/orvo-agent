@@ -1422,10 +1422,10 @@ def validate_freshness_envelope_metric_objects(
     *,
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown_metric + freshness_companion_missing + evidence_missing +
-    evidence_source_mismatch + value_kind_mismatch + money_currency_missing
-    diagnostics for metric-shaped objects whose freshness envelope must be
-    inspected together.
+    """Compose unknown_metric + freshness_companion_missing +
+    duplicate_canonical_metric + evidence_missing + evidence_source_mismatch +
+    value_kind_mismatch + money_currency_missing diagnostics for metric-shaped
+    objects whose freshness envelope must be inspected together.
 
     Parallel to :func:`validate_freshness_envelope_metric_keys` but on the
     object side: scheduled runners, connector emitters, and ledger checks that
@@ -1433,27 +1433,34 @@ def validate_freshness_envelope_metric_objects(
     entry point that surfaces the keys-only freshness diagnostic plus the
     structural evidence/value-kind diagnostics that the keys-only validator
     cannot see. The fixed concatenation order ``unknown_metric`` ->
-    ``freshness_companion_missing`` -> ``evidence_missing`` ->
-    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
-    ``money_currency_missing`` keeps the result deterministic and free of
-    overlap because each downstream helper skips unknown keys, the two evidence
-    diagnostics are mutually exclusive (evidence_missing fires only on zero
-    entries, evidence_source_mismatch only on non-empty collections), and
-    money_currency_missing is scoped to a disjoint canonical population (only
-    ``unit="money"`` metrics) from value_kind_mismatch (any unit kind).
-    Money-currency lands last so structural and value-type diagnostics surface
-    before the rendering-metadata diagnostic that money metrics must carry a
-    currency string for the runtime/control-plane to interpret values
-    unambiguously, mirroring the slot reserved by
+    ``freshness_companion_missing`` -> ``duplicate_canonical_metric`` ->
+    ``evidence_missing`` -> ``evidence_source_mismatch`` ->
+    ``value_kind_mismatch`` -> ``money_currency_missing`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys, the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch
+    only on non-empty collections), and money_currency_missing is scoped to a
+    disjoint canonical population (only ``unit="money"`` metrics) from
+    value_kind_mismatch (any unit kind). The key-level diagnostics stay
+    contiguous so this validator remains a superset of
+    :func:`validate_freshness_envelope_metric_keys` over the same keys, with
+    duplicate_canonical_metric closing the key-level block before the
+    object-level evidence/value diagnostics, mirroring
     :func:`validate_report_metric_objects`,
     :func:`validate_case_metric_objects`, and
-    :func:`validate_surface_metric_objects`.
+    :func:`validate_surface_metric_objects`. Money-currency lands last so
+    structural and value-type diagnostics surface before the
+    rendering-metadata diagnostic that money metrics must carry a currency
+    string for the runtime/control-plane to interpret values unambiguously.
     """
 
     materialized = list(metrics)
     unknown_issues = validate_metrics(materialized, registry=registry)
     keys = [_metric_key(metric) for metric in materialized]
     freshness_issues = find_freshness_companion_violations(
+        keys, registry=registry
+    )
+    duplicate_issues = find_duplicate_canonical_violations(
         keys, registry=registry
     )
     evidence_missing_issues = find_evidence_required_violations(
@@ -1471,6 +1478,7 @@ def validate_freshness_envelope_metric_objects(
     return [
         *unknown_issues,
         *freshness_issues,
+        *duplicate_issues,
         *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
@@ -1483,8 +1491,9 @@ def validate_freshness_envelope_metric_keys(
     *,
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown_metric + freshness_companion_missing diagnostics for a
-    batch of keys whose freshness envelope must be inspected together.
+    """Compose unknown_metric + freshness_companion_missing +
+    duplicate_canonical_metric diagnostics for a batch of keys whose freshness
+    envelope must be inspected together.
 
     Parallel to :func:`validate_report_metric_keys`,
     :func:`validate_case_metric_keys`, and :func:`validate_surface_metric_keys`
@@ -1493,8 +1502,14 @@ def validate_freshness_envelope_metric_keys(
     unregistered keys and freshness_required keys that are missing a
     ``runtime.freshness`` family companion in the same payload. The fixed
     concatenation order ``unknown_metric`` -> ``freshness_companion_missing``
-    keeps the result deterministic and free of overlap because
-    :func:`find_freshness_companion_violations` already skips unknown keys.
+    -> ``duplicate_canonical_metric`` keeps the result deterministic and free
+    of overlap because the downstream helpers already skip unknown keys.
+    Duplicate-canonical lands last because an alias/canonical pair resolving
+    to one metric is a payload-shape problem (the runtime would inspect the
+    same canonical metric twice when accounting for freshness companions)
+    rather than a per-key envelope violation, mirroring the slot in
+    :func:`validate_report_metric_keys`, :func:`validate_case_metric_keys`,
+    and :func:`validate_surface_metric_keys`.
     """
 
     materialized = list(metric_keys)
@@ -1505,7 +1520,10 @@ def validate_freshness_envelope_metric_keys(
     freshness_issues = find_freshness_companion_violations(
         materialized, registry=registry
     )
-    return [*unknown_issues, *freshness_issues]
+    duplicate_issues = find_duplicate_canonical_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *freshness_issues, *duplicate_issues]
 
 
 def validate_metrics(
