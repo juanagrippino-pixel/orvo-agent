@@ -511,6 +511,13 @@ class _OperationalCaseMutations:
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
             merged_snapshots = _unique_snapshots([*existing.evidence_snapshots, *detection_snapshots])
+            event_metadata: dict[str, Any] = {"dedupe_key": detection.dedupe_key}
+            if detection.severity != existing.severity:
+                event_metadata["severity_from"] = existing.severity
+                event_metadata["severity_to"] = detection.severity
+            if detection.priority_score != existing.priority_score:
+                event_metadata["priority_score_from"] = existing.priority_score
+                event_metadata["priority_score_to"] = detection.priority_score
             update: dict[str, Any] = {
                 "title": detection.title,
                 "status": "open" if is_recurrence else existing.status,
@@ -539,7 +546,7 @@ class _OperationalCaseMutations:
                         evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"{event_verb} {detection.case_type} case from deterministic detection.",
-                        metadata={"dedupe_key": detection.dedupe_key},
+                        metadata=event_metadata,
                     ),
                 ],
             }
