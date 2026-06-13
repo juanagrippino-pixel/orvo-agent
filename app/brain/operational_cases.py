@@ -1420,6 +1420,11 @@ def upsert_cases_from_report(
     ):
         existing = case_store.find_by_dedupe_key(detection.business_id, detection.dedupe_key)
         case = case_store.upsert_detection(detection)
+        # Two insights in one report can share a dedupe key (e.g. both route to
+        # stockout_risk); count the case once so audited open/update totals and
+        # run-ledger case refs match distinct cases, not detections.
+        if case.case_id in case_ids:
+            continue
         case_ids.append(case.case_id)
         if existing is None:
             opened_count += 1

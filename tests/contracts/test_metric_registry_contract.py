@@ -26,6 +26,7 @@ REQUIRED_ALIASES = {
     "revenue_today": "commerce.revenue.total",
     "revenue_baseline": "commerce.revenue.baseline",
     "orders_today": "commerce.orders.count",
+    "revenue_baseline": "commerce.revenue.baseline",
     "stock_units": "commerce.inventory.available_units",
     "unanswered_conversations": "support.conversations.unanswered_count",
     "ad_spend_today": "ads.spend.total",
@@ -218,6 +219,45 @@ def test_owner_facing_operational_case_types_are_explicitly_promoted_registry_fa
         registered_case_families - OWNER_FACING_OPERATIONAL_CASE_TYPES
     )
     assert "channel_mix_shift" not in OWNER_FACING_OPERATIONAL_CASE_TYPES
+
+
+def test_adapter_declared_metric_keys_are_registered_with_adapter_sources_allowed():
+    """Every metric key an adapter can emit must resolve in the semantic registry.
+
+    Guards against silent metric drift: an adapter adding/renaming a key without
+    registering it keeps reports rendering but breaks semantic validation,
+    detections, and case evidence downstream. The CSV adapter reuses the Google
+    Sheets record builder, so every sheet-declared key must also allow ``csv``.
+    """
+
+    from app.brain.adapters.google_sheets import METRIC_ORDER
+    from app.brain.adapters.sample import METRIC_LABELS
+    from app.brain.semantics.metric_registry import default_metric_registry
+
+    registry = default_metric_registry()
+
+    unregistered = []
+    source_gaps = []
+
+    for key in METRIC_ORDER:
+        canonical = registry.try_resolve_key(key)
+        if canonical is None:
+            unregistered.append(f"google_sheets:{key}")
+            continue
+        for source in ("google_sheets", "csv"):
+            if source not in registry.get(canonical).allowed_sources:
+                source_gaps.append(f"{source}:{key}->{canonical}")
+
+    for key in METRIC_LABELS:
+        canonical = registry.try_resolve_key(key)
+        if canonical is None:
+            unregistered.append(f"sample:{key}")
+            continue
+        if "sample" not in registry.get(canonical).allowed_sources:
+            source_gaps.append(f"sample:{key}->{canonical}")
+
+    assert unregistered == []
+    assert source_gaps == []
 
 
 def test_connector_emitted_metric_families_are_registered_or_explicitly_compatible():

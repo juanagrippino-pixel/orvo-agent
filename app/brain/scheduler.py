@@ -13,13 +13,16 @@ Public API
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.brain.config import BusinessConfig, ReportSchedule
 
 UTC = timezone.utc
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +145,9 @@ def due_schedules(
     - Disabled schedules are skipped.
     - Schedules whose business_id is absent from *business_configs* are skipped
       (no KeyError raised).
+    - Schedules with a malformed cron expression or an unknown business
+      timezone are skipped with a warning; one tenant's bad config must never
+      abort the due-check for other tenants.
     - *now* must be UTC-aware; run_at in each ScheduledReportRun is set to *now*.
     """
     runs: list[ScheduledReportRun] = []
@@ -154,7 +160,18 @@ def due_schedules(
         if biz is None:
             continue
 
-        if should_run_schedule(sched, now, biz.timezone):
+        try:
+            due = should_run_schedule(sched, now, biz.timezone)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            _log.warning(
+                "scheduler skipped_invalid_schedule schedule_id=%s business_id=%s error=%s",
+                sched.schedule_id,
+                sched.business_id,
+                exc,
+            )
+            continue
+
+        if due:
             runs.append(
                 ScheduledReportRun(
                     schedule_id=sched.schedule_id,
