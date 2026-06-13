@@ -5,7 +5,7 @@ from typing import get_args
 
 import sqlite3
 
-from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCaseStore
+from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCaseStore, TimelineEventType
 from app.brain.semantics import CASE_FAMILY_METRICS
 from app.brain.storage import init_schema
 from app.brain.work_items import (
@@ -86,6 +86,9 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["evidence_source_count"] == 1
     assert projection["source_connectors"] == ["tiendanube"]
     assert projection["latest_evidence_at"] == "2026-05-24T08:00:00Z"
+    assert projection["timeline_event_count"] == 1
+    assert projection["last_event_at"] == "2026-05-24T08:00:00Z"
+    assert projection["last_event_type"] == "case_opened"
     assert projection["degraded"] is False
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
@@ -391,11 +394,36 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["timeline_event_count"] == {
+        "field": "timeline_event_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["last_event_at"] == {
+        "field": "last_event_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["last_event_type"] == {
+        "field": "last_event_type",
+        "value_type": "enum",
+        "allowed_values": sorted(get_args(TimelineEventType)),
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+        "facetable": True,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {
+        "last_event_at",
         "due_at",
         "evidence_snapshot_count",
         "evidence_source_count",
@@ -403,6 +431,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "opened_at",
         "priority_score",
         "sla_target_seconds",
+        "timeline_event_count",
         "updated_at",
     }
     assert allowed_work_item_facet_fields() == {
@@ -411,6 +440,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "degraded",
         "entity.kind",
         "issue_type",
+        "last_event_type",
         "priority_bracket",
         "project",
         "release_state",
