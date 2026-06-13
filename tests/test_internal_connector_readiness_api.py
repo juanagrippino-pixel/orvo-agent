@@ -143,9 +143,11 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "error_summary": "Tiendanube 401 access_token=[REDACTED]",
     }
     assert tiendanube["health_policy"]["readiness_check"] == "metadata_only"
+    assert tiendanube["required_scopes"] == ["orders.read", "products.read"]
 
     disabled = connectors["csv-disabled"]
     assert disabled["readiness_state"] == "disabled"
+    assert disabled["required_scopes"] == []
     assert disabled["setup_required"] is False
     assert disabled["setup_reason"] is None
     assert disabled["operator_next_step"] is None
