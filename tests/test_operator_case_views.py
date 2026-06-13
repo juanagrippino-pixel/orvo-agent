@@ -612,6 +612,35 @@ def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_pa
     assert [case["case_id"] for case in view_body["data"]["cases"]] == [critical.case_id]
 
 
+def test_internal_case_view_execution_keeps_route_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    artema_case = _seed_case(db_path, _case_detection(run_id="run-artemea-critical", priority=95))
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-other-critical",
+            priority=100,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views/critical_open/cases",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["view"]["view_id"] == "critical_open"
+    assert body["data"]["view"]["readonly"] is True
+    assert [case["case_id"] for case in body["data"]["cases"]] == [artema_case.case_id]
+    assert body["data"]["total"] == 1
+    assert body["data"]["count"] == 1
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
 def test_internal_case_view_unknown_view_returns_enveloped_404(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 
