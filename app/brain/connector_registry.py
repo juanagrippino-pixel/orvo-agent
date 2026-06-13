@@ -90,6 +90,12 @@ def _event_type_value(event: object) -> str:
     return event_type
 
 
+def is_secret_ref_handle(value: object) -> bool:
+    """Return True when a value is an opaque secret manager reference."""
+
+    return isinstance(value, str) and value.startswith("secret://") and len(value) > len("secret://")
+
+
 class UnknownConnectorError(ValueError):
     """Raised when a connector type is not registered."""
 
@@ -453,6 +459,20 @@ class ConnectorSpec:
                 label="secret_refs",
             )
         )
+
+        for secret in self.required_secret_refs:
+            ref_value = secret_ref_values.get(secret.name)
+            if ref_value not in (None, "") and not is_secret_ref_handle(ref_value):
+                issues.append(
+                    ConnectorValidationIssue(
+                        code="invalid_secret_ref",
+                        key=secret.name,
+                        message=(
+                            f"{self.connector_type} connector secret_refs.{secret.name} "
+                            "must be an opaque secret:// handle"
+                        ),
+                    )
+                )
 
         for key in self.legacy_secret_config_fields:
             if key in params:

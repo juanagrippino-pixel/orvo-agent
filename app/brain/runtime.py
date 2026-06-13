@@ -21,6 +21,7 @@ from app.brain.connector_registry import (
     CAPABILITY_DAILY_REPORT,
     ConnectorSpec,
     default_connector_registry,
+    is_secret_ref_handle,
 )
 from app.brain.models import InsightThresholds
 from app.brain.security.redaction import is_secret_key, redact_secrets, redact_uri
@@ -285,12 +286,15 @@ def _compile_connectors(
 
         missing_public = _missing_required_params(connector, spec.required_config_fields)
         missing_secret_refs = _missing_required_secret_refs(connector, spec)
-        missing = missing_public + missing_secret_refs
-        if missing:
+        invalid_secret_refs = _invalid_required_secret_refs(connector, spec)
+        if missing_public or missing_secret_refs:
             errors.append(
                 f"connector {connector.connector_id} ({connector.connector_type}) missing required params: "
-                + ", ".join(missing)
+                + ", ".join(missing_public + missing_secret_refs)
             )
+        if invalid_secret_refs:
+            errors.extend(invalid_secret_refs)
+        if missing_public or missing_secret_refs or invalid_secret_refs:
             continue
 
         secret_names = [secret.name for secret in spec.required_secret_refs]
@@ -371,6 +375,18 @@ def _missing_required_secret_refs(connector: ConnectorConfig, spec: ConnectorSpe
             continue
         missing.append(secret.name)
     return missing
+
+
+def _invalid_required_secret_refs(connector: ConnectorConfig, spec: ConnectorSpec) -> list[str]:
+    errors: list[str] = []
+    for secret in spec.required_secret_refs:
+        ref_value = connector.secret_refs.get(secret.name)
+        if ref_value not in (None, "") and not is_secret_ref_handle(ref_value):
+            errors.append(
+                f"connector {connector.connector_id} ({connector.connector_type}) has invalid "
+                f"secret_refs.{secret.name}; expected opaque secret:// handle"
+            )
+    return errors
 
 
 def _public_params(params: dict, legacy_secret_names: Sequence[str]) -> dict[str, Any]:
