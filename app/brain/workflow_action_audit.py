@@ -30,6 +30,19 @@ def _records_by_ledger_id(
     return {record.ledger_id: record for record in records}
 
 
+def _approval_request_matches_record(
+    request: WorkflowApprovalRequest,
+    record: WorkflowActionLedgerRecord,
+) -> bool:
+    return (
+        request.approval_request_id == record.approval_request_id
+        and request.ledger_id == record.ledger_id
+        and request.business_id == record.business_id
+        and request.case_id == record.case_id
+        and request.action_key == record.action_key
+    )
+
+
 def _redacted_event(payload: dict[str, Any]) -> dict[str, Any]:
     redacted = redact_secrets(payload)
     return redacted if isinstance(redacted, dict) else payload
@@ -61,7 +74,7 @@ def _request_event(
     request: WorkflowApprovalRequest,
     record: WorkflowActionLedgerRecord | None,
 ) -> dict[str, Any] | None:
-    if record is None:
+    if record is None or not _approval_request_matches_record(request, record):
         return None
     return _redacted_event(
         {
@@ -92,7 +105,7 @@ def _decision_event(
     request: WorkflowApprovalRequest,
     record: WorkflowActionLedgerRecord | None,
 ) -> dict[str, Any] | None:
-    if record is None or request.decided_at is None:
+    if record is None or request.decided_at is None or not _approval_request_matches_record(request, record):
         return None
     event_type = "workflow_approval_cancelled" if request.status == "cancelled" else "workflow_approval_decided"
     return _redacted_event(
