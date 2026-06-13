@@ -1,5 +1,50 @@
 # Integration Train — 2026-05-31
 
+## Release integration update — 2026-06-13 23:19 UTC
+
+Status: **No safe merge promoted; `n2-pro-work-management` needs rebase/reconcile before integration.**
+
+Canonical branch: `feat/orvo-brain-control-plane`<br>
+Current head verified in this run: `12fde952` (`docs: refresh autonomous board report`)
+
+Preflight notes:
+
+- `git fetch --all --prune` completed successfully in this run.
+- Canonical worktree was clean on `feat/orvo-brain-control-plane` before candidate verification.
+- Candidate worker worktree `/root/orvo-agent-worktrees/N2 Pro-work-management` was clean on `n2-pro-work-management` at `9de94482`.
+- Candidate scope remains bounded and architecture-aligned: `7` files changed, no new dependencies, and the diff stays inside `OperationalCase -> WorkItem -> operator query/projection` semantics.
+- Focused worker verification passed: `pytest tests/test_work_items.py tests/test_operator_case_views.py tests/test_brain_operational_cases.py -q` -> `101 passed in 4.93s`.
+
+Promotion attempt:
+
+- Candidate branch: `n2-pro-work-management`
+- Dry merge worktree: `/root/orvo-agent-worktrees/integration-manager-20260613-work-management`
+- Attempted command: `git merge --no-ff n2-pro-work-management -m "merge: integrate work management semantics"`
+- Result: **blocked by merge conflicts**; no merge commit created, candidate branch preserved, temporary merge was aborted.
+
+Exact blockers:
+
+- `app/brain/operational_cases.py`
+  - Current base already records recurring-detection audit metadata as `severity_from` / `severity_to` and `priority_score_from` / `priority_score_to`.
+  - `n2-pro-work-management` introduces SLA/due-date metadata plus `previous_*` / current-value pairs.
+  - These overlap in the same `upsert_detection()` recurrence block, so the branch needs a deliberate metadata-shape reconciliation instead of an automatic merge.
+- `tests/test_brain_operational_cases.py`
+  - Base added a forbidden-transition matrix regression in the same region where the branch adds SLA/audit recurrence tests.
+  - The branch therefore needs a rebase that preserves both the transition guard and the newer SLA/evidence assertions.
+
+Review notes / risks:
+
+- Architecture verdict is still positive: this branch is the best current slice for strengthening Atlassian-like work-management semantics without creating a second source of truth.
+- Integration risk is now rebase/reconciliation risk, not product-direction risk.
+- Do **not** direct-merge the stale branch as-is; rebase or slice it so the audit-metadata contract is intentionally unified and tested.
+
+Current next integration order:
+
+1. **Rebase/reconcile `n2-pro-work-management`:** keep both audit metadata contracts (`severity/priority` change tracking from base plus SLA/due-date tracking from branch) and preserve the forbidden-transition regression.
+2. **Then re-evaluate `N2-Pro/workflow-automation`:** only after WorkItem/work-management semantics are rebased cleanly, because workflow queue projections should build on the canonical case/work-item shape.
+3. **Hold `N2-Pro/operator-surfaces`:** keep split/reduction pressure on the broad operator-surface branch until shared activity/query primitives are further consolidated.
+4. **Track repo-wide semantic enforcement separately:** continue treating metric-registry advisory-vs-blocking follow-up as a repo-level integration priority.
+
 ## Release integration update — 2026-06-12 01:36 UTC
 
 Status: **JQL route-owned project scope guard promoted**.
