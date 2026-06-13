@@ -28,6 +28,7 @@ CaseActionKey = Literal[
     "assign_owner",
     "mark_in_progress",
     "resolve_case",
+    "reopen_case",
     "dismiss_case",
     "add_comment",
 ]

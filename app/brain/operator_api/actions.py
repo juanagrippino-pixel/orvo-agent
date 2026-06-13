@@ -170,6 +170,9 @@ def _validate_case_action_inputs(
         normalize_case_assignee(assignee_ref, owner_ref)
         return case, effective_actor_ref
 
+    if action_key == "reopen_case":
+        return case, effective_actor_ref
+
     target_status, _default_reason = _ACTION_TARGETS[action_key]
     provided_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
     if target_status in TERMINAL_OPERATIONAL_CASE_STATUSES and provided_reason is None:
@@ -225,6 +228,19 @@ def apply_case_action(
                 actor_type="operator",
                 actor_ref=effective_actor_ref,
                 assignee_ref=normalized_assignee_ref,
+            )
+        except OperationalCaseStatusError as exc:
+            raise OperatorAPIError("invalid_case_transition", str(exc), status_code=409) from exc
+        return {"case": case_detail(updated)}
+
+    if action_key == "reopen_case":
+        provided_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
+        try:
+            updated = store.reopen_case(
+                case.case_id,
+                actor_type="operator",
+                actor_ref=effective_actor_ref,
+                reason=provided_reason or "Reopened by operator.",
             )
         except OperationalCaseStatusError as exc:
             raise OperatorAPIError("invalid_case_transition", str(exc), status_code=409) from exc

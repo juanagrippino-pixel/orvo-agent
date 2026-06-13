@@ -124,6 +124,16 @@ _ACTION_DEFINITIONS: tuple[ActionDefinition, ...] = (
         requires_reason=True,
     ),
     ActionDefinition(
+        "reopen_case",
+        "Reopen case",
+        "manual",
+        "case_transition",
+        api_enabled=True,
+        api_mode="manual_operator_mutation",
+        status_effect="open",
+        input_fields=("reason",),
+    ),
+    ActionDefinition(
         "request_follow_up",
         "Request follow-up",
         "manual",

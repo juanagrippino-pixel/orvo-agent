@@ -548,6 +548,16 @@ class OperationalCaseStore(Protocol):
         transitioned_at: datetime | None = None,
     ) -> OperationalCase: ...
 
+    def reopen_case(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        reason: str | None = None,
+        reopened_at: datetime | None = None,
+    ) -> OperationalCase: ...
+
     def add_comment(
         self,
         case_id: str,
@@ -737,6 +747,44 @@ class _OperationalCaseMutations:
         if status == "dismissed":
             update["dismissed_at"] = transitioned_at
         updated = record.model_copy(update=update, deep=True)
+        updated = OperationalCase.model_validate(updated.model_dump())
+        self._persist(updated)
+        return updated.model_copy(deep=True)
+
+    def reopen_case(
+        self,
+        case_id: str,
+        *,
+        actor_type: ActorType,
+        actor_ref: str,
+        reason: str | None = None,
+        reopened_at: datetime | None = None,
+    ) -> OperationalCase:
+        record = self._load_for_update(case_id)
+        if record.status != "resolved":
+            raise OperationalCaseStatusError(f"case {case_id} cannot be reopened from status {record.status}")
+        reopened_at = _as_utc(reopened_at) if reopened_at is not None else _now_utc()
+        updated = record.model_copy(
+            update={
+                "status": "open",
+                "updated_at": reopened_at,
+                "acknowledged_at": None,
+                "resolved_at": None,
+                "timeline": [
+                    *record.timeline,
+                    OperationalCaseTimelineEvent(
+                        event_type="case_reopened",
+                        actor_type=actor_type,
+                        actor_ref=actor_ref,
+                        case_id=record.case_id,
+                        created_at=reopened_at,
+                        summary=reason or "Case reopened by operator.",
+                        metadata={"from_status": record.status, "to_status": "open"},
+                    ),
+                ],
+            },
+            deep=True,
+        )
         updated = OperationalCase.model_validate(updated.model_dump())
         self._persist(updated)
         return updated.model_copy(deep=True)

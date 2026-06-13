@@ -97,6 +97,65 @@ def test_normalize_case_assignee_redacts_secret_shapes_before_store_or_ledger_us
     assert_no_raw_actor_secret(assignee)
 
 
+def test_apply_case_action_reopen_case_reopens_resolved_case_and_rejects_non_resolved(conn):
+    store = SQLiteOperationalCaseStore(conn)
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as not_resolved:
+        apply_case_action(
+            store,
+            business_id="artemea",
+            case_id=opened.case_id,
+            action_key="reopen_case",
+            actor_ref="operator@example.com",
+        )
+    assert not_resolved.value.code == "invalid_case_transition"
+    assert not_resolved.value.status_code == 409
+
+    store.transition_case(opened.case_id, status="acknowledged", actor_type="operator", actor_ref="op", transitioned_at=utc(9))
+    store.transition_case(opened.case_id, status="resolved", actor_type="operator", actor_ref="op", reason="Fixed", transitioned_at=utc(10))
+
+    result = apply_case_action(
+        store,
+        business_id="artemea",
+        case_id=opened.case_id,
+        action_key="reopen_case",
+        actor_ref="operator@example.com",
+        reason="Volvió a fallar",
+    )
+
+    payload = result["case"]
+    assert payload["status"] == "open"
+    assert payload["resolved_at"] is None
+    assert payload["acknowledged_at"] is None
+    last_event = payload["timeline"][-1]
+    assert last_event["event_type"] == "case_reopened"
+    assert last_event["actor_type"] == "operator"
+    assert last_event["actor_ref"] == "operator@example.com"
+    assert "Volvió a fallar" in last_event["summary"]
+
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(opened.case_id)
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert reloaded.timeline[-1].event_type == "case_reopened"
+
+
+def test_apply_case_action_reopen_case_rejects_cross_business_scope(conn):
+    store = SQLiteOperationalCaseStore(conn)
+    opened = store.upsert_detection(case_detection(), detected_at=utc(8))
+
+    with pytest.raises(OperatorAPIError) as scoped:
+        apply_case_action(
+            store,
+            business_id="other-business",
+            case_id=opened.case_id,
+            action_key="reopen_case",
+            actor_ref="operator@example.com",
+        )
+    assert scoped.value.code == "case_not_found"
+    assert scoped.value.status_code == 404
+
+
 def test_timeline_actor_ref_is_redacted_for_comments_and_status_actions_before_persistence(conn):
     store = SQLiteOperationalCaseStore(conn)
     opened = store.upsert_detection(case_detection(), detected_at=utc(8))
@@ -740,6 +799,7 @@ def test_apply_case_action_only_executes_api_enabled_catalog_keys_with_safe_erro
         "dismiss_case": "dismissed",
         "mark_in_progress": "in_progress",
         "resolve_case": "resolved",
+        "reopen_case": "open",
     }
     assert set(API_ENABLED_CASE_ACTION_KEYS) == set(expected_statuses)
     assert {
@@ -756,13 +816,22 @@ def test_apply_case_action_only_executes_api_enabled_catalog_keys_with_safe_erro
             kwargs["assignee_ref"] = "owner@example.com"
         if action_key in {"dismiss_case", "resolve_case"}:
             kwargs["reason"] = "Operator completed the governed case workflow"
-        if action_key == "resolve_case":
+        if action_key in {"resolve_case", "reopen_case"}:
             apply_case_action(
                 store,
                 business_id="artemea",
                 case_id=opened.case_id,
                 action_key="acknowledge_case",
                 actor_ref="operator@example.com",
+            )
+        if action_key == "reopen_case":
+            apply_case_action(
+                store,
+                business_id="artemea",
+                case_id=opened.case_id,
+                action_key="resolve_case",
+                actor_ref="operator@example.com",
+                reason="Operator completed the governed case workflow",
             )
 
         result = apply_case_action(
