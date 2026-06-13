@@ -43,6 +43,12 @@ def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert parse_case_jql("timeline_event_count >= 2").normalized == (
         "timeline_event_count >= 2 ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("comment_count >= 1 ORDER BY last_comment_at DESC").normalized == (
+        "comment_count >= 1 ORDER BY last_comment_at DESC"
+    )
+    assert parse_case_jql("last_comment_at >= 2026-05-24T09:00:00Z").normalized == (
+        "last_comment_at >= 2026-05-24T09:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
     assert parse_case_jql("last_event_at >= 2026-05-24T09:00:00Z").normalized == (
         "last_event_at >= 2026-05-24T09:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
     )
@@ -250,6 +256,64 @@ def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scop
     assert body["data"]["normalized_jql"] == "source_connector = meta_ads ORDER BY priority_score DESC, opened_at ASC"
     assert [case["case_id"] for case in body["data"]["cases"]] == [meta_case.case_id]
     assert body["data"]["cases"][0]["source_connectors"] == ["meta_ads"]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
+def test_internal_case_queue_filters_and_sorts_by_comment_activity(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    earlier_case = _seed_case(
+        db_path,
+        _case_detection(run_id="run-comment-earlier", priority=50, dedupe_suffix="stockout_risk/business/comment-earlier/daily"),
+    )
+    later_case = _seed_case(
+        db_path,
+        _case_detection(run_id="run-comment-later", priority=50, dedupe_suffix="stockout_risk/business/comment-later/daily"),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-comment-other",
+            priority=50,
+            dedupe_suffix="stockout_risk/business/comment-other/daily",
+        ),
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.add_comment(
+        earlier_case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Revisar stock físico.",
+        commented_at=datetime(2026, 5, 24, 9, 15, tzinfo=timezone.utc),
+    )
+    store.add_comment(
+        later_case.case_id,
+        actor_type="operator",
+        actor_ref="operator:juan",
+        comment="Cliente esperando confirmación.",
+        commented_at=datetime(2026, 5, 24, 9, 45, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "comment_count >= 1 ORDER BY last_comment_at DESC"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "comment_count >= 1 ORDER BY last_comment_at DESC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [later_case.case_id, earlier_case.case_id]
+    assert [case["work_item"]["comment_count"] for case in body["data"]["cases"]] == [1, 1]
+    assert [case["work_item"]["last_comment_at"] for case in body["data"]["cases"]] == [
+        "2026-05-24T09:45:00Z",
+        "2026-05-24T09:15:00Z",
+    ]
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
