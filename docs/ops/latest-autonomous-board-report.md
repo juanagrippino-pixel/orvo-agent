@@ -1,106 +1,94 @@
 # Reporte ejecutivo autónomo — Orvo Board
 
-Fecha de corte: 2026-06-12 22:52 UTC
+Fecha de corte: 2026-06-13 23:13 UTC
 Repo: `/root/orvo-agent`
 Rama canónica: `feat/orvo-brain-control-plane`
-Board report previo: `491e9c88` (`docs: refresh autonomous board report`)
-HEAD local verificado: `23dbfdef` (`research: wismo carrier readiness`)
-HEAD remoto verificado: `74fd65cf` (`Merge branch 'N2-Pro/connector-platform' into integration/release-manager-20260612`)
-Estado repo al corte: limpio; la canónica local está `ahead 1` de `origin/feat/orvo-brain-control-plane`.
-Inventario verificado: 190 worktrees, 0 dirty, 0 missing. Backlog actual: 107 ramas locales y 148 remotas no mergeadas contra la canónica.
+HEAD verificado: `cca427f9` (`codex: redact unknown metric diagnostics`)
+Estado repo: limpio; sincronizado con `origin/feat/orvo-brain-control-plane` (`ahead/behind 0/0`).
+Inventario verificado: **207 worktrees**, **0 dirty**, **0 missing**.
+Backlog actual: **120 ramas locales** y **150 remotas** no mergeadas contra la canónica.
 
 ## 1. Lectura ejecutiva
 
-Orvo siguió avanzando en la dirección correcta: menos “bot/reporting tool” y más **centro operativo PyME** con contratos reales de runtime, cases, readiness y operador. El salto de hoy no es solo visual: la canónica ya absorbió hardening de connector-platform, más guardrails de proyección owner-facing y la primera implementación útil de **OS snapshot**.
+El sistema autónomo sigue empujando en la dirección correcta: menos “dashboard/report bot” y más **control plane operativo** con runtime, ledger, cases y operador como fuentes reales de verdad. Lo nuevo de hoy no es un pivote de producto sino un endurecimiento claro del núcleo: mejores validaciones semánticas, mejor higiene de redacción, más señal operativa en queues/histogramas y mejor finalización de runs.
 
-El bloqueo principal sigue siendo operacional, no conceptual: el piloto real de Artemea continúa caído por autenticación/fuente (`Tiendanube 401`, `Meta Ads 400`). La buena noticia es que el sistema ahora degrada honestamente y abre/mantiene `data_stale`; la mala es que todavía no hay una demo/piloto “source-of-truth green” para ventas/pedidos si Tiendanube no conecta.
+La foto ejecutiva es simple:
+- **sí hubo shipping real** en la canónica;
+- **la fábrica autónoma está sana** (repo limpio + worktrees limpios);
+- **el bloqueo comercial principal sigue siendo Artemea** por fallas reales de conectores;
+- **el siguiente riesgo importante ya no es destructividad**, sino sprawl de ramas/superficies antes de cerrar enforcement semántico y orden de integración.
 
-## 2. Qué shipped desde el último board report
+## 2. Qué shipped
 
-Commits/deliverables destacados desde `491e9c88`:
+Commits ya absorbidos en la canónica que sí cambian capacidad o hardening:
 
-- **JQL scope guard integrado** — `ca0dfeff`, `30b3b600`.
-  - La ruta dueña del contexto impone project scope; baja riesgo de query drift o cruces indebidos.
-
-- **Connector readiness / setup-required surfaced** — `5b9bbe71`.
-  - Mejora clave para el enfoque “OS honesto”: módulos no conectados pueden mostrarse como setup-required en vez de fingir cobertura.
-
-- **Case queue / evidence / diagnostics hardening** — `72296223`, `4e027c04`, `1be47692`, `618e48aa`, `64319c22`, `20878741`.
-  - Se fortalecen queue summaries, eventos `evidence_attached`, validaciones duplicate-canonical y el contrato append-only del ledger.
-
-- **Connector-platform absorbido a la canónica** — `39505eb3`, `3e108b4b`, `23c115eb`, `de2e77b1`, `74fd65cf`.
-  - El runtime/ledger ahora registra y expone familias emitidas por conectores y certifica mejor lo que realmente declaran/ejecutan.
-
-- **Owner-facing boundary guard** — `29204978`.
-  - QA reforzó que las proyecciones owner-facing respeten los límites de promoción/readiness.
-
-- **OS snapshot / operator-home primer slice** — `63338fae`, `50ff50d8`, `5837bee5`.
-  - Ya existe una proyección de OS snapshot en la capa operator API y un UX brief explícito para la pantalla tipo “centro operativo”.
-
-- **Posicionamiento PyME OS profundizado** — `d2c74b57`, `60654ad6`, `3af4f21c`, `23dbfdef`.
-  - Se consolidó el plan competitivo La PyME/OS snapshot y se documentó `wismo/carrier readiness` como lane futura, sin prometer shipping falso.
+- `cca427f9` — redacción de diagnósticos de métricas desconocidas.
+- `cf225cb7`, `6206111c`, `c2005bf6` — integración de lanes legacy de QA/runtime/case workflow.
+- `15c8cea8`, `ac53d46e`, `b41f14ec`, `16ce4993`, `f531c0a1`, `cbc81706` — histogramas por severidad, queue summary, bloqueo de transiciones prohibidas y validadores duplicate-canonical/freshness.
+- `3fa4d226`, `cb869fee`, `53ed7f9e` — `connector outcome duration` ya forma parte de la salud del ledger/runtime.
+- `c079eaf6` — readiness health ahora respeta `connector_id`.
+- `71aa4470` — los runs ya finalizan correctamente cuando falla el registro de éxito.
+- `d0e7a876` — redacción de headers `Authorization` multi-token.
+- `49071ede` — el endpoint interno de **OS snapshot** quedó expuesto en la canónica.
 
 ## 3. Qué está corriendo
 
-- **Departamentos/líneas activas verificadas por señales recientes:** COO/Strategic Planner, QA/Red Team, Release/Integration y SRE/Ops siguen emitiendo output; además hay worktrees activos de Product/UX, Connector Platform, Workflow, Search, Trust/Admin y Operator Surfaces.
-- **Higiene del sistema autónomo:** 190 worktrees registrados, 0 dirty, 0 missing.
-- **Modo de trabajo vigente:** canónica limpia + ramas/worktrees externos; la integración secuencial sigue siendo la política correcta.
-- **Canónica local adelantada por 1 commit** sobre origin: solo research/documentación (`23dbfdef`), no una feature crítica sin verificar.
+Señales recientes verificadas:
+- **QA / Red Team**, **Release / Integration**, **SRE / Ops** y **COO / Strategy** siguen produciendo output reciente.
+- Hay worktrees activos en **connector-platform**, **workflow-automation**, **trust/admin/security**, **work-management**, **search-analytics**, **operator-surfaces**, **GTM** y **docs/ARB reconciliation**.
+- No hay procesos Hermes en background colgados al momento del corte.
+- La disciplina operativa sigue sana: canónica limpia + trabajo aislado en worktrees externos.
 
 ## 4. Bloqueos y riesgos que importan
 
-1. **Bloqueo crítico de piloto: Artemea sigue fallando en runtime real.**
-   - Verificación ejecutada al corte:
-     `python scripts/run_orvo_brain_reports.py --db /root/orvo-agent/orvo_brain.sqlite3 --business-id artemea --dry-run --force`
-   - Resultado real: `status=failed`.
-   - Error resumido: `Tiendanube auth failed: HTTP 401` + `Meta Ads error: HTTP 400`.
-   - Efecto correcto del sistema: permanecen abiertos casos `data_stale` para `tiendanube` y `meta_ads`.
-   - Riesgo: no hay demostración vendible del core ventas/pedidos mientras Tiendanube siga roja.
+### Bloqueo #1 — Artemea sigue roja en runtime real
+Verificación ejecutada al corte:
 
-2. **Hay progreso en OS snapshot, pero todavía falta cerrar el loop de “operator home”.**
-   - La proyección existe en operator API.
-   - Falta terminar su amarre fino en superficie/rutas/tests y luego grabar demo V2 desde un tenant limpio.
+`python scripts/run_orvo_brain_reports.py --db /root/orvo-agent/orvo_brain.sqlite3 --business-id artemea --dry-run --force`
 
-3. **Sprawl de ramas sigue alto.**
-   - 107 ramas locales + 148 remotas no mergeadas.
-   - Riesgo: volver a meter drift semántico, test deletions o endpoints bespoke por merge apurado.
+Resultado real:
+- `status=failed`
+- error: `PipelineAllConnectorsFailedError`
+- detalle: `tiendanube: HTTP 401` + `meta_ads: HTTP 400`
+- efecto correcto del sistema: siguen abiertos dos casos `data_stale` (`tiendanube`, `meta_ads`).
 
-4. **Latest ARB reconciliation supersedes this pre-review line.**
-   - `docs/architecture-reviews/2026-06-12-review.md` now marks `N2-Pro/connector-platform`, `N2-Pro/workflow-automation`, and `N2-Pro/trust-admin-security` as merge-ready; `N2-Pro/search-analytics` as merge-ready with rebase recommended; and `n2-pro-work-management` plus `N2-Pro/operator-surfaces` as needs-work.
+Lectura ejecutiva: el core es más honesto, pero el piloto/demo vendible sigue bloqueado mientras Tiendanube no quede verde o no se cambie a un tenant demo sano.
 
-5. **Cuidado con scope creep comercial/técnico.**
-   - El plan correcto hoy es “centro operativo / PyME OS slice”.
-   - No vender ARCA, caja, atención o carrier visibility como automatización plena sin evidencia, readiness y fuente verde.
+### Riesgo #2 — enforcement semántico todavía incompleto
+La revisión de arquitectura del 2026-06-13 marca que el `metric_registry` sigue en modo demasiado “advisory” en paths importantes. El repo ya observa drift, pero todavía no bloquea todo lo que debería en cada boundary de ingestión/case generation.
 
-## 5. Branches que necesitan integración/revisión
+### Riesgo #3 — operator surfaces puede abrirse demasiado rápido
+La misma revisión marca que `N2-Pro/operator-surfaces` va en dirección correcta, pero está demasiado grande y corre riesgo de proliferar endpoints `recently_*` antes de consolidar un modelo compartido de activity/query.
 
-Orden recomendado hoy:
+### Riesgo #4 — branch sprawl alto
+Con **120 ramas locales** y **150 remotas** no mergeadas, el riesgo no es falta de trabajo sino integración desordenada, drift semántico y merges anchos con review insuficiente.
 
-1. **`codex/os-snapshot-20260612`** — mejor siguiente merge chico.
-   - Diff específico actual contra canónica: route wiring + tests (`dashboard_views` + `test_internal_operator_api`).
-   - Valor: cerrar el slice visible del OS snapshot ya integrado en operator API.
-   - Gate: rebase, focused tests, suite amplia, y revisión de que derive solo de runtime/connectors/cases.
+## 5. Ramas que piden integración o decisión
 
-2. **`codex/lapyme-os-snapshot-20260611`** — valiosa, pero ya está vieja para merge directo.
-   - Tiene 1 commit útil propio pero está ~58 commits detrás de la canónica.
-   - Recomendación: extraer/cherry-pick solo el valor residual; no mergear la rama completa.
+Según `docs/architecture-reviews/2026-06-13-review.md`:
 
-3. **`codex/qa-case-timeline-dedupe-scope-20260612`** — QA guard chico a revisar.
-   - Puede ser buen follow-up si toca evidencia/timeline/case dedupe sin expandir superficie.
+### Mejor posicionadas
+- `N2-Pro/connector-platform` — **merge-ready**.
+- `N2-Pro/workflow-automation` — **merge-ready candidate** tras rebase.
+- `N2-Pro/trust-admin-security` — **merge-ready candidate** tras rebase.
+- `n2-pro-work-management` — **merge-ready candidate**; estratégicamente importante porque fortalece `OperationalCase -> WorkItem` sin crear otra fuente de verdad.
 
-4. **Ramas N2-Pro amplias** (`n2-pro-work-management`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, `N2-Pro/search-analytics`).
-   - Mantener el orden de integración según `docs/specs/integration-train-contract.md` y la revisión ARB más reciente: no hacer merge wholesale; `connector-platform`, `workflow-automation`, `trust-admin-security` y `search-analytics` requieren gates de rebase/tests, mientras `work-management` y `operator-surfaces` siguen en needs-work.
+### Con cautela
+- `N2-Pro/search-analytics` — parece chica y activa, pero no figura como slice cerrada en la revisión más reciente; revisar/rebasear antes de promover.
 
-## 6. Próximas acciones autónomas recomendadas
+### No integrar wholesale
+- `N2-Pro/operator-surfaces` — **needs work**; conviene partirla en slices más chicos antes de merge.
 
-- **Release/Integration:** promover primero `codex/os-snapshot-20260612` por tamaño/impacto; después volver a un QA guard chico.
-- **SRE/Ops:** tratar `Tiendanube 401` como incidente #1 del negocio; validar token/credencial o mover demo/piloto a una tienda green. Meta Ads puede seguir fuera del Starter.
-- **Product/GTM:** usar el UX brief y el action plan para grabar V2 apenas exista tenant demo verde con snapshot y queue.
-- **QA/ARB:** seguir bloqueando cualquier owner-facing claim nuevo si no está conectado a readiness, evidence y promotion gates.
+## 6. Qué hará la organización autónoma ahora
+
+1. **Release/Integration:** priorizar integración en slices chicos y con rebase limpio; `n2-pro-work-management` y luego `workflow-automation` son la mejor secuencia para reforzar el modelo antes de expandir más UI.
+2. **SRE/Ops:** tratar `Tiendanube 401` de Artemea como incidente comercial/operativo de máxima prioridad; si no se destraba rápido, mover demo/piloto a un tenant verde.
+3. **QA/ARB:** empujar follow-up para pasar de semántica advisory a semántica blocking en los boundaries correctos.
+4. **Product/GTM:** usar el OS snapshot ya aterrizado como narrativa de “centro operativo” y no volver a una historia de bot/ERP genérico.
 
 ## Decisiones pedidas a Juan
 
-1. **Piloto:** ¿destrabamos ya Tiendanube de Artemea o cambiamos a una tienda/demo source-of-truth verde para no frenar ventas?
-2. **Prioridad de integración:** ¿autorizás que Release meta primero `codex/os-snapshot-20260612` como próximo merge por valor demo/comercial?
-3. **Oferta:** confirmar que seguimos vendiendo **centro operativo / OS Activation Sprint**, no “bot de WhatsApp” ni ERP.
-4. **Claims:** confirmar que ARCA, caja/tesorería, atención y carrier visibility siguen como readiness lanes hasta nueva evidencia y conectores verdes.
+1. **Piloto:** ¿invertimos ya en destrabar Artemea/Tiendanube o autorizás migrar la demo comercial a otro tenant fuente-de-verdad verde?
+2. **Orden de integración:** ¿autorizás priorizar `n2-pro-work-management` y `workflow-automation` antes de seguir abriendo `operator-surfaces`?
+3. **Oferta:** confirmar que seguimos vendiendo **OS Activation Sprint / centro operativo PyME**, no “bot de WhatsApp” ni ERP generalista.
+4. **Claims:** mantener `meta_ads`, carrier visibility, ARCA/caja/tesorería y otras lanes como readiness/expansión, no como capacidad cerrada, hasta tener fuentes verdes y contratos completos.
