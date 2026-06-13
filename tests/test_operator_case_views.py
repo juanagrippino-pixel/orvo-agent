@@ -1153,7 +1153,6 @@ def test_case_queue_csv_export_supports_builtin_view_scope(monkeypatch, tmp_path
     assert "other" not in raw_body
 
 
-
 def test_case_queue_csv_export_rejects_conflicting_filters_and_invalid_format(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-export-conflict"))
