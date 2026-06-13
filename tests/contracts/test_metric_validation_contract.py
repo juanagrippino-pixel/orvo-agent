@@ -1758,13 +1758,13 @@ def test_validate_surface_metric_keys_composes_unknown_then_pii_class_disallowed
     from app.brain.semantics.metric_registry import validate_surface_metric_keys
 
     # Mixed bag: one canonical pii-none key, one low-pii canonical key, one
-    # low-pii alias of the same canonical key, and one unknown key. The
+    # low-pii alias of a distinct canonical key, and one unknown key. The
     # composition must report unknowns first (owned by validate_metrics) and
     # then pii_class_disallowed (owned by find_pii_class_violations). Each
     # diagnostic preserves its own input-order index.
     metric_keys = (
         "commerce.orders.count",
-        "support.conversations.unanswered_count",
+        "support.conversations.oldest_unanswered_age_minutes",
         "unanswered_conversations",
         "custom.unknown_surface_metric",
     )
@@ -1774,8 +1774,35 @@ def test_validate_surface_metric_keys_composes_unknown_then_pii_class_disallowed
     )
     assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
         ("unknown_metric", "custom.unknown_surface_metric", 3, "warning"),
-        ("pii_class_disallowed", "support.conversations.unanswered_count", 1, "warning"),
+        ("pii_class_disallowed", "support.conversations.oldest_unanswered_age_minutes", 1, "warning"),
         ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+    ]
+
+
+def test_validate_surface_metric_keys_appends_duplicate_canonical_after_pii_class_disallowed():
+    """Parallel to :func:`validate_report_metric_keys` and
+    :func:`validate_case_metric_keys`: the surface-side key composition must
+    append duplicate_canonical_metric after the unknown_metric ->
+    pii_class_disallowed pair so a payload emitting both an alias and its
+    canonical key (double-rendering risk on WhatsApp dispatch / owner brief)
+    is flagged at the later occurrence's input index."""
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_keys
+
+    metric_keys = (
+        "orders_today",
+        "unanswered_conversations",
+        "custom.unknown_surface_metric",
+        "commerce.orders.count",
+    )
+
+    issues = validate_surface_metric_keys(
+        metric_keys, allowed_pii_classes=("none",)
+    )
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 2, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 1, "warning"),
+        ("duplicate_canonical_metric", "commerce.orders.count", 3, "warning"),
     ]
 
 
@@ -1898,7 +1925,7 @@ def test_validate_surface_metric_objects_composes_unknown_then_pii_then_evidence
         _metric("custom.unknown_surface_metric", "tiendanube"),
         _metric("unanswered_conversations", "whatsapp", value=5),
         _metric("ad_spend_today", "whatsapp", unit="ARS"),
-        _metric("commerce.orders.count", "tiendanube", value="not a number"),
+        _metric("stock_units", "tiendanube", value="not a number"),
     ]
 
     issues = validate_surface_metric_objects(
@@ -1909,7 +1936,41 @@ def test_validate_surface_metric_objects_composes_unknown_then_pii_then_evidence
         ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
         ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
         ("evidence_source_mismatch", "ad_spend_today", 3, "warning"),
-        ("value_kind_mismatch", "commerce.orders.count", 4, "warning"),
+        ("value_kind_mismatch", "stock_units", 4, "warning"),
+    ]
+
+
+def test_validate_surface_metric_objects_slots_duplicate_canonical_between_pii_and_evidence_missing():
+    """Mirrors :func:`validate_report_metric_objects` and
+    :func:`validate_case_metric_objects`: the key-level diagnostics stay
+    contiguous, so duplicate_canonical_metric must land immediately after
+    pii_class_disallowed and before the object-level evidence diagnostics.
+    The duplicate at index 3 is the canonical key (``commerce.orders.count``)
+    resolving to the same metric as ``orders_today`` at index 0 while carrying
+    clean evidence and a count value, proving the duplicate slot fires
+    independently of any object-level violation."""
+
+    from app.brain.semantics.metric_registry import validate_surface_metric_objects
+
+    metrics = [
+        _metric("orders_today", "tiendanube", value=12),
+        _metric("custom.unknown_surface_metric", "tiendanube"),
+        _metric("unanswered_conversations", "whatsapp", value=5),
+        _metric("commerce.orders.count", "tiendanube", value=15),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
+        _metric("stock_units", "tiendanube", value="not a number"),
+    ]
+
+    issues = validate_surface_metric_objects(
+        metrics, allowed_pii_classes=("none",)
+    )
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_surface_metric", 1, "warning"),
+        ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
+        ("duplicate_canonical_metric", "commerce.orders.count", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "stock_units", 5, "warning"),
     ]
 
 
@@ -1952,7 +2013,7 @@ def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_
             "evidence": [{"source": "whatsapp", "label": "wa run"}],
         },
         {
-            "key": "commerce.orders.count",
+            "key": "stock_units",
             "value": "not a number",
             "unit": None,
             "evidence": [{"source": "tiendanube", "label": "tn run"}],
@@ -1968,7 +2029,7 @@ def test_validate_surface_metric_objects_slots_evidence_missing_between_pii_and_
         ("pii_class_disallowed", "unanswered_conversations", 2, "warning"),
         ("evidence_missing", "commerce.revenue.total", 3, "warning"),
         ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
-        ("value_kind_mismatch", "commerce.orders.count", 5, "warning"),
+        ("value_kind_mismatch", "stock_units", 5, "warning"),
     ]
 
 

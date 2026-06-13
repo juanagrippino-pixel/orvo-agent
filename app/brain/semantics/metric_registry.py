@@ -1312,10 +1312,10 @@ def validate_surface_metric_objects(
     allowed_pii_classes: Iterable[str],
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown_metric + pii_class_disallowed + evidence_missing +
-    evidence_source_mismatch + value_kind_mismatch + money_currency_missing
-    diagnostics for metric-shaped objects bound for a surface (WhatsApp
-    dispatch, owner brief) that enforces a PII allowlist.
+    """Compose unknown_metric + pii_class_disallowed + duplicate_canonical_metric
+    + evidence_missing + evidence_source_mismatch + value_kind_mismatch +
+    money_currency_missing diagnostics for metric-shaped objects bound for a
+    surface (WhatsApp dispatch, owner brief) that enforces a PII allowlist.
 
     Parallel to :func:`validate_report_metric_objects` and
     :func:`validate_case_metric_objects` but on the surface side: dispatch
@@ -1323,21 +1323,26 @@ def validate_surface_metric_objects(
     ``allowed_pii_classes`` and must also surface evidence/value-kind
     mismatches that the key-only :func:`validate_surface_metric_keys` cannot
     see. The fixed concatenation order ``unknown_metric`` ->
-    ``pii_class_disallowed`` -> ``evidence_missing`` ->
-    ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
-    ``money_currency_missing`` keeps the result deterministic and free of
-    overlap because each downstream helper skips unknown keys, the two
-    evidence diagnostics are mutually exclusive (evidence_missing fires only
-    on zero entries, evidence_source_mismatch only on non-empty collections),
-    and money_currency_missing is scoped to a disjoint canonical population
-    (only ``unit="money"`` metrics) from value_kind_mismatch (any unit kind).
-    Money-currency lands last so structural and value-type diagnostics surface
-    before the rendering-metadata diagnostic that money metrics must carry a
-    currency string for surfaces to render unambiguously, mirroring the slot
-    reserved by :func:`validate_report_metric_objects`.
-    ``allowed_pii_classes`` is validated by :func:`find_pii_class_violations`,
-    so unsupported classes surface as ``ValueError`` rather than silently
-    passing.
+    ``pii_class_disallowed`` -> ``duplicate_canonical_metric`` ->
+    ``evidence_missing`` -> ``evidence_source_mismatch`` ->
+    ``value_kind_mismatch`` -> ``money_currency_missing`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys, the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch
+    only on non-empty collections), and money_currency_missing is scoped to a
+    disjoint canonical population (only ``unit="money"`` metrics) from
+    value_kind_mismatch (any unit kind). The key-level diagnostics stay
+    contiguous so this validator remains a superset of
+    :func:`validate_surface_metric_keys` over the same keys, with
+    duplicate_canonical_metric closing the key-level block before the
+    object-level evidence/value diagnostics, mirroring
+    :func:`validate_report_metric_objects`. Money-currency lands last so
+    structural and value-type diagnostics surface before the
+    rendering-metadata diagnostic that money metrics must carry a currency
+    string for surfaces to render unambiguously, mirroring the slot reserved
+    by :func:`validate_report_metric_objects`. ``allowed_pii_classes`` is
+    validated by :func:`find_pii_class_violations`, so unsupported classes
+    surface as ``ValueError`` rather than silently passing.
     """
 
     materialized = list(metrics)
@@ -1347,6 +1352,9 @@ def validate_surface_metric_objects(
         keys,
         allowed_pii_classes=allowed_pii_classes,
         registry=registry,
+    )
+    duplicate_issues = find_duplicate_canonical_violations(
+        keys, registry=registry
     )
     evidence_missing_issues = find_evidence_required_violations(
         materialized, registry=registry
@@ -1363,6 +1371,7 @@ def validate_surface_metric_objects(
     return [
         *unknown_issues,
         *pii_issues,
+        *duplicate_issues,
         *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
@@ -1376,18 +1385,20 @@ def validate_surface_metric_keys(
     allowed_pii_classes: Iterable[str],
     registry: MetricRegistry | None = None,
 ) -> list[MetricValidationIssue]:
-    """Compose unknown_metric + pii_class_disallowed diagnostics for keys
-    bound for a surface that enforces a PII allowlist.
+    """Compose unknown_metric + pii_class_disallowed + duplicate_canonical_metric
+    diagnostics for keys bound for a surface that enforces a PII allowlist.
 
     Parallel to :func:`validate_report_metric_keys` and
     :func:`validate_case_metric_keys` but on the surface side: dispatch paths
     (WhatsApp, owner brief) must reject metrics whose canonical ``pii_class`` is
     not in ``allowed_pii_classes``. The fixed concatenation order
-    ``unknown_metric`` -> ``pii_class_disallowed`` keeps the result
-    deterministic and free of overlap because :func:`find_pii_class_violations`
-    already skips unknown keys. ``allowed_pii_classes`` is validated by
-    :func:`find_pii_class_violations`, so unsupported classes surface as
-    ``ValueError`` rather than silently passing.
+    ``unknown_metric`` -> ``pii_class_disallowed`` ->
+    ``duplicate_canonical_metric`` keeps the result deterministic and free of
+    overlap because :func:`find_pii_class_violations` and
+    :func:`find_duplicate_canonical_violations` already skip unknown keys.
+    ``allowed_pii_classes`` is validated by :func:`find_pii_class_violations`,
+    so unsupported classes surface as ``ValueError`` rather than silently
+    passing.
     """
 
     materialized = list(metric_keys)
@@ -1400,7 +1411,10 @@ def validate_surface_metric_keys(
         allowed_pii_classes=allowed_pii_classes,
         registry=registry,
     )
-    return [*unknown_issues, *pii_issues]
+    duplicate_issues = find_duplicate_canonical_violations(
+        materialized, registry=registry
+    )
+    return [*unknown_issues, *pii_issues, *duplicate_issues]
 
 
 def validate_freshness_envelope_metric_objects(
