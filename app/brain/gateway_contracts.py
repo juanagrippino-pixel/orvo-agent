@@ -96,23 +96,32 @@ class GatewayRoutePolicy:
     """Allowlisted gateway policy for one route/method pair.
 
     This is still deterministic and storage-agnostic. It lets future middleware
-    enforce idempotency, business scoping, and rate-limit decisions without
-    copying validation rules into Flask handlers.
+    enforce idempotency, business scoping, auth-shape expectations, and
+    rate-limit decisions without copying validation rules into Flask handlers.
     """
 
     route_key: RouteKey
     method: Method
     idempotency_mode: GatewayIdempotencyMode = "optional"
     requires_business_id: bool = False
+    requires_actor_ref: bool = False
+    allowed_auth_schemes: tuple[str, ...] = ()
     rate_limit_policy: GatewayRateLimitPolicy | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "route_key", _normalize_route_key(self.route_key))
         object.__setattr__(self, "method", _normalize_method(self.method))
+        object.__setattr__(self, "allowed_auth_schemes", tuple(self.allowed_auth_schemes))
         if self.idempotency_mode not in {"optional", "required", "forbidden"}:
             raise GatewayContractError(
                 "invalid_gateway_route_policy",
                 "Idempotency mode must be optional, required, or forbidden.",
+            )
+        invalid_auth_schemes = [scheme for scheme in self.allowed_auth_schemes if scheme not in _SAFE_AUTH_SCHEMES]
+        if invalid_auth_schemes:
+            raise GatewayContractError(
+                "invalid_gateway_route_policy",
+                "Allowed auth schemes must come from the safe gateway auth-scheme allowlist.",
             )
 
 
@@ -285,6 +294,10 @@ def validate_gateway_route_policy(
         return GatewayRouteDecision(allowed=False, reason="method_mismatch")
     if policy.requires_business_id and context.business_id is None:
         return GatewayRouteDecision(allowed=False, reason="business_id_required")
+    if policy.requires_actor_ref and context.actor_ref in {None, "anonymous", "[REDACTED]"}:
+        return GatewayRouteDecision(allowed=False, reason="actor_ref_required")
+    if policy.allowed_auth_schemes and context.auth_scheme not in policy.allowed_auth_schemes:
+        return GatewayRouteDecision(allowed=False, reason="auth_scheme_not_allowed")
     if policy.idempotency_mode == "required" and context.idempotency_key is None:
         return GatewayRouteDecision(allowed=False, reason="idempotency_key_required")
     if policy.idempotency_mode == "forbidden" and context.idempotency_key is not None:

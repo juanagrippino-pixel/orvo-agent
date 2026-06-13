@@ -154,6 +154,8 @@ def test_gateway_rate_limit_policy_without_limit_allows_by_default():
 def test_gateway_route_policy_accepts_matching_context_and_rate_limit_snapshot():
     context = build_gateway_context(
         {
+            "Authorization": "Bearer route_token",
+            "X-Orvo-Operator": "operator:ana",
             "X-Request-ID": "route-req",
             "Idempotency-Key": "route:artemea:1",
         },
@@ -166,6 +168,8 @@ def test_gateway_route_policy_accepts_matching_context_and_rate_limit_snapshot()
         method="POST",
         idempotency_mode="required",
         requires_business_id=True,
+        requires_actor_ref=True,
+        allowed_auth_schemes=("Bearer",),
         rate_limit_policy=GatewayRateLimitPolicy(scope="business", requests_per_minute=2),
     )
 
@@ -232,3 +236,56 @@ def test_gateway_route_policy_rejects_forbidden_idempotency_key():
         allowed=False,
         reason="idempotency_key_forbidden",
     )
+
+
+def test_gateway_route_policy_rejects_missing_actor_ref_when_required():
+    context = build_gateway_context(
+        {"Authorization": "Bearer route_token", "Idempotency-Key": "ack:artemea:1"},
+        route_key="internal.cases.ack",
+        business_id="artemea",
+        method="POST",
+    )
+    policy = GatewayRoutePolicy(
+        route_key="internal.cases.ack",
+        method="POST",
+        idempotency_mode="required",
+        requires_actor_ref=True,
+        allowed_auth_schemes=("Bearer",),
+    )
+
+    assert validate_gateway_route_policy(policy, context, current_requests=0) == GatewayRouteDecision(
+        allowed=False,
+        reason="actor_ref_required",
+    )
+
+
+def test_gateway_route_policy_rejects_disallowed_auth_scheme():
+    context = build_gateway_context(
+        {"Authorization": "Basic dXNlcjpwYXNz", "X-Orvo-Operator": "operator:ana"},
+        route_key="internal.runs.force",
+        business_id="artemea",
+        method="POST",
+    )
+    policy = GatewayRoutePolicy(
+        route_key="internal.runs.force",
+        method="POST",
+        requires_actor_ref=True,
+        allowed_auth_schemes=("Bearer",),
+    )
+
+    assert validate_gateway_route_policy(policy, context, current_requests=0) == GatewayRouteDecision(
+        allowed=False,
+        reason="auth_scheme_not_allowed",
+    )
+
+
+def test_gateway_route_policy_rejects_non_allowlisted_policy_auth_scheme():
+    with pytest.raises(GatewayContractError) as exc:
+        GatewayRoutePolicy(
+            route_key="internal.runs.force",
+            method="POST",
+            allowed_auth_schemes=("Digest",),
+        )
+
+    assert exc.value.code == "invalid_gateway_route_policy"
+    assert "Digest" not in str(exc.value)

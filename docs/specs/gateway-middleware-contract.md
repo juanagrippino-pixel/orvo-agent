@@ -74,13 +74,24 @@ expectations before a future Flask middleware delegates to business handlers:
 - `idempotency_mode`: `optional`, `required`, or `forbidden`;
 - `requires_business_id`: whether the normalized context must carry a business
   routing label;
+- `requires_actor_ref`: whether the context must include a safe non-anonymous
+  operator principal label before route code can mutate durable state;
+- `allowed_auth_schemes`: optional tuple of allowlisted header schemes
+  (`Bearer`, `Basic`, `Token`, `ApiKey`, `Api-Key`) expected for the route after
+  upstream authentication has already happened;
 - `rate_limit_policy`: optional `GatewayRateLimitPolicy` evaluated from a
   deterministic counter snapshot.
 
+`allowed_auth_schemes` is still **shape validation, not authentication proof**.
+It exists so middleware can reject unexpected/malformed auth headers without
+spreading scheme checks across handlers, while route code continues to require
+real authenticated operator/business context.
+
 `validate_gateway_route_policy()` returns `GatewayRouteDecision(allowed,
 reason, retry_after_seconds)`. Denial reasons are stable strings such as
-`idempotency_key_required`, `rate_limited`, or `business_id_required`; they never
-echo caller-controlled route keys or idempotency values.
+`idempotency_key_required`, `actor_ref_required`, `auth_scheme_not_allowed`,
+`rate_limited`, or `business_id_required`; they never echo caller-controlled
+route keys, auth headers, or idempotency values.
 
 ### Audit provenance
 
@@ -99,8 +110,8 @@ The test suite verifies:
 - safe authorization scheme extraction;
 - redacted audit event envelopes;
 - deterministic rate-limit decisions;
-- route-policy enforcement for idempotency, business scoping, rate limits, and
-  unsafe route-key material.
+- route-policy enforcement for auth-scheme allowlists, non-anonymous actor refs,
+  idempotency, business scoping, rate limits, and unsafe route-key material.
 
 ## Integration notes
 
