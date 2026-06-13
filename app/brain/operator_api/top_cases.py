@@ -4,6 +4,83 @@ from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 
 
+_TOP_CASE_RANKINGS: dict[str, str] = {
+    "priority": "priority",
+    "age": "age",
+    "stalled": "stalled",
+    "degraded": "degraded",
+}
+
+
+def parse_top_case_ranking(value: str | None) -> str:
+    if value in (None, ""):
+        return "priority"
+    normalized = (redact_text(value.strip()) or "[REDACTED]").lower()
+    ranking = _TOP_CASE_RANKINGS.get(normalized)
+    if ranking is None:
+        raise OperatorAPIError(
+            "invalid_top_case_ranking",
+            f"unsupported top case ranking: {normalized}",
+            status_code=400,
+        )
+    return ranking
+
+
+def list_top_actionable_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    ranking: str | None = None,
+    limit: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Shared top-cases projection with an allowlisted ranking selector.
+
+    Operator surfaces should prefer one stable endpoint/query surface over a
+    growing set of specialized transport routes. This helper preserves the
+    existing deterministic ranking implementations while exposing a single
+    allowlisted selector for the HTTP layer.
+    """
+
+    normalized_ranking = parse_top_case_ranking(ranking)
+    if normalized_ranking == "priority":
+        payload = list_top_actionable_cases_by_priority(
+            store,
+            business_id=business_id,
+            limit=limit,
+            now=now,
+        )
+    elif normalized_ranking == "age":
+        payload = list_top_actionable_cases_by_age(
+            store,
+            business_id=business_id,
+            limit=limit,
+            now=now,
+        )
+    elif normalized_ranking == "stalled":
+        payload = list_top_stalled_actionable_cases(
+            store,
+            business_id=business_id,
+            limit=limit,
+            now=now,
+        )
+    else:
+        payload = list_top_actionable_degraded_cases(
+            store,
+            business_id=business_id,
+            limit=limit,
+            now=now,
+        )
+
+    return redact_secrets(
+        {
+            "projection_type": "top_actionable_cases",
+            "ranking": normalized_ranking,
+            **payload,
+        }
+    )
+
+
 def list_top_actionable_cases_by_age(
     store: OperationalCaseStore,
     *,

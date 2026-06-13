@@ -261,6 +261,23 @@ def register_case_activity_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/top")
+    def internal_brain_cases_top(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                list_top_actionable_cases(
+                    case_store,
+                    business_id=business_id,
+                    ranking=request.args.get("ranking"),
+                    limit=request.args.get("limit"),
+                    now=datetime.now(timezone.utc),
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/top-by-age")
     def internal_brain_cases_top_by_age(business_id: str):
         return _with_internal_stores(
