@@ -3986,6 +3986,35 @@ def test_internal_top_degraded_actionable_cases_endpoint_is_scoped_and_ordered(m
     assert all(case["source_connectors"] == ["tiendanube"] for case in data["cases"])
 
 
+def test_internal_os_snapshot_endpoint_projects_scoped_home_surface(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection(run_id="run-artemea-os-snapshot"))
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other-os-snapshot"))
+    _seed_run(db_path, business_id="artemea", run_id="run-artemea-os-snapshot")
+
+    response = client.get("/internal/brain/businesses/artemea/os-snapshot", headers=AUTH)
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_snapshot_secret" not in raw_body
+    assert "raw_run_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["next_action"]["kind"] == "work_case"
+    assert data["next_action"]["case"]["case_id"] == case.case_id
+    assert data["next_action"]["lifecycle_action_key"] == "acknowledge_case"
+    assert data["case_queue_summary"]["by_status"]["open"] == 1
+    assert data["case_queue_summary"]["total"] == 1
+    assert data["runtime_health"]["latest_run"]["run_id"] == "run-artemea-os-snapshot"
+    stock_module = next(module for module in data["modules"] if module["module_key"] == "stock_fulfillment")
+    assert stock_module["actionable_cases"] == 1
+    assert stock_module["status"] == "attention"
+
+
 def test_internal_dashboard_endpoint_rejects_non_integer_limit_with_safe_envelope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())

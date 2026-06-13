@@ -38,6 +38,22 @@ def register_dashboard_view_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/os-snapshot")
+    def internal_brain_os_snapshot(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                get_os_snapshot(
+                    case_store,
+                    run_ledger,
+                    business_id=business_id,
+                    now=datetime.now(timezone.utc),
+                ),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/case-views")
     def internal_brain_case_views(business_id: str):
         return _with_internal_stores(
