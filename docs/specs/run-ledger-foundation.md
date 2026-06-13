@@ -10,7 +10,7 @@ Implemented in:
 
 Core objects:
 - `RunRecord`: one report/run lifecycle for a business, including safe config reference/digest fields for future operator audit views.
-- `ConnectorRunOutcome`: per-connector execution result, with optional evidence lineage references.
+- `ConnectorRunOutcome`: per-connector execution result, with optional evidence lineage references and derived `duration_ms` from start/finish timestamps.
 - `ArtifactRef`: reference or summary metadata for generated artifacts; does not embed full secrets or large payloads, and can link to evidence refs / Operational Case ids.
 - `DispatchOutcomeRef`: reference to a delivery/dispatch attempt, including status, idempotency key, attempt number, delivery message id, and optional provider response reference.
 - `RunLedger`: protocol with create/update/list/get and append semantics.

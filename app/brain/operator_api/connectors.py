@@ -79,6 +79,7 @@ def _last_health_projection(latest: tuple[str, ConnectorRunOutcome] | None) -> d
         "health_state": outcome.health_state,
         "started_at": _iso(outcome.started_at),
         "finished_at": _iso(outcome.finished_at),
+        "duration_ms": outcome.duration_ms,
         "error_summary": redact_text(outcome.error_summary) if outcome.error_summary else None,
     }
 

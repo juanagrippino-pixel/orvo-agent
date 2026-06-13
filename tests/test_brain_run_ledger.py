@@ -219,7 +219,10 @@ def test_connector_run_outcome_defaults_registry_health_state_from_status():
     assert failed.health_state == "failed"
     assert skipped.health_state == "degraded"
     assert explicit.health_state == "unauthorized"
+    assert succeeded.duration_ms == 60_000
+    assert skipped.duration_ms is None
     assert explicit.model_dump()["health_state"] == "unauthorized"
+    assert explicit.model_dump()["duration_ms"] == 60_000
 
 
 def test_appends_are_append_only_keep_duplicates_and_preserve_insertion_order_after_reload(conn):

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from app.brain.connector_health import ConnectorHealthState, default_connector_health_state
 from app.brain.security.redaction import redact_secrets, redact_text, redact_uri
@@ -146,6 +146,13 @@ class ConnectorRunOutcome(BaseModel):
         if self.finished_at is not None and self.finished_at < self.started_at:
             raise ValueError("finished_at must be after started_at")
         return self
+
+    @computed_field(return_type=int | None)
+    @property
+    def duration_ms(self) -> int | None:
+        if self.finished_at is None:
+            return None
+        return int((self.finished_at - self.started_at).total_seconds() * 1000)
 
 
 class DispatchOutcomeRef(BaseModel):

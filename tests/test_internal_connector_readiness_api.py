@@ -140,6 +140,7 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "health_state": "unauthorized",
         "started_at": "2026-05-24T07:00:00Z",
         "finished_at": "2026-05-24T08:00:00Z",
+        "duration_ms": 3_600_000,
         "error_summary": "Tiendanube 401 access_token=[REDACTED]",
     }
     assert tiendanube["health_policy"]["readiness_check"] == "metadata_only"
