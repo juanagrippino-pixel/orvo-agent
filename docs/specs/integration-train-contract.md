@@ -27,7 +27,7 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ### 2026-06-13 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `00d7bd8d` (`feat/orvo-brain-control-plane`, `docs: capture 2026-06-13 architecture review findings`). This supersedes the 2026-06-12 checkpoint and incorporates the latest Architecture Review Board review in `docs/architecture-reviews/2026-06-13-arb-cron-review.md` plus `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`. The latest review keeps `N2-Pro/connector-platform` merge-ready, keeps `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, and `n2-pro-work-management` as merge-ready candidates pending rebase/reconciliation, and keeps `N2-Pro/operator-surfaces` in needs-work mode because it is too broad and route-heavy.
+The current repository `HEAD` before this reconciliation is `00d7bd8d` (`feat/orvo-brain-control-plane`, `docs: capture 2026-06-13 architecture review findings`). This supersedes the 2026-06-12 checkpoint and incorporates the latest Architecture Review Board review in `docs/architecture-reviews/2026-06-13-arb-cron-review.md` plus `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`. The latest review keeps `N2-Pro/connector-platform` merge-ready, keeps `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, and `n2-pro-work-management` as merge-ready candidates pending rebase/reconciliation, and keeps `N2-Pro/operator-surfaces` in needs-work mode because it is too broad and route-heavy. Earlier 2026-06-12 architecture reviews remain useful historical context when reconciling older branch-readiness notes.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
