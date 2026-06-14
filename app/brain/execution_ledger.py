@@ -128,7 +128,22 @@ def _connector_emitted_events(status: str, health_state: str | None = None) -> t
 
 
 def _event_certification_metadata(connector_type: str, events: Sequence[str]) -> dict[str, Any]:
-    issues = validate_emitted_events_for_connector(connector_type, list(events))
+    try:
+        issues = validate_emitted_events_for_connector(connector_type, list(events))
+    except UnknownConnectorError:
+        return {
+            "status": "warning",
+            "issue_count": 1,
+            "events": list(events),
+            "issues": [
+                {
+                    "code": "unknown_connector_type",
+                    "event_type": "connector_type",
+                    "index": None,
+                    "message": f"Unknown connector type: {connector_type}",
+                }
+            ],
+        }
     return {
         "status": "passed" if not issues else "warning",
         "issue_count": len(issues),
@@ -146,7 +161,21 @@ def _event_certification_metadata(connector_type: str, events: Sequence[str]) ->
 
 
 def _metric_certification_metadata(connector_type: str, metrics: Sequence[Any]) -> dict[str, Any]:
-    issues = validate_emitted_metric_objects_for_connector(connector_type, metrics)
+    try:
+        issues = validate_emitted_metric_objects_for_connector(connector_type, metrics)
+    except UnknownConnectorError:
+        return {
+            "status": "warning",
+            "issue_count": 1,
+            "issues": [
+                {
+                    "code": "unknown_connector_type",
+                    "key": "connector_type",
+                    "index": None,
+                    "message": f"Unknown connector type: {connector_type}",
+                }
+            ],
+        }
     return {
         "status": "passed" if not issues else "warning",
         "issue_count": len(issues),
