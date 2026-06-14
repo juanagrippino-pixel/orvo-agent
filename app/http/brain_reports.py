@@ -26,6 +26,7 @@ from app.brain.adapters.meta_ads import (
     build_daily_report_from_meta_ads,
 )
 from app.brain.reporting import compose_daily_report_text
+from app.brain.semantics.metric_registry import MetricRegistryValidationError
 from app.http.public_errors import public_error_response as _public_error_response
 from app.http.public_errors import public_error_text as _public_error_text
 
@@ -35,6 +36,17 @@ def _server_override(name: str, fallback):
     return getattr(server_module, name, fallback) if server_module is not None else fallback
 
 
+def _report_response(report):
+    try:
+        text = compose_daily_report_text(report)
+    except MetricRegistryValidationError as e:
+        return _public_error_response({"error": _public_error_text(e)}, 400)
+    return jsonify({
+        "text": text,
+        "report": report.model_dump(mode="json"),
+    })
+
+
 def register_brain_report_routes(app):
     @app.post("/brain/reports/daily")
     def brain_daily_report():
@@ -42,10 +54,7 @@ def register_brain_report_routes(app):
         if not payload.get("business_name") or not payload.get("metrics"):
             return jsonify({"error": "business_name and metrics are required"}), 400
         report = build_daily_report_from_payload(payload)
-        return jsonify({
-            "text": compose_daily_report_text(report),
-            "report": report.model_dump(mode="json"),
-        })
+        return _report_response(report)
 
 
     @app.post("/brain/reports/daily/google-sheets")
@@ -72,10 +81,7 @@ def register_brain_report_routes(app):
         except ValueError as e:
             return _public_error_response({"error": _public_error_text(e)}, 400)
 
-        return jsonify({
-            "text": compose_daily_report_text(report),
-            "report": report.model_dump(mode="json"),
-        })
+        return _report_response(report)
 
 
     @app.post("/brain/reports/daily/csv")
@@ -101,10 +107,7 @@ def register_brain_report_routes(app):
         except (FileNotFoundError, ValueError) as e:
             return _public_error_response({"error": _public_error_text(e)}, 400)
 
-        return jsonify({
-            "text": compose_daily_report_text(report),
-            "report": report.model_dump(mode="json"),
-        })
+        return _report_response(report)
 
 
     @app.post("/brain/reports/daily/tiendanube")
@@ -134,10 +137,7 @@ def register_brain_report_routes(app):
         except TiendanubeConnectionError as e:
             return _public_error_response({"error": _public_error_text(e)}, 502)
 
-        return jsonify({
-            "text": compose_daily_report_text(report),
-            "report": report.model_dump(mode="json"),
-        })
+        return _report_response(report)
 
 
     @app.post("/brain/reports/daily/mercadolibre")
@@ -169,10 +169,7 @@ def register_brain_report_routes(app):
         except ValueError as e:
             return _public_error_response({"error": _public_error_text(e)}, 400)
 
-        return jsonify({
-            "text": compose_daily_report_text(report),
-            "report": report.model_dump(mode="json"),
-        })
+        return _report_response(report)
 
 
     @app.post("/brain/reports/daily/meta-ads")
@@ -203,7 +200,4 @@ def register_brain_report_routes(app):
         except ValueError as e:
             return _public_error_response({"error": _public_error_text(e)}, 400)
 
-        return jsonify({
-            "text": compose_daily_report_text(report),
-            "report": report.model_dump(mode="json"),
-        })
+        return _report_response(report)
