@@ -1246,8 +1246,8 @@ def validate_report_metric_objects(
 ) -> list[MetricValidationIssue]:
     """Compose unknown_metric + report_not_allowed + duplicate_canonical_metric
     + evidence_missing + evidence_source_mismatch + value_kind_mismatch +
-    money_currency_missing diagnostics for metric-shaped objects bound for a
-    user-facing report stage.
+    value_negative + money_currency_missing diagnostics for metric-shaped
+    objects bound for a user-facing report stage.
 
     Parallel to :meth:`ConnectorSpec.validate_emitted_metric_objects` but on the
     report-rendering side: the report renderer must reject report_not_allowed
@@ -1256,20 +1256,24 @@ def validate_report_metric_objects(
     concatenation order ``unknown_metric`` -> ``report_not_allowed`` ->
     ``duplicate_canonical_metric`` -> ``evidence_missing`` ->
     ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
-    ``money_currency_missing`` keeps the result deterministic and free of
-    overlap because each downstream helper skips unknown keys, the two
-    evidence diagnostics are mutually exclusive (evidence_missing fires only
-    on zero entries, evidence_source_mismatch only on non-empty collections),
-    and money_currency_missing is scoped to a disjoint canonical population
-    (only ``unit="money"`` metrics) from value_kind_mismatch (any unit kind).
-    The key-level diagnostics stay contiguous so this validator remains a
-    superset of :func:`validate_report_metric_keys` over the same keys, with
+    ``value_negative`` -> ``money_currency_missing`` keeps the result
+    deterministic and free of overlap because each downstream helper skips
+    unknown keys, the two evidence diagnostics are mutually exclusive
+    (evidence_missing fires only on zero entries, evidence_source_mismatch
+    only on non-empty collections), value_negative is scoped to a disjoint
+    canonical population (only ``unit in {"count", "duration"}``) from
+    money_currency_missing (only ``unit="money"``) and skips bool/non-numeric
+    values reserved by value_kind_mismatch. The key-level diagnostics stay
+    contiguous so this validator remains a superset of
+    :func:`validate_report_metric_keys` over the same keys, with
     duplicate_canonical_metric closing the key-level block before the
     object-level evidence/value diagnostics, mirroring
-    :meth:`ConnectorSpec.validate_emitted_metric_objects`. Money-currency
-    lands last so structural and value-type diagnostics surface before the
-    rendering-metadata diagnostic that money metrics must carry a currency
-    string for reports to render unambiguously.
+    :meth:`ConnectorSpec.validate_emitted_metric_objects`. Value-negative
+    slots immediately after value_kind_mismatch so the value-related
+    diagnostics cluster, and money_currency_missing lands last so structural
+    and value-type diagnostics surface before the rendering-metadata
+    diagnostic that money metrics must carry a currency string for reports
+    to render unambiguously.
     """
 
     materialized = list(metrics)
@@ -1288,6 +1292,9 @@ def validate_report_metric_objects(
     value_kind_issues = find_value_kind_violations(
         materialized, registry=registry
     )
+    value_negative_issues = find_negative_value_violations(
+        materialized, registry=registry
+    )
     money_currency_issues = find_money_currency_violations(
         materialized, registry=registry
     )
@@ -1298,6 +1305,7 @@ def validate_report_metric_objects(
         *evidence_missing_issues,
         *evidence_issues,
         *value_kind_issues,
+        *value_negative_issues,
         *money_currency_issues,
     ]
 
