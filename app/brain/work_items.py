@@ -23,6 +23,7 @@ from app.brain.operational_cases import (
     OperationalCaseSeverity,
     OperationalCaseStatus,
     OperationalCaseStatusCategory,
+    OperationalCaseTimelineEvent,
     OperationalCaseType,
     SLA_STATUS_BREACHED,
     SLA_STATUS_MET,
@@ -326,16 +327,25 @@ def case_last_comment_at(case: OperationalCase) -> datetime | None:
     return max(comment_events)
 
 
-def case_last_event_at(case: OperationalCase) -> datetime | None:
+def _last_timeline_event(case: OperationalCase) -> OperationalCaseTimelineEvent | None:
     if not case.timeline:
         return None
-    return max(event.created_at for event in case.timeline)
+    _, event = max(enumerate(case.timeline), key=lambda item: (item[1].created_at, item[0]))
+    return event
+
+
+def case_last_event_at(case: OperationalCase) -> datetime | None:
+    event = _last_timeline_event(case)
+    if event is None:
+        return None
+    return event.created_at
 
 
 def case_last_event_type(case: OperationalCase) -> str | None:
-    if not case.timeline:
+    event = _last_timeline_event(case)
+    if event is None:
         return None
-    return max(case.timeline, key=lambda event: event.created_at).event_type
+    return event.event_type
 
 
 def case_source_connectors(case: OperationalCase) -> list[str]:
