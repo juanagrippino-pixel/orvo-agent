@@ -102,8 +102,15 @@ def _ensure_idempotent_replay_matches(
     *,
     case_id: str,
     action_key: str,
+    actor_ref: str,
 ) -> None:
-    if record.source != "manual_operator" or record.case_id != case_id or record.action_key != action_key:
+    expected_actor_ref = redact_text(actor_ref) or actor_ref
+    if (
+        record.source != "manual_operator"
+        or record.case_id != case_id
+        or record.action_key != action_key
+        or record.actor_ref != expected_actor_ref
+    ):
         raise OperatorAPIError(
             "idempotency_key_conflict",
             "X-Idempotency-Key was already used for a different manual case action",
@@ -310,7 +317,12 @@ def apply_case_action_with_idempotency(
         params=params,
     )
     if not write.created:
-        _ensure_idempotent_replay_matches(write.record, case_id=case_id, action_key=action_key)
+        _ensure_idempotent_replay_matches(
+            write.record,
+            case_id=case_id,
+            action_key=action_key,
+            actor_ref=effective_actor_ref,
+        )
         _ensure_replay_executed(write.record)
         _ensure_idempotent_replay_payload_matches(write.record, params)
         case = get_scoped_case(store, business_id=business_id, case_id=case_id)
