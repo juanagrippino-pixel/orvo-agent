@@ -13,6 +13,7 @@ from .owner_brief import register_owner_brief_routes
 from .runs_delivery import register_run_delivery_routes
 from .runtime import register_runtime_routes
 from .session import register_session_routes
+from .workflow_actions import register_case_action_routes
 
 
 def register_internal_brain_routes(app):
@@ -29,3 +30,4 @@ def register_internal_brain_routes(app):
     register_owner_brief_routes(app)
     register_operator_audit_routes(app)
     register_run_delivery_routes(app)
+    register_case_action_routes(app)

@@ -1214,7 +1214,16 @@ def test_internal_case_action_catalog_has_single_route_binding(monkeypatch, tmp_
     assert [route.endpoint for route in routes] == ["internal_brain_case_actions"]
 
 
-def test_internal_case_action_catalog_audits_business_scope_denials(monkeypatch, tmp_path):
+def test_internal_case_action_route_is_registered_from_dedicated_workflow_surface(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from server import app
+
+    action_endpoint = app.view_functions["internal_brain_case_action"]
+
+    assert action_endpoint.__module__ == "app.http.internal_brain.workflow_actions"
+
+
+def test_internal_case_action_audits_business_scope_denials(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
 
     response = client.get(
