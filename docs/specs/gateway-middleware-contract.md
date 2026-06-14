@@ -93,6 +93,32 @@ reason, retry_after_seconds)`. Denial reasons are stable strings such as
 `rate_limited`, or `business_id_required`; they never echo caller-controlled
 route keys, auth headers, or idempotency values.
 
+### Service catalog
+
+`GatewayServiceCatalog` is the allowlisted route-policy registry for the Python
+runtime. It binds a service name and human-readable description to a
+`GatewayRoutePolicy` without owning Flask routes, storage, or authentication.
+
+The built-in `default_gateway_service_catalog()` currently documents the
+`internal-brain` service routes that already exist in the runtime/operator
+surface, including runtime compile preview, connector readiness, run ledger,
+case action, case-view, dashboard, and redacted operator-audit projections.
+
+Catalog guarantees:
+
+- route/method duplicates fail closed with
+  `GatewayContractError(code="duplicate_gateway_service_route")`;
+- unknown routes fail closed with
+  `GatewayContractError(code="unknown_gateway_service_route")` and do not echo
+  the caller-controlled route key;
+- `internal-brain` routes require `Bearer` auth-shape validation after upstream
+  authentication and a safe actor reference;
+- business-scoped internal routes require `requires_business_id=True`;
+- mutating case actions require idempotency and a business-scoped rate limit.
+
+This keeps gateway conventions centralized while preserving the existing rule
+that transport code stays thin and business services remain the source of truth.
+
 ### Audit provenance
 
 `build_gateway_audit_event()` builds a redacted event envelope for gateway
@@ -102,6 +128,7 @@ payload data through the existing secret redaction layer.
 ## Tests
 
 - `tests/contracts/test_gateway_contracts.py`
+- `tests/contracts/test_gateway_service_catalog.py`
 
 The test suite verifies:
 
@@ -111,7 +138,9 @@ The test suite verifies:
 - redacted audit event envelopes;
 - deterministic rate-limit decisions;
 - route-policy enforcement for auth-scheme allowlists, non-anonymous actor refs,
-  idempotency, business scoping, rate limits, and unsafe route-key material.
+  idempotency, business scoping, rate limits, and unsafe route-key material;
+- service-catalog duplicate rejection, unknown-route fail-closed behavior, and
+  built-in `internal-brain` route policies.
 
 ## Integration notes
 

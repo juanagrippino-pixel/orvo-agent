@@ -8,8 +8,9 @@ they reach case, ledger, connector, or runtime stores.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
+from types import MappingProxyType
 from typing import Any, Literal, Mapping
 from uuid import uuid4
 
@@ -123,6 +124,106 @@ class GatewayRoutePolicy:
                 "invalid_gateway_route_policy",
                 "Allowed auth schemes must come from the safe gateway auth-scheme allowlist.",
             )
+
+
+@dataclass(frozen=True)
+class GatewayServiceCatalogEntry:
+    """One service-catalog row binding a route to a gateway policy."""
+
+    service: str
+    description: str
+    policy: GatewayRoutePolicy
+
+    @property
+    def route_key(self) -> RouteKey:
+        return self.policy.route_key
+
+    @property
+    def method(self) -> Method:
+        return self.policy.method
+
+
+@dataclass(frozen=True)
+class GatewayServiceCatalog:
+    """Read-only route-policy catalog for gateway middleware/service registry use.
+
+    The catalog is intentionally storage-agnostic: it does not authenticate,
+    rate-limit, or persist decisions. It centralizes the allowlisted route/method
+    policies that future middleware can evaluate before delegating to business
+    handlers.
+    """
+
+    entries: tuple[GatewayServiceCatalogEntry, ...] = field(default_factory=tuple)
+    _index: Mapping[tuple[RouteKey, Method], GatewayServiceCatalogEntry] = field(
+        init=False,
+        repr=False,
+        default_factory=dict,
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "entries", tuple(self.entries))
+        index: dict[tuple[RouteKey, Method], GatewayServiceCatalogEntry] = {}
+        for entry in self.entries:
+            key = (entry.route_key, entry.method)
+            if key in index:
+                raise GatewayContractError(
+                    "duplicate_gateway_service_route",
+                    "Gateway service catalog already contains this route/method policy.",
+                )
+            index[key] = entry
+        object.__setattr__(self, "_index", MappingProxyType(index))
+
+    def register(self, entry: GatewayServiceCatalogEntry) -> "GatewayServiceCatalog":
+        """Return a new catalog with the service route registered."""
+
+        key = (entry.route_key, entry.method)
+        if key in self._index:
+            raise GatewayContractError(
+                "duplicate_gateway_service_route",
+                "Gateway service catalog already contains this route/method policy.",
+            )
+        return GatewayServiceCatalog((*self.entries, entry))
+
+    def policy_for(self, route_key: str, method: str) -> GatewayRoutePolicy:
+        """Return a registered route policy or fail closed without echoing route keys."""
+
+        method_value: Method = _normalize_method(method)
+        try:
+            return self._index[(route_key, method_value)].policy
+        except KeyError as exc:
+            raise GatewayContractError(
+                "unknown_gateway_service_route",
+                "Gateway route policy is not registered.",
+            ) from exc
+
+    def entry_for(self, route_key: str, method: str) -> GatewayServiceCatalogEntry:
+        """Return the catalog entry for a route/method pair."""
+
+        method_value: Method = _normalize_method(method)
+        try:
+            return self._index[(route_key, method_value)]
+        except KeyError as exc:
+            raise GatewayContractError(
+                "unknown_gateway_service_route",
+                "Gateway route policy is not registered.",
+            ) from exc
+
+    def services(self) -> tuple[str, ...]:
+        """Return service names in insertion order, without duplicates."""
+
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for entry in self.entries:
+            if entry.service in seen:
+                continue
+            seen.add(entry.service)
+            ordered.append(entry.service)
+        return tuple(ordered)
+
+    def entries_for_service(self, service: str) -> tuple[GatewayServiceCatalogEntry, ...]:
+        """Return catalog entries for one service in insertion order."""
+
+        return tuple(entry for entry in self.entries if entry.service == service)
 
 
 @dataclass(frozen=True)
@@ -277,6 +378,160 @@ def evaluate_gateway_rate_limit(
     return GatewayRateLimitDecision(
         allowed=False,
         retry_after_seconds=policy.retry_after_seconds,
+    )
+
+
+_INTERNAL_BRAIN_AUTH_SCHEMES: tuple[str, ...] = ("Bearer",)
+_INTERNAL_BRAIN_ACTION_RATE_LIMIT = GatewayRateLimitPolicy(
+    scope="business",
+    requests_per_minute=30,
+    retry_after_seconds=60,
+)
+
+
+def _internal_brain_policy(
+    route_key: str,
+    method: Method,
+    *,
+    description: str,
+    idempotency_mode: GatewayIdempotencyMode = "optional",
+    requires_business_id: bool = True,
+    rate_limit_policy: GatewayRateLimitPolicy | None = None,
+) -> GatewayServiceCatalogEntry:
+    return GatewayServiceCatalogEntry(
+        service="internal-brain",
+        description=description,
+        policy=GatewayRoutePolicy(
+            route_key=route_key,
+            method=method,
+            idempotency_mode=idempotency_mode,
+            requires_business_id=requires_business_id,
+            requires_actor_ref=True,
+            allowed_auth_schemes=_INTERNAL_BRAIN_AUTH_SCHEMES,
+            rate_limit_policy=rate_limit_policy,
+        ),
+    )
+
+
+def default_gateway_service_catalog() -> GatewayServiceCatalog:
+    """Return Orvo Brain's built-in gateway route-policy catalog."""
+
+    return GatewayServiceCatalog(
+        (
+            _internal_brain_policy(
+                "internal.brain.runtime.compile_preview",
+                "POST",
+                description="Compile an immutable runtime preview plan.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.connectors.readiness",
+                "GET",
+                description="Read connector readiness projections.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.operator_session",
+                "GET",
+                description="Read the authenticated operator session projection.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.runs.list",
+                "GET",
+                description="List run ledger projections.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.runs.dispatch_status_summary",
+                "GET",
+                description="Summarize run dispatch status.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.runs.detail",
+                "GET",
+                description="Read one run ledger projection.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.whatsapp.delivery_statuses",
+                "GET",
+                description="Read WhatsApp delivery status audit events.",
+                requires_business_id=False,
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.list",
+                "GET",
+                description="List actionable operational cases.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.summary",
+                "GET",
+                description="Summarize the operational case queue.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.case_actions",
+                "GET",
+                description="List the case action catalog for the operator role.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.detail",
+                "GET",
+                description="Read one operational case projection.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.timeline",
+                "GET",
+                description="List one operational case timeline.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.action",
+                "POST",
+                description="Execute one whitelisted case action.",
+                idempotency_mode="required",
+                rate_limit_policy=_INTERNAL_BRAIN_ACTION_RATE_LIMIT,
+            ),
+            _internal_brain_policy(
+                "internal.brain.case_views.list",
+                "GET",
+                description="List built-in case views.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.case_views.execute",
+                "GET",
+                description="Execute one built-in case view.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.case_facets.list",
+                "GET",
+                description="List case queue facets.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.resolution_latency",
+                "GET",
+                description="Summarize case resolution latency.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.stagnation",
+                "GET",
+                description="Summarize case queue stagnation.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.acknowledgment_latency",
+                "GET",
+                description="Summarize case acknowledgment latency.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.cases.handling_latency",
+                "GET",
+                description="Summarize case handling latency.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.dashboard",
+                "GET",
+                description="Read the operator dashboard projection.",
+            ),
+            _internal_brain_policy(
+                "internal.brain.operator_audit_events",
+                "GET",
+                description="Read redacted operator audit events.",
+            ),
+        )
     )
 
 
