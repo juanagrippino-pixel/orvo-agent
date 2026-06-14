@@ -1188,10 +1188,10 @@ def test_case_update_records_severity_and_priority_change_audit_metadata():
     event = updated.timeline[-1]
     assert event.event_type == "case_updated"
     assert event.metadata["dedupe_key"] == initial.dedupe_key
-    assert event.metadata["severity_from"] == "warning"
-    assert event.metadata["severity_to"] == "critical"
-    assert event.metadata["priority_score_from"] == 70
-    assert event.metadata["priority_score_to"] == 100
+    assert event.metadata["previous_severity"] == "warning"
+    assert event.metadata["severity"] == "critical"
+    assert event.metadata["previous_priority_score"] == 70
+    assert event.metadata["priority_score"] == 100
 
     unchanged = store.upsert_detection(
         make_stockout_detection(run_id="run-3"), detected_at=utc_dt(10)
@@ -1226,10 +1226,10 @@ def test_case_recurrence_reopen_records_severity_change_audit_metadata():
 
     event = reopened.timeline[-1]
     assert event.event_type == "case_reopened"
-    assert event.metadata["severity_from"] == "warning"
-    assert event.metadata["severity_to"] == "critical"
-    assert event.metadata["priority_score_from"] == 70
-    assert event.metadata["priority_score_to"] == 100
+    assert event.metadata["previous_severity"] == "warning"
+    assert event.metadata["severity"] == "critical"
+    assert event.metadata["previous_priority_score"] == 70
+    assert event.metadata["priority_score"] == 100
 
 
 def test_operator_reopen_restores_resolved_case_and_emits_case_reopened_event(conn):
