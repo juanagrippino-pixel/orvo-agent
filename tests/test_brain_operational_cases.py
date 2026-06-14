@@ -926,3 +926,91 @@ def test_upsert_cases_from_report_counts_same_run_dedupe_collision_once():
     assert timeline_types == ["case_opened", "case_updated"], (
         "both detections must remain audited on the case timeline"
     )
+
+
+# Silent metric-drift regression: case.metadata must reflect the LATEST
+# detection's metric-registry advisory state, not accumulate stale advisory
+# fields from a prior run. If a first run carried `metric_registry_mode` /
+# `metric_registry_issues` because the report had an unregistered metric, a
+# subsequent clean re-detection of the same case family must clear those keys
+# from case.metadata. Otherwise operators see a case that looks like it still
+# has registry issues even though the latest evidence is clean — a classic
+# metric-drift silent breakage where the audit surface diverges from the
+# deterministic detection.
+def test_upsert_cases_from_report_clears_stale_metric_registry_advisory_on_clean_recurrence():
+    from app.brain.operational_cases import upsert_cases_from_report
+
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    advisory_report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source]),
+            Metric(key="custom.owner_note_metric", label="Owner note", value="manual", evidence=[source]),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+    clean_report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 25),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=2, unit="units", evidence=[source]),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 2 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+    store = InMemoryOperationalCaseStore()
+
+    upsert_cases_from_report(
+        case_store=store,
+        business_id="artemea",
+        report=advisory_report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+    )
+    [case_after_advisory] = store.list_cases(business_id="artemea")
+    assert case_after_advisory.metadata["metric_registry_mode"] == "advisory", (
+        "first run must surface advisory state when report carries an unregistered metric"
+    )
+    assert case_after_advisory.metadata["metric_registry_issues"], (
+        "first run must surface the deterministic issue list when report carries an unregistered metric"
+    )
+
+    upsert_cases_from_report(
+        case_store=store,
+        business_id="artemea",
+        report=clean_report,
+        run_id="run-2",
+        artifact_ref="ledger://runs/run-2/daily-report",
+    )
+    [case_after_clean] = store.list_cases(business_id="artemea")
+
+    assert case_after_clean.case_id == case_after_advisory.case_id, (
+        "same dedupe key must update the existing case rather than open a new one"
+    )
+    assert "metric_registry_mode" not in case_after_clean.metadata, (
+        "case.metadata must not retain stale 'metric_registry_mode' once the latest "
+        "detection is registry-clean — operators would otherwise see phantom advisory state"
+    )
+    assert "metric_registry_issues" not in case_after_clean.metadata, (
+        "case.metadata must not retain stale 'metric_registry_issues' once the latest "
+        "detection is registry-clean — operators would otherwise see phantom issue lists"
+    )
+    assert case_after_clean.metadata["insight_title"] == "Stock crítico", (
+        "non-advisory detection-sourced metadata must still reflect the latest detection"
+    )
