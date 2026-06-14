@@ -20,6 +20,7 @@ from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerStore,
     WorkflowApprovalRequest,
 )
+from app.brain.workflow_projection_validation import validate_workflow_projection_limit
 
 
 def _iso(value: datetime) -> str:
@@ -101,6 +102,7 @@ def list_workflow_approval_queue(
             "invalid_workflow_approval_queue_scope",
             "workflow approval queue case_id must be non-empty",
         )
+    parsed_limit = validate_workflow_projection_limit(limit)
     validate_workflow_action_key_filter(action_key, require_approval_required=True)
 
     records = ledger.list_actions(business_id=business_id)
@@ -121,7 +123,7 @@ def list_workflow_approval_queue(
         if _is_pending_approval(request, record)
     ]
     pending_pairs.sort(key=lambda pair: (pair[0].requested_at, pair[0].approval_request_id))
-    selected = pending_pairs if limit is None else pending_pairs[: max(limit, 0)]
+    selected = pending_pairs if parsed_limit is None else pending_pairs[:parsed_limit]
     payload = {
         "business_id": business_id,
         **({"case_id": case_id} if case_id is not None else {}),
