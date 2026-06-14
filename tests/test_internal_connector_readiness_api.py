@@ -59,6 +59,48 @@ def _append_connector_outcome(db_path) -> None:
         ledger.update_run(run.run_id, status="failed", finished_at=_utc(8))
 
 
+def _append_certified_success_outcome(db_path) -> None:
+    with closing(sqlite3.connect(db_path)) as conn:
+        init_schema(conn)
+        ledger = SQLiteRunLedger(conn)
+        run = ledger.create_run(
+            business_id="artemea",
+            trigger_type="forced",
+            run_id="run-certification-latest",
+            started_at=_utc(9),
+        )
+        ledger.append_connector_outcome(
+            run.run_id,
+            ConnectorRunOutcome(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                status="succeeded",
+                health_state="ok",
+                started_at=_utc(9),
+                finished_at=_utc(10),
+                metadata={
+                    "event_certification": {
+                        "status": "passed",
+                        "issue_count": 0,
+                        "issues": [],
+                    },
+                    "metric_certification": {
+                        "status": "warning",
+                        "issue_count": 1,
+                        "issues": [
+                            {
+                                "code": "undeclared_family",
+                                "key": "unanswered_conversations",
+                                "message": "Metric key should stay registry declared",
+                            }
+                        ],
+                    },
+                },
+            ),
+        )
+        ledger.update_run(run.run_id, status="succeeded", finished_at=_utc(10))
+
+
 def test_internal_connector_readiness_projects_config_validation_and_last_health(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _save_business(
@@ -142,6 +184,7 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "finished_at": "2026-05-24T08:00:00Z",
         "duration_ms": 3_600_000,
         "error_summary": "Tiendanube 401 access_token=[REDACTED]",
+        "certification": None,
     }
     assert tiendanube["health_policy"]["readiness_check"] == "metadata_only"
     assert tiendanube["required_scopes"] == ["orders.read", "products.read"]
@@ -235,6 +278,52 @@ def test_internal_connector_readiness_does_not_borrow_same_type_health_from_othe
     assert connectors["tn-secondary"]["last_health"] is None
     assert connectors["tn-secondary"]["readiness_state"] == "ready"
     assert connectors["tn-secondary"]["setup_required"] is False
+
+
+def test_internal_connector_readiness_projects_last_run_certification_summary(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _save_business(
+        db_path,
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn-main",
+                    connector_type="tiendanube",
+                    label="TiendaNube principal",
+                    params={"store_id": "123"},
+                    secret_refs={"access_token": "secret://tenant/artemea/tiendanube/main"},
+                ),
+            ],
+        ),
+    )
+    _append_certified_success_outcome(db_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    connector = response.get_json()["data"]["connectors"][0]
+    assert connector["readiness_state"] == "ready"
+    assert connector["last_health"] == {
+        "run_id": "run-certification-latest",
+        "status": "succeeded",
+        "health_state": "ok",
+        "started_at": "2026-05-24T09:00:00Z",
+        "finished_at": "2026-05-24T10:00:00Z",
+        "duration_ms": 3_600_000,
+        "error_summary": None,
+        "certification": {
+            "events": {"status": "passed", "issue_count": 0},
+            "metrics": {"status": "warning", "issue_count": 1},
+        },
+    }
 
 
 def test_internal_connector_readiness_fails_closed_on_legacy_inline_secret(monkeypatch, tmp_path):
