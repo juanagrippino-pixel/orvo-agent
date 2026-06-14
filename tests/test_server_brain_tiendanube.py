@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from app.brain.models import DailyReport, Evidence, Metric
+from app.brain.models import DailyReport, Evidence, Insight, Metric
 from app.brain.adapters.tiendanube import TiendanubeAuthError, TiendanubeConnectionError
 
 
@@ -52,6 +52,57 @@ def test_tiendanube_daily_report_endpoint_returns_report(monkeypatch):
     assert "Orvo Brain" in body["text"]
     assert body["report"]["business_name"] == "Artemea"
     assert body["report"]["metrics"][0]["evidence"][0]["source"] == "tiendanube"
+
+
+def test_tiendanube_daily_report_endpoint_redacts_secret_shaped_report_payload_strings(monkeypatch):
+    from server import app
+
+    source = Evidence(source="tiendanube", label="Panel Authorization: Bearer secret_token")
+
+    def fake_build_daily_report_from_tiendanube(**kwargs):
+        return DailyReport(
+            business_name="Artemea",
+            report_date=kwargs["report_date"],
+            metrics=[Metric(key="revenue_today", label="Ventas de hoy", value=70000, unit="ARS", evidence=[source])],
+            insights=[
+                Insight(
+                    severity="warning",
+                    title="Seguimiento manual",
+                    explanation="Validar los accesos antes del cierre.",
+                    recommended_action="Revisar Authorization: Bearer secret_token antes del cierre.",
+                    evidence=[source],
+                )
+            ],
+        )
+
+    monkeypatch.setattr("server.build_daily_report_from_tiendanube", fake_build_daily_report_from_tiendanube)
+
+    client = app.test_client()
+    response = client.post(
+        "/brain/reports/daily/tiendanube",
+        json={
+            "business_name": "Artemea",
+            "report_date": "2026-05-19",
+            "store_id": "12345",
+            "access_token": "tn_token",
+            "include_stock": True,
+            "source_label": "Tienda Artemea",
+        },
+    )
+
+    assert response.status_code == 200
+    rendered = response.get_data(as_text=True)
+    assert "secret_token" not in rendered
+    body = response.get_json()
+    evidence_label = body["report"]["metrics"][0]["evidence"][0]["label"]
+    assert "Panel Authorization:" in evidence_label
+    assert "secret_token" not in evidence_label
+    assert "[REDACTED]" in evidence_label
+    recommended_action = body["report"]["insights"][0]["recommended_action"]
+    assert "Revisar Authorization:" in recommended_action
+    assert "secret_token" not in recommended_action
+    assert "[REDACTED]" in recommended_action
+    assert "[REDACTED]" in body["text"]
 
 
 def test_tiendanube_daily_report_endpoint_rejects_missing_required_fields():

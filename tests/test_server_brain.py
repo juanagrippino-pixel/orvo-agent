@@ -27,6 +27,30 @@ def test_daily_brain_report_endpoint_returns_text_metrics_and_insights():
     assert len(body["report"]["insights"]) == 2
 
 
+def test_daily_brain_report_endpoint_redacts_secret_shaped_report_payload_strings():
+    from server import app
+
+    client = app.test_client()
+    response = client.post(
+        "/brain/reports/daily",
+        json={
+            "business_name": "Artemea",
+            "report_date": "2026-05-19",
+            "source_label": "Carga manual access_token=raw_generic_secret",
+            "metrics": {
+                "revenue_today": 70000,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    rendered = response.get_data(as_text=True)
+    assert "raw_generic_secret" not in rendered
+    payload = response.get_json()
+    assert payload["report"]["metrics"][0]["evidence"][0]["label"] == "Carga manual access_token=[REDACTED]"
+    assert "[REDACTED]" in payload["text"]
+
+
 def test_daily_brain_report_endpoint_rejects_report_not_allowed_metrics():
     from server import app
 
