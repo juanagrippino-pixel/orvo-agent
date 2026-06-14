@@ -102,6 +102,58 @@ def test_metric_certification_metadata_includes_issue_messages_for_connector_log
     }
 
 
+def test_event_certification_metadata_degrades_to_warning_for_unknown_connector_type():
+    certification = _event_certification_metadata(
+        "legacy_connector",
+        ["connector.execution.succeeded", "connector.health.ok"],
+    )
+
+    assert certification == {
+        "status": "warning",
+        "issue_count": 1,
+        "events": [
+            "connector.execution.succeeded",
+            "connector.health.ok",
+        ],
+        "issues": [
+            {
+                "code": "unknown_connector_type",
+                "event_type": "connector_type",
+                "index": None,
+                "message": "Unknown connector type: legacy_connector",
+            }
+        ],
+    }
+
+
+def test_metric_certification_metadata_degrades_to_warning_for_unknown_connector_type():
+    certification = _metric_certification_metadata(
+        "legacy_connector",
+        [
+            Metric(
+                key="orders_today",
+                label="Pedidos",
+                value=3,
+                unit="count",
+                evidence=[Evidence(source="legacy_connector", label="Legacy")],
+            )
+        ],
+    )
+
+    assert certification == {
+        "status": "warning",
+        "issue_count": 1,
+        "issues": [
+            {
+                "code": "unknown_connector_type",
+                "key": "connector_type",
+                "index": None,
+                "message": "Unknown connector type: legacy_connector",
+            }
+        ],
+    }
+
+
 def test_record_pipeline_failure_maps_connector_auth_errors_to_typed_health_state():
     class UnauthorizedConnectorError(RuntimeError):
         connector_type = "tiendanube"
