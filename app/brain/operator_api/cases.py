@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from .common import *  # noqa: F401,F403
 from .common import (  # noqa: F401
     _ACTIONABLE_STATUSES,
@@ -10,6 +12,18 @@ from .common import (  # noqa: F401
 from .projections import *  # noqa: F401,F403
 
 
+def parse_case_as_of(raw: str | None) -> datetime | None:
+    if raw in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as exc:
+        raise OperatorAPIError("invalid_as_of", "as_of must be an ISO 8601 datetime", status_code=400) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise OperatorAPIError("invalid_as_of", "as_of must include a timezone", status_code=400)
+    return parsed
+
+
 def list_case_queue(
     store: OperationalCaseStore,
     *,
@@ -17,18 +31,20 @@ def list_case_queue(
     status: str | None,
     limit: str | None,
     jql: str | None = None,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
+    now = parse_case_as_of(as_of)
     if jql not in (None, ""):
         if status not in (None, ""):
             raise OperatorAPIError("conflicting_case_filters", "status and jql filters are mutually exclusive", status_code=400)
         from app.brain.operator_views import query_case_queue
 
-        return query_case_queue(store, business_id=business_id, jql=jql, limit=limit)
+        return query_case_queue(store, business_id=business_id, jql=jql, limit=limit, now=now)
 
     parsed_status = parse_case_status(status)
     parsed_limit = parse_limit(limit)
     cases = store.list_cases(business_id=business_id, status=parsed_status, limit=parsed_limit)
-    return {"cases": [case_queue_item(case) for case in cases], "limit": parsed_limit}
+    return {"cases": [case_queue_item(case, now=now) for case in cases], "limit": parsed_limit}
 
 def get_scoped_case(store: OperationalCaseStore, *, business_id: str, case_id: str) -> OperationalCase:
     case = store.get_case(case_id)
@@ -36,8 +52,9 @@ def get_scoped_case(store: OperationalCaseStore, *, business_id: str, case_id: s
         raise OperatorAPIError("case_not_found", "case not found", status_code=404)
     return case
 
-def get_case_projection(store: OperationalCaseStore, *, business_id: str, case_id: str) -> dict[str, Any]:
-    return {"case": case_detail(get_scoped_case(store, business_id=business_id, case_id=case_id))}
+def get_case_projection(store: OperationalCaseStore, *, business_id: str, case_id: str, as_of: str | None = None) -> dict[str, Any]:
+    now = parse_case_as_of(as_of)
+    return {"case": case_detail(get_scoped_case(store, business_id=business_id, case_id=case_id), now=now)}
 
 def list_case_timeline(
     store: OperationalCaseStore,

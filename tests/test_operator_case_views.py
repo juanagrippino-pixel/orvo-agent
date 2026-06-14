@@ -589,6 +589,39 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
+def test_query_case_queue_uses_supplied_sla_clock(monkeypatch, tmp_path):
+    db_path = tmp_path / "queue.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-sla-clock"))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    try:
+        pending = operator_views.query_case_queue(
+            store,
+            business_id="artemea",
+            jql="status = open",
+            limit=None,
+            now=datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+        )
+        breached = operator_views.query_case_queue(
+            store,
+            business_id="artemea",
+            jql="sla_status = breached",
+            limit=None,
+            now=datetime(2026, 5, 24, 10, 30, tzinfo=timezone.utc),
+        )
+    finally:
+        conn.close()
+
+    assert pending["cases"][0]["case_id"] == case.case_id
+    assert pending["cases"][0]["sla_status"] == "pending"
+    assert pending["cases"][0]["work_item"]["sla_status"] == "pending"
+    assert breached["cases"][0]["case_id"] == case.case_id
+    assert breached["cases"][0]["sla_status"] == "breached"
+    assert breached["cases"][0]["work_item"]["sla_status"] == "breached"
+
+
 def test_internal_case_queue_project_jql_cannot_override_route_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection(run_id="run-artemea", priority=80))

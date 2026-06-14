@@ -193,18 +193,19 @@ def query_case_queue(
     jql: str | None,
     limit: str | None,
     view: dict[str, Any] | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     parsed = parse_case_jql(jql)
     parsed_limit = parse_limit(limit)
     candidates = store.list_cases(business_id=business_id, limit=None)
-    filtered = [case for case in candidates if _matches(case, parsed.clauses)]
+    filtered = [case for case in candidates if _matches(case, parsed.clauses, now=now)]
     total = len(filtered)
-    filtered = _sort_cases(filtered, parsed.order_by)
+    filtered = _sort_cases(filtered, parsed.order_by, now=now)
     limited = filtered[:parsed_limit]
     data: dict[str, Any] = {
         "jql": parsed.raw,
         "normalized_jql": parsed.normalized,
-        "cases": [case_queue_item(case) for case in limited],
+        "cases": [case_queue_item(case, now=now) for case in limited],
         "limit": parsed_limit,
         "count": len(limited),
         "total": total,
@@ -222,6 +223,7 @@ def facet_case_queue(
     field: str | None,
     jql: str | None,
     limit: str | None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Return deterministic WorkItem field facets over route-scoped cases.
 
@@ -239,10 +241,10 @@ def facet_case_queue(
     parsed = parse_case_jql(jql)
     bucket_limit = parse_limit(limit, default=20)
     candidates = store.list_cases(business_id=business_id, limit=None)
-    filtered = [case for case in candidates if _matches(case, parsed.clauses)]
+    filtered = [case for case in candidates if _matches(case, parsed.clauses, now=now)]
     counts: dict[Any, int] = {}
     for case in filtered:
-        for value in _case_facet_values(case, facet_field):
+        for value in _case_facet_values(case, facet_field, now=now):
             counts[value] = counts.get(value, 0) + 1
 
     buckets = [
@@ -263,10 +265,10 @@ def facet_case_queue(
     return redact_secrets(data)
 
 
-def _case_facet_values(case: OperationalCase, field: str) -> tuple[Any, ...]:
+def _case_facet_values(case: OperationalCase, field: str, now: datetime | None = None) -> tuple[Any, ...]:
     if field == "source_connector":
         return tuple(_case_source_connectors(case))
-    return (_case_field_value(case, field),)
+    return (_case_field_value(case, field, now=now),)
 
 
 def _facet_value_sort_key(value: Any) -> tuple[str, str]:
@@ -376,15 +378,15 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
-def _matches(case: OperationalCase, clauses: tuple[CaseJQLClause, ...]) -> bool:
-    return all(_matches_clause(case, clause) for clause in clauses)
+def _matches(case: OperationalCase, clauses: tuple[CaseJQLClause, ...], now: datetime | None = None) -> bool:
+    return all(_matches_clause(case, clause, now=now) for clause in clauses)
 
 
-def _matches_clause(case: OperationalCase, clause: CaseJQLClause) -> bool:
+def _matches_clause(case: OperationalCase, clause: CaseJQLClause, now: datetime | None = None) -> bool:
     if clause.field == "source_connector":
         return _matches_source_connector(case, clause)
 
-    actual = _case_field_value(case, clause.field)
+    actual = _case_field_value(case, clause.field, now=now)
     if clause.operator == "IN":
         return actual in clause.values
     expected = clause.values[0]
@@ -421,7 +423,7 @@ def _matches_source_connector(case: OperationalCase, clause: CaseJQLClause) -> b
     raise OperatorAPIError("unsupported_jql_operator", f"Unsupported operator: {clause.operator}", status_code=400)
 
 
-def _case_field_value(case: OperationalCase, field: str) -> Any:
+def _case_field_value(case: OperationalCase, field: str, now: datetime | None = None) -> Any:
     if field == "entity.kind":
         return case.entity_scope.get("kind")
     if field == "entity.id":
@@ -459,20 +461,20 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
     if field == "priority_bracket":
         return case_priority_bracket(case)
     if field == "sla_status":
-        return case_sla_status(case)
+        return case_sla_status(case, now=now)
     return getattr(case, field)
 
 
-def _sort_cases(cases: list[OperationalCase], order_by: tuple[tuple[str, str], ...]) -> list[OperationalCase]:
+def _sort_cases(cases: list[OperationalCase], order_by: tuple[tuple[str, str], ...], now: datetime | None = None) -> list[OperationalCase]:
     result = list(cases)
     # Apply stable sorts from last to first so mixed directions work.
     for field, direction in reversed(order_by + (("case_id", "ASC"),)):
         reverse = direction == "DESC"
-        result.sort(key=lambda case, sort_field=field: _sort_value(case, sort_field), reverse=reverse)
+        result.sort(key=lambda case, sort_field=field: _sort_value(case, sort_field, now=now), reverse=reverse)
     return result
 
 
-def _sort_value(case: OperationalCase, field: str) -> Any:
+def _sort_value(case: OperationalCase, field: str, now: datetime | None = None) -> Any:
     if field == "case_id":
         return case.case_id
-    return _case_field_value(case, field)
+    return _case_field_value(case, field, now=now)
