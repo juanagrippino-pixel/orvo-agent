@@ -26,6 +26,7 @@ from app.brain.adapters.meta_ads import (
     build_daily_report_from_meta_ads,
 )
 from app.brain.reporting import compose_daily_report_text
+from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.semantics.metric_registry import MetricRegistryValidationError
 from app.http.public_errors import public_error_response as _public_error_response
 from app.http.public_errors import public_error_text as _public_error_text
@@ -41,9 +42,11 @@ def _report_response(report):
         text = compose_daily_report_text(report)
     except MetricRegistryValidationError as e:
         return _public_error_response({"error": _public_error_text(e)}, 400)
+    safe_text = redact_text(text) or "[REDACTED]"
+    safe_payload = redact_secrets(report.model_dump(mode="json"))
     return jsonify({
-        "text": text,
-        "report": report.model_dump(mode="json"),
+        "text": safe_text,
+        "report": safe_payload,
     })
 
 
