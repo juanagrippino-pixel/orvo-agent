@@ -34,6 +34,10 @@ def _case_scope() -> str | None:
     return request.args.get("case_id")
 
 
+def _action_key_scope() -> str | None:
+    return request.args.get("action_key")
+
+
 def _handle_projection_errors(business_id: str, exc: Exception):
     if isinstance(exc, OperatorAPIError):
         return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
@@ -63,6 +67,7 @@ def register_workflow_action_routes(app):
             data = list_workflow_approval_queue(
                 _workflow_ledger(),
                 business_id=business_id,
+                action_key=_action_key_scope(),
                 limit=_read_limit(),
             )
         except Exception as exc:
@@ -79,6 +84,7 @@ def register_workflow_action_routes(app):
                 _workflow_ledger(),
                 business_id=business_id,
                 case_id=_case_scope(),
+                action_key=_action_key_scope(),
                 limit=_read_limit(),
             )
         except Exception as exc:
