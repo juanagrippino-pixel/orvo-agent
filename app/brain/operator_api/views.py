@@ -19,6 +19,18 @@ def list_builtin_case_views(
 
     return {"views": builtin_case_views_with_counts(store, business_id=business_id)}
 
+
+def get_builtin_case_view_detail(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    view_id: str,
+) -> dict[str, Any]:
+    from app.brain.operator_views import describe_builtin_case_view
+
+    return {"view": describe_builtin_case_view(store, business_id=business_id, view_id=view_id)}
+
+
 def execute_builtin_case_view(
     store: OperationalCaseStore,
     *,

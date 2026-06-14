@@ -685,6 +685,45 @@ def test_internal_case_views_include_business_scoped_matching_counts(monkeypatch
     assert all("matching_case_count" in view for view in views.values())
 
 
+def test_internal_case_view_detail_returns_stable_jql_and_normalized_metadata(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-critical-open"))
+    _seed_case(db_path, _case_detection(run_id="run-other-business", business_id="other"))
+
+    response = client.get("/internal/brain/businesses/artemea/case-views/critical_open", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["redaction_applied"] is True
+    assert body["data"]["view"] == {
+        "view_id": "critical_open",
+        "label": "Critical open cases",
+        "description": "Open critical cases first.",
+        "readonly": True,
+        "jql": "status = open AND severity = critical ORDER BY priority_score DESC",
+        "normalized_jql": "status = open AND severity = critical ORDER BY priority_score DESC",
+        "filters": [
+            {"field": "status", "operator": "=", "values": ["open"]},
+            {"field": "severity", "operator": "=", "values": ["critical"]},
+        ],
+        "order_by": [{"field": "priority_score", "direction": "DESC"}],
+        "matching_case_count": 1,
+    }
+
+
+def test_internal_case_view_detail_unknown_view_returns_enveloped_404(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-views/missing", headers=AUTH)
+
+    assert response.status_code == 404
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "case_view_not_found"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _seed_case(db_path, _case_detection(run_id="run-critical"))

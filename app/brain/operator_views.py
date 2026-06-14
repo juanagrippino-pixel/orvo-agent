@@ -152,6 +152,31 @@ def get_builtin_case_view(view_id: str) -> dict[str, Any]:
     raise OperatorAPIError("case_view_not_found", "case view not found", status_code=404)
 
 
+def describe_builtin_case_view(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    view_id: str,
+) -> dict[str, Any]:
+    """Return one built-in view with normalized filter/sort metadata."""
+
+    view = get_builtin_case_view(view_id)
+    parsed = parse_case_jql(str(view["jql"]))
+    candidates = store.list_cases(business_id=business_id, limit=None)
+    matching_case_count = sum(1 for case in candidates if _matches(case, parsed.clauses))
+    payload = {
+        **view,
+        "normalized_jql": parsed.normalized,
+        "filters": [_serialize_clause(clause) for clause in parsed.clauses],
+        "order_by": [
+            {"field": field, "direction": direction}
+            for field, direction in parsed.order_by
+        ],
+        "matching_case_count": matching_case_count,
+    }
+    return redact_secrets(payload)
+
+
 def parse_case_jql(jql: str | None) -> ParsedCaseJQL:
     raw = (jql or "").strip()
     if not raw:
@@ -366,6 +391,14 @@ def _format_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def _serialize_clause(clause: CaseJQLClause) -> dict[str, Any]:
+    return {
+        "field": clause.field,
+        "operator": clause.operator,
+        "values": list(clause.values),
+    }
 
 
 def _matches(case: OperationalCase, clauses: tuple[CaseJQLClause, ...]) -> bool:
