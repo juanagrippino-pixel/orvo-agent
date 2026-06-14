@@ -67,6 +67,7 @@ def register_workflow_action_routes(app):
             data = list_workflow_approval_queue(
                 _workflow_ledger(),
                 business_id=business_id,
+                case_id=_case_scope(),
                 action_key=_action_key_scope(),
                 limit=_read_limit(),
             )
