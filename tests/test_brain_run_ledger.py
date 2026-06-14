@@ -118,6 +118,81 @@ def test_terminal_run_status_cannot_be_mutated_or_appended_to():
         )
 
 
+def test_terminal_run_rejects_every_append_surface_on_in_memory_and_sqlite_ledgers(conn):
+    """The run ledger is the append-only receipt of one run. Once the run reaches a
+    terminal status, no late connector outcome, dispatch outcome, or artifact ref
+    may be silently slipped in — otherwise a slow connector finishing after the
+    run was closed would corrupt the audit trail with no surfaced error.
+
+    The existing terminal-mutation test only locks ``append_artifact_ref`` on the
+    in-memory ledger. This locks the same contract for ``append_connector_outcome``
+    and ``append_dispatch_outcome``, and verifies the SQLite-backed ledger enforces
+    the rejection identically (its ``get_run`` reloads from disk, a different code
+    path that could regress independently).
+    """
+
+    for label, ledger in (
+        ("memory", InMemoryRunLedger()),
+        ("sqlite", SQLiteRunLedger(conn)),
+    ):
+        run_id = f"run-terminal-{label}"
+        ledger.create_run(
+            run_id=run_id,
+            business_id="artemea",
+            trigger_type="scheduled",
+            started_at=utc_dt(8),
+        )
+        ledger.update_run(
+            run_id,
+            status="failed",
+            finished_at=utc_dt(9),
+            error_summary="boom",
+        )
+
+        with pytest.raises(RunLedgerStatusError, match="terminal"):
+            ledger.append_connector_outcome(
+                run_id,
+                ConnectorRunOutcome(
+                    connector_id="late-conn",
+                    connector_type="tiendanube",
+                    status="succeeded",
+                    started_at=utc_dt(8),
+                    finished_at=utc_dt(8, 30),
+                ),
+            )
+
+        with pytest.raises(RunLedgerStatusError, match="terminal"):
+            ledger.append_dispatch_outcome(
+                run_id,
+                DispatchOutcomeRef(
+                    channel="whatsapp",
+                    status="sent",
+                    idempotency_key=f"artemea/2026-05-24/daily-{label}",
+                ),
+            )
+
+        with pytest.raises(RunLedgerStatusError, match="terminal"):
+            ledger.append_artifact_ref(
+                run_id,
+                ArtifactRef(artifact_id="late-art", artifact_type="daily_report"),
+            )
+
+        persisted = ledger.get_run(run_id)
+        assert persisted is not None, f"{label}: terminal run must still be retrievable"
+        assert persisted.status == "failed", (
+            f"{label}: rejected late appends must not flip the run back out of terminal status"
+        )
+        assert persisted.connector_outcomes == [], (
+            f"{label}: rejected connector_outcome append must not be persisted"
+        )
+        assert persisted.dispatch_outcomes == [], (
+            f"{label}: rejected dispatch_outcome append must not be persisted"
+        )
+        assert persisted.artifacts == [], (
+            f"{label}: rejected artifact append must not be persisted"
+        )
+
+
 def test_terminal_status_requires_finished_at_and_valid_time_order():
     ledger = InMemoryRunLedger()
     ledger.create_run(run_id="run-time", business_id="artemea", trigger_type="scheduled", started_at=utc_dt(10))
