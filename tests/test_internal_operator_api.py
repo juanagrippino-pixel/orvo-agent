@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 
 from app.brain.operational_cases import (
@@ -1327,6 +1329,48 @@ def test_internal_run_dispatch_status_summary_is_scoped_redacted_and_filterable(
             "none": 1,
         },
     }
+
+
+def test_internal_run_history_export_is_scoped_filtered_and_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-sent", dispatch_status="sent")
+    _seed_run(db_path, business_id="artemea", run_id="run-failed", dispatch_status="failed")
+    _seed_run(db_path, business_id="other", run_id="run-other-failed", dispatch_status="failed")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/export?status=succeeded&dispatch_status=sent&limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "text/csv" in response.content_type
+    assert "attachment; filename=orvo-run-history-artemea.csv" in response.headers["Content-Disposition"]
+    assert "run-sent" in raw_body
+    assert "run-failed" not in raw_body
+    assert "raw_run_secret" not in raw_body
+    assert "raw_artifact_secret" not in raw_body
+    assert "raw_provider_secret" not in raw_body
+    rows = list(csv.DictReader(StringIO(raw_body)))
+    assert [row["run_id"] for row in rows] == ["run-sent"]
+    assert rows[0]["dispatch_status"] == "sent"
+    assert "REDACTED" in rows[0]["config_ref"]
+
+
+def test_internal_run_history_export_rejects_invalid_filters_with_redacted_error(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_run(db_path, business_id="artemea", run_id="run-artemea")
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/runs/export?status=failed access_token=raw_status_secret",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_status_secret" not in raw_body
+    body = response.get_json()
+    assert body["error"]["code"] == "invalid_run_status"
 
 
 def test_internal_case_queue_summary_returns_status_severity_and_actionable_counts(monkeypatch, tmp_path):

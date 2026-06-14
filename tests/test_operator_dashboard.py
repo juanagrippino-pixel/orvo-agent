@@ -1,6 +1,8 @@
 """Operator dashboard aggregation endpoint tests."""
 from __future__ import annotations
 
+import csv
+from io import StringIO
 from datetime import datetime, timezone
 
 from app.brain.operational_cases import (
@@ -8,8 +10,8 @@ from app.brain.operational_cases import (
     OperationalCaseDetection,
     OperationalCaseEvidenceSnapshot,
 )
-from app.brain.operator_api import get_operator_dashboard, get_os_snapshot
-from app.brain.run_ledger import InMemoryRunLedger
+from app.brain.operator_api import export_run_history_csv, get_operator_dashboard, get_os_snapshot
+from app.brain.run_ledger import DispatchOutcomeRef, InMemoryRunLedger
 
 
 def _utc(hour: int) -> datetime:
@@ -152,6 +154,49 @@ def test_dashboard_handles_empty_stores() -> None:
     assert result["top_actionable_cases"]["count"] == 0
     assert result["top_degraded_cases"]["count"] == 0
     assert len(result["run_history"]["runs"]) == 0
+
+
+def test_export_run_history_csv_is_scoped_filtered_and_redacted() -> None:
+    """Run-history CSV export should reuse ledger projections and enforce scope/limit."""
+    ledger = InMemoryRunLedger()
+
+    sent = ledger.create_run(
+        business_id="artemea",
+        trigger_type="scheduled",
+        run_id="run-sent",
+        started_at=_utc(4),
+        config_ref="config://runtime?access_token=raw_export_secret",
+    )
+    ledger.append_dispatch_outcome(
+        sent.run_id,
+        DispatchOutcomeRef(
+            channel="whatsapp",
+            status="sent",
+            provider_response_ref="provider://response?access_token=raw_export_secret",
+        ),
+    )
+    ledger.update_run(sent.run_id, status="succeeded", finished_at=_utc(5))
+    failed = ledger.create_run(
+        business_id="artemea",
+        trigger_type="scheduled",
+        run_id="run-failed",
+        started_at=_utc(6),
+    )
+    ledger.append_dispatch_outcome(failed.run_id, DispatchOutcomeRef(channel="whatsapp", status="failed"))
+    ledger.update_run(failed.run_id, status="failed", finished_at=_utc(7))
+    ledger.create_run(business_id="other", trigger_type="scheduled", run_id="run-other", started_at=_utc(8))
+
+    export = export_run_history_csv(ledger, business_id="artemea", status="succeeded", limit="1")
+
+    assert export["content_type"] == "text/csv"
+    assert export["filename"] == "orvo-run-history-artemea.csv"
+    body = export["body"]
+    assert "raw_export_secret" not in body
+    rows = list(csv.DictReader(StringIO(body)))
+    assert [row["run_id"] for row in rows] == ["run-sent"]
+    assert rows[0]["status"] == "succeeded"
+    assert rows[0]["dispatch_status"] == "sent"
+    assert "REDACTED" in rows[0]["config_ref"]
 
 
 def test_dashboard_scopes_to_business_id() -> None:
