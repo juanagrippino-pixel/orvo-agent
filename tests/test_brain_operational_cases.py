@@ -582,6 +582,135 @@ def test_upsert_detection_on_acknowledged_case_preserves_ack_and_reflects_escala
         )
 
 
+# Audit-gap regression: operator comments (`operator_comment` timeline events)
+# must survive a full ack -> resolve -> recurrence cycle alongside the system
+# `status_changed` / `case_opened` / `case_reopened` events. The existing
+# recurrence-audit test only adds status_changed events, so a refactor that
+# accidentally filtered the carried-over timeline to system events on
+# recurrence (e.g. trying to "reset" the case while keeping the dedupe key)
+# would silently erase operator commentary without tripping any current test.
+# Operator commentary is the human audit trail Hito 0 supervisors rely on to
+# explain why a recurred case was previously resolved.
+def test_recurrence_preserves_operator_comments_across_full_lifecycle(conn):
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+
+        open_comment = store.add_comment(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="juan",
+            comment="Pinged supplier, awaiting reply",
+            commented_at=utc_dt(8, 30),
+        )
+        assert open_comment.timeline[-1].event_type == "operator_comment", (
+            f"{label}: comment on open case must append an operator_comment event"
+        )
+
+        store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+
+        ack_comment = store.add_comment(
+            opened.case_id,
+            actor_type="operator",
+            actor_ref="juan",
+            comment="Supplier confirmed restock for Monday",
+            commented_at=utc_dt(9, 30),
+        )
+        assert ack_comment.timeline[-1].event_type == "operator_comment", (
+            f"{label}: comment on acked case must append an operator_comment event"
+        )
+
+        resolved = store.transition_case(
+            opened.case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Stock repuesto",
+            transitioned_at=utc_dt(10),
+        )
+
+        pre_recurrence_event_types = [event.event_type for event in resolved.timeline]
+        assert pre_recurrence_event_types == [
+            "case_opened",
+            "operator_comment",
+            "status_changed",
+            "operator_comment",
+            "status_changed",
+        ], (
+            f"{label}: pre-recurrence timeline must interleave operator_comment events with system events"
+        )
+        pre_recurrence_event_ids = [event.event_id for event in resolved.timeline]
+        pre_recurrence_comment_summaries = [
+            event.summary for event in resolved.timeline if event.event_type == "operator_comment"
+        ]
+
+        reopened = store.upsert_detection(
+            make_stockout_detection(run_id="run-2", evidence_ref="evidence://tn/stock/2026-05-25"),
+            detected_at=utc_dt(11),
+        )
+
+        assert reopened.case_id == opened.case_id, (
+            f"{label}: recurrence must reuse case_id, not mint a new case"
+        )
+        assert reopened.status == "open", f"{label}: recurrence must reopen status to 'open'"
+
+        reopened_event_types = [event.event_type for event in reopened.timeline]
+        assert reopened_event_types == [
+            "case_opened",
+            "operator_comment",
+            "status_changed",
+            "operator_comment",
+            "status_changed",
+            "case_reopened",
+        ], (
+            f"{label}: recurrence must preserve operator_comment events from the prior lifecycle, "
+            f"not silently filter them out when carrying the timeline forward"
+        )
+        assert [event.event_id for event in reopened.timeline[:5]] == pre_recurrence_event_ids, (
+            f"{label}: prior timeline event ids (including operator_comment ids) must remain identical across recurrence"
+        )
+        recurred_comment_summaries = [
+            event.summary for event in reopened.timeline if event.event_type == "operator_comment"
+        ]
+        assert recurred_comment_summaries == pre_recurrence_comment_summaries, (
+            f"{label}: operator comment text must be preserved verbatim across recurrence"
+        )
+
+        # New comments after recurrence must keep appending without disturbing
+        # the prior commentary — the audit trail is purely additive.
+        post_recurrence_comment = store.add_comment(
+            reopened.case_id,
+            actor_type="operator",
+            actor_ref="juan",
+            comment="Recurrió, revisando supplier de nuevo",
+            commented_at=utc_dt(11, 30),
+        )
+        final_event_types = [event.event_type for event in post_recurrence_comment.timeline]
+        assert final_event_types == [
+            "case_opened",
+            "operator_comment",
+            "status_changed",
+            "operator_comment",
+            "status_changed",
+            "case_reopened",
+            "operator_comment",
+        ], (
+            f"{label}: post-recurrence comment must append without dropping prior operator commentary"
+        )
+        assert [event.event_id for event in post_recurrence_comment.timeline[:5]] == pre_recurrence_event_ids, (
+            f"{label}: post-recurrence comment must not rewrite prior timeline event ids"
+        )
+
+
 def test_open_case_queue_orders_by_priority_then_age():
     store = InMemoryOperationalCaseStore()
     warning = make_stockout_detection(run_id="run-1")
