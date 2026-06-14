@@ -133,8 +133,11 @@ All listed routes returned `200` in the seeded snapshot unless otherwise noted. 
 | GET | `/internal/brain/businesses/<business_id>/cases/top-degraded` | `internal_brain_cases_top_degraded` | `actionable_degraded_total`, `business_id`, `cases`, `count`, `limit`, `now` |
 | GET | `/internal/brain/businesses/<business_id>/cases/top-stalled` | `internal_brain_cases_top_stalled` | `actionable_total`, `business_id`, `cases`, `count`, `limit`, `now` |
 | GET | `/internal/brain/businesses/<business_id>/cases/recently-opened` | `internal_brain_cases_recently_opened` | `business_id`, `cases`, `count`, `limit`, `open_total` |
+| GET | `/internal/brain/businesses/<business_id>/cases/recently-reopened` | `internal_brain_cases_recently_reopened` | `business_id`, `cases`, `count`, `limit`, `reopened_total` |
 | GET | `/internal/brain/businesses/<business_id>/cases/recently-acknowledged` | `internal_brain_cases_recently_acknowledged` | `acknowledged_total`, `business_id`, `cases`, `count`, `limit` |
+| GET | `/internal/brain/businesses/<business_id>/cases/recently-in-progress` | `internal_brain_cases_recently_in_progress` | `business_id`, `cases`, `count`, `in_progress_total`, `limit` |
 | GET | `/internal/brain/businesses/<business_id>/cases/recently-resolved` | `internal_brain_cases_recently_resolved` | `business_id`, `cases`, `count`, `limit`, `resolved_total` |
+| GET | `/internal/brain/businesses/<business_id>/cases/recently-dismissed` | `internal_brain_cases_recently_dismissed` | `business_id`, `cases`, `count`, `dismissed_total`, `limit` |
 | GET | `/internal/brain/businesses/<business_id>/dashboard` | `internal_brain_dashboard` | `acknowledgment_latency_histogram`, `business_id`, `case_queue_summary`, `now`, `resolution_latency_histogram`, `run_history`, `top_actionable_cases`, `top_degraded_cases`, `workflow_throughput` |
 | GET | `/internal/brain/businesses/<business_id>/case-views` | `internal_brain_case_views` | `views` |
 | GET | `/internal/brain/businesses/<business_id>/case-views/<view_id>/cases` | `internal_brain_case_view_cases` | `cases`, `count`, `jql`, `limit`, `normalized_jql`, `total`, `truncated`, `view` |
