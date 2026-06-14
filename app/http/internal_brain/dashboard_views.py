@@ -73,6 +73,7 @@ def register_dashboard_view_routes(app):
                     business_id=business_id,
                     view_id=view_id,
                     limit=request.args.get("limit"),
+                    as_of=request.args.get("as_of"),
                 ),
             ),
         )
@@ -90,6 +91,7 @@ def register_dashboard_view_routes(app):
                     field=request.args.get("field"),
                     jql=request.args.get("jql"),
                     limit=request.args.get("limit"),
+                    as_of=request.args.get("as_of"),
                 ),
             ),
         )
@@ -100,7 +102,7 @@ def register_dashboard_view_routes(app):
             business_id,
             lambda case_store, run_ledger: _internal_success(
                 business_id,
-                get_case_projection(case_store, business_id=business_id, case_id=case_id),
+                get_case_projection(case_store, business_id=business_id, case_id=case_id, as_of=request.args.get("as_of")),
             ),
         )
 
