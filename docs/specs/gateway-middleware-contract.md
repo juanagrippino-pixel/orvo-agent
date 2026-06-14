@@ -98,11 +98,16 @@ route keys, auth headers, or idempotency values.
 `GatewayServiceCatalog` is the allowlisted route-policy registry for the Python
 runtime. It binds a service name and human-readable description to a
 `GatewayRoutePolicy` without owning Flask routes, storage, or authentication.
+Each entry may also declare a safe `path_pattern` so thin middleware can resolve
+concrete request paths to the same canonical route policy catalog.
 
 The built-in `default_gateway_service_catalog()` currently documents the
 `internal-brain` service routes that already exist in the runtime/operator
 surface, including runtime compile preview, connector readiness, run ledger,
 case action, case-view, dashboard, and redacted operator-audit projections.
+`policy_for_request_path()` / `entry_for_request_path()` prefer the most
+specific static route before dynamic placeholder segments such as
+`<business_id>` or `<case_id>`.
 
 Catalog guarantees:
 

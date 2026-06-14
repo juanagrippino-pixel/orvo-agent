@@ -26,6 +26,9 @@ _REQUEST_ID_LENGTH_LIMIT: int = 128
 _IDEMPOTENCY_KEY_LENGTH_LIMIT: int = 128
 _IDEMPOTENCY_KEY_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ROUTE_KEY_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+_SAFE_PATH_RE: re.Pattern[str] = re.compile(r"^/[A-Za-z0-9_./:-]*$")
+_PATH_PATTERN_RE: re.Pattern[str] = re.compile(r"^/[A-Za-z0-9_./<>:-]*$")
+_PATH_PARAMETER_RE: re.Pattern[str] = re.compile(r"^<[A-Za-z_][A-Za-z0-9_]*>$")
 _SAFE_AUTH_SCHEMES: frozenset[str] = frozenset({"Bearer", "Basic", "Token", "ApiKey", "Api-Key"})
 _SECRET_KEY_RE: re.Pattern[str] = re.compile(
     r"(?i)\b(access_token|refresh_token|api_key|apikey|authorization|auth_header|password|private_key|credential|cookie|session|signature|secret|token)\b"
@@ -133,6 +136,11 @@ class GatewayServiceCatalogEntry:
     service: str
     description: str
     policy: GatewayRoutePolicy
+    path_pattern: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.path_pattern is not None:
+            object.__setattr__(self, "path_pattern", _normalize_path_pattern(self.path_pattern))
 
     @property
     def route_key(self) -> RouteKey:
@@ -159,10 +167,17 @@ class GatewayServiceCatalog:
         repr=False,
         default_factory=dict,
     )
+    _path_entries: tuple[GatewayServiceCatalogEntry, ...] = field(
+        init=False,
+        repr=False,
+        default_factory=tuple,
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "entries", tuple(self.entries))
         index: dict[tuple[RouteKey, Method], GatewayServiceCatalogEntry] = {}
+        path_index: set[tuple[str, Method]] = set()
+        path_entries: list[GatewayServiceCatalogEntry] = []
         for entry in self.entries:
             key = (entry.route_key, entry.method)
             if key in index:
@@ -171,7 +186,21 @@ class GatewayServiceCatalog:
                     "Gateway service catalog already contains this route/method policy.",
                 )
             index[key] = entry
+            if entry.path_pattern is not None:
+                path_key = (entry.path_pattern, entry.method)
+                if path_key in path_index:
+                    raise GatewayContractError(
+                        "duplicate_gateway_service_route",
+                        "Gateway service catalog already contains this route/method policy.",
+                    )
+                path_index.add(path_key)
+                path_entries.append(entry)
         object.__setattr__(self, "_index", MappingProxyType(index))
+        path_entries.sort(
+            key=lambda entry: _path_pattern_specificity(entry.path_pattern or "/"),
+            reverse=True,
+        )
+        object.__setattr__(self, "_path_entries", tuple(path_entries))
 
     def register(self, entry: GatewayServiceCatalogEntry) -> "GatewayServiceCatalog":
         """Return a new catalog with the service route registered."""
@@ -207,6 +236,32 @@ class GatewayServiceCatalog:
                 "unknown_gateway_service_route",
                 "Gateway route policy is not registered.",
             ) from exc
+
+    def policy_for_request_path(self, path: str, method: str) -> GatewayRoutePolicy:
+        """Resolve a concrete HTTP path to a registered route policy."""
+
+        return self.entry_for_request_path(path, method).policy
+
+    def entry_for_request_path(self, path: str, method: str) -> GatewayServiceCatalogEntry:
+        """Resolve a concrete HTTP path to a catalog entry, preferring static matches."""
+
+        try:
+            normalized_path = _normalize_request_path(path)
+        except GatewayContractError as exc:
+            raise GatewayContractError(
+                "unknown_gateway_service_route",
+                "Gateway route policy is not registered.",
+            ) from exc
+        method_value: Method = _normalize_method(method)
+        for entry in self._path_entries:
+            if entry.method != method_value or entry.path_pattern is None:
+                continue
+            if _path_matches(entry.path_pattern, normalized_path):
+                return entry
+        raise GatewayContractError(
+            "unknown_gateway_service_route",
+            "Gateway route policy is not registered.",
+        )
 
     def services(self) -> tuple[str, ...]:
         """Return service names in insertion order, without duplicates."""
@@ -335,6 +390,91 @@ def _normalize_route_key(route_key: str) -> RouteKey:
     return route_key
 
 
+def _normalize_request_path(path: str) -> str:
+    raw_path = (path or "").strip()
+    if not raw_path:
+        raise GatewayContractError(
+            "invalid_gateway_request_path",
+            "Gateway request path is required.",
+        )
+    normalized_path = raw_path.split("?", 1)[0].strip() or "/"
+    if not normalized_path.startswith("/"):
+        normalized_path = f"/{normalized_path}"
+    if normalized_path != "/":
+        normalized_path = normalized_path.rstrip("/") or "/"
+    redacted = redact_text(normalized_path) or "[REDACTED]"
+    if redacted != normalized_path or _SAFE_PATH_RE.fullmatch(normalized_path) is None:
+        raise GatewayContractError(
+            "invalid_gateway_request_path",
+            "Gateway request path must be a safe slash-delimited identifier.",
+        )
+    return normalized_path
+
+
+def _split_path_segments(path: str) -> tuple[str, ...]:
+    normalized_path = (path or "/").strip() or "/"
+    if not normalized_path.startswith("/"):
+        normalized_path = f"/{normalized_path}"
+    if normalized_path != "/":
+        normalized_path = normalized_path.rstrip("/") or "/"
+    if normalized_path == "/":
+        return ()
+    return tuple(segment for segment in normalized_path.strip("/").split("/") if segment)
+
+
+def _is_path_parameter_segment(segment: str) -> bool:
+    return _PATH_PARAMETER_RE.fullmatch(segment) is not None
+
+
+def _normalize_path_pattern(path_pattern: str) -> str:
+    raw_pattern = (path_pattern or "").strip()
+    if not raw_pattern:
+        raise GatewayContractError(
+            "invalid_gateway_path_pattern",
+            "Gateway path pattern is required.",
+        )
+    normalized_pattern = raw_pattern.split("?", 1)[0].strip() or "/"
+    if not normalized_pattern.startswith("/"):
+        normalized_pattern = f"/{normalized_pattern}"
+    if normalized_pattern != "/":
+        normalized_pattern = normalized_pattern.rstrip("/") or "/"
+    redacted = redact_text(normalized_pattern) or "[REDACTED]"
+    if redacted != normalized_pattern or _PATH_PATTERN_RE.fullmatch(normalized_pattern) is None:
+        raise GatewayContractError(
+            "invalid_gateway_path_pattern",
+            "Gateway path pattern must be a safe slash-delimited identifier.",
+        )
+    for segment in _split_path_segments(normalized_pattern):
+        if "<" in segment or ">" in segment:
+            if not _is_path_parameter_segment(segment):
+                raise GatewayContractError(
+                    "invalid_gateway_path_pattern",
+                    "Gateway path pattern placeholders must occupy the full segment.",
+                )
+    return normalized_pattern
+
+
+def _path_pattern_specificity(path_pattern: str) -> tuple[int, int]:
+    segments = _split_path_segments(path_pattern)
+    static_segment_count = sum(1 for segment in segments if not _is_path_parameter_segment(segment))
+    return static_segment_count, len(segments)
+
+
+def _path_matches(path_pattern: str, path: str) -> bool:
+    pattern_segments = _split_path_segments(path_pattern)
+    path_segments = _split_path_segments(path)
+    if len(pattern_segments) != len(path_segments):
+        return False
+    for pattern_segment, path_segment in zip(pattern_segments, path_segments):
+        if _is_path_parameter_segment(pattern_segment):
+            if not path_segment:
+                return False
+            continue
+        if pattern_segment != path_segment:
+            return False
+    return True
+
+
 def build_gateway_context(
     headers: Mapping[str, str] | None,
     *,
@@ -394,6 +534,7 @@ def _internal_brain_policy(
     method: Method,
     *,
     description: str,
+    path_pattern: str | None = None,
     idempotency_mode: GatewayIdempotencyMode = "optional",
     requires_business_id: bool = True,
     rate_limit_policy: GatewayRateLimitPolicy | None = None,
@@ -401,6 +542,7 @@ def _internal_brain_policy(
     return GatewayServiceCatalogEntry(
         service="internal-brain",
         description=description,
+        path_pattern=path_pattern,
         policy=GatewayRoutePolicy(
             route_key=route_key,
             method=method,
@@ -422,67 +564,80 @@ def default_gateway_service_catalog() -> GatewayServiceCatalog:
                 "internal.brain.runtime.compile_preview",
                 "POST",
                 description="Compile an immutable runtime preview plan.",
+                path_pattern="/internal/brain/businesses/<business_id>/runtime/compile-preview",
             ),
             _internal_brain_policy(
                 "internal.brain.connectors.readiness",
                 "GET",
                 description="Read connector readiness projections.",
+                path_pattern="/internal/brain/businesses/<business_id>/connectors/readiness",
             ),
             _internal_brain_policy(
                 "internal.brain.operator_session",
                 "GET",
                 description="Read the authenticated operator session projection.",
+                path_pattern="/internal/brain/businesses/<business_id>/operator-session",
             ),
             _internal_brain_policy(
                 "internal.brain.runs.list",
                 "GET",
                 description="List run ledger projections.",
+                path_pattern="/internal/brain/businesses/<business_id>/runs",
             ),
             _internal_brain_policy(
                 "internal.brain.runs.dispatch_status_summary",
                 "GET",
                 description="Summarize run dispatch status.",
+                path_pattern="/internal/brain/businesses/<business_id>/runs/dispatch-status-summary",
             ),
             _internal_brain_policy(
                 "internal.brain.runs.detail",
                 "GET",
                 description="Read one run ledger projection.",
+                path_pattern="/internal/brain/businesses/<business_id>/runs/<run_id>",
             ),
             _internal_brain_policy(
                 "internal.brain.whatsapp.delivery_statuses",
                 "GET",
                 description="Read WhatsApp delivery status audit events.",
+                path_pattern="/internal/brain/whatsapp/delivery-statuses",
                 requires_business_id=False,
             ),
             _internal_brain_policy(
                 "internal.brain.cases.list",
                 "GET",
                 description="List actionable operational cases.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.summary",
                 "GET",
                 description="Summarize the operational case queue.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/summary",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.case_actions",
                 "GET",
                 description="List the case action catalog for the operator role.",
+                path_pattern="/internal/brain/businesses/<business_id>/case-actions",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.detail",
                 "GET",
                 description="Read one operational case projection.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/<case_id>",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.timeline",
                 "GET",
                 description="List one operational case timeline.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/<case_id>/timeline",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.action",
                 "POST",
                 description="Execute one whitelisted case action.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/<case_id>/actions",
                 idempotency_mode="required",
                 rate_limit_policy=_INTERNAL_BRAIN_ACTION_RATE_LIMIT,
             ),
@@ -490,46 +645,55 @@ def default_gateway_service_catalog() -> GatewayServiceCatalog:
                 "internal.brain.case_views.list",
                 "GET",
                 description="List built-in case views.",
+                path_pattern="/internal/brain/businesses/<business_id>/case-views",
             ),
             _internal_brain_policy(
                 "internal.brain.case_views.execute",
                 "GET",
                 description="Execute one built-in case view.",
+                path_pattern="/internal/brain/businesses/<business_id>/case-views/<view_id>/cases",
             ),
             _internal_brain_policy(
                 "internal.brain.case_facets.list",
                 "GET",
                 description="List case queue facets.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/facets",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.resolution_latency",
                 "GET",
                 description="Summarize case resolution latency.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/resolution-latency",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.stagnation",
                 "GET",
                 description="Summarize case queue stagnation.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/stagnation",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.acknowledgment_latency",
                 "GET",
                 description="Summarize case acknowledgment latency.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/acknowledgment-latency",
             ),
             _internal_brain_policy(
                 "internal.brain.cases.handling_latency",
                 "GET",
                 description="Summarize case handling latency.",
+                path_pattern="/internal/brain/businesses/<business_id>/cases/handling-latency",
             ),
             _internal_brain_policy(
                 "internal.brain.dashboard",
                 "GET",
                 description="Read the operator dashboard projection.",
+                path_pattern="/internal/brain/businesses/<business_id>/dashboard",
             ),
             _internal_brain_policy(
                 "internal.brain.operator_audit_events",
                 "GET",
                 description="Read redacted operator audit events.",
+                path_pattern="/internal/brain/businesses/<business_id>/operator-audit-events",
             ),
         )
     )
