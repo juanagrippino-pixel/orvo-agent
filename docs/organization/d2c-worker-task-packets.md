@@ -639,14 +639,13 @@ Current source-of-truth check:
 - `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`, and `priority_bracket`.
-- `docs/architecture-reviews/2026-06-12-review.md` is the latest ARB input for this lane. It marks `N2-Pro/search-analytics` as merge-ready with rebase recommended because it exposes canonical query metadata and CSV export through the shared case-query layer, while `N2-Pro/operator-surfaces` remains needs-work due to endpoint proliferation and direct `store.list_cases(...)` rescans.
+- `docs/architecture-reviews/2026-06-13-arb-cron-review.md` is the latest ARB input for this lane. It keeps WorkItem as projection-only, treats WorkItem/JQL/facet/view primitives as the canonical source for query semantics, keeps `N2-Pro/operator-surfaces` needs-work because of endpoint proliferation and direct `store.list_cases(...)` rescans, and does **not** include a fresh 2026-06-13 verdict for `N2-Pro/search-analytics`.
 - Future broad search/operator-surface work must consume the WorkItem field registry and shared case-query/view primitives rather than creating local field semantics or one-off endpoint projections.
 
 Read:
 
-- `docs/architecture-reviews/2026-06-12-review.md`
-- `docs/architecture-reviews/2026-06-12-branch-readiness-matrix.md` — historical, superseded by the latest 2026-06-12 ARB review where verdicts conflict.
-- `docs/specs/internal-operator-api-contract.md`
+- `docs/architecture-reviews/2026-06-13-arb-cron-review.md`
+- `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`
 - `docs/specs/integration-train-contract.md`
 - `docs/specs/testing-invariant-matrix.md`
 

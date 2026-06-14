@@ -32,11 +32,12 @@ This N2 Pro note supersedes only the provider-specific rule that normal Orvo wor
 
 ## Integration posture after latest ARB review
 
-Latest source: [`docs/architecture-reviews/2026-06-12-review.md`](../architecture-reviews/2026-06-12-review.md).
+Latest source: [`docs/architecture-reviews/2026-06-13-arb-cron-review.md`](../architecture-reviews/2026-06-13-arb-cron-review.md) and [`docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`](../architecture-reviews/2026-06-13-arb-cron-branch-readiness.md).
 
-- Merge-ready: `N2-Pro/connector-platform`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`.
-- Merge-ready with rebase recommended: `N2-Pro/search-analytics`.
-- Needs work: `n2-pro-work-management`, `N2-Pro/operator-surfaces`.
+- Merge-ready: `N2-Pro/connector-platform`.
+- Merge-ready candidates after rebase/reconciliation: `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `n2-pro-work-management`.
+- Needs work: `N2-Pro/operator-surfaces` because it is too broad and route-heavy.
+- Hold/search-analytics caveat: `N2-Pro/search-analytics` is not part of the latest 2026-06-13 ARB verdict; do not promote it from older notes until a fresh review confirms it stays inside canonical WorkItem/JQL/facet/view primitives.
 - Not mergeable: destructive `claude/*` refactor branches.
 
 The integration train should continue to merge narrow, additive slices that strengthen registries, audit, readiness, deterministic workflow plumbing, and shared query/view primitives. It should reject wholesale merges that duplicate projection logic, weaken semantic validation, delete accepted tests, or let bespoke operator endpoints become source of truth.
