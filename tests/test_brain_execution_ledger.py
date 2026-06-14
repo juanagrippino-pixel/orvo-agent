@@ -47,6 +47,26 @@ def test_event_certification_metadata_includes_issue_messages_for_connector_logg
     }
 
 
+def test_event_certification_metadata_accepts_connector_specific_health_states():
+    certification = _event_certification_metadata(
+        "tiendanube",
+        [
+            "connector.execution.succeeded",
+            "connector.health.partial_inventory_unavailable",
+        ],
+    )
+
+    assert certification == {
+        "status": "passed",
+        "issue_count": 0,
+        "events": [
+            "connector.execution.succeeded",
+            "connector.health.partial_inventory_unavailable",
+        ],
+        "issues": [],
+    }
+
+
 def test_metric_certification_metadata_includes_issue_messages_for_connector_logging():
     certification = _metric_certification_metadata(
         "google_sheets",
