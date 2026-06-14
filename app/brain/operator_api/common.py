@@ -207,6 +207,12 @@ def _reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
     return reopen_count, latest_reopen_at
 
 
+def case_reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
+    """Public wrapper for case reopen statistics shared by projections."""
+
+    return _reopen_stats(case)
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}
