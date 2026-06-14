@@ -18,6 +18,7 @@ from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerStore,
     WorkflowApprovalRequest,
 )
+from app.brain.workflow_projection_validation import validate_workflow_projection_limit
 
 
 def _iso(value: datetime) -> str:
@@ -147,6 +148,7 @@ def list_workflow_action_audit_events(
 
     if case_id is not None and not case_id.strip():
         raise WorkflowActionLedgerError("invalid_workflow_audit_scope", "workflow audit case_id must be non-empty")
+    parsed_limit = validate_workflow_projection_limit(limit)
     if case_id is not None:
         records = [record for record in ledger.list_actions(business_id=business_id) if record.case_id == case_id]
     else:
@@ -172,7 +174,7 @@ def list_workflow_action_audit_events(
             str(event.get("event_type", "")),
         )
     )
-    selected = events if limit is None else events[: max(limit, 0)]
+    selected = events if parsed_limit is None else events[:parsed_limit]
     payload = {
         "business_id": business_id,
         **({"case_id": case_id} if case_id is not None else {}),

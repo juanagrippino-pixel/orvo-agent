@@ -2235,3 +2235,20 @@ def test_workflow_action_audit_events_reject_blank_case_scope(tmp_path):
 
     assert exc.value.code == "invalid_workflow_audit_scope"
     assert "case-approved" not in exc.value.message
+
+
+@pytest.mark.parametrize("invalid_limit", [0, -1, "oops", True, False])
+def test_workflow_projection_services_reject_invalid_limit(invalid_limit):
+    ledger = InMemoryWorkflowActionLedgerStore()
+
+    with pytest.raises(WorkflowActionLedgerError) as approval_exc:
+        list_workflow_approval_queue(ledger, business_id="artemea", limit=invalid_limit)
+    assert approval_exc.value.code == "invalid_workflow_projection_limit"
+
+    with pytest.raises(WorkflowActionLedgerError) as execution_exc:
+        list_workflow_execution_queue(ledger, business_id="artemea", limit=invalid_limit)
+    assert execution_exc.value.code == "invalid_workflow_projection_limit"
+
+    with pytest.raises(WorkflowActionLedgerError) as audit_exc:
+        list_workflow_action_audit_events(ledger, business_id="artemea", limit=invalid_limit)
+    assert audit_exc.value.code == "invalid_workflow_projection_limit"
