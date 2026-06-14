@@ -1806,6 +1806,73 @@ def list_top_reopened_cases(
     )
 
 
+_REOPEN_COUNT_BUCKETS: tuple[tuple[str, int | None], ...] = (
+    ("none", 0),
+    ("once", 1),
+    ("twice", 2),
+    ("three_to_five", 5),
+    ("six_plus", None),
+)
+
+
+def _classify_reopen_count_bucket(reopen_count: int) -> str:
+    for name, upper in _REOPEN_COUNT_BUCKETS:
+        if upper is None or reopen_count <= upper:
+            return name
+    return _REOPEN_COUNT_BUCKETS[-1][0]
+
+
+def summarize_case_reopen_counts(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Aggregate chronic-recurrence stats over the currently-actionable queue.
+
+    Queue-summary sibling for the reopen dimension: complements
+    :func:`list_top_reopened_cases` (which surfaces the worst offenders) by
+    giving operator surfaces the shape of the whole actionable backlog —
+    how many currently-actionable cases have ever been reopened, how the
+    reopen-count distribution looks, and the worst-case recurrence depth.
+    Only cases in an actionable status (``open`` or ``acknowledged``) are
+    counted; once a case is resolved or cancelled it leaves the projection.
+    Reopen counts are derived from ``case_reopened`` timeline events, so
+    the projection has no notion of "now" and needs no time parameter.
+    Buckets are tiered as ``none`` (0), ``once`` (1), ``twice`` (2),
+    ``three_to_five`` (3-5), and ``six_plus`` (6+). Strictly scoped per
+    tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    by_reopen_bucket: dict[str, int] = {name: 0 for name, _ in _REOPEN_COUNT_BUCKETS}
+    actionable_total = 0
+    actionable_reopened_cases = 0
+    actionable_total_reopens = 0
+    actionable_max_reopen_count = 0
+    for case in cases:
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        reopen_count = sum(
+            1 for event in case.timeline if event.event_type == "case_reopened"
+        )
+        actionable_total += 1
+        actionable_total_reopens += reopen_count
+        if reopen_count > 0:
+            actionable_reopened_cases += 1
+        if reopen_count > actionable_max_reopen_count:
+            actionable_max_reopen_count = reopen_count
+        bucket = _classify_reopen_count_bucket(reopen_count)
+        by_reopen_bucket[bucket] += 1
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "actionable_total": actionable_total,
+            "actionable_reopened_cases": actionable_reopened_cases,
+            "actionable_total_reopens": actionable_total_reopens,
+            "actionable_max_reopen_count": actionable_max_reopen_count,
+            "by_reopen_bucket": by_reopen_bucket,
+        }
+    )
+
+
 def list_recently_resolved_cases(
     store: OperationalCaseStore,
     *,
