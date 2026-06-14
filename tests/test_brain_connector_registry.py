@@ -59,7 +59,7 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
         )
         assert spec.executor.supported_runtime_modes == expected_modes
         assert spec.health.readiness_check == "metadata_only"
-        assert spec.health_policy_metadata() == {
+        expected_health_policy = {
             "readiness_check": spec.health.readiness_check,
             "supports_health_check": spec.health.supports_health_check,
             "degraded_state": spec.health.degraded_state,
@@ -72,6 +72,9 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
                 "failed",
             ],
         }
+        if spec.health.detailed_states:
+            expected_health_policy["detailed_states"] = list(spec.health.detailed_states)
+        assert spec.health_policy_metadata() == expected_health_policy
         assert spec.rate_limit_policy_metadata() == {
             "default_timeout_seconds": spec.rate_limit.default_timeout_seconds,
             "requests_per_minute": spec.rate_limit.requests_per_minute,

@@ -73,6 +73,12 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
             "rate_limited",
             "failed",
         ],
+        "detailed_states": [
+            "network_error",
+            "malformed_response",
+            "partial_inventory_unavailable",
+            "stale_success",
+        ],
     }
     assert runtime.connectors[1].required_scopes == ["orders.read", "products.read"]
     assert runtime.connectors[1].rate_limit_policy == {
@@ -174,6 +180,12 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                     "unauthorized",
                     "rate_limited",
                     "failed",
+                ],
+                "detailed_states": [
+                    "network_error",
+                    "malformed_response",
+                    "partial_inventory_unavailable",
+                    "stale_success",
                 ],
             },
             "required_scopes": ["orders.read", "products.read"],
