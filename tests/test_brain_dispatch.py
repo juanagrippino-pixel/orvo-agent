@@ -163,6 +163,23 @@ def test_dispatch_owner_case_brief_skips_internal_only_case_families():
     delivery_client.send_text.assert_not_called()
 
 
+def test_dispatch_owner_case_brief_skips_readiness_gated_case_families():
+    from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
+
+    delivery_client = MagicMock()
+
+    result = dispatch_owner_case_brief(
+        cases=[make_owner_case("readiness-gated", case_type="unanswered_conversations")],
+        business=make_business(),
+        report_date=date(2026, 5, 19),
+        delivery_client=delivery_client,
+        idempotency_store=InMemoryIdempotencyStore(),
+    )
+
+    assert result is None
+    delivery_client.send_text.assert_not_called()
+
+
 def test_dispatch_owner_case_brief_skips_duplicate_key():
     from app.brain.delivery import DeliveryResult
     from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_owner_case_brief
