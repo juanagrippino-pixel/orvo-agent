@@ -1147,6 +1147,52 @@ def test_validate_report_metric_objects_appends_money_currency_missing_after_val
     ]
 
 
+def test_validate_report_metric_objects_slots_value_negative_between_value_kind_and_money_currency():
+    """validate_report_metric_objects must slot value_negative immediately
+    after value_kind_mismatch and before money_currency_missing so the
+    value-related diagnostics cluster naturally on the report side: value_kind
+    enforces the canonical unit type, value_negative enforces the non-negative
+    semantics of count/duration metrics, and money_currency_missing closes the
+    value/rendering block as the final rendering-metadata diagnostic. This
+    mirrors the slot reserved by
+    :meth:`ConnectorSpec.validate_emitted_metric_objects`. The negative
+    ``ad_impressions_today`` carries an in-envelope source and a numeric
+    value, isolating value_negative from every upstream slot — it is
+    registered (skips unknown_metric), report_allowed (skips
+    report_not_allowed), unique (skips duplicate_canonical_metric), carries
+    evidence (skips evidence_missing), source matches (skips
+    evidence_source_mismatch), is a real int (skips value_kind_mismatch),
+    and is a ``count`` not ``money`` (skips money_currency_missing). Only
+    value_negative fires for that metric, proving the new slot is composed
+    in the documented position.
+    """
+
+    from app.brain.semantics.metric_registry import validate_report_metric_objects
+
+    metrics = [
+        _metric("revenue_today", "tiendanube", value=120000, unit="ARS"),
+        _metric("custom.unknown_report_metric", "tiendanube"),
+        _metric("runtime.freshness.age_seconds", "tiendanube", value=42),
+        _metric("tn_revenue_today", "tiendanube", value=120000, unit="ARS"),
+        _metric("ad_spend_today", "whatsapp", value=1500, unit="ARS"),
+        _metric("orders_today", "tiendanube", value="not a number"),
+        _metric("ad_impressions_today", "meta_ads", value=-100),
+        _metric("commerce.revenue.baseline", "google_sheets", value=80000),
+    ]
+
+    issues = validate_report_metric_objects(metrics)
+
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in issues] == [
+        ("unknown_metric", "custom.unknown_report_metric", 1, "warning"),
+        ("report_not_allowed", "runtime.freshness.age_seconds", 2, "warning"),
+        ("duplicate_canonical_metric", "tn_revenue_today", 3, "warning"),
+        ("evidence_source_mismatch", "ad_spend_today", 4, "warning"),
+        ("value_kind_mismatch", "orders_today", 5, "warning"),
+        ("value_negative", "ad_impressions_today", 6, "warning"),
+        ("money_currency_missing", "commerce.revenue.baseline", 7, "warning"),
+    ]
+
+
 def test_validate_report_metric_objects_returns_empty_for_clean_report_metrics():
     from app.brain.semantics.metric_registry import validate_report_metric_objects
 
