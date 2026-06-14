@@ -1,9 +1,91 @@
 # N2 Pro Integration Train Note — 2026-06-12
 
-**Integration branch:** `feat/orvo-brain-control-plane`  
-**Current integration HEAD:** `cb49a64c` (`test: workflow ledger approval redaction boundary`)  
-**Worker root inspected:** `/root/orvo-agent-worktrees`  
-**Run mode:** safe integration review only; no destructive branch cleanup.
+## Release integration update — 2026-06-14
+
+**Integration branch:** `feat/orvo-brain-control-plane`
+**Current integration HEAD before update:** `bd28c57c` (`codex: expose recently reopened cases endpoint`)
+**Worker root inspected:** `/root/orvo-agent-worktrees`
+**Run mode:** safe integration review; no destructive branch cleanup.
+
+### Inventory summary
+
+- `git fetch --all --prune`: completed.
+- Canonical worktree: clean on `feat/orvo-brain-control-plane`.
+- Local unmerged branches against integration branch: **122**.
+- Git worktrees total: **211**.
+- Worker worktrees under `/root/orvo-agent-worktrees`: **210**.
+- Dirty worker worktrees: **0**.
+- Missing worker worktrees: **0**.
+
+### Candidate review
+
+#### `N2-Pro/connector-platform` at `4fb4f4dd`
+
+This branch was still the first branch in the latest ARB merge sequence, but it is **not merge-safe against the current integration HEAD** without rebasing/splitting.
+
+Observed diff against `feat/orvo-brain-control-plane`:
+
+- `15` commits ahead and `12` commits behind current integration HEAD.
+- `20` files changed, `105` insertions and `1,657` deletions.
+- Deletes accepted regression coverage:
+  - `tests/test_operator_case_recently_reopened.py`
+  - `tests/test_operator_case_top_reopened.py`
+- Rewrites/deletes substantial current test coverage in:
+  - `tests/contracts/test_metric_validation_contract.py`
+  - `tests/test_brain_operational_cases.py`
+  - `tests/test_brain_reporting.py`
+  - `tests/test_server_internal_brain_recently_opened.py`
+- Touches semantic registry and reporting paths in a stale/drift-prone shape:
+  - `app/brain/semantics/metric_registry.py`
+  - `app/brain/reporting.py`
+  - `app/brain/operator_api/recent_cases.py`
+  - `app/brain/operator_api/top_cases.py`
+
+Blocker: the branch appears to be based on an older integration baseline and removes accepted current tests instead of adding a narrow additive connector/runtime slice. The current guardrail is to preserve the integration baseline until a connector-platform slice is rebased with additive tests and no deletion of accepted coverage.
+
+#### Broader recent N2 Pro lane branches
+
+Recent lane branches were also not selected for direct merge because their diffs against current HEAD are stale, broad, or delete accepted regression coverage:
+
+- `N2-Pro/workflow-automation` — `89` files changed, `1,290` insertions, `9,116` deletions.
+- `N2-Pro/trust-admin-security` — `87` files changed, `910` insertions, `9,110` deletions.
+- `n2-pro-work-management` — `34` files changed, `990` insertions, `1,951` deletions.
+- `N2-Pro/operator-surfaces` — `129` files changed, `7,044` insertions, `9,468` deletions.
+- `n2/report-surface-registry-gate-integration-20260614` — `12` files changed, `1` insertion, `1,451` deletions.
+- `n2/report-surface-registry-gate` — `26` files changed, `32` insertions, `1,759` deletions.
+- `n2/success-recording-terminal-20260613` — `45` files changed, `188` insertions, `4,436` deletions.
+- `n2/query-layer-recent-cases-20260613` — `65` files changed, `665` insertions, `6,178` deletions.
+
+Blocker: these branches are not safe as whole-branch merges because they are stale relative to current integration HEAD and remove accepted tests/docs or introduce broad architecture changes. They need lane-owner rebases and additive slicing.
+
+### Decision
+
+**No branch merged this run.**
+
+The integration branch remains the clean source of truth. The safest action is to keep the current baseline and ask lane owners to rebase/split around the current integration HEAD, preserving accepted regression tests and durable docs.
+
+### Next integration order
+
+1. Rebase/split `N2-Pro/connector-platform` into an additive connector/runtime metadata slice with no deletion of accepted regression tests.
+2. Rebase/split `N2-Pro/trust-admin-security` around audit/redaction hardening only, preserving existing operator audit tests.
+3. Rebase/split `n2-pro-work-management` around WorkItem/SLA projection primitives, preserving accepted OperationalCase and metric-registry tests.
+4. Rebase/split `N2-Pro/workflow-automation` around ledger-derived read surfaces and approval/action-key filters only.
+5. Defer `N2-Pro/operator-surfaces` until it is split into smaller projection-led slices that use shared query/activity primitives.
+6. Preserve current integration branch as the clean source of truth until a narrow branch passes focused tests without deleting accepted coverage or durable docs.
+
+### Verification performed
+
+- `git fetch --all --prune`: completed.
+- `git status --short`: clean before this note.
+- `git branch --show-current`: `feat/orvo-brain-control-plane`.
+- `git rev-parse --short HEAD`: `bd28c57c`.
+- `git branch --no-merged feat/orvo-brain-control-plane`: **122** unmerged branches.
+- `git worktree list --porcelain`: **211** worktrees, **210** worker worktrees, **0** dirty, **0** missing.
+- Candidate diff inspected with `git diff --stat`, `git diff --name-status`, and commit ancestry checks.
+- Focused guard suite: `pytest tests/test_worker_handoff_manifest_guard.py tests/test_brain_connector_registry.py tests/test_brain_execution_ledger.py tests/test_internal_connector_readiness_api.py tests/test_brain_run_ledger.py tests/test_operator_case_views.py -q` -> **71 passed**.
+- Broader regression suite: `pytest -q` -> **1553 passed**.
+- No merge, push, deploy, or cron mutation performed.
+
 
 ## Inventory summary
 
