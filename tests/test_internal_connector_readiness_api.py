@@ -187,6 +187,12 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "certification": None,
     }
     assert tiendanube["health_policy"]["readiness_check"] == "metadata_only"
+    assert tiendanube["health_policy"]["detailed_states"] == [
+        "network_error",
+        "malformed_response",
+        "partial_inventory_unavailable",
+        "stale_success",
+    ]
     assert tiendanube["required_scopes"] == ["orders.read", "products.read"]
     assert tiendanube["supported_runtime_modes"] == [
         "preview",
