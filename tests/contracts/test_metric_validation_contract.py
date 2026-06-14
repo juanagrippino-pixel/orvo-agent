@@ -3178,3 +3178,243 @@ def test_duplicate_canonical_helper_is_reexported_from_semantics_public_surface(
 
     assert hasattr(semantics, "find_duplicate_canonical_violations")
     assert "find_duplicate_canonical_violations" in semantics.__all__
+
+
+def test_negative_value_helper_flags_negative_count_metric():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    # commerce.orders.count has canonical unit="count"; counts are non-negative
+    # quantities so a negative numeric value indicates an adapter or normalizer
+    # bug (e.g., a subtraction underflow) that must be surfaced.
+    metrics = [
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=120000,
+            unit="ARS",
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=-3,
+            evidence=[_evidence()],
+        ),
+    ]
+
+    violations = find_negative_value_violations(metrics)
+    assert [(issue.code, issue.key, issue.index, issue.severity) for issue in violations] == [
+        ("value_negative", "commerce.orders.count", 1, "warning"),
+    ]
+    assert "commerce.orders.count" in violations[0].message
+    assert "count" in violations[0].message
+
+
+def test_negative_value_helper_flags_negative_duration_metric():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    # runtime.freshness.age_seconds has canonical unit="duration"; durations
+    # are non-negative quantities and a negative value is always a runtime bug.
+    metrics = [
+        Metric(
+            key="runtime.freshness.age_seconds",
+            label="Freshness",
+            value=-30,
+            evidence=[_evidence()],
+        ),
+    ]
+
+    violations = find_negative_value_violations(metrics)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("value_negative", "runtime.freshness.age_seconds", 0),
+    ]
+    assert "duration" in violations[0].message
+
+
+def test_negative_value_helper_resolves_aliases_before_checking_unit_kind():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    # orders_today is an alias for commerce.orders.count (unit="count"); the
+    # diagnostic must resolve the alias and surface the canonical key in the
+    # message.
+    metrics = [
+        Metric(
+            key="orders_today",
+            label="Pedidos",
+            value=-1,
+            evidence=[_evidence()],
+        ),
+    ]
+    violations = find_negative_value_violations(metrics)
+    assert len(violations) == 1
+    assert violations[0].key == "orders_today"
+    assert "commerce.orders.count" in violations[0].message
+
+
+def test_negative_value_helper_returns_empty_when_count_durations_non_negative():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    metrics = [
+        Metric(
+            key="commerce.orders.count",
+            label="Orders",
+            value=0,
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="runtime.freshness.age_seconds",
+            label="Freshness",
+            value=300,
+            evidence=[_evidence()],
+        ),
+    ]
+    assert find_negative_value_violations(metrics) == []
+
+
+def test_negative_value_helper_skips_money_percent_boolean_timestamp_units():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    # Money can legitimately be negative (refunds/credits), percent can express
+    # deltas (e.g., -5% change), and boolean/timestamp units are not numeric.
+    # None of these unit kinds should fire value_negative.
+    metrics = [
+        Metric(
+            key="commerce.revenue.total",
+            label="Revenue",
+            value=-1500,
+            unit="ARS",
+            evidence=[_evidence()],
+        ),
+        Metric(
+            key="runtime.data_quality.completeness_ratio",
+            label="Completeness",
+            value=-0.1,
+            evidence=[_evidence()],
+        ),
+    ]
+    assert find_negative_value_violations(metrics) == []
+
+
+def test_negative_value_helper_skips_non_numeric_or_bool_for_value_kind_owner():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    # Non-numeric values on count/duration metrics are flagged by
+    # find_value_kind_violations, not this helper. Booleans are likewise the
+    # value-kind helper's responsibility for numeric units.
+    metrics = [
+        {
+            "key": "commerce.orders.count",
+            "value": "not-a-number",
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "commerce.orders.count",
+            "value": True,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "commerce.orders.count",
+            "value": False,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+    ]
+    assert find_negative_value_violations(metrics) == []
+
+
+def test_negative_value_helper_skips_unknown_keys_so_diagnostics_compose():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    metrics = [
+        {
+            "key": "never_registered_metric",
+            "value": -10,
+            "evidence": [{"source": "sample", "label": "s"}],
+        },
+    ]
+    assert find_negative_value_violations(metrics) == []
+
+
+def test_negative_value_helper_is_deterministic_across_runs():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    metrics = [
+        {
+            "key": "commerce.orders.count",
+            "value": -1,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "runtime.freshness.age_seconds",
+            "value": -5,
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+        {
+            "key": "commerce.revenue.total",
+            "value": -1500,
+            "unit": "ARS",
+            "evidence": [{"source": "tiendanube", "label": "tn"}],
+        },
+    ]
+    first = find_negative_value_violations(metrics)
+    second = find_negative_value_violations(metrics)
+    assert first == second
+    assert [(issue.key, issue.index) for issue in first] == [
+        ("commerce.orders.count", 0),
+        ("runtime.freshness.age_seconds", 1),
+    ]
+
+
+def test_negative_value_helper_rejects_metrics_missing_key_or_value_field():
+    from app.brain.semantics.metric_registry import find_negative_value_violations
+
+    with pytest.raises(ValueError, match="key"):
+        find_negative_value_violations(
+            [{"value": -1, "evidence": []}]
+        )
+
+    with pytest.raises(ValueError, match="value"):
+        find_negative_value_violations(
+            [{"key": "commerce.orders.count", "evidence": []}]
+        )
+
+
+def test_negative_value_helper_threads_custom_registry_through_resolution():
+    from app.brain.semantics.metric_registry import (
+        MetricDefinition,
+        MetricRegistry,
+        find_negative_value_violations,
+    )
+
+    # A custom registry can declare new count/duration metrics; the helper must
+    # use the passed registry rather than the process-wide default for
+    # resolution.
+    registry = MetricRegistry(
+        (
+            MetricDefinition(
+                key="custom.tickets.open_count",
+                family="custom.tickets",
+                label="Open tickets",
+                unit="count",
+                allowed_sources=("sample",),
+                aliases=("tickets_open",),
+                aggregation="latest",
+                case_allowed=True,
+            ),
+        )
+    )
+
+    metrics = [
+        {"key": "custom.tickets.open_count", "value": -2, "evidence": []},
+        {"key": "tickets_open", "value": 7, "evidence": []},
+    ]
+    violations = find_negative_value_violations(metrics, registry=registry)
+    assert [(issue.code, issue.key, issue.index) for issue in violations] == [
+        ("value_negative", "custom.tickets.open_count", 0),
+    ]
+
+
+def test_negative_value_helper_is_reexported_from_semantics_public_surface():
+    from app.brain import semantics
+
+    assert hasattr(semantics, "find_negative_value_violations")
+    assert "find_negative_value_violations" in semantics.__all__

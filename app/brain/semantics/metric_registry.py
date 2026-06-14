@@ -946,6 +946,65 @@ def find_money_currency_violations(
     return issues
 
 
+def find_negative_value_violations(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+) -> list[MetricValidationIssue]:
+    """Return advisory diagnostics for count/duration metrics emitted with a
+    negative numeric value.
+
+    A ``value_negative`` violation means a metric key resolved to a canonical
+    definition whose ``unit`` is ``"count"`` or ``"duration"`` but whose
+    runtime value is a numeric value strictly less than zero. Counts and
+    durations are non-negative quantities; a negative value indicates an
+    adapter or normalizer bug (e.g., a subtraction underflow that would
+    silently corrupt run-ledger aggregations and case detections). Money,
+    percent, boolean, and timestamp units are intentionally skipped: money
+    can legitimately be negative (refunds/credits), percent can express
+    deltas (e.g., -5% change), and the remaining kinds are not numeric. Non-
+    numeric and boolean values for count/duration metrics are intentionally
+    skipped because they are the slot reserved by
+    :func:`find_value_kind_violations`; this helper composes cleanly with
+    it. Unknown (unresolved) keys are intentionally skipped so this
+    diagnostic composes cleanly with :func:`validate_metrics` and the other
+    envelope helpers. Result order matches input order and is deterministic.
+    """
+
+    active_registry = registry or default_metric_registry()
+    issues: list[MetricValidationIssue] = []
+    for index, metric in enumerate(metrics):
+        key = _metric_key(metric)
+        value = _metric_value(metric)
+        canonical = active_registry.try_resolve_key(key)
+        if canonical is None:
+            continue
+        definition = active_registry.get(canonical)
+        if definition.unit not in {"count", "duration"}:
+            continue
+        if isinstance(value, bool):
+            continue
+        if not isinstance(value, (int, float)):
+            continue
+        if value >= 0:
+            continue
+        issues.append(
+            MetricValidationIssue(
+                code="value_negative",
+                key=key,
+                message=(
+                    f"Metric key '{key}' (canonical '{canonical}') has "
+                    f"canonical unit '{definition.unit}' but runtime value "
+                    f"{value!r} is negative; {definition.unit} metrics are "
+                    f"non-negative quantities"
+                ),
+                severity="warning",
+                index=index,
+            )
+        )
+    return issues
+
+
 def find_freshness_companion_violations(
     metric_keys: Iterable[str],
     *,
@@ -1642,6 +1701,7 @@ __all__ = [
     "find_family_envelope_violations",
     "find_freshness_companion_violations",
     "find_money_currency_violations",
+    "find_negative_value_violations",
     "find_pii_class_violations",
     "find_report_allowed_violations",
     "find_source_envelope_violations",
