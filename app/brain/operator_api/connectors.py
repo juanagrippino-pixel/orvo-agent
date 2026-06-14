@@ -70,6 +70,30 @@ def _last_connector_outcomes(ledger: RunLedger, business_id: str) -> dict[str, t
     return latest
 
 
+def _certification_summary_projection(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    def _summary(key: str) -> dict[str, Any] | None:
+        raw = metadata.get(key)
+        if not isinstance(raw, dict):
+            return None
+        status = raw.get("status")
+        issue_count = raw.get("issue_count")
+        summary: dict[str, Any] = {}
+        if isinstance(status, str) and status:
+            summary["status"] = status
+        if isinstance(issue_count, int):
+            summary["issue_count"] = issue_count
+        return summary or None
+
+    events = _summary("event_certification")
+    metrics = _summary("metric_certification")
+    if events is None and metrics is None:
+        return None
+    return {
+        "events": events,
+        "metrics": metrics,
+    }
+
+
 def _last_health_projection(latest: tuple[str, ConnectorRunOutcome] | None) -> dict[str, Any] | None:
     if latest is None:
         return None
@@ -82,6 +106,7 @@ def _last_health_projection(latest: tuple[str, ConnectorRunOutcome] | None) -> d
         "finished_at": _iso(outcome.finished_at),
         "duration_ms": outcome.duration_ms,
         "error_summary": redact_text(outcome.error_summary) if outcome.error_summary else None,
+        "certification": _certification_summary_projection(outcome.metadata),
     }
 
 
