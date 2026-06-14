@@ -345,6 +345,73 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert unsupported_release_state.value.code == "unsupported_jql_value"
 
 
+def test_parse_case_jql_supports_quoted_string_values_for_operator_search():
+    assert parse_case_jql('entity.label = "Conversaciones sin responder"').normalized == (
+        "entity.label = Conversaciones sin responder ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("entity.label = 'WhatsApp Conversations'").normalized == (
+        "entity.label = WhatsApp Conversations ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    with pytest.raises(OperatorAPIError) as unsupported_value:
+        parse_case_jql("entity.label = Conversaciones sin responder")
+    assert unsupported_value.value.code == "invalid_jql"
+
+    with pytest.raises(OperatorAPIError) as unsafe_value:
+        parse_case_jql("entity.label = Conversaciones; DROP TABLE cases")
+    assert unsafe_value.value.code == "invalid_jql"
+
+    with pytest.raises(OperatorAPIError) as unsafe_quoted_value:
+        parse_case_jql('entity.label = "WhatsApp; DROP TABLE cases"')
+    assert unsafe_quoted_value.value.code == "invalid_jql"
+
+
+def test_internal_case_queue_filters_by_quoted_entity_label_and_keeps_business_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    whatsapp_case = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-whatsapp",
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            entity_scope={"kind": "channel", "id": "whatsapp", "label": "WhatsApp Conversaciones"},
+        ),
+    )
+    other_label = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-other-label",
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/instagram/support.conversations/daily",
+            entity_scope={"kind": "channel", "id": "whatsapp", "label": "Instagram Conversaciones"},
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-other-business",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/other-business/daily",
+            entity_scope={"kind": "channel", "id": "whatsapp", "label": "WhatsApp Conversaciones"},
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": 'entity.label = "WhatsApp Conversaciones"'},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "entity.label = WhatsApp Conversaciones ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [whatsapp_case.case_id]
+    assert other_label.case_id not in [case["case_id"] for case in body["data"]["cases"]]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+
+
 def test_internal_case_queue_filters_by_release_state(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     promoted = _seed_case(db_path, _case_detection(run_id="run-promoted", priority=95))

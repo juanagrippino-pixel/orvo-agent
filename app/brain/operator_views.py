@@ -482,8 +482,13 @@ def _ensure_operator(field: str, operator: str, spec: WorkItemQueryFieldDefiniti
 
 
 def _coerce_value(field: str, raw_value: str, spec: WorkItemQueryFieldDefinition) -> Any:
-    value = _unquote(raw_value.strip())
-    if not re.fullmatch(r"[A-Za-z0-9_:\-+.]+", value):
+    raw_value = raw_value.strip()
+    quoted = _is_quoted(raw_value)
+    value = _unquote(raw_value)
+    if quoted:
+        if not _is_safe_quoted_string(value):
+            raise OperatorAPIError("invalid_jql", "JQL value contains unsupported characters", status_code=400)
+    elif not re.fullmatch(r"[A-Za-z0-9_:\-+.]+", value):
         raise OperatorAPIError("invalid_jql", "JQL value contains unsupported characters", status_code=400)
     if spec.value_type == "enum":
         if spec.allowed_values is not None and value not in spec.allowed_values:
@@ -514,6 +519,14 @@ def _unquote(value: str) -> str:
     if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         return value[1:-1]
     return value
+
+
+def _is_quoted(value: str) -> bool:
+    return (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'"))
+
+
+def _is_safe_quoted_string(value: str) -> bool:
+    return bool(value) and re.fullmatch(r"[^\x00-\x1F\x7F\"'<>;]+", value) is not None
 
 
 def _format_value(value: Any) -> str:
