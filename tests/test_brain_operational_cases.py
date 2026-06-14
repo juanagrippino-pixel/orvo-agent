@@ -494,6 +494,94 @@ def test_recurrence_clears_ack_state_preserves_full_audit_timeline_and_supports_
         ], f"{label}: full recurrence cycle must accumulate audit events without dropping any"
 
 
+# Audit-gap regression: when an *acknowledged* case receives a new detection
+# (within the same lifecycle, without first being resolved), the contract is
+# that the operator's ack persists AND the severity/priority/title escalate to
+# reflect the new detection. The WhatsApp owner brief relies on this so a case
+# that escalates from warning to critical still surfaces with the "✓ Visto"
+# tag instead of either (a) silently dropping the ack or (b) silently
+# suppressing the new severity. A refactor that flipped either direction would
+# slip past the open/resolved recurrence tests above.
+def test_upsert_detection_on_acknowledged_case_preserves_ack_and_reflects_escalated_detection(conn):
+    initial = OperationalCaseDetection(
+        business_id="artemea",
+        case_type="stockout_risk",
+        dedupe_key="artemea/stockout_risk/business/monitored/commerce.inventory/daily",
+        title="Stock bajo",
+        severity="warning",
+        priority_score=70,
+        entity_scope={"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
+        evidence_refs=["evidence://tn/stock/2026-05-24"],
+        run_id="run-1",
+        artifact_refs=["ledger://runs/run-1/daily-report"],
+        metadata={"recommended_action": "Vigilar stock"},
+    )
+    escalated = OperationalCaseDetection(
+        business_id="artemea",
+        case_type="stockout_risk",
+        dedupe_key="artemea/stockout_risk/business/monitored/commerce.inventory/daily",
+        title="Stock crítico",
+        severity="critical",
+        priority_score=100,
+        entity_scope={"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
+        evidence_refs=["evidence://tn/stock/2026-05-25"],
+        run_id="run-2",
+        artifact_refs=["ledger://runs/run-2/daily-report"],
+        metadata={"recommended_action": "Reponer stock ya"},
+    )
+
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(initial, detected_at=utc_dt(8))
+        acked = store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+        assert acked.acknowledged_at == utc_dt(9), (
+            f"{label}: ack must be persisted before the escalated re-detection"
+        )
+
+        escalated_case = store.upsert_detection(escalated, detected_at=utc_dt(10))
+
+        assert escalated_case.case_id == opened.case_id, (
+            f"{label}: escalated detection must reuse the same case_id, not mint a new case"
+        )
+        assert escalated_case.status == "acknowledged", (
+            f"{label}: escalated detection on an acked case must NOT silently drop the ack — the operator already saw it"
+        )
+        assert escalated_case.acknowledged_at == utc_dt(9), (
+            f"{label}: acknowledged_at must be preserved across escalation as the audit anchor"
+        )
+        assert escalated_case.resolved_at is None, (
+            f"{label}: acked-case escalation must not invent a resolved_at"
+        )
+        assert escalated_case.severity == "critical", (
+            f"{label}: severity must reflect the new detection so escalation is visible in the brief"
+        )
+        assert escalated_case.priority_score == 100, (
+            f"{label}: priority_score must reflect the new detection so the case re-ranks in the operator queue"
+        )
+        assert escalated_case.title == "Stock crítico", (
+            f"{label}: title must reflect the new detection so the brief surfaces the escalated context"
+        )
+        assert escalated_case.latest_run_id == "run-2", (
+            f"{label}: latest_run_id must advance to the escalation run"
+        )
+        assert escalated_case.source_run_ids == ["run-1", "run-2"], (
+            f"{label}: source_run_ids must accumulate both runs for audit traceability"
+        )
+        event_types = [event.event_type for event in escalated_case.timeline]
+        assert event_types == ["case_opened", "status_changed", "case_updated"], (
+            f"{label}: escalation on an acked case must append `case_updated`, not `case_reopened` (no recurrence)"
+        )
+
+
 def test_open_case_queue_orders_by_priority_then_age():
     store = InMemoryOperationalCaseStore()
     warning = make_stockout_detection(run_id="run-1")
