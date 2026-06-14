@@ -82,47 +82,15 @@ def _redact_audit_identifier(value: str | None) -> str | None:
     return redacted if redacted == value else "[REDACTED]"
 
 
-def _collapse_audit_business_display_id(value: str) -> str:
-    """Collapse secret-shaped business labels even if the secret text is already redacted."""
-
-    collapsed = audit_business_display_id(value)
-    if collapsed != value:
-        return collapsed
-    normalized = value.lower().replace("-", "_")
-    if "[redacted]" in normalized and any(
-        part in normalized
-        for part in (
-            "access_token",
-            "refresh_token",
-            "api_key",
-            "apikey",
-            "authorization",
-            "auth_header",
-            "authorization_code",
-            "oauth_code",
-            "password",
-            "private_key",
-            "credential",
-            "cookie",
-            "session",
-            "signature",
-            "secret",
-            "token",
-        )
-    ):
-        return "[REDACTED]"
-    return collapsed
-
-
 def _collapse_audit_business_id_fields(value: Any) -> Any:
-    """Collapse nested secret-shaped audit ``business_id`` display labels."""
+    """Collapse nested audit ``business_id`` display labels through shared audit scope rules."""
 
     if isinstance(value, dict):
         collapsed: dict[str, Any] = {}
         for raw_key, raw_value in value.items():
             key = str(raw_key)
             if key == "business_id" and isinstance(raw_value, str):
-                collapsed[key] = _collapse_audit_business_display_id(raw_value)
+                collapsed[key] = audit_business_display_id(raw_value)
             else:
                 collapsed[key] = _collapse_audit_business_id_fields(raw_value)
         return collapsed
@@ -137,9 +105,9 @@ def _redact_audit_payload(value: Any) -> Any:
     """Redact audit payloads and remove secret-key labels from operator exports.
 
     Audit payloads may contain nested ``business_id`` display labels copied from
-    route-scoped projections. When a caller pastes a credential-shaped string
-    into such a label, collapse the whole identifier instead of persisting a
-    partially redacted tenant string like ``artemea access_token=[REDACTED]``.
+    route-scoped projections. The shared audit-scope helper collapses
+    credential-shaped labels before persistence so operator exports do not keep
+    partially redacted tenant strings like ``artemea access_token=[REDACTED]``.
     """
 
     if isinstance(value, dict):
@@ -149,7 +117,7 @@ def _redact_audit_payload(value: Any) -> Any:
             if is_secret_key(key):
                 redacted["[REDACTED]"] = "[REDACTED]"
             elif key == "business_id" and isinstance(raw_value, str):
-                redacted[key] = _collapse_audit_business_display_id(raw_value)
+                redacted[key] = audit_business_display_id(raw_value)
             else:
                 redacted[key] = _redact_audit_payload(raw_value)
         return redacted

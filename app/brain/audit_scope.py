@@ -14,6 +14,29 @@ from app.brain.security.redaction import redact_text
 
 
 AUDIT_BUSINESS_SCOPE_KEY_VERSION = "audit_business_scope_sha256_v1"
+_SECRET_KEY_PARTS = (
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "auth_header",
+    "authorization_code",
+    "oauth_code",
+    "password",
+    "private_key",
+    "credential",
+    "cookie",
+    "session",
+    "signature",
+    "secret",
+    "token",
+)
+
+
+def _already_redacted_secret_shaped_label(value: str) -> bool:
+    normalized = value.lower().replace("-", "_")
+    return "[redacted]" in normalized and any(part in normalized for part in _SECRET_KEY_PARTS)
 
 
 def audit_business_display_id(business_id: str) -> str:
@@ -27,7 +50,11 @@ def audit_business_display_id(business_id: str) -> str:
     """
 
     redacted = redact_text(business_id) or "[REDACTED]"
-    return redacted if redacted == business_id else "[REDACTED]"
+    if redacted != business_id:
+        return "[REDACTED]"
+    if _already_redacted_secret_shaped_label(redacted):
+        return "[REDACTED]"
+    return redacted
 
 
 def audit_business_scope_key(business_id: str) -> str:
