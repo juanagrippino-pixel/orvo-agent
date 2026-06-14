@@ -325,76 +325,55 @@ def register_case_activity_routes(app):
         )
 
 
-    @app.get("/internal/brain/businesses/<business_id>/cases/recently-opened")
-    def internal_brain_cases_recently_opened(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
+    def _register_recent_cases_route(path_suffix: str, endpoint_name: str, projection):
+        def _handler(business_id: str, _projection=projection):
+            return _with_internal_stores(
                 business_id,
-                list_recently_opened_cases(
-                    case_store,
-                    business_id=business_id,
-                    limit=request.args.get("limit"),
+                lambda case_store, run_ledger: _internal_success(
+                    business_id,
+                    _projection(
+                        case_store,
+                        business_id=business_id,
+                        limit=request.args.get("limit"),
+                    ),
                 ),
-            ),
+            )
+
+        _handler.__name__ = endpoint_name
+        app.add_url_rule(
+            f"/internal/brain/businesses/<business_id>/cases/{path_suffix}",
+            endpoint=endpoint_name,
+            view_func=_handler,
+            methods=["GET"],
         )
 
-
-    @app.get("/internal/brain/businesses/<business_id>/cases/recently-reopened")
-    def internal_brain_cases_recently_reopened(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
-                business_id,
-                list_recently_reopened_cases(
-                    case_store,
-                    business_id=business_id,
-                    limit=request.args.get("limit"),
-                ),
-            ),
-        )
-
-
-    @app.get("/internal/brain/businesses/<business_id>/cases/recently-acknowledged")
-    def internal_brain_cases_recently_acknowledged(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
-                business_id,
-                list_recently_acknowledged_cases(
-                    case_store,
-                    business_id=business_id,
-                    limit=request.args.get("limit"),
-                ),
-            ),
-        )
-
-
-    @app.get("/internal/brain/businesses/<business_id>/cases/recently-in-progress")
-    def internal_brain_cases_recently_in_progress(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
-                business_id,
-                list_recently_in_progress_cases(
-                    case_store,
-                    business_id=business_id,
-                    limit=request.args.get("limit"),
-                ),
-            ),
-        )
-
-
-    @app.get("/internal/brain/businesses/<business_id>/cases/recently-resolved")
-    def internal_brain_cases_recently_resolved(business_id: str):
-        return _with_internal_stores(
-            business_id,
-            lambda case_store, run_ledger: _internal_success(
-                business_id,
-                list_recently_resolved_cases(
-                    case_store,
-                    business_id=business_id,
-                    limit=request.args.get("limit"),
-                ),
-            ),
-        )
+    _register_recent_cases_route(
+        "recently-opened",
+        "internal_brain_cases_recently_opened",
+        list_recently_opened_cases,
+    )
+    _register_recent_cases_route(
+        "recently-reopened",
+        "internal_brain_cases_recently_reopened",
+        list_recently_reopened_cases,
+    )
+    _register_recent_cases_route(
+        "recently-acknowledged",
+        "internal_brain_cases_recently_acknowledged",
+        list_recently_acknowledged_cases,
+    )
+    _register_recent_cases_route(
+        "recently-in-progress",
+        "internal_brain_cases_recently_in_progress",
+        list_recently_in_progress_cases,
+    )
+    _register_recent_cases_route(
+        "recently-resolved",
+        "internal_brain_cases_recently_resolved",
+        list_recently_resolved_cases,
+    )
+    _register_recent_cases_route(
+        "recently-dismissed",
+        "internal_brain_cases_recently_dismissed",
+        list_recently_dismissed_cases,
+    )
