@@ -21,11 +21,12 @@ def execute_builtin_case_view(
     business_id: str,
     view_id: str,
     limit: str | None,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     from app.brain.operator_views import get_builtin_case_view, query_case_queue
 
     view = get_builtin_case_view(view_id)
-    return query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
+    return query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view, now=parse_case_as_of(as_of))
 
 
 def list_case_facets(
@@ -35,9 +36,10 @@ def list_case_facets(
     field: str | None,
     jql: str | None,
     limit: str | None,
+    as_of: str | None = None,
 ) -> dict[str, Any]:
     from app.brain.operator_views import facet_case_queue
 
-    return facet_case_queue(store, business_id=business_id, field=field, jql=jql, limit=limit)
+    return facet_case_queue(store, business_id=business_id, field=field, jql=jql, limit=limit, now=parse_case_as_of(as_of))
 
 __all__ = [name for name in globals() if not name.startswith("__")]
