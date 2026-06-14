@@ -65,7 +65,7 @@ Con **120 ramas locales** y **150 remotas** no mergeadas, el riesgo no es falta 
 
 ## 5. Ramas que piden integración o decisión
 
-Según `docs/architecture-reviews/2026-06-13-review.md`:
+Según `docs/architecture-reviews/2026-06-13-arb-cron-review.md`:
 
 ### Mejor posicionadas
 - `N2-Pro/connector-platform` — **merge-ready**.
