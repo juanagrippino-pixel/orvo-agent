@@ -1873,6 +1873,73 @@ def summarize_case_reopen_counts(
     )
 
 
+def summarize_case_reopen_counts_by_severity(
+    store: OperationalCaseStore, *, business_id: str
+) -> dict[str, Any]:
+    """Severity-split chronic-recurrence stats over the actionable queue.
+
+    Mirrors :func:`summarize_case_reopen_counts` but groups the actionable
+    totals, reopen aggregates, and bucket distribution by case severity
+    (info / warning / critical), matching the attribution used by
+    :func:`summarize_case_queue_by_severity` and
+    :func:`summarize_case_handling_latency_histogram_by_severity`. Operator
+    surfaces use it to spot when chronic recurrence concentrates in critical
+    cases even though the overall reopen distribution looks acceptable. Only
+    cases currently in an actionable status (``open`` or ``acknowledged``)
+    are counted; severities with zero actionable cases are omitted from the
+    ``by_severity`` map. Reopen counts are derived from ``case_reopened``
+    timeline events, so the projection has no notion of "now" and needs no
+    time parameter. Strictly scoped per tenant.
+    """
+
+    cases = store.list_cases(business_id=business_id, limit=None)
+    by_severity: dict[str, dict[str, Any]] = {}
+    actionable_total = 0
+    actionable_reopened_cases = 0
+    actionable_total_reopens = 0
+    actionable_max_reopen_count = 0
+    for case in cases:
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        reopen_count = sum(
+            1 for event in case.timeline if event.event_type == "case_reopened"
+        )
+        actionable_total += 1
+        actionable_total_reopens += reopen_count
+        if reopen_count > 0:
+            actionable_reopened_cases += 1
+        if reopen_count > actionable_max_reopen_count:
+            actionable_max_reopen_count = reopen_count
+        bucket = _classify_reopen_count_bucket(reopen_count)
+        severity_entry = by_severity.get(case.severity)
+        if severity_entry is None:
+            severity_entry = {
+                "actionable_total": 0,
+                "actionable_reopened_cases": 0,
+                "actionable_total_reopens": 0,
+                "actionable_max_reopen_count": 0,
+                "by_reopen_bucket": {name: 0 for name, _ in _REOPEN_COUNT_BUCKETS},
+            }
+            by_severity[case.severity] = severity_entry
+        severity_entry["actionable_total"] += 1
+        severity_entry["actionable_total_reopens"] += reopen_count
+        if reopen_count > 0:
+            severity_entry["actionable_reopened_cases"] += 1
+        if reopen_count > severity_entry["actionable_max_reopen_count"]:
+            severity_entry["actionable_max_reopen_count"] = reopen_count
+        severity_entry["by_reopen_bucket"][bucket] += 1
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "actionable_total": actionable_total,
+            "actionable_reopened_cases": actionable_reopened_cases,
+            "actionable_total_reopens": actionable_total_reopens,
+            "actionable_max_reopen_count": actionable_max_reopen_count,
+            "by_severity": by_severity,
+        }
+    )
+
+
 def list_recently_resolved_cases(
     store: OperationalCaseStore,
     *,
