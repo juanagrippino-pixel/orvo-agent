@@ -712,6 +712,47 @@ def test_internal_case_queue_jql_reports_scoped_total_and_truncation(monkeypatch
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
+def test_internal_case_queue_supports_builtin_view_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    critical = _seed_case(db_path, _case_detection(run_id="run-view-critical", priority=95))
+    _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-view-warning",
+            dedupe_suffix="stockout_risk/sku/VIEW-WARN/inventory.on_hand/daily",
+            severity="warning",
+            priority=80,
+            title="Riesgo no crítico",
+        ),
+    )
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-view-other", priority=99))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"view_id": "critical_open", "limit": "10"},
+    )
+    dedicated_view = client.get(
+        "/internal/brain/businesses/artemea/case-views/critical_open/cases",
+        headers=AUTH,
+        query_string={"limit": "10"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["view_id"] == "critical_open"
+    assert body["data"]["view"] == {"view_id": "critical_open", "label": "Critical open cases", "readonly": True}
+    assert body["data"]["jql"] == "status = open AND severity = critical ORDER BY priority_score DESC"
+    assert body["data"]["normalized_jql"] == "status = open AND severity = critical ORDER BY priority_score DESC"
+    assert body["data"]["count"] == 1
+    assert body["data"]["total"] == 1
+    assert body["data"]["truncated"] is False
+    assert [case["case_id"] for case in body["data"]["cases"]] == [critical.case_id]
+    assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
+    assert body["data"] == dedicated_view.get_json()["data"]
+
+
 def test_internal_case_queue_rejects_conflicting_filters_and_invalid_jql(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())
@@ -720,6 +761,21 @@ def test_internal_case_queue_rejects_conflicting_filters_and_invalid_jql(monkeyp
         "/internal/brain/businesses/artemea/cases?status=open&jql=status%20%3D%20open",
         headers=AUTH,
     )
+    view_status_conflict = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"view_id": "critical_open", "status": "open"},
+    )
+    view_jql_conflict = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"view_id": "critical_open", "jql": "severity = critical"},
+    )
+    missing_view = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"view_id": "missing"},
+    )
     invalid = client.get(
         "/internal/brain/businesses/artemea/cases?jql=business_id%20%3D%20other%20AND%20access_token%3Draw_jql_secret",
         headers=AUTH,
@@ -727,6 +783,12 @@ def test_internal_case_queue_rejects_conflicting_filters_and_invalid_jql(monkeyp
 
     assert conflict.status_code == 400
     assert conflict.get_json()["error"]["code"] == "conflicting_case_filters"
+    assert view_status_conflict.status_code == 400
+    assert view_status_conflict.get_json()["error"]["code"] == "conflicting_case_filters"
+    assert view_jql_conflict.status_code == 400
+    assert view_jql_conflict.get_json()["error"]["code"] == "conflicting_case_filters"
+    assert missing_view.status_code == 404
+    assert missing_view.get_json()["error"]["code"] == "case_view_not_found"
     assert invalid.status_code == 400
     raw_invalid = invalid.get_data(as_text=True)
     assert "raw_jql_secret" not in raw_invalid

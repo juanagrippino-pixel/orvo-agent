@@ -112,7 +112,7 @@ All listed routes returned `200` in the seeded snapshot unless otherwise noted. 
 | Method | Route | Flask endpoint | Current `data` keys |
 |---|---|---|---|
 | GET | `/internal/brain/businesses/<business_id>/operator-session` | `internal_brain_operator_session` | `operator` |
-| GET | `/internal/brain/businesses/<business_id>/cases` | `internal_brain_cases` | `cases`, `limit` |
+| GET | `/internal/brain/businesses/<business_id>/cases` | `internal_brain_cases` | `cases`, `count`, `jql`, `limit`, `normalized_jql`, `total`, `truncated`, `view`, `view_id` |
 | GET | `/internal/brain/businesses/<business_id>/case-actions` | `internal_brain_case_actions` | `actions`, `api_enabled_action_keys`, `business_id`, `operator_executable_action_keys` |
 | GET | `/internal/brain/businesses/<business_id>/cases/summary` | `internal_brain_cases_summary` | `actionable_by_severity`, `actionable_degraded`, `actionable_total`, `business_id`, `by_case_type`, `by_severity`, `by_status`, `total` |
 | GET | `/internal/brain/businesses/<business_id>/cases/summary/by-priority-bracket` | `internal_brain_cases_summary_by_priority_bracket` | `actionable_by_priority_bracket`, `actionable_degraded_by_priority_bracket`, `actionable_total`, `business_id`, `total`, `totals_by_priority_bracket` |

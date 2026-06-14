@@ -16,11 +16,28 @@ def list_case_queue(
     business_id: str,
     status: str | None,
     limit: str | None,
+    view_id: str | None = None,
     jql: str | None = None,
 ) -> dict[str, Any]:
+    selected_filters = [
+        filter_name
+        for filter_name, filter_value in (("view_id", view_id), ("status", status), ("jql", jql))
+        if filter_value not in (None, "")
+    ]
+    if len(selected_filters) > 1:
+        raise OperatorAPIError(
+            "conflicting_case_filters",
+            "view_id, status, and jql filters are mutually exclusive",
+            status_code=400,
+        )
+
+    if view_id not in (None, ""):
+        from app.brain.operator_views import get_builtin_case_view, query_case_queue
+
+        view = get_builtin_case_view(str(view_id).strip())
+        return query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
+
     if jql not in (None, ""):
-        if status not in (None, ""):
-            raise OperatorAPIError("conflicting_case_filters", "status and jql filters are mutually exclusive", status_code=400)
         from app.brain.operator_views import query_case_queue
 
         return query_case_queue(store, business_id=business_id, jql=jql, limit=limit)

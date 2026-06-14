@@ -29,6 +29,7 @@ def register_case_summary_routes(app):
                     business_id=business_id,
                     status=request.args.get("status"),
                     limit=request.args.get("limit"),
+                    view_id=request.args.get("view_id"),
                     jql=request.args.get("jql"),
                 ),
             ),
