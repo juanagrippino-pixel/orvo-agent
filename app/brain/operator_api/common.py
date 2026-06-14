@@ -191,6 +191,22 @@ def _worst_freshness_state(case: OperationalCase) -> str | None:
             worst = snapshot.freshness_state
     return worst
 
+
+def _reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
+    """Return total reopen count and latest reopen timestamp for a case."""
+
+    reopen_count = 0
+    latest_reopen_at: datetime | None = None
+    for event in case.timeline:
+        if event.event_type != "case_reopened":
+            continue
+        reopen_count += 1
+        event_at = event.created_at.astimezone(timezone.utc)
+        if latest_reopen_at is None or event_at > latest_reopen_at:
+            latest_reopen_at = event_at
+    return reopen_count, latest_reopen_at
+
+
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
     if not seconds:
         return {}

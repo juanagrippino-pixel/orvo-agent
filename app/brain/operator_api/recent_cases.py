@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .common import *  # noqa: F401,F403
+from .common import _reopen_stats
 from .projections import *  # noqa: F401,F403
 
 
@@ -102,6 +103,56 @@ def list_recently_opened_cases(
             "count": len(cases_payload),
         }
     )
+
+
+def list_recently_reopened_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-reopened cases that are back in the open queue.
+
+    Complements :func:`list_recently_opened_cases` for the recurrence side of
+    the workflow. Only currently open cases are included; if the case is
+    acknowledged or resolved after reopening it moves to the corresponding
+    projection. The reopen timestamp is taken from the latest canonical
+    ``case_reopened`` timeline event, and rows are ordered by that timestamp
+    DESC with ``case_id`` ASC as a deterministic tie-breaker.
+    """
+
+    parsed_limit = parse_limit(limit)
+    reopened: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="open", limit=None):
+        _reopen_count, latest_reopen_at = _reopen_stats(case)
+        if latest_reopen_at is None:
+            continue
+        reopened.append((latest_reopen_at, case.case_id, case))
+
+    reopened.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = reopened[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "reopened_at": reopened_at.isoformat(),
+        }
+        for reopened_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "reopened_total": len(reopened),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
 
 def list_recently_acknowledged_cases(
     store: OperationalCaseStore,

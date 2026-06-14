@@ -1,0 +1,416 @@
+"""Tests for the deterministic recently-reopened cases projection."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from app.brain.operational_cases import (
+    InMemoryOperationalCaseStore,
+    OperationalCaseDetection,
+)
+from app.brain.operator_api import (
+    OperatorAPIError,
+    list_recently_reopened_cases,
+)
+
+
+NOW = datetime(2026, 5, 26, 12, tzinfo=timezone.utc)
+
+
+def _detection(
+    *,
+    business_id: str = "artemea",
+    case_type: str = "stockout_risk",
+    dedupe_suffix: str = "stockout_risk/business/monitored/commerce.inventory/daily",
+    severity: str = "critical",
+    priority: int = 100,
+    run_id: str = "run-reopen-1",
+) -> OperationalCaseDetection:
+    evidence_ref = f"evidence://{business_id}/{run_id}/{case_type}"
+    return OperationalCaseDetection(
+        business_id=business_id,
+        case_type=case_type,  # type: ignore[arg-type]
+        dedupe_key=f"{business_id}/{dedupe_suffix}",
+        title="Caso",
+        severity=severity,  # type: ignore[arg-type]
+        priority_score=priority,
+        entity_scope={"kind": "business", "id": "monitored", "label": "Monitoreado"},
+        evidence_refs=[evidence_ref],
+        run_id=run_id,
+        artifact_refs=[f"ledger://runs/{run_id}/daily-report"],
+    )
+
+
+def _resolve(
+    store: InMemoryOperationalCaseStore,
+    case_id: str,
+    *,
+    acknowledged_at: datetime,
+    resolved_at: datetime,
+) -> None:
+    store.transition_case(
+        case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=acknowledged_at,
+    )
+    store.transition_case(
+        case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=resolved_at,
+    )
+
+
+def _reopen(
+    store: InMemoryOperationalCaseStore,
+    case_id: str,
+    *,
+    reopened_at: datetime,
+    reason: str | None = None,
+) -> None:
+    store.reopen_case(
+        case_id,
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        reason=reason,
+        reopened_at=reopened_at,
+    )
+
+
+def test_returns_empty_when_no_cases():
+    store = InMemoryOperationalCaseStore()
+
+    result = list_recently_reopened_cases(store, business_id="artemea")
+
+    assert result == {
+        "business_id": "artemea",
+        "reopened_total": 0,
+        "cases": [],
+        "limit": 50,
+        "count": 0,
+    }
+
+
+def test_orders_most_recently_reopened_first():
+    store = InMemoryOperationalCaseStore()
+
+    schedule = [
+        ("a", "stockout_risk/business/monitored/commerce.inventory/daily", timedelta(days=4)),
+        ("b", "sales_drop/channel/all/commerce.revenue/daily", timedelta(days=1)),
+        ("c", "sales_drop/channel/meta_ads/commerce.revenue/daily", timedelta(hours=10)),
+        ("d", "unanswered_conversations/channel/whatsapp/support.conversations/daily", timedelta(hours=2)),
+    ]
+    cases_by_run: dict[str, str] = {}
+    for run_id, dedupe_suffix, since_reopen in schedule:
+        opened_at = NOW - timedelta(days=10)
+        case = store.upsert_detection(
+            _detection(
+                case_type="sales_drop" if "sales_drop" in dedupe_suffix else ("unanswered_conversations" if "unanswered" in dedupe_suffix else "stockout_risk"),
+                dedupe_suffix=dedupe_suffix,
+                severity="critical" if "stockout" in dedupe_suffix else "warning",
+                run_id=f"run-{run_id}",
+            ),
+            detected_at=opened_at,
+        )
+        _resolve(
+            store,
+            case.case_id,
+            acknowledged_at=opened_at + timedelta(hours=1),
+            resolved_at=opened_at + timedelta(hours=2),
+        )
+        _reopen(store, case.case_id, reopened_at=NOW - since_reopen)
+        cases_by_run[run_id] = case.case_id
+
+    result = list_recently_reopened_cases(store, business_id="artemea")
+
+    assert result["reopened_total"] == 4
+    assert result["count"] == 4
+    returned_ids = [entry["case_id"] for entry in result["cases"]]
+    assert returned_ids == [
+        cases_by_run["d"],
+        cases_by_run["c"],
+        cases_by_run["b"],
+        cases_by_run["a"],
+    ]
+    first = result["cases"][0]
+    assert first["status"] == "open"
+    assert first["reopened_at"].startswith("2026-05-26T10:00:00")
+    assert "opened_at" in first
+
+
+def test_uses_latest_reopen_event_when_case_reopened_multiple_times():
+    store = InMemoryOperationalCaseStore()
+
+    opened_at = NOW - timedelta(days=5)
+    case = store.upsert_detection(
+        _detection(run_id="run-double"),
+        detected_at=opened_at,
+    )
+    _resolve(
+        store,
+        case.case_id,
+        acknowledged_at=opened_at + timedelta(hours=1),
+        resolved_at=opened_at + timedelta(hours=2),
+    )
+    # First reopen, then re-resolve, then reopen again — the latest event wins.
+    _reopen(store, case.case_id, reopened_at=NOW - timedelta(days=3))
+    store.transition_case(
+        case.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(days=3) + timedelta(hours=1),
+    )
+    store.transition_case(
+        case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(days=3) + timedelta(hours=2),
+    )
+    latest_reopen_at = NOW - timedelta(hours=4)
+    _reopen(store, case.case_id, reopened_at=latest_reopen_at)
+
+    result = list_recently_reopened_cases(store, business_id="artemea")
+
+    assert result["reopened_total"] == 1
+    assert result["count"] == 1
+    entry = result["cases"][0]
+    assert entry["case_id"] == case.case_id
+    assert entry["reopened_at"] == latest_reopen_at.isoformat()
+
+
+def test_respects_limit():
+    store = InMemoryOperationalCaseStore()
+
+    schedule = [
+        ("first", timedelta(days=3)),
+        ("second", timedelta(days=2)),
+        ("third", timedelta(days=1)),
+    ]
+    cases_by_run: dict[str, str] = {}
+    for index, (run_id, since_reopen) in enumerate(schedule):
+        opened_at = NOW - timedelta(days=10)
+        case = store.upsert_detection(
+            _detection(
+                case_type="sales_drop",
+                dedupe_suffix=f"sales_drop/channel/c{index}/commerce.revenue/daily",
+                severity="warning",
+                run_id=f"run-{run_id}",
+            ),
+            detected_at=opened_at,
+        )
+        _resolve(
+            store,
+            case.case_id,
+            acknowledged_at=opened_at + timedelta(hours=1),
+            resolved_at=opened_at + timedelta(hours=2),
+        )
+        _reopen(store, case.case_id, reopened_at=NOW - since_reopen)
+        cases_by_run[run_id] = case.case_id
+
+    result = list_recently_reopened_cases(store, business_id="artemea", limit="2")
+
+    assert result["limit"] == 2
+    assert result["reopened_total"] == 3
+    assert result["count"] == 2
+    assert [entry["case_id"] for entry in result["cases"]] == [
+        cases_by_run["third"],
+        cases_by_run["second"],
+    ]
+
+
+def test_excludes_cases_never_reopened():
+    store = InMemoryOperationalCaseStore()
+
+    # Open but never resolved/reopened — excluded; recently_opened owns it.
+    open_only = store.upsert_detection(
+        _detection(case_type="stockout_risk", run_id="run-open"),
+        detected_at=NOW - timedelta(hours=2),
+    )
+
+    # Reopened — included.
+    reopened = store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            run_id="run-reopened",
+        ),
+        detected_at=NOW - timedelta(days=2),
+    )
+    _resolve(
+        store,
+        reopened.case_id,
+        acknowledged_at=NOW - timedelta(days=1, hours=22),
+        resolved_at=NOW - timedelta(days=1, hours=20),
+    )
+    _reopen(store, reopened.case_id, reopened_at=NOW - timedelta(hours=3))
+
+    result = list_recently_reopened_cases(store, business_id="artemea")
+
+    assert result["reopened_total"] == 1
+    assert result["count"] == 1
+    assert result["cases"][0]["case_id"] == reopened.case_id
+    assert open_only.case_id not in [c["case_id"] for c in result["cases"]]
+
+
+def test_excludes_reopened_then_acknowledged_or_resolved():
+    store = InMemoryOperationalCaseStore()
+
+    # Reopened then re-acknowledged — excluded; recently_acknowledged owns it.
+    reack = store.upsert_detection(
+        _detection(case_type="stockout_risk", run_id="run-reack"),
+        detected_at=NOW - timedelta(days=3),
+    )
+    _resolve(
+        store,
+        reack.case_id,
+        acknowledged_at=NOW - timedelta(days=2, hours=22),
+        resolved_at=NOW - timedelta(days=2, hours=20),
+    )
+    _reopen(store, reack.case_id, reopened_at=NOW - timedelta(hours=8))
+    store.transition_case(
+        reack.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=6),
+    )
+
+    # Reopened then re-resolved — excluded; recently_resolved owns it.
+    reres = store.upsert_detection(
+        _detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            run_id="run-reres",
+        ),
+        detected_at=NOW - timedelta(days=3),
+    )
+    _resolve(
+        store,
+        reres.case_id,
+        acknowledged_at=NOW - timedelta(days=2, hours=22),
+        resolved_at=NOW - timedelta(days=2, hours=20),
+    )
+    _reopen(store, reres.case_id, reopened_at=NOW - timedelta(hours=10))
+    store.transition_case(
+        reres.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=9),
+    )
+    store.transition_case(
+        reres.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator@example.com",
+        transitioned_at=NOW - timedelta(hours=8),
+    )
+
+    # Reopened and still open — included.
+    open_again = store.upsert_detection(
+        _detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            run_id="run-open-again",
+        ),
+        detected_at=NOW - timedelta(days=3),
+    )
+    _resolve(
+        store,
+        open_again.case_id,
+        acknowledged_at=NOW - timedelta(days=2, hours=22),
+        resolved_at=NOW - timedelta(days=2, hours=20),
+    )
+    _reopen(store, open_again.case_id, reopened_at=NOW - timedelta(hours=2))
+
+    result = list_recently_reopened_cases(store, business_id="artemea")
+
+    assert result["reopened_total"] == 1
+    assert result["count"] == 1
+    assert result["cases"][0]["case_id"] == open_again.case_id
+
+
+def test_is_scoped_per_business():
+    store = InMemoryOperationalCaseStore()
+    mine = store.upsert_detection(
+        _detection(business_id="artemea", run_id="run-mine"),
+        detected_at=NOW - timedelta(days=2),
+    )
+    _resolve(
+        store,
+        mine.case_id,
+        acknowledged_at=NOW - timedelta(days=1, hours=22),
+        resolved_at=NOW - timedelta(days=1, hours=20),
+    )
+    _reopen(store, mine.case_id, reopened_at=NOW - timedelta(hours=4))
+
+    other = store.upsert_detection(
+        _detection(business_id="other-shop", run_id="run-other"),
+        detected_at=NOW - timedelta(days=2),
+    )
+    _resolve(
+        store,
+        other.case_id,
+        acknowledged_at=NOW - timedelta(days=1, hours=22),
+        resolved_at=NOW - timedelta(days=1, hours=20),
+    )
+    _reopen(store, other.case_id, reopened_at=NOW - timedelta(hours=1))
+
+    result = list_recently_reopened_cases(store, business_id="artemea")
+
+    assert result["reopened_total"] == 1
+    assert result["count"] == 1
+    assert result["cases"][0]["case_id"] == mine.case_id
+
+
+def test_tiebreaks_on_case_id():
+    store = InMemoryOperationalCaseStore()
+    reopened_at = NOW - timedelta(hours=6)
+    case_ids: list[str] = []
+    for suffix in ("alpha", "beta", "gamma"):
+        case = store.upsert_detection(
+            _detection(
+                case_type="sales_drop",
+                dedupe_suffix=f"sales_drop/channel/{suffix}/commerce.revenue/daily",
+                severity="warning",
+                run_id=f"run-{suffix}",
+            ),
+            detected_at=NOW - timedelta(days=2),
+        )
+        _resolve(
+            store,
+            case.case_id,
+            acknowledged_at=NOW - timedelta(days=1, hours=22),
+            resolved_at=NOW - timedelta(days=1, hours=20),
+        )
+        _reopen(store, case.case_id, reopened_at=reopened_at)
+        case_ids.append(case.case_id)
+
+    result = list_recently_reopened_cases(store, business_id="artemea")
+
+    assert result["reopened_total"] == 3
+    returned_ids = [entry["case_id"] for entry in result["cases"]]
+    assert returned_ids == sorted(case_ids)
+    assert all(entry["reopened_at"] == reopened_at.isoformat() for entry in result["cases"])
+
+
+def test_rejects_invalid_limit():
+    store = InMemoryOperationalCaseStore()
+
+    with pytest.raises(OperatorAPIError) as exc_info:
+        list_recently_reopened_cases(
+            store, business_id="artemea", limit="not-an-int"
+        )
+
+    assert exc_info.value.code == "invalid_limit"
+    assert exc_info.value.status_code == 400

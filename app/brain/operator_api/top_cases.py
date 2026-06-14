@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .common import *  # noqa: F401,F403
+from .common import _ACTIONABLE_STATUSES, _reopen_stats
 from .projections import *  # noqa: F401,F403
 
 
@@ -247,6 +248,57 @@ def list_top_actionable_degraded_cases(
             "business_id": business_id,
             "now": reference.isoformat(),
             "actionable_degraded_total": len(degraded),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
+def list_top_reopened_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N actionable cases ranked by total reopen count.
+
+    Complements ``list_recently_reopened_cases`` by highlighting chronic
+    recurrence rather than the latest bounce-back. Only actionable cases are
+    included, ordered by reopen count DESC with ``case_id`` ASC as a
+    deterministic tie-breaker. Each row includes the latest reopen timestamp so
+    operator surfaces can distinguish chronic from fresh recurrence.
+    """
+
+    parsed_limit = parse_limit(limit)
+    reopened: list[tuple[int, str, datetime, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        reopen_count, latest_reopen_at = _reopen_stats(case)
+        if reopen_count == 0 or latest_reopen_at is None:
+            continue
+        reopened.append((reopen_count, case.case_id, latest_reopen_at, case))
+
+    reopened.sort(key=lambda item: (-item[0], item[1]))
+    limited = reopened[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "reopen_count": reopen_count,
+            "latest_reopened_at": latest_reopen_at.isoformat(),
+        }
+        for reopen_count, _case_id, latest_reopen_at, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "reopened_total": len(reopened),
             "cases": cases_payload,
             "limit": parsed_limit,
             "count": len(cases_payload),
