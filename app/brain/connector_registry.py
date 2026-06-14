@@ -97,18 +97,24 @@ def _declared_health_state_for_event(
     health_event_suffix: str,
     *,
     allowed_health_states: tuple[ConnectorHealthState, ...],
-) -> ConnectorHealthState | None:
-    """Resolve the canonical declared health state for a concrete health event.
+    detailed_health_states: tuple[str, ...] = (),
+) -> str | None:
+    """Resolve the declared health state for a concrete health event.
 
     Health event types may append detail after the canonical registry state, such
-    as ``connector.health.rate_limited.retry_scheduled``. Certification should
-    accept those detailed events only when their leading canonical health state
-    is declared for the connector.
+    as ``connector.health.rate_limited.retry_scheduled``. Some connectors also
+    declare connector-specific health outcomes like
+    ``connector.health.partial_inventory_unavailable``. Certification should
+    accept both the canonical taxonomy and any connector-specific detailed states
+    explicitly declared on the spec.
     """
 
     for allowed_state in allowed_health_states:
         if health_event_suffix == allowed_state or health_event_suffix.startswith(f"{allowed_state}."):
             return allowed_state
+    for detailed_state in detailed_health_states:
+        if health_event_suffix == detailed_state or health_event_suffix.startswith(f"{detailed_state}."):
+            return detailed_state
     return None
 
 
@@ -226,13 +232,17 @@ class ConnectorHealthMetadata:
 
     ``allowed_states`` mirrors the connector-registry contract taxonomy so
     compiled runtime/run metadata can expose stable health semantics before a
-    connector-specific health checker is implemented.
+    connector-specific health checker is implemented. ``detailed_states`` lets a
+    connector explicitly certify additional connector-specific health events
+    under the same registry-driven envelope without widening the shared
+    cross-connector taxonomy.
     """
 
     readiness_check: str = "metadata_only"
     supports_health_check: bool = False
     degraded_state: str = "degraded"
     allowed_states: tuple[ConnectorHealthState, ...] = CONNECTOR_HEALTH_STATES
+    detailed_states: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -689,6 +699,7 @@ class ConnectorSpec:
 
         allowed_families = tuple(self.emitted_event_families)
         allowed_health_states = tuple(self.health.allowed_states)
+        detailed_health_states = tuple(self.health.detailed_states)
         issues: list[ConnectorEventValidationIssue] = []
         for index, event in enumerate(events):
             event_type = _event_type_value(event)
@@ -719,6 +730,7 @@ class ConnectorSpec:
                 declared_health_state = _declared_health_state_for_event(
                     health_state,
                     allowed_health_states=allowed_health_states,
+                    detailed_health_states=detailed_health_states,
                 )
                 if declared_health_state is None:
                     issues.append(
@@ -1182,6 +1194,14 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             ),
         ),
         scopes=ConnectorScopeMetadata(required=("orders.read", "products.read")),
+        health=ConnectorHealthMetadata(
+            detailed_states=(
+                "network_error",
+                "malformed_response",
+                "partial_inventory_unavailable",
+                "stale_success",
+            )
+        ),
         rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=30, requests_per_minute=120),
     ),
 )

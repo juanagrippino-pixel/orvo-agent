@@ -47,6 +47,26 @@ def test_event_certification_metadata_includes_issue_messages_for_connector_logg
     }
 
 
+def test_event_certification_metadata_accepts_connector_specific_health_states():
+    certification = _event_certification_metadata(
+        "tiendanube",
+        [
+            "connector.execution.succeeded",
+            "connector.health.partial_inventory_unavailable",
+        ],
+    )
+
+    assert certification == {
+        "status": "passed",
+        "issue_count": 0,
+        "events": [
+            "connector.execution.succeeded",
+            "connector.health.partial_inventory_unavailable",
+        ],
+        "issues": [],
+    }
+
+
 def test_metric_certification_metadata_includes_issue_messages_for_connector_logging():
     certification = _metric_certification_metadata(
         "google_sheets",
@@ -77,6 +97,58 @@ def test_metric_certification_metadata_includes_issue_messages_for_connector_log
                     "'commerce.revenue', 'commerce.inventory', 'runtime.freshness', "
                     "'runtime.data_quality']"
                 ),
+            }
+        ],
+    }
+
+
+def test_event_certification_metadata_degrades_to_warning_for_unknown_connector_type():
+    certification = _event_certification_metadata(
+        "legacy_connector",
+        ["connector.execution.succeeded", "connector.health.ok"],
+    )
+
+    assert certification == {
+        "status": "warning",
+        "issue_count": 1,
+        "events": [
+            "connector.execution.succeeded",
+            "connector.health.ok",
+        ],
+        "issues": [
+            {
+                "code": "unknown_connector_type",
+                "event_type": "connector_type",
+                "index": None,
+                "message": "Unknown connector type: legacy_connector",
+            }
+        ],
+    }
+
+
+def test_metric_certification_metadata_degrades_to_warning_for_unknown_connector_type():
+    certification = _metric_certification_metadata(
+        "legacy_connector",
+        [
+            Metric(
+                key="orders_today",
+                label="Pedidos",
+                value=3,
+                unit="count",
+                evidence=[Evidence(source="legacy_connector", label="Legacy")],
+            )
+        ],
+    )
+
+    assert certification == {
+        "status": "warning",
+        "issue_count": 1,
+        "issues": [
+            {
+                "code": "unknown_connector_type",
+                "key": "connector_type",
+                "index": None,
+                "message": "Unknown connector type: legacy_connector",
             }
         ],
     }

@@ -48,11 +48,12 @@ def test_connector_spec_certifies_health_events_against_declared_health_states()
             "connector.health.ok",
             "connector.health.partial_inventory_unavailable",
             "connector.health.rate_limited.retry_scheduled",
+            "connector.health.paused",
         )
     )
 
     assert [(issue.code, issue.event_type, issue.index) for issue in issues] == [
-        ("undeclared_health_state", "connector.health.partial_inventory_unavailable", 1),
+        ("undeclared_health_state", "connector.health.paused", 3),
     ]
     assert all(issue.severity == "warning" for issue in issues)
 
