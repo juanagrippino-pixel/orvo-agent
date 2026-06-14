@@ -167,11 +167,12 @@ def _safe_runtime_label(value: str) -> str:
 def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, Any]:
     """Return a safe registry-contract summary for run metadata."""
 
+    safe_secret_refs = redact_secrets({"secret_refs": connector.secret_refs}).get("secret_refs", {})
     return {
         "connector_id": _safe_runtime_identifier(connector.connector_id),
         "connector_type": _safe_runtime_identifier(connector.connector_type),
         "label": _safe_runtime_label(connector.label),
-        "secret_refs": dict(connector.secret_refs),
+        "secret_refs": safe_secret_refs,
         "required_params": list(connector.required_params),
         "secret_param_names": list(connector.secret_param_names),
         "legacy_secret_param_names": list(connector.legacy_secret_param_names),

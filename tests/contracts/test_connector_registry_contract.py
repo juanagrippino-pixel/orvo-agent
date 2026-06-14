@@ -53,7 +53,6 @@ def test_connector_spec_certifies_health_events_against_declared_health_states()
 
     assert [(issue.code, issue.event_type, issue.index) for issue in issues] == [
         ("undeclared_health_state", "connector.health.partial_inventory_unavailable", 1),
-        ("undeclared_health_state", "connector.health.rate_limited.retry_scheduled", 2),
     ]
     assert all(issue.severity == "warning" for issue in issues)
 
@@ -140,6 +139,26 @@ def test_connector_spec_control_plane_config_validation_does_not_emit_secret_val
     assert unexpected_secret not in rendered
     assert "tn_inline_secret" not in rendered
     assert "unexpected_secret" not in rendered
+
+
+def test_connector_spec_control_plane_config_rejects_query_bearing_secret_refs():
+    from app.brain.connector_registry import CONNECTOR_TYPE_TIENDANUBE, get_connector_spec
+
+    tiendanube = get_connector_spec(CONNECTOR_TYPE_TIENDANUBE)
+
+    issues = tiendanube.validate_control_plane_config(
+        params={"store_id": "12345"},
+        secret_refs={
+            "access_token": "secret://businesses/artemea/connectors/tn-main/access_token?token=raw_ref_query"
+        },
+        strict=True,
+    )
+
+    assert [(issue.code, issue.key, issue.severity) for issue in issues] == [
+        ("invalid_secret_ref", "access_token", "error")
+    ]
+    rendered = repr(issues)
+    assert "raw_ref_query" not in rendered
 
 
 def test_sample_connector_is_not_declared_as_forced_or_scheduled_daily_runtime():

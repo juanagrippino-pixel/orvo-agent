@@ -154,6 +154,7 @@ def _event_certification_metadata(connector_type: str, events: Sequence[str]) ->
                 "code": issue.code,
                 "event_type": issue.event_type,
                 "index": issue.index,
+                "message": issue.message,
             }
             for issue in issues
         ],
@@ -170,6 +171,7 @@ def _metric_certification_metadata(connector_type: str, metrics: Sequence[Any]) 
                 "code": issue.code,
                 "key": issue.key,
                 "index": issue.index,
+                "message": issue.message,
             }
             for issue in issues
         ],

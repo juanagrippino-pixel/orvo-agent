@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from importlib import import_module
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
+from urllib.parse import parse_qsl, urlsplit
 
 from app.brain.connector_health import CONNECTOR_HEALTH_STATES, ConnectorHealthState
+from app.brain.security.redaction import is_secret_key
 from app.brain.semantics.metric_registry import (
     MetricRegistry,
     MetricValidationIssue,
@@ -90,10 +92,44 @@ def _event_type_value(event: object) -> str:
     return event_type
 
 
+def _declared_health_state_for_event(
+    health_event_suffix: str,
+    *,
+    allowed_health_states: tuple[ConnectorHealthState, ...],
+) -> ConnectorHealthState | None:
+    """Resolve the canonical declared health state for a concrete health event.
+
+    Health event types may append detail after the canonical registry state, such
+    as ``connector.health.rate_limited.retry_scheduled``. Certification should
+    accept those detailed events only when their leading canonical health state
+    is declared for the connector.
+    """
+
+    for allowed_state in allowed_health_states:
+        if health_event_suffix == allowed_state or health_event_suffix.startswith(f"{allowed_state}."):
+            return allowed_state
+    return None
+
+
 def is_secret_ref_handle(value: object) -> bool:
     """Return True when a value is an opaque secret manager reference."""
 
-    return isinstance(value, str) and value.startswith("secret://") and len(value) > len("secret://")
+    if not isinstance(value, str) or not value.startswith("secret://") or len(value) <= len("secret://"):
+        return False
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return False
+    if parts.scheme != "secret":
+        return False
+    if not parts.netloc and not parts.path:
+        return False
+    if parts.username is not None or parts.password is not None:
+        return False
+    return not any(
+        key.lower().replace("-", "_") == "code" or is_secret_key(key)
+        for key, _ in parse_qsl(parts.query, keep_blank_values=True)
+    )
 
 
 class UnknownConnectorError(ValueError):
@@ -669,7 +705,11 @@ class ConnectorSpec:
                 and event_type.startswith(health_prefix)
             ):
                 health_state = event_type.removeprefix(health_prefix)
-                if health_state not in allowed_health_states:
+                declared_health_state = _declared_health_state_for_event(
+                    health_state,
+                    allowed_health_states=allowed_health_states,
+                )
+                if declared_health_state is None:
                     issues.append(
                         ConnectorEventValidationIssue(
                             code="undeclared_health_state",
