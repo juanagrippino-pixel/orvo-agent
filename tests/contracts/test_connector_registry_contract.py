@@ -441,6 +441,53 @@ def test_connector_spec_validate_emitted_metric_objects_appends_money_currency_a
     assert all(issue.severity == "warning" for issue in issues)
 
 
+def test_connector_spec_validate_emitted_metric_objects_slots_value_negative_between_value_kind_and_money_currency():
+    """ConnectorSpec.validate_emitted_metric_objects must slot value_negative
+    immediately after value_kind_mismatch and before money_currency_missing so
+    the value-related diagnostics cluster naturally: value_kind enforces the
+    canonical unit type, value_negative enforces the non-negative semantics of
+    count/duration metrics, and money_currency_missing closes the
+    value/rendering block as the final rendering-metadata diagnostic. The
+    negative ``ad_impressions_today`` at index 5 carries an in-envelope source
+    and a numeric value, isolating value_negative from every upstream slot —
+    it is registered (skips unknown_metric), allowed for meta_ads (skips
+    disallowed_source/undeclared_family/evidence_source_mismatch), unique
+    (skips duplicate_canonical_metric), carries evidence (skips
+    evidence_missing), is a real int (skips value_kind_mismatch), and is a
+    ``count`` not ``money`` (skips money_currency_missing). Only value_negative
+    fires for that metric, proving the new slot is composed in the documented
+    position.
+    """
+
+    from app.brain.connector_registry import get_connector_spec
+
+    meta_ads = get_connector_spec("meta_ads")
+
+    metrics = [
+        _metric("ad_spend_today", "meta_ads", value=1500, unit="ARS"),
+        _metric("mystery_metric", "meta_ads"),
+        _metric("orders_today", "meta_ads"),
+        _metric("ad_roas_today", "meta_ads", value="0.5"),
+        _metric("ad_spend_today", "meta_ads", value=1500),
+        _metric("ad_impressions_today", "meta_ads", value=-100),
+    ]
+
+    issues = meta_ads.validate_emitted_metric_objects(metrics)
+
+    codes_keys = [(issue.code, issue.key, issue.index) for issue in issues]
+    assert codes_keys == [
+        ("unknown_metric", "mystery_metric", 1),
+        ("disallowed_source", "orders_today", 2),
+        ("undeclared_family", "orders_today", 2),
+        ("duplicate_canonical_metric", "ad_spend_today", 4),
+        ("evidence_source_mismatch", "orders_today", 2),
+        ("value_kind_mismatch", "ad_roas_today", 3),
+        ("value_negative", "ad_impressions_today", 5),
+        ("money_currency_missing", "ad_spend_today", 4),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
 def test_connector_spec_validate_emitted_metric_objects_slots_evidence_missing_between_family_and_evidence_source():
     """ConnectorSpec.validate_emitted_metric_objects must slot evidence_missing
     immediately after undeclared_family and before evidence_source_mismatch so

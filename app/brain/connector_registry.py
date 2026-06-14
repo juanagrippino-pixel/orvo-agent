@@ -25,6 +25,7 @@ from app.brain.semantics.metric_registry import (
     find_evidence_source_violations,
     find_family_envelope_violations,
     find_money_currency_violations,
+    find_negative_value_violations,
     find_source_envelope_violations,
     find_value_kind_violations,
     validate_metrics,
@@ -338,7 +339,7 @@ class ConnectorSpec:
         *,
         registry: MetricRegistry | None = None,
     ) -> list[MetricValidationIssue]:
-        """Compose all eight envelope diagnostics for emitted metric objects.
+        """Compose all nine envelope diagnostics for emitted metric objects.
 
         Symmetric extension of :meth:`validate_emitted_metrics` that operates
         on metric-shaped objects (each exposing ``key``, ``value``, ``unit``,
@@ -346,11 +347,12 @@ class ConnectorSpec:
         ``disallowed_source`` -> ``undeclared_family`` ->
         ``duplicate_canonical_metric`` -> ``evidence_missing``
         -> ``evidence_source_mismatch`` -> ``value_kind_mismatch`` ->
-        ``money_currency_missing`` lets the runtime treat object-level
-        validation as a superset of key-level validation: when every required
-        metric carries non-empty evidence with in-envelope sources, every
-        value type matches the canonical unit kind, and every money metric
-        carries a currency string, the result equals
+        ``value_negative`` -> ``money_currency_missing`` lets the runtime
+        treat object-level validation as a superset of key-level validation:
+        when every required metric carries non-empty evidence with
+        in-envelope sources, every value type matches the canonical unit
+        kind, every count/duration value is non-negative, and every money
+        metric carries a currency string, the result equals
         ``validate_emitted_metrics`` over the same keys — the four key-level
         diagnostics stay contiguous and in the same relative order.
         ``evidence_missing`` slots between ``duplicate_canonical_metric`` and
@@ -358,9 +360,14 @@ class ConnectorSpec:
         diagnostics surface before content diagnostics about wrong-source
         evidence; this mirrors the slot reserved by
         :func:`validate_report_metric_objects` and
-        :func:`validate_case_metric_objects`. ``money_currency_missing``
-        lands last so structural and value-type diagnostics surface before
-        the rendering-metadata diagnostic that money metrics must carry a
+        :func:`validate_case_metric_objects`. ``value_negative`` slots
+        immediately after ``value_kind_mismatch`` so the value-type
+        diagnostic (wrong runtime type for canonical unit) precedes the
+        value-sign diagnostic (right type but negative for count/duration);
+        both populations are disjoint with ``money_currency_missing`` (scoped
+        to ``unit="money"``). ``money_currency_missing`` lands last so
+        structural and value-type diagnostics surface before the
+        rendering-metadata diagnostic that money metrics must carry a
         currency string for the runtime/control-plane to interpret values
         unambiguously, mirroring the slot reserved by
         :func:`validate_report_metric_objects`,
@@ -395,6 +402,9 @@ class ConnectorSpec:
         value_kind_issues = find_value_kind_violations(
             materialized, registry=registry
         )
+        value_negative_issues = find_negative_value_violations(
+            materialized, registry=registry
+        )
         money_currency_issues = find_money_currency_violations(
             materialized, registry=registry
         )
@@ -406,6 +416,7 @@ class ConnectorSpec:
             *evidence_missing_issues,
             *evidence_issues,
             *value_kind_issues,
+            *value_negative_issues,
             *money_currency_issues,
         ]
 
