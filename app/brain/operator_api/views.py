@@ -16,6 +16,12 @@ def list_builtin_case_views() -> dict[str, Any]:
     return {"views": builtin_case_views()}
 
 
+def get_builtin_case_view_detail(view_id: str) -> dict[str, Any]:
+    from app.brain.operator_views import get_builtin_case_view
+
+    return get_builtin_case_view(view_id)
+
+
 def execute_builtin_case_view(
     store: OperationalCaseStore,
     *,

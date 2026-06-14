@@ -1171,6 +1171,45 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_view_detail_returns_single_readonly_builtin_view(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-views/high_priority", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"] == {
+        "view_id": "high_priority",
+        "label": "High priority",
+        "description": "Actionable high-priority cases ordered by priority score.",
+        "jql": "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC",
+        "readonly": True,
+        "normalized_jql": "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC",
+        "filter_fields": ["priority_bracket", "status"],
+        "sort_fields": ["priority_score"],
+    }
+    assert body["redaction_applied"] is True
+
+
+def test_internal_case_view_detail_rejects_unknown_view_without_echoing_input(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views/token:[REDACTED]",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 404
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "case_view_not_found"
+    assert body["error"]["message"] == "case view not found"
+    assert body["redaction_applied"] is True
+
+
 def test_internal_case_query_fields_expose_canonical_metadata(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 

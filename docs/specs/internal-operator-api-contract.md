@@ -82,6 +82,7 @@ GET /internal/brain/businesses/{business_id}/cases
 GET /internal/brain/businesses/{business_id}/cases/export
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/cases/facets
+GET /internal/brain/businesses/{business_id}/case-views/{view_id}
 GET /internal/brain/businesses/{business_id}/case-query-fields
 GET /internal/brain/businesses/{business_id}/case-query-fields?field={field}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
@@ -103,6 +104,12 @@ unsupported query syntax or unknown views with stable redacted errors and does
 not persist custom views or translate query text into SQL. The export is a
 projection over `OperationalCase`/WorkItem state, not an alternate source of
 truth; raw response bodies are redacted at the HTTP boundary.
+
+`/case-views/{view_id}` returns one read-only built-in view definition from the
+same canonical case-view registry used by `/cases` and `/cases/export`,
+including the stable JQL string plus normalized filter/sort metadata for UI
+selection. Unknown view IDs fail with the same stable redacted
+`case_view_not_found` envelope used by other case-view selectors.
 
 `status_category`, and `work_item_id`. JQL-lite and case facets are read-only,
 route-scoped projections over the canonical WorkItem field registry; supported
