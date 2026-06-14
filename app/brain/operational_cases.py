@@ -765,6 +765,8 @@ class _OperationalCaseMutations:
                     "previous_due_at": existing.due_at.isoformat() if existing.due_at is not None else None,
                     "due_at": due_at.isoformat(),
                 })
+            if is_recurrence and existing.assignee_ref is not None:
+                metadata["previous_assignee_ref"] = existing.assignee_ref
             update: dict[str, Any] = {
                 "title": detection.title,
                 "status": "open" if is_recurrence else existing.status,
