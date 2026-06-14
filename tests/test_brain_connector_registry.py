@@ -200,6 +200,54 @@ def test_registry_as_mapping_is_read_only():
         mutable_mapping["new"] = mapping["csv"]
 
 
+def test_connector_contract_metadata_is_registry_service_projection():
+    from app.brain.connector_registry import connector_contract_metadata, get_connector_spec
+
+    metadata = connector_contract_metadata(
+        get_connector_spec("google_sheets"),
+        connector_label="Sheet Artemea",
+    )
+
+    assert metadata == {
+        "label": "Sheet Artemea",
+        "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
+        "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+        "capabilities": ["daily_report", "sheet_import"],
+        "emitted_metric_families": [
+            "commerce.orders",
+            "commerce.revenue",
+            "commerce.inventory",
+            "runtime.freshness",
+            "runtime.data_quality",
+        ],
+        "emitted_event_families": ["connector.execution", "connector.health"],
+        "required_scopes": ["spreadsheets.readonly"],
+        "health_policy": {
+            "readiness_check": "metadata_only",
+            "supports_health_check": False,
+            "degraded_state": "degraded",
+            "allowed_states": [
+                "ok",
+                "degraded",
+                "stale",
+                "unauthorized",
+                "rate_limited",
+                "failed",
+            ],
+        },
+        "rate_limit_policy": {
+            "default_timeout_seconds": 30,
+            "requests_per_minute": None,
+            "retry_policy": "adapter_default",
+        },
+        "lifecycle": {
+            "status": "active",
+            "owner": "orvo-brain",
+            "version": "phase-a",
+        },
+    }
+
+
 def test_default_specs_separate_public_required_fields_from_secret_refs():
     from app.brain.connector_registry import list_connector_specs
 
