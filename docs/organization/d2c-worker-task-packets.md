@@ -513,17 +513,25 @@ Acceptance:
 - API/projection callers can read WorkItem-shaped output without bypassing the Operational Case store;
 - no new lifecycle transitions, LLM decisions, manual work creation, or owner-facing copy changes are introduced.
 
-## Packet T — Metric registry enforcement for Operational Cases
+## Packet T — Metric registry enforcement rollout
 
-Goal: promote the semantic metric registry from advisory diagnostics to an enforced gate for deterministic Operational Case creation while keeping previews/imports compatible.
+Status: mostly satisfied for persisted Operational Case upserts; dispatch only as a narrow regression/fixer packet for preview/report/surface enforcement boundaries. Do **not** re-open the already-shipped persisted case-gating slice.
 
-Dependency: dispatch after Packet R connector/semantic family alignment is green and after current CSV/Sheets/Tiendanube compatibility tests pass. Do not combine with connector execution rewrites.
+Goal: keep deterministic Operational Case creation gated by the semantic metric registry while extending explicit validation hooks to preview/report/surface paths that still need advisory-to-blocking decisions.
 
-Source-of-truth check: current case evidence uses `default_metric_registry()` and `validate_metrics(..., strict=False)` but stores `metric_registry_mode: advisory`; current report merging still sums duplicate numeric keys or last-wins non-numeric/unit-mismatched keys outside registry-owned aggregation policy.
+Dependency: dispatch after Packet R connector/semantic family alignment is green and after current CSV/Sheets/Tiendanube compatibility tests pass. Do not combine with connector execution rewrites or broad operator-surface endpoint growth.
+
+Current source-of-truth check:
+
+- `app/brain/operational_cases.py` keeps `detect_cases_from_report(... metric_registry_mode="advisory")` as the reusable detection primitive, but `upsert_cases_from_report(...)` calls it with `metric_registry_mode="enforced"` before persisting cases.
+- `_case_detection_allowed_by_metric_registry(...)` blocks persisted case creation when enforced mode finds invalid/unknown operational metrics for the report sources.
+- `app/brain/semantics/metric_registry.py` already exposes report/surface validation helpers such as `validate_report_metric_objects()` and `validate_surface_metric_objects()` for boundary-level diagnostics.
+- The 2026-06-13 ARB follow-up remains valid: enforcement is not yet uniformly explicit across every non-persistent preview/report/surface path, so the next packet should add targeted validation hooks rather than redesign the registry.
 
 Read:
 
-- `docs/architecture-reviews/2026-06-01-architecture-board-review.md`
+- `docs/architecture-reviews/2026-06-13-arb-cron-review.md`
+- `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`
 - `docs/specs/metric-registry-contract.md`
 - `docs/specs/d2c-case-family-catalog.md`
 - `docs/specs/testing-invariant-matrix.md`
@@ -533,15 +541,16 @@ Likely files:
 - `app/brain/semantics/metric_registry.py`
 - `app/brain/operational_cases.py`
 - `app/brain/pipeline.py`
+- `tests/contracts/test_metric_validation_contract.py`
 - `tests/contracts/test_metric_registry_contract.py`
 - `tests/test_brain_operational_cases.py`
 
 Acceptance:
 
-- Operational Case detection rejects, quarantines, or opens/updates `data_stale` for unknown/invalid operational metrics instead of letting them create owner-facing cases;
-- enforcement modes are explicit, at minimum separating preview/import advisory behavior from runtime case-creation behavior;
+- persisted Operational Case detection remains enforced and rejects unknown/invalid operational metrics before case persistence;
+- preview/report/surface validation hooks make enforcement mode explicit where owner-facing projections depend on report metrics;
 - CSV/Sheets unknown metrics are marked custom/non-operational unless mapped to registered metrics;
-- duplicate-key aggregation policy is registry-defined or explicitly blocked for non-aggregatable metrics before cases are created;
+- duplicate-key aggregation policy is registry-defined or explicitly blocked for non-aggregatable metrics before owner-facing projections are emitted;
 - compatibility tests prove legacy aliases still resolve and existing valid Tiendanube/CSV/Sheets reports remain green.
 
 ## Packet U — Workflow action ledger and approval object foundation
