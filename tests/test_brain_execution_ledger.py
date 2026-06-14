@@ -520,3 +520,74 @@ def test_record_pipeline_success_finalizes_partial_when_secondary_owner_brief_di
     assert owner_brief_outcome.metadata["case_count"] == 0
     assert owner_brief_outcome.error_summary == "RuntimeError: owner brief failed access_token=[REDACTED]"
     assert "raw_dispatch_secret" not in repr(reloaded)
+
+
+def test_record_pipeline_failure_keeps_run_failed_when_secondary_owner_brief_dispatcher_raises():
+    class UnauthorizedConnectorError(RuntimeError):
+        connector_type = "tiendanube"
+        connector_id = "tn-main"
+
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="TN principal",
+                params={"store_id": "123", "access_token": "tn_test_token"},
+            )
+        ],
+    )
+    ledger = InMemoryRunLedger()
+    case_store = InMemoryOperationalCaseStore()
+    run = ledger.create_run(
+        run_id="run-failure-owner-brief-secondary-failure",
+        business_id=business.business_id,
+        trigger_type="scheduled",
+        started_at=utc_dt(8),
+    )
+
+    def broken_owner_brief_dispatcher(owner_cases):
+        assert owner_cases
+        raise RuntimeError("owner brief failed access_token=raw_secondary_secret")
+
+    secondary_dispatch = record_pipeline_failure(
+        run_ledger=ledger,
+        case_store=case_store,
+        run_id=run.run_id,
+        error=UnauthorizedConnectorError("HTTP 401 Unauthorized access_token=raw_primary_secret"),
+        business=business,
+        business_id=business.business_id,
+        connector_types=["tiendanube"],
+        case_brief_dispatcher=broken_owner_brief_dispatcher,
+    )
+
+    assert secondary_dispatch is not None
+    assert secondary_dispatch.status == "failed"
+    assert secondary_dispatch.error == "RuntimeError: owner brief failed access_token=[REDACTED]"
+
+    reloaded = ledger.get_run(run.run_id)
+    assert reloaded is not None
+    assert reloaded.status == "failed"
+    assert reloaded.finished_at is not None
+    assert reloaded.summary_metadata["cases_opened"] == 1
+    assert reloaded.summary_metadata["cases_updated"] == 0
+    assert reloaded.summary_metadata["case_brief_dispatch_status"] == "failed"
+    assert reloaded.error_summary == "UnauthorizedConnectorError: HTTP 401 Unauthorized access_token=[REDACTED]"
+    assert [outcome.status for outcome in reloaded.dispatch_outcomes] == ["failed"]
+    owner_brief_outcome = reloaded.dispatch_outcomes[0]
+    assert owner_brief_outcome.metadata["message_type"] == "owner_case_brief"
+    assert owner_brief_outcome.metadata["case_count"] == 1
+    assert owner_brief_outcome.error_summary == "RuntimeError: owner brief failed access_token=[REDACTED]"
+    [connector_outcome] = reloaded.connector_outcomes
+    assert connector_outcome.health_state == "unauthorized"
+    assert connector_outcome.error_summary == (
+        "UnauthorizedConnectorError: HTTP 401 Unauthorized access_token=[REDACTED]"
+    )
+    dumped = reloaded.model_dump_json()
+    assert "raw_primary_secret" not in dumped
+    assert "raw_secondary_secret" not in dumped
