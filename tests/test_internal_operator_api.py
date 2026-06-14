@@ -485,6 +485,55 @@ def test_internal_owner_case_brief_preview_exposes_deduped_displayed_snapshot_id
     assert len(displayed_case["evidence_snapshot_ids"]) == 1
 
 
+def test_internal_owner_case_brief_preview_reports_truthful_freshness_totals_by_case(
+    monkeypatch, tmp_path
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(
+        db_path,
+        _case_detection(
+            priority=95,
+            run_id="run-artemea-stale",
+            freshness_state="stale",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            priority=95,
+            run_id="run-artemea-missing",
+            freshness_state="missing",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            title="Ventas bajaron",
+            run_id="run-artemea-fresh",
+            freshness_state="fresh",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview?business_name=Artemea&max_cases=3",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["redaction_applied"] is True
+    assert body["data"]["total_actionable_cases"] == 2
+    assert body["data"]["evidence_freshness"] == {
+        "displayed": {"missing": 1, "fresh": 1},
+        "total_actionable": {"missing": 1, "fresh": 1},
+        "has_degraded_or_stale_evidence": True,
+    }
+
+
 def test_internal_owner_case_brief_preview_requires_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection())

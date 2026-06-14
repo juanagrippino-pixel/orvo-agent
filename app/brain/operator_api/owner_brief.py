@@ -12,7 +12,7 @@ from app.brain.operational_cases import (
 from app.brain.reporting import compose_owner_case_brief, order_owner_case_brief_cases
 from app.brain.security.redaction import redact_secrets, redact_text
 
-from .common import OperatorAPIError, parse_limit
+from .common import OperatorAPIError, _worst_freshness_state, parse_limit
 from .projections import _case_suggested_action_keys, _case_suggested_actions
 
 
@@ -35,12 +35,8 @@ def _owner_brief_cases(store: OperationalCaseStore, business_id: str) -> list[Op
 def _freshness_counts(cases: list[OperationalCase]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for case in cases:
-        if not case.evidence_snapshots:
-            counts["missing"] = counts.get("missing", 0) + 1
-            continue
-        for snapshot in case.evidence_snapshots:
-            state = snapshot.freshness_state or "missing"
-            counts[state] = counts.get(state, 0) + 1
+        state = _worst_freshness_state(case) or "missing"
+        counts[state] = counts.get(state, 0) + 1
     return counts
 
 
