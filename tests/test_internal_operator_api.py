@@ -298,6 +298,27 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["degraded"] is False
 
 
+def test_internal_case_queue_accepts_as_of_for_sla_status(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection(run_id="run-artemea-as-of"))
+
+    pending = client.get(
+        "/internal/brain/businesses/artemea/cases?as_of=2026-05-24T09:30:00Z",
+        headers=AUTH,
+    )
+    breached = client.get(
+        "/internal/brain/businesses/artemea/cases?as_of=2026-05-24T10:30:00Z",
+        headers=AUTH,
+    )
+
+    assert pending.status_code == 200
+    assert breached.status_code == 200
+    assert pending.get_json()["data"]["cases"][0]["case_id"] == case.case_id
+    assert breached.get_json()["data"]["cases"][0]["case_id"] == case.case_id
+    assert pending.get_json()["data"]["cases"][0]["sla_status"] == "pending"
+    assert breached.get_json()["data"]["cases"][0]["sla_status"] == "breached"
+
+
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     case = _seed_case(db_path, _case_detection())

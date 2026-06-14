@@ -30,6 +30,7 @@ def register_case_summary_routes(app):
                     status=request.args.get("status"),
                     limit=request.args.get("limit"),
                     jql=request.args.get("jql"),
+                    as_of=request.args.get("as_of"),
                 ),
             ),
         )

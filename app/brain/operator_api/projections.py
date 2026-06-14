@@ -8,8 +8,8 @@ from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 
 
-def case_queue_item(case: OperationalCase) -> dict[str, Any]:
-    work_item = case_work_item_projection(case)
+def case_queue_item(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
+    work_item = case_work_item_projection(case, now=now)
     return redact_secrets(
         {
             "case_id": case.case_id,
@@ -112,8 +112,8 @@ def _case_suggested_actions(case: OperationalCase) -> list[dict[str, Any]]:
         for action_key in _case_suggested_action_keys(case)
     ]
 
-def case_detail(case: OperationalCase) -> dict[str, Any]:
-    work_item = case_work_item_projection(case)
+def case_detail(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
+    work_item = case_work_item_projection(case, now=now)
     return redact_secrets(
         {
             "case_id": case.case_id,
