@@ -563,6 +563,31 @@ def test_internal_case_facets_reject_business_scope_and_redact_bad_field(monkeyp
     assert "raw_facet_secret" not in secret_field.get_data(as_text=True)
 
 
+def test_internal_case_facets_reject_sqlish_jql_without_echoing_input(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-facet-sqlish"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/facets",
+        headers=AUTH,
+        query_string={
+            "field": "source_connector",
+            "jql": "status = open UNION SELECT business_id FROM operational_cases WHERE access_token=raw_facet_jql_secret",
+        },
+    )
+
+    raw_body = response.get_data(as_text=True)
+    body = response.get_json()
+    assert response.status_code == 400
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["error"]["code"] == "invalid_jql"
+    assert body["redaction_applied"] is True
+    assert "UNION SELECT" not in raw_body
+    assert "operational_cases" not in raw_body
+    assert "raw_facet_jql_secret" not in raw_body
+
+
 def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
 
