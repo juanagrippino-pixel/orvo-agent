@@ -330,6 +330,30 @@ def test_business_delivery_statuses_filter_status_within_tenant_scope(monkeypatc
     ]
 
 
+def test_business_delivery_statuses_append_business_scoped_read_audit_event(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _record_delivery_status(db_path, message_id="wamid.artemea", business_id="artemea")
+    headers = {**AUTH, "X-Orvo-Businesses": "artemea", "X-Request-ID": "req-business-delivery-read"}
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/whatsapp/delivery-statuses",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    audit_events = _read_audit_events(db_path)
+    assert len(audit_events) == 1
+    assert audit_events[0] == {
+        "business_id": "artemea",
+        "actor_ref": "operator:juan",
+        "event_type": "operator.whatsapp_delivery_statuses.read",
+        "target_type": "whatsapp_delivery_statuses",
+        "target_id": "artemea",
+        "request_id": "req-business-delivery-read",
+        "data": {"status": "allowed", "scope": "business", "limit": 50},
+    }
+
+
 def test_business_delivery_statuses_reject_unknown_status_filter_without_echo(monkeypatch, tmp_path):
     client, _db_path = _client(monkeypatch, tmp_path)
     headers = {**AUTH, "X-Orvo-Businesses": "artemea"}
@@ -350,6 +374,38 @@ def test_business_delivery_statuses_reject_unknown_status_filter_without_echo(mo
     assert body["error"]["code"] == "invalid_delivery_status"
     assert body["error"]["message"] == "unsupported delivery status"
     assert body["redaction_applied"] is True
+
+
+def test_business_delivery_statuses_audit_failed_unknown_status_without_echo(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    headers = {**AUTH, "X-Orvo-Businesses": "artemea", "X-Request-ID": "req-business-delivery-read-failed"}
+    raw_status_secret = "raw_business_delivery_status_secret"
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/whatsapp/delivery-statuses",
+        headers=headers,
+        query_string={"status": f"queued access_token={raw_status_secret}"},
+    )
+
+    assert response.status_code == 400
+    audit_events = _read_audit_events(db_path)
+    assert len(audit_events) == 1
+    assert audit_events[0] == {
+        "business_id": "artemea",
+        "actor_ref": "operator:juan",
+        "event_type": "operator.whatsapp_delivery_statuses.read_failed",
+        "target_type": "whatsapp_delivery_statuses",
+        "target_id": "artemea",
+        "request_id": "req-business-delivery-read-failed",
+        "data": {
+            "status": "failed",
+            "scope": "business",
+            "error_code": "invalid_delivery_status",
+            "status_code": 400,
+            "status_filter_present": True,
+        },
+    }
+    assert raw_status_secret not in json.dumps(audit_events[0], sort_keys=True)
 
 
 def test_business_delivery_statuses_enforce_business_grants(monkeypatch, tmp_path):
