@@ -4,9 +4,13 @@ from datetime import date, datetime, timezone
 from typing import Iterable
 
 from app.brain.models import DailyReport, Evidence, Metric
-from app.brain.operational_cases import OperationalCase, owner_facing_actionable_cases
+from app.brain.operational_cases import OperationalCase, OperationalCaseEvidenceMetric, owner_facing_actionable_cases
 from app.brain.security.redaction import redact_text
-from app.brain.semantics.metric_registry import default_metric_registry
+from app.brain.semantics.metric_registry import (
+    MetricRegistryValidationError,
+    validate_report_metric_objects_strict,
+    validate_surface_metric_objects_strict,
+)
 
 
 def _format_value(metric: Metric) -> str:
@@ -151,15 +155,30 @@ def _case_sources(case: OperationalCase) -> list[str]:
     return labels
 
 
-def _case_metric_allowed_for_owner_brief(metric_key: str) -> bool:
-    """Return whether a case evidence metric is safe for owner-facing brief text."""
+def _case_metric_to_surface_metric(snapshot, metric: OperationalCaseEvidenceMetric) -> Metric:
+    value = metric.value if metric.value is not None else 0
+    return Metric(
+        key=metric.metric_key,
+        label=metric.label or metric.metric_key,
+        value=value,
+        unit=metric.unit,
+        evidence=[Evidence(source=snapshot.source, label=snapshot.source_label or snapshot.source)],
+    )
 
-    registry = default_metric_registry()
-    canonical_key = registry.try_resolve_key(metric_key)
-    if canonical_key is None:
+
+def _case_metric_allowed_for_owner_brief_object(snapshot, metric: OperationalCaseEvidenceMetric) -> bool:
+    """Return whether a case metric can be rendered on the owner surface."""
+
+    if metric.value is None:
         return False
-    definition = registry.get(canonical_key)
-    return definition.case_allowed and definition.pii_class in {"none", "low"}
+    try:
+        validate_surface_metric_objects_strict(
+            [_case_metric_to_surface_metric(snapshot, metric)],
+            allowed_pii_classes=("none", "low"),
+        )
+    except MetricRegistryValidationError:
+        return False
+    return True
 
 
 def _case_metric_lines(case: OperationalCase, *, max_metrics: int = 2) -> list[str]:
@@ -167,7 +186,7 @@ def _case_metric_lines(case: OperationalCase, *, max_metrics: int = 2) -> list[s
     seen: set[str] = set()
     for snapshot in case.evidence_snapshots:
         for metric in snapshot.metrics:
-            if not _case_metric_allowed_for_owner_brief(metric.metric_key):
+            if not _case_metric_allowed_for_owner_brief_object(snapshot, metric):
                 continue
             label = metric.label or metric.metric_key
             if label in seen:
@@ -278,6 +297,10 @@ def compose_owner_case_brief(
 def compose_daily_report_text(report: DailyReport) -> str:
     """Compose a short, cited Spanish daily report for a business owner."""
 
+    validate_report_metric_objects_strict(
+        report.metrics,
+        ignored_issue_codes={"duplicate_canonical_metric"},
+    )
     mkeys = _metrics_by_key(report)
 
     lines = [

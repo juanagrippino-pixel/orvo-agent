@@ -283,16 +283,24 @@ def test_dispatch_daily_report_sends_whatsapp_budgeted_text_for_long_report():
     from app.brain.delivery import DeliveryResult
     from app.brain.dispatch import InMemoryIdempotencyStore, dispatch_daily_report
 
-    source = Evidence(source="manual", label="Manual")
+    source = Evidence(source="sample", label="Manual")
+    metric_keys = [
+        "revenue_today",
+        "revenue_baseline",
+        "orders_today",
+        "stock_units",
+        "unanswered_conversations",
+        "ad_spend_today",
+    ]
     long_report = DailyReport(
         business_name="Artemea",
         report_date=date(2026, 5, 19),
         metrics=[
             Metric(
-                key=f"metric_{i}",
+                key=metric_keys[i % len(metric_keys)],
                 label=f"Métrica larga {i}",
                 value=i * 1000,
-                unit="ARS",
+                unit="ARS" if i % len(metric_keys) in {0, 1, 5} else None,
                 evidence=[source],
             )
             for i in range(80)
