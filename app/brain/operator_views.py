@@ -175,14 +175,29 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
 )
 
 
+def _builtin_view_query_metadata(jql: str) -> dict[str, Any]:
+    parsed = parse_case_jql(jql)
+    return {
+        "normalized_jql": parsed.normalized,
+        "filter_fields": sorted({clause.field for clause in parsed.clauses}),
+        "sort_fields": [field for field, _direction in parsed.order_by],
+    }
+
+
+def _annotated_builtin_case_view(view: dict[str, Any]) -> dict[str, Any]:
+    annotated = dict(view)
+    annotated.update(_builtin_view_query_metadata(view["jql"]))
+    return annotated
+
+
 def builtin_case_views() -> list[dict[str, Any]]:
-    return redact_secrets([dict(view) for view in _BUILTIN_CASE_VIEWS])
+    return redact_secrets([_annotated_builtin_case_view(view) for view in _BUILTIN_CASE_VIEWS])
 
 
 def get_builtin_case_view(view_id: str) -> dict[str, Any]:
     for view in _BUILTIN_CASE_VIEWS:
         if view["view_id"] == view_id:
-            return redact_secrets(dict(view))
+            return redact_secrets(_annotated_builtin_case_view(view))
     raise OperatorAPIError("case_view_not_found", "case view not found", status_code=404)
 
 

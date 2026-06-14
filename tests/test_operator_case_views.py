@@ -1143,16 +1143,30 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
         "connector_degraded",
     }.issubset(views)
     assert views["acknowledged_cases"]["jql"] == "status = acknowledged ORDER BY acknowledged_at DESC"
+    assert views["acknowledged_cases"]["normalized_jql"] == "status = acknowledged ORDER BY acknowledged_at DESC"
+    assert views["acknowledged_cases"]["filter_fields"] == ["status"]
+    assert views["acknowledged_cases"]["sort_fields"] == ["acknowledged_at"]
     assert views["recently_reopened"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND reopen_count >= 1 ORDER BY latest_reopened_at DESC"
     )
+    assert views["recently_reopened"]["normalized_jql"] == (
+        "status IN (open, acknowledged, in_progress) AND reopen_count >= 1 ORDER BY latest_reopened_at DESC"
+    )
+    assert views["recently_reopened"]["filter_fields"] == ["reopen_count", "status"]
+    assert views["recently_reopened"]["sort_fields"] == ["latest_reopened_at"]
     assert views["high_priority"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC"
     )
+    assert views["high_priority"]["filter_fields"] == ["priority_bracket", "status"]
+    assert views["high_priority"]["sort_fields"] == ["priority_score"]
     assert views["connector_degraded"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC"
     )
+    assert views["connector_degraded"]["filter_fields"] == ["degraded", "status"]
+    assert views["connector_degraded"]["sort_fields"] == ["updated_at"]
     assert all(view["readonly"] is True for view in views.values())
+    assert all("business_id" not in view["filter_fields"] for view in views.values())
+    assert all("business_id" not in view["sort_fields"] for view in views.values())
     assert "business_id" not in " ".join(view["jql"] for view in views.values())
     assert body["redaction_applied"] is True
 
