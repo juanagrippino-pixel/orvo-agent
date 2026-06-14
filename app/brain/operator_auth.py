@@ -83,11 +83,25 @@ def parse_allowed_businesses(value: str | None) -> tuple[str, ...] | None:
     ``None`` means legacy internal callers did not send a grant header and stay
     token-scoped during migration. A present but empty header becomes an empty
     grant set and therefore fails closed for every route business.
+
+    The wildcard grant ``*`` dominates any explicit business IDs, so collapse the
+    parsed scope to ``("*",)`` as soon as it appears. This keeps operator session
+    projections and durable authorization-denial audits from retaining redundant
+    or user-pasted grant fragments once a global grant is already explicit.
     """
 
     if value is None:
         return None
-    return tuple(item.strip() for item in value.split(",") if item.strip())
+    parsed: list[str] = []
+    for item in value.split(","):
+        normalized = item.strip()
+        if not normalized:
+            continue
+        if normalized == "*":
+            return ("*",)
+        if normalized not in parsed:
+            parsed.append(normalized)
+    return tuple(parsed)
 
 
 def safe_internal_operator_actor_ref(actor_ref: str | None) -> str:
