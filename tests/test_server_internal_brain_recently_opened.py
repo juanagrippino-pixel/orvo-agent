@@ -126,6 +126,19 @@ def _resolve_case(db_path, case_id: str, *, resolved_hours_ago: int = 0) -> None
     conn.close()
 
 
+def _reopen_case(db_path, case_id: str, *, reopened_hours_ago: int = 0) -> None:
+    conn = sqlite3.connect(str(db_path))
+    store = SQLiteOperationalCaseStore(conn)
+    store.reopen_case(
+        case_id,
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="Issue recurred during operator follow-up.",
+        reopened_at=datetime.now(timezone.utc) - timedelta(hours=reopened_hours_ago),
+    )
+    conn.close()
+
+
 def test_recently_opened_returns_scoped_open_cases_ordered_newest_first(_isolate_db):
     from server import app
 
@@ -177,6 +190,65 @@ def test_recently_opened_returns_scoped_open_cases_ordered_newest_first(_isolate
     returned_case_ids = {case["case_id"] for case in data["cases"]}
     assert older not in returned_case_ids
     assert acknowledged not in returned_case_ids
+
+
+def test_recently_reopened_returns_scoped_open_recurrences_ordered_newest_first(_isolate_db):
+    from server import app
+
+    older = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=12,
+        run_id="run-reopened-older",
+        dedupe_suffix="recent/reopened/older",
+    )
+    _resolve_case(_isolate_db, older, resolved_hours_ago=10)
+    _reopen_case(_isolate_db, older, reopened_hours_ago=5)
+    newest = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=8,
+        run_id="run-reopened-newest",
+        dedupe_suffix="recent/reopened/newest",
+    )
+    _resolve_case(_isolate_db, newest, resolved_hours_ago=6)
+    _reopen_case(_isolate_db, newest, reopened_hours_ago=1)
+    still_open = _seed_open_case(
+        _isolate_db,
+        opened_hours_ago=1,
+        run_id="run-not-reopened",
+        dedupe_suffix="recent/reopened/not-reopened",
+    )
+    other_business = _seed_open_case(
+        _isolate_db,
+        business_id="other-biz",
+        opened_hours_ago=8,
+        run_id="run-reopened-other",
+        dedupe_suffix="recent/reopened/other",
+    )
+    _resolve_case(_isolate_db, other_business, resolved_hours_ago=6)
+    _reopen_case(_isolate_db, other_business, reopened_hours_ago=0)
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/recently-reopened?limit=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["reopened_total"] == 2
+    assert data["limit"] == 1
+    assert data["count"] == 1
+    assert data["cases"][0]["case_id"] == newest
+    assert data["cases"][0]["status"] == "open"
+    assert "reopened_at" in data["cases"][0]
+    returned_case_ids = {case["case_id"] for case in data["cases"]}
+    assert older not in returned_case_ids
+    assert still_open not in returned_case_ids
 
 
 def test_recently_acknowledged_returns_scoped_acknowledged_cases_ordered_newest_first(_isolate_db):
