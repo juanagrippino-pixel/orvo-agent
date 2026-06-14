@@ -208,6 +208,51 @@ def test_case_work_item_projection_tracks_comment_activity_separately_from_last_
     assert projection["latest_evidence_at"] == "2026-05-24T09:30:00Z"
 
 
+def test_case_work_item_projection_prefers_last_appended_timeline_event_when_timestamps_tie(tmp_path):
+    db_path = tmp_path / "work-item-last-event-tie.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-last-event-tie", priority=87))
+    tied_timestamp = datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc)
+    later_snapshot = case.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_id": "snapshot-last-event-tie-google",
+            "snapshot_key": "run-last-event-tie-google/evidence://artemea/run-last-event-tie-google/stockout_risk/stockout_risk/business/monitored",
+            "captured_at": tied_timestamp,
+            "run_id": "run-last-event-tie-google",
+            "artifact_ref": "ledger://runs/run-last-event-tie-google/daily-report",
+            "evidence_ref": "evidence://artemea/run-last-event-tie-google/stockout_risk",
+            "source": "google_sheets",
+            "source_label": "Google Sheets",
+            "summary": "Stock snapshot from Google Sheets.",
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    case = store.add_comment(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Primer evento con timestamp empatado.",
+        commented_at=tied_timestamp,
+    )
+    case = store.attach_evidence(
+        case.case_id,
+        snapshots=[later_snapshot],
+        run_id="run-last-event-tie-google",
+        artifact_ref="ledger://runs/run-last-event-tie-google/daily-report",
+        summary="Attached Google Sheets evidence after the comment.",
+        attached_at=tied_timestamp,
+    )
+    conn.close()
+
+    projection = case_work_item_projection(case, now=datetime(2026, 5, 24, 10, tzinfo=timezone.utc))
+
+    assert projection["timeline_event_count"] == 3
+    assert projection["last_event_at"] == "2026-05-24T09:30:00Z"
+    assert projection["last_event_type"] == "evidence_attached"
+
+
 def test_issue_type_definitions_expose_release_state_from_semantic_registry():
     definitions = {definition["case_type"]: definition for definition in operational_case_issue_type_definitions()}
 
