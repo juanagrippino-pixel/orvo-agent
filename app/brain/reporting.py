@@ -1,5 +1,6 @@
 """Report composition for WhatsApp-first Orvo Brain output."""
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Iterable
 
@@ -33,6 +34,15 @@ def _format_ars(value: float) -> str:
 
 
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerCaseBriefSurface:
+    """Validated owner-facing case projection surface."""
+
+    total_open: int
+    visible_cases: tuple[OperationalCase, ...]
+
 
 _TN_REVENUE_KEYS = (
     "revenue_today_tn",
@@ -242,6 +252,29 @@ def _case_status_line(case: OperationalCase, report_date: date | None) -> str | 
     return "   Estado: " + " · ".join(parts)
 
 
+def validate_daily_report_for_preview(report: DailyReport) -> None:
+    """Validate a daily report before rendering it as an owner-facing preview."""
+
+    validate_report_metric_objects_strict(
+        report.metrics,
+        ignored_issue_codes={"duplicate_canonical_metric"},
+    )
+
+
+def validate_owner_case_brief_cases(
+    cases: Iterable[OperationalCase],
+    *,
+    max_cases: int = 3,
+) -> OwnerCaseBriefSurface:
+    """Return the canonical, owner-visible, sorted case projection surface."""
+
+    if max_cases < 0:
+        raise ValueError("max_cases must be non-negative")
+    actionable = owner_facing_actionable_cases(cases)
+    visible_cases = tuple(sorted(actionable, key=_case_order)[:max_cases])
+    return OwnerCaseBriefSurface(total_open=len(actionable), visible_cases=visible_cases)
+
+
 def compose_owner_case_brief(
     business_name: str,
     cases: Iterable[OperationalCase],
@@ -255,25 +288,26 @@ def compose_owner_case_brief(
     store. The text is intentionally short and fully redacted before returning.
     """
 
-    actionable = owner_facing_actionable_cases(cases)
-    actionable = sorted(actionable, key=_case_order)
-    visible_cases = actionable[:max_cases]
+    surface = validate_owner_case_brief_cases(cases, max_cases=max_cases)
     date_suffix = f" · {report_date.isoformat()}" if report_date else ""
     lines = [f"🧠 Orvo — {business_name}", f"Brief operativo{date_suffix}", ""]
 
-    if not actionable:
+    if surface.total_open == 0:
         lines.append("✅ Sin temas operativos abiertos por ahora.")
         return redact_text("\n".join(lines)) or "[REDACTED]"
 
-    total_plural = "tema operativo abierto" if len(actionable) == 1 else "temas operativos abiertos"
-    if len(actionable) > len(visible_cases):
-        shown_plural = "principal" if len(visible_cases) == 1 else "principales"
-        lines.append(f"Hay {len(actionable)} {total_plural}; te muestro los {len(visible_cases)} {shown_plural}:")
+    total_plural = "tema operativo abierto" if surface.total_open == 1 else "temas operativos abiertos"
+    if surface.total_open > len(surface.visible_cases):
+        shown_plural = "principal" if len(surface.visible_cases) == 1 else "principales"
+        lines.append(
+            f"Hay {surface.total_open} {total_plural}; "
+            f"te muestro los {len(surface.visible_cases)} {shown_plural}:"
+        )
     else:
-        review_plural = "tema operativo" if len(actionable) == 1 else "temas operativos"
-        lines.append(f"Hoy hay {len(actionable)} {review_plural} para revisar:")
+        review_plural = "tema operativo" if surface.total_open == 1 else "temas operativos"
+        lines.append(f"Hoy hay {surface.total_open} {review_plural} para revisar:")
 
-    for index, case in enumerate(visible_cases, start=1):
+    for index, case in enumerate(surface.visible_cases, start=1):
         prefix = "🔴" if case.severity == "critical" else "🟡" if case.severity == "warning" else "ℹ️"
         lines.extend(["", f"{index}. {prefix} {case.title}", f"   Caso: {case.case_id}"])
         status_line = _case_status_line(case, report_date)
@@ -297,10 +331,7 @@ def compose_owner_case_brief(
 def compose_daily_report_text(report: DailyReport) -> str:
     """Compose a short, cited Spanish daily report for a business owner."""
 
-    validate_report_metric_objects_strict(
-        report.metrics,
-        ignored_issue_codes={"duplicate_canonical_metric"},
-    )
+    validate_daily_report_for_preview(report)
     mkeys = _metrics_by_key(report)
 
     lines = [

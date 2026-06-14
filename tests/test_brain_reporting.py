@@ -100,6 +100,34 @@ def test_compose_daily_report_text_rejects_report_not_allowed_metrics():
     assert "runtime.connector.status" in str(excinfo.value)
 
 
+def test_validate_daily_report_for_preview_rejects_report_not_allowed_metrics():
+    import pytest
+
+    from app.brain.reporting import validate_daily_report_for_preview
+    from app.brain.semantics.metric_registry import MetricRegistryValidationError
+
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(
+                key="runtime.connector.status",
+                label="Conector",
+                value=1,
+                unit="boolean",
+                evidence=[_tn_source()],
+            )
+        ],
+        insights=[],
+    )
+
+    with pytest.raises(MetricRegistryValidationError) as excinfo:
+        validate_daily_report_for_preview(report)
+
+    assert "report_not_allowed" in str(excinfo.value)
+    assert "runtime.connector.status" in str(excinfo.value)
+
+
 # ── new tests ────────────────────────────────────────────────────────────────
 
 def test_single_channel_tn_only_no_canales_section():
@@ -606,6 +634,34 @@ def test_compose_owner_case_brief_prioritizes_open_cases_with_evidence_and_actio
     assert "Reponer stock o pausar campañas." in text
     assert "Resuelto" not in text
     assert "raw_case_brief_secret" not in text
+
+
+def test_validate_owner_case_brief_cases_filters_and_orders_visible_owner_cases():
+    from app.brain.reporting import validate_owner_case_brief_cases
+
+    low = _owner_case(case_id="case-low", title="ROAS bajo", priority_score=60)
+    visible = _owner_case(case_id="case-visible", title="Stock crítico", priority_score=90)
+    resolved = _owner_case(case_id="case-done", title="Resuelto", status="resolved", priority_score=100)
+    deferred = _owner_case(
+        case_id="case-deferred",
+        title="Mix de canales interno",
+        case_type="channel_mix_shift",
+        priority_score=99,
+    )
+
+    surface = validate_owner_case_brief_cases([resolved, deferred, low, visible], max_cases=1)
+
+    assert surface.total_open == 2
+    assert [case.case_id for case in surface.visible_cases] == ["case-visible"]
+
+
+def test_validate_owner_case_brief_cases_rejects_negative_max_cases():
+    import pytest
+
+    from app.brain.reporting import validate_owner_case_brief_cases
+
+    with pytest.raises(ValueError, match="max_cases"):
+        validate_owner_case_brief_cases([], max_cases=-1)
 
 
 def test_owner_case_brief_renders_only_registry_allowed_case_metrics():
