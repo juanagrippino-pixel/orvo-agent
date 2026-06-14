@@ -320,12 +320,15 @@ class ConnectorSpec:
     def health_policy_metadata(self) -> dict[str, Any]:
         """Return serializable connector health policy metadata."""
 
-        return {
+        metadata = {
             "readiness_check": self.health.readiness_check,
             "supports_health_check": self.health.supports_health_check,
             "degraded_state": self.health.degraded_state,
             "allowed_states": list(self.health.allowed_states),
         }
+        if self.health.detailed_states:
+            metadata["detailed_states"] = list(self.health.detailed_states)
+        return metadata
 
     def rate_limit_policy_metadata(self) -> dict[str, Any]:
         """Return serializable connector rate-limit policy metadata."""

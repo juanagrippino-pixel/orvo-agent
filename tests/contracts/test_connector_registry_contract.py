@@ -58,6 +58,19 @@ def test_connector_spec_certifies_health_events_against_declared_health_states()
     assert all(issue.severity == "warning" for issue in issues)
 
 
+def test_connector_spec_health_policy_metadata_exposes_connector_specific_detailed_states():
+    from app.brain.connector_registry import get_connector_spec
+
+    tiendanube = get_connector_spec("tiendanube")
+
+    assert tiendanube.health_policy_metadata()["detailed_states"] == [
+        "network_error",
+        "malformed_response",
+        "partial_inventory_unavailable",
+        "stale_success",
+    ]
+
+
 def test_validate_emitted_events_for_connector_module_function_matches_spec_method():
     from app.brain.connector_registry import (
         get_connector_spec,
