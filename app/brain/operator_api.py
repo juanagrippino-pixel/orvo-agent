@@ -1739,6 +1739,73 @@ def list_top_actionable_degraded_cases(
     )
 
 
+def list_top_reopened_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N currently-actionable cases ranked by total reopen count.
+
+    Complements :func:`list_recently_reopened_cases`, which orders by the
+    latest ``case_reopened`` event timestamp. This projection orders by the
+    total count of ``case_reopened`` timeline events DESC so chronic
+    recurrence cases — those that operators have reopened multiple times —
+    bubble to the top for root-cause attention. Only cases currently in an
+    actionable status (``open`` or ``acknowledged``) are included; once a
+    case is re-resolved or cancelled it leaves this projection. Ties on
+    reopen count are broken by ``case_id`` ASC for deterministic ordering.
+    Each row exposes ``latest_reopened_at`` (timestamp of the most recent
+    ``case_reopened`` event) for context. Strictly scoped per tenant; the
+    projection reads timeline events directly from the case store, so it
+    needs no ``now`` parameter.
+    """
+
+    parsed_limit = parse_limit(limit)
+    reopened: list[tuple[int, str, datetime, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, limit=None):
+        if case.status not in _ACTIONABLE_STATUSES:
+            continue
+        reopen_count = 0
+        latest_reopen_at: datetime | None = None
+        for event in case.timeline:
+            if event.event_type != "case_reopened":
+                continue
+            reopen_count += 1
+            event_at = event.created_at.astimezone(timezone.utc)
+            if latest_reopen_at is None or event_at > latest_reopen_at:
+                latest_reopen_at = event_at
+        if reopen_count == 0 or latest_reopen_at is None:
+            continue
+        reopened.append((reopen_count, case.case_id, latest_reopen_at, case))
+
+    # Highest reopen count first; tie-break by case_id ASC for deterministic order.
+    reopened.sort(key=lambda item: (-item[0], item[1]))
+    limited = reopened[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "reopen_count": reopen_count,
+            "latest_reopened_at": latest_reopen_at.isoformat(),
+        }
+        for reopen_count, _case_id, latest_reopen_at, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "reopened_total": len(reopened),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
+
 def list_recently_resolved_cases(
     store: OperationalCaseStore,
     *,
