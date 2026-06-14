@@ -8,6 +8,7 @@ from app.brain.connector_registry import (
     ConnectorRegistry,
     ConnectorSpec,
     ConnectorValidationIssue,
+    connector_contract_metadata,
     default_connector_registry,
 )
 from app.brain.run_ledger import ConnectorRunOutcome, RunLedger
@@ -194,16 +195,16 @@ def _connector_projection(
             strict=True,
         )
         auth_requirements = _auth_requirements_projection(spec, connector)
-        health_policy = spec.health_policy_metadata()
-        rate_limit_policy = spec.rate_limit_policy_metadata()
-        lifecycle = spec.lifecycle_metadata()
-        capabilities = list(spec.capabilities)
-        required_scopes = list(spec.scopes.required)
-        emitted_metric_families = list(spec.emitted_metric_families)
-        emitted_event_families = list(spec.emitted_event_families)
-        assert spec.executor is not None
-        supported_runtime_modes = list(spec.executor.supported_runtime_modes)
-        executor_factory_path = spec.factory_path
+        contract_metadata = connector_contract_metadata(spec, connector_label=connector.label)
+        health_policy = contract_metadata["health_policy"]
+        rate_limit_policy = contract_metadata["rate_limit_policy"]
+        lifecycle = contract_metadata["lifecycle"]
+        capabilities = contract_metadata["capabilities"]
+        required_scopes = contract_metadata["required_scopes"]
+        emitted_metric_families = contract_metadata["emitted_metric_families"]
+        emitted_event_families = contract_metadata["emitted_event_families"]
+        supported_runtime_modes = contract_metadata["supported_runtime_modes"]
+        executor_factory_path = contract_metadata["executor_factory_path"]
 
     latest = latest_outcomes.get(f"id:{connector.connector_id}")
     if latest is None and connector_type_counts.get(connector.connector_type, 0) == 1:

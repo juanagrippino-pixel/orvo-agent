@@ -803,6 +803,33 @@ class ConnectorRegistry:
         )
 
 
+def connector_contract_metadata(
+    spec: ConnectorSpec,
+    *,
+    connector_label: str | None = None,
+) -> dict[str, Any]:
+    """Return serializable registry contract metadata for a connector spec."""
+
+    metadata: dict[str, Any] = {}
+    if connector_label:
+        metadata["label"] = connector_label
+    assert spec.executor is not None  # populated by ConnectorSpec.__post_init__
+    metadata.update(
+        {
+            "executor_factory_path": spec.factory_path,
+            "supported_runtime_modes": list(spec.executor.supported_runtime_modes),
+            "capabilities": list(spec.capabilities),
+            "emitted_metric_families": list(spec.emitted_metric_families),
+            "emitted_event_families": list(spec.emitted_event_families),
+            "required_scopes": list(spec.scopes.required),
+            "health_policy": spec.health_policy_metadata(),
+            "rate_limit_policy": spec.rate_limit_policy_metadata(),
+            "lifecycle": spec.lifecycle_metadata(),
+        }
+    )
+    return metadata
+
+
 def _access_token_requirement(
     *,
     provider: str,
