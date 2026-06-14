@@ -30,9 +30,10 @@ def test_list_events_queries_secret_shaped_business_id_using_persisted_redacted_
     )
 
     assert [event["event_id"] for event in events] == [event_id]
-    assert events[0]["business_id"] == "tenant?access_token=%5BREDACTED%5D"
+    assert events[0]["business_id"] == "[REDACTED]"
     serialized = json.dumps(events[0], sort_keys=True)
     assert "raw-business-secret" not in serialized
+    assert "access_token" not in serialized
     assert "audit_business_scope_sha256_v1:" not in serialized
 
 
@@ -67,6 +68,97 @@ def test_list_events_does_not_cross_tenant_when_secret_shaped_business_ids_redac
     )
 
     assert [event["data"]["reason"] for event in events] == ["first"]
+
+
+def test_list_events_redacts_legacy_secret_shaped_business_ids():
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        """
+        CREATE TABLE operator_audit_events (
+            event_id     TEXT PRIMARY KEY,
+            business_id  TEXT NOT NULL,
+            actor_ref    TEXT NOT NULL,
+            event_type   TEXT NOT NULL,
+            target_type  TEXT NOT NULL,
+            target_id    TEXT,
+            request_id   TEXT,
+            created_at   TEXT NOT NULL,
+            data         TEXT NOT NULL
+        );
+        INSERT INTO operator_audit_events (
+            event_id, business_id, actor_ref, event_type, target_type,
+            target_id, request_id, created_at, data
+        ) VALUES (
+            'audit_legacy_secret', 'legacy?access_' || 'token=raw-legacy-secret', 'operator:legacy',
+            'operator.authorization.denied', 'case', NULL, NULL, '2026-06-04T12:00:00Z',
+            '{"reason":"legacy_secret_business_id"}'
+        );
+        """
+    )
+    conn.commit()
+
+    init_schema(conn)
+
+    events = SQLiteOperatorAuditStore(conn).list_events(
+        business_id="legacy?access_" + "token=raw-legacy-secret",
+        retention_days=90,
+        limit=10,
+    )
+
+    assert [event["event_id"] for event in events] == ["audit_legacy_secret"]
+    assert events[0]["business_id"] == "[REDACTED]"
+    serialized = json.dumps(events[0], sort_keys=True)
+    assert "raw-legacy-secret" not in serialized
+    assert "access_token" not in serialized
+
+
+def test_list_events_redacts_legacy_secret_shaped_audit_identifiers():
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        """
+        CREATE TABLE operator_audit_events (
+            event_id     TEXT PRIMARY KEY,
+            business_id  TEXT NOT NULL,
+            actor_ref    TEXT NOT NULL,
+            event_type   TEXT NOT NULL,
+            target_type  TEXT NOT NULL,
+            target_id    TEXT,
+            request_id   TEXT,
+            created_at   TEXT NOT NULL,
+            data         TEXT NOT NULL
+        );
+        INSERT INTO operator_audit_events (
+            event_id, business_id, actor_ref, event_type, target_type,
+            target_id, request_id, created_at, data
+        ) VALUES (
+            'audit_legacy_identifiers', 'artemea', 'operator:juan access_' || 'token=raw_legacy_actor_secret',
+            'operator.case_action.failed', 'operational_case', 'case-' || 'token=raw_legacy_target_secret',
+            'req-' || 'access_token=raw_legacy_request_secret', '2026-06-04T12:00:00Z',
+            '{"metadata":{"access_token":"raw_legacy_data_secret"}}'
+        );
+        """
+    )
+    conn.commit()
+
+    init_schema(conn)
+
+    events = SQLiteOperatorAuditStore(conn).list_events(
+        business_id="artemea",
+        retention_days=90,
+        limit=10,
+    )
+
+    assert [event["event_id"] for event in events] == ["audit_legacy_identifiers"]
+    assert events[0]["actor_ref"] == "[REDACTED]"
+    assert events[0]["target_id"] == "[REDACTED]"
+    assert events[0]["request_id"] == "[REDACTED]"
+    assert events[0]["data"]["metadata"]["[REDACTED]"] == "[REDACTED]"
+    serialized = json.dumps(events[0], sort_keys=True)
+    assert "raw_legacy_actor_secret" not in serialized
+    assert "raw_legacy_target_secret" not in serialized
+    assert "raw_legacy_request_secret" not in serialized
+    assert "raw_legacy_data_secret" not in serialized
+    assert "access_token" not in serialized
 
 
 def test_init_schema_migrates_legacy_operator_audit_table_without_scope_key():

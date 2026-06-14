@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 from contextlib import closing
+from typing import Any
 from uuid import uuid4
 
 from flask import jsonify, request
@@ -40,7 +41,32 @@ def _safe_internal_business_id(business_id: str) -> str:
     """
 
     redacted = redact_text(business_id) or "[REDACTED]"
-    return redacted if redacted == business_id else "[REDACTED]"
+    return "[REDACTED]" if redacted != business_id or "[REDACTED]" in business_id else redacted
+
+
+def _collapse_business_id_fields(value: Any) -> Any:
+    """Collapse secret-shaped business_id fields after normal redaction.
+
+    Internal projections reuse ``business_id`` as both a scoping field and a
+    display label. Reusing the same boundary helper here prevents nested
+    projections from leaking partial key-value labels such as
+    ``tenant access_token=[REDACTED]``.
+    """
+
+    if isinstance(value, dict):
+        collapsed: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            key = str(raw_key)
+            if key == "business_id" and isinstance(raw_value, str):
+                collapsed[key] = _safe_internal_business_id(raw_value)
+            else:
+                collapsed[key] = _collapse_business_id_fields(raw_value)
+        return collapsed
+    if isinstance(value, list):
+        return [_collapse_business_id_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_collapse_business_id_fields(item) for item in value)
+    return value
 
 
 def _internal_request_id() -> str:
@@ -60,7 +86,7 @@ def _internal_success(business_id: str, data: dict, *, warnings: list[str] | Non
             "ok": True,
             "business_id": _safe_internal_business_id(business_id),
             "request_id": _internal_request_id(),
-            "data": redact_secrets(data),
+            "data": _collapse_business_id_fields(redact_secrets(data)),
             "warnings": redact_secrets(warnings or []),
             "redaction_applied": True,
         }
@@ -256,10 +282,12 @@ def _internal_principal_or_error(
             role=request.headers.get("X-Orvo-Role"),
             allowed_businesses_header=_internal_operator_businesses_header(),
         )
-        require_internal_business_scope(principal, business_id)
-        require_internal_permission(principal, permission)
         if require_explicit_global_scope:
+            require_internal_permission(principal, permission)
             require_explicit_global_business_scope(principal)
+        else:
+            require_internal_business_scope(principal, business_id)
+            require_internal_permission(principal, permission)
     except InternalOperatorAuthorizationError as exc:
         if audit_denial:
             _record_internal_authorization_denial(business_id=business_id, actor_ref=actor_ref or "anonymous", exc=exc)

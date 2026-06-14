@@ -14,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.brain.audit_scope import audit_business_display_id, audit_business_scope_key
-from app.brain.security.redaction import redact_secrets, redact_text
+from app.brain.security.redaction import is_secret_key, redact_secrets, redact_text
 
 
 DEFAULT_OPERATOR_AUDIT_RETENTION_DAYS = 90
@@ -82,6 +82,52 @@ def _redact_audit_identifier(value: str | None) -> str | None:
     return redacted if redacted == value else "[REDACTED]"
 
 
+def _collapse_audit_business_id_fields(value: Any) -> Any:
+    """Collapse nested audit ``business_id`` display labels through shared audit scope rules."""
+
+    if isinstance(value, dict):
+        collapsed: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            key = str(raw_key)
+            if key == "business_id" and isinstance(raw_value, str):
+                collapsed[key] = audit_business_display_id(raw_value)
+            else:
+                collapsed[key] = _collapse_audit_business_id_fields(raw_value)
+        return collapsed
+    if isinstance(value, list):
+        return [_collapse_audit_business_id_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_collapse_audit_business_id_fields(item) for item in value)
+    return value
+
+
+def _redact_audit_payload(value: Any) -> Any:
+    """Redact audit payloads and remove secret-key labels from operator exports.
+
+    Audit payloads may contain nested ``business_id`` display labels copied from
+    route-scoped projections. The shared audit-scope helper collapses
+    credential-shaped labels before persistence so operator exports do not keep
+    partially redacted tenant strings like ``artemea access_token=[REDACTED]``.
+    """
+
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for raw_key, raw_value in value.items():
+            key = str(raw_key)
+            if is_secret_key(key):
+                redacted["[REDACTED]"] = "[REDACTED]"
+            elif key == "business_id" and isinstance(raw_value, str):
+                redacted[key] = audit_business_display_id(raw_value)
+            else:
+                redacted[key] = _redact_audit_payload(raw_value)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_audit_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_audit_payload(item) for item in value)
+    return redact_secrets(value)
+
+
 class SQLiteOperatorAuditStore:
     """SQLite-backed append-only audit store for internal operator actions."""
 
@@ -104,7 +150,8 @@ class SQLiteOperatorAuditStore:
 
         event_id = f"audit_{uuid4().hex}"
         captured_at = created_at or datetime.now(timezone.utc)
-        safe_data = redact_secrets(data or {})
+        safe_data = _collapse_audit_business_id_fields(data or {})
+        safe_data = redact_secrets(safe_data)
         if not isinstance(safe_data, dict):
             safe_data = {"value": safe_data}
         self._conn.execute(
@@ -172,14 +219,14 @@ class SQLiteOperatorAuditStore:
                 redact_secrets(
                     {
                         "event_id": event_id,
-                        "business_id": row_business_id,
-                        "actor_ref": actor_ref,
-                        "event_type": event_type,
-                        "target_type": target_type,
-                        "target_id": target_id,
-                        "request_id": request_id,
+                        "business_id": audit_business_display_id(row_business_id),
+                        "actor_ref": _redact_audit_identifier(actor_ref),
+                        "event_type": _redact_audit_identifier(event_type),
+                        "target_type": _redact_audit_identifier(target_type),
+                        "target_id": _redact_audit_identifier(target_id),
+                        "request_id": _redact_audit_identifier(request_id),
                         "created_at": created_at,
-                        "data": data,
+                        "data": _redact_audit_payload(data),
                     }
                 )
             )
