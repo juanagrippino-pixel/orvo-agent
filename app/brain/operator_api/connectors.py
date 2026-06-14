@@ -161,20 +161,28 @@ def _setup_projection(
     The readiness endpoint remains an inspection surface: it does not execute
     health checks or mutate configuration. These hints make already-known config
     and last-run failures visible as setup-required tasks in the operator app.
+    Non-blocking migration warnings (for example legacy inline secrets that now
+    have a valid ``secret_ref``) stay ``ready`` but still surface as setup work
+    so operators can finish the control-plane cleanup deterministically.
     """
 
-    if not connector.enabled or readiness_state == "ready":
+    if not connector.enabled:
+        return {"setup_required": False, "setup_reason": None, "operator_next_step": None}
+
+    errors = [issue for issue in validation_issues if issue.severity == "error"]
+    warnings = [issue for issue in validation_issues if issue.severity != "error"]
+    if readiness_state == "ready" and not warnings:
         return {"setup_required": False, "setup_reason": None, "operator_next_step": None}
 
     setup_reason: str | None = None
     if not registered:
         setup_reason = "unknown_connector_type"
-    else:
-        errors = [issue for issue in validation_issues if issue.severity == "error"]
-        if errors:
-            setup_reason = errors[0].code
-        elif last_health is not None:
-            setup_reason = _HEALTH_SETUP_REASONS.get(str(last_health.get("health_state") or ""))
+    elif errors:
+        setup_reason = errors[0].code
+    elif warnings:
+        setup_reason = warnings[0].code
+    elif last_health is not None:
+        setup_reason = _HEALTH_SETUP_REASONS.get(str(last_health.get("health_state") or ""))
 
     if setup_reason is None:
         setup_reason = "review_connector_configuration"
