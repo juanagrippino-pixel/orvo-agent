@@ -18,6 +18,7 @@ from app.brain.operational_cases import (
     OperationalCaseStore,
 )
 from app.brain.operator_api import OperatorAPIError, case_queue_item, parse_case_status, parse_limit
+from app.brain.operator_api.common import case_reopen_stats
 from app.brain.operator_case_projections import is_case_degraded, source_connectors
 from app.brain.security.redaction import redact_secrets, redact_text
 from app.brain.work_items import (
@@ -127,6 +128,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "label": "Recently resolved",
         "description": "Resolved cases ordered by the canonical resolved_at timestamp.",
         "jql": "status = resolved ORDER BY resolved_at DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "recently_reopened",
+        "label": "Recently reopened",
+        "description": "Actionable cases reopened after resolution, ordered by latest recurrence time.",
+        "jql": "status IN (open, acknowledged, in_progress) AND reopen_count >= 1 ORDER BY latest_reopened_at DESC",
         "readonly": True,
     },
     {
@@ -601,6 +609,11 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_status_category(case)
     if field == "priority_bracket":
         return case_priority_bracket(case)
+    if field in {"reopen_count", "latest_reopened_at"}:
+        reopen_count, latest_reopened_at = case_reopen_stats(case)
+        if field == "reopen_count":
+            return reopen_count
+        return latest_reopened_at
     return getattr(case, field)
 
 

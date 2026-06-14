@@ -277,14 +277,32 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["reopen_count"] == {
+        "field": "reopen_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["latest_reopened_at"] == {
+        "field": "latest_reopened_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {
         "acknowledged_at",
+        "latest_reopened_at",
         "opened_at",
         "priority_score",
+        "reopen_count",
         "resolved_at",
         "updated_at",
     }

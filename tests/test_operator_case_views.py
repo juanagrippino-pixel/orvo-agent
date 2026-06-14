@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import csv
 import sqlite3
-from datetime import datetime
-from pathlib import Path
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -66,11 +64,39 @@ def _acknowledge_case(db_path: Path, case_id: str, *, acknowledged_at: datetime)
             case_id,
             status="acknowledged",
             actor_type="operator",
-            actor_id="operator@example.com",
-            event_type="case.acknowledged",
-            event_summary="Operator acknowledged case",
-            occurred_at=acknowledged_at,
+            actor_ref="operator@example.com",
+            transitioned_at=acknowledged_at,
         )
+
+
+def _reopen_case_n_times(db_path: Path, case_id: str, *, times: int) -> None:
+    with closing(sqlite3.connect(db_path)) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        for index in range(times):
+            base_hour = 9 + index * 3
+            store.transition_case(
+                case_id,
+                status="acknowledged",
+                actor_type="operator",
+                actor_ref="operator:juan",
+                transitioned_at=_utc(base_hour),
+            )
+            store.transition_case(
+                case_id,
+                status="resolved",
+                actor_type="operator",
+                actor_ref="operator:juan",
+                reason="Resolved before recurrence",
+                transitioned_at=_utc(base_hour + 1),
+            )
+            store.reopen_case(
+                case_id,
+                actor_type="operator",
+                actor_ref="operator:juan",
+                reason="Recurring operational signal",
+                reopened_at=_utc(base_hour + 2),
+            )
 
 
 def test_parse_case_jql_uses_canonical_work_item_field_registry():
@@ -99,6 +125,18 @@ def test_parse_case_jql_supports_acknowledged_at_sort_for_acknowledged_case_view
     assert parse_case_jql("acknowledged_at >= 2026-05-24T10:00:00+00:00").normalized == (
         "acknowledged_at >= 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
     )
+
+
+def test_parse_case_jql_supports_reopen_fields_for_recurring_case_views():
+    assert parse_case_jql("reopen_count >= 2 ORDER BY latest_reopened_at DESC").normalized == (
+        "reopen_count >= 2 ORDER BY latest_reopened_at DESC"
+    )
+    assert parse_case_jql("latest_reopened_at >= 2026-05-24T10:00:00+00:00").normalized == (
+        "latest_reopened_at >= 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+    with pytest.raises(OperatorAPIError) as exc:
+        parse_case_jql("reopen_count = nope")
+    assert exc.value.code == "unsupported_jql_value"
 
 
 def test_internal_case_view_acknowledged_cases_orders_by_acknowledged_at(
@@ -268,6 +306,86 @@ def test_internal_case_view_recently_resolved_excludes_non_resolved_cases(tmp_pa
     assert payload["count"] == 1
     assert payload["total"] == 1
     assert [case["case_id"] for case in payload["cases"]] == [resolved.case_id]
+
+
+def test_internal_case_view_recently_reopened_matches_equivalent_jql(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    reopened_once = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-reopened-once",
+            priority=65,
+            dedupe_suffix="run-reopened-once/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-reopened-once", "label": "Run reopened once"},
+        ),
+    )
+    reopened_twice = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-reopened-twice",
+            priority=85,
+            dedupe_suffix="run-reopened-twice/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-reopened-twice", "label": "Run reopened twice"},
+        ),
+    )
+    never_reopened = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-never-reopened",
+            priority=95,
+            dedupe_suffix="run-never-reopened/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-never-reopened", "label": "Run never reopened"},
+        ),
+    )
+    other = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            business_id="other",
+            run_id="run-reopened-other",
+            priority=99,
+            dedupe_suffix="run-reopened-other/commerce.inventory/daily",
+            entity_scope={"kind": "business", "id": "run-reopened-other", "label": "Run reopened other"},
+        ),
+    )
+
+    _reopen_case_n_times(db_path, reopened_once.case_id, times=1)
+    _reopen_case_n_times(db_path, reopened_twice.case_id, times=2)
+    _reopen_case_n_times(db_path, other.case_id, times=3)
+
+    view_response = client.get(
+        "/internal/brain/businesses/artemea/case-views/recently_reopened/cases",
+        headers=AUTH,
+    )
+    direct_response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={
+            "jql": "status IN (open, acknowledged, in_progress) AND reopen_count >= 1 ORDER BY latest_reopened_at DESC",
+        },
+    )
+
+    assert view_response.status_code == 200
+    assert direct_response.status_code == 200
+
+    view_payload = view_response.get_json()["data"]
+    direct_payload = direct_response.get_json()["data"]
+    assert view_payload["view_id"] == "recently_reopened"
+    assert view_payload["normalized_jql"] == (
+        "status IN (open, acknowledged, in_progress) AND reopen_count >= 1 ORDER BY latest_reopened_at DESC"
+    )
+    assert [case["case_id"] for case in view_payload["cases"]] == [
+        reopened_twice.case_id,
+        reopened_once.case_id,
+    ]
+    assert all(case["business_id"] == "artemea" for case in view_payload["cases"])
+    assert view_payload["cases"] == direct_payload["cases"]
+    assert view_payload["total"] == 2
+    assert never_reopened.case_id not in {case["case_id"] for case in view_payload["cases"]}
 
 
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
@@ -1017,6 +1135,7 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
         "open_cases",
         "acknowledged_cases",
         "in_progress_cases",
+        "recently_reopened",
         "high_priority",
         "critical_open",
         "data_stale",
@@ -1024,6 +1143,9 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
         "connector_degraded",
     }.issubset(views)
     assert views["acknowledged_cases"]["jql"] == "status = acknowledged ORDER BY acknowledged_at DESC"
+    assert views["recently_reopened"]["jql"] == (
+        "status IN (open, acknowledged, in_progress) AND reopen_count >= 1 ORDER BY latest_reopened_at DESC"
+    )
     assert views["high_priority"]["jql"] == (
         "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC"
     )
@@ -1073,7 +1195,25 @@ def test_internal_case_query_fields_expose_canonical_metadata(monkeypatch, tmp_p
         "sortable": True,
         "facetable": False,
     }
+    assert body["data"]["fields_by_name"]["reopen_count"] == {
+        "field": "reopen_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert body["data"]["fields_by_name"]["latest_reopened_at"] == {
+        "field": "latest_reopened_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert "acknowledged_at" in body["data"]["sort_fields"]
+    assert "reopen_count" in body["data"]["sort_fields"]
+    assert "latest_reopened_at" in body["data"]["sort_fields"]
     assert "priority_score" in body["data"]["sort_fields"]
     assert "updated_at" in body["data"]["sort_fields"]
     assert "source_connector" in body["data"]["facet_fields"]
