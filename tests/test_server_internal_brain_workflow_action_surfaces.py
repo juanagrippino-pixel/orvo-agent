@@ -117,6 +117,42 @@ def test_internal_workflow_approval_queue_returns_redacted_pending_requests(_iso
     assert "raw_pending_secret" not in str(data)
 
 
+def test_internal_workflow_approval_queue_can_scope_to_case(_isolate_db):
+    from server import app
+
+    pending, approved = _seed_workflow_actions(_isolate_db)
+    assert pending.approval_request is not None
+    assert approved.approval_request is not None
+    client = app.test_client()
+
+    invalid = client.get(
+        "/internal/brain/businesses/artemea/workflow/approval-queue?case_id=+++",
+        headers=AUTH,
+    )
+    assert invalid.status_code == 400
+    invalid_body = invalid.get_json()
+    assert invalid_body["ok"] is False
+    assert invalid_body["error"]["code"] == "invalid_workflow_approval_queue_scope"
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/workflow/approval-queue?case_id=case-pending",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["case_id"] == "case-pending"
+    assert data["total"] == 1
+    assert data["returned"] == 1
+    assert [item["approval_request_id"] for item in data["approval_requests"]] == [
+        pending.approval_request.approval_request_id
+    ]
+    assert approved.approval_request.approval_request_id not in str(data)
+
+
 def test_internal_workflow_execution_queue_can_scope_to_case_and_redacts_params(_isolate_db):
     from server import app
 
