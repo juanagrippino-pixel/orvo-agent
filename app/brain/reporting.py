@@ -192,8 +192,7 @@ def _case_suggested_action_label(case: OperationalCase) -> str | None:
     labels = [ACTION_CATALOG[action_key].label for action_key in suggested_action_keys_for_case(case)]
     if labels:
         return " · ".join(labels)
-    recommended_action = case.metadata.get("recommended_action")
-    return recommended_action if isinstance(recommended_action, str) and recommended_action.strip() else None
+    return None
 
 
 def _utc_date(value: datetime) -> date:

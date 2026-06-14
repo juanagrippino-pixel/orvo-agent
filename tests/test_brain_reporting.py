@@ -499,7 +499,9 @@ def test_compose_owner_case_brief_prioritizes_open_cases_with_evidence_and_actio
     from app.brain.reporting import compose_owner_case_brief
 
     low = _owner_case(case_id="case-low", title="ROAS bajo", severity="warning", priority_score=60)
+    low.metadata["suggested_action_keys"] = ["confirm_stock"]
     high = _owner_case(case_id="case-high", title="Stock crítico", severity="critical", priority_score=95, metric_value=2)
+    high.metadata["suggested_action_keys"] = ["confirm_stock"]
     resolved = _owner_case(case_id="case-done", title="Resuelto", status="resolved", priority_score=100)
 
     text = compose_owner_case_brief("Artemea", [low, high, resolved], report_date=date(2026, 5, 24))
@@ -510,7 +512,7 @@ def test_compose_owner_case_brief_prioritizes_open_cases_with_evidence_and_actio
     assert "case-high" in text
     assert "Tiendanube" in text
     assert "Stock disponible: 2 units" in text
-    assert "Reponer stock o pausar campañas." in text
+    assert "Acción sugerida: Confirm stock" in text
     assert "Resuelto" not in text
     assert "raw_case_brief_secret" not in text
 
@@ -534,7 +536,7 @@ def test_owner_case_brief_renders_only_registry_allowed_case_metrics():
     assert "tn_test_token" not in text
 
 
-def test_owner_brief_redacts_secret_shaped_recommended_action_text():
+def test_owner_brief_ignores_unregistered_free_text_action_copy():
     from app.brain.reporting import compose_owner_case_brief
 
     case = _owner_case(
@@ -545,10 +547,29 @@ def test_owner_brief_redacts_secret_shaped_recommended_action_text():
 
     text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
 
-    assert "Acción sugerida" in text
+    assert "Acción sugerida" not in text
     assert "raw_action_brief_secret" not in text
     assert "Authorization: Basic" not in text
-    assert "[REDACTED" in text
+
+
+def test_owner_brief_ignores_secret_shaped_invalid_action_keys():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(
+        case_id="case-action-key-secret",
+        title="Stock crítico",
+        recommended_action="delete_everything access_token=raw_owner_action_key_secret",
+    )
+    case.metadata["suggested_action_keys"] = [
+        "delete_everything",
+        "access_token=raw_owner_action_key_secret",
+    ]
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Acción sugerida" not in text
+    assert "delete_everything" not in text
+    assert "raw_owner_action_key_secret" not in text
 
 
 def test_owner_brief_prefers_registered_action_keys_over_free_text_action_copy():
