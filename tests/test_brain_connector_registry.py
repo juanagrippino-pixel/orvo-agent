@@ -455,7 +455,13 @@ def test_connector_contract_metadata_includes_executor_factory_param_metadata():
             "required": False,
             "fallback": None,
         },
-        {"argument": "include_stock", "source": "connector_param_bool", "key": "include_stock", "required": False, "fallback": False},
+        {
+            "argument": "include_stock",
+            "source": "connector_param_bool",
+            "key": "include_stock",
+            "required": False,
+            "fallback": False,
+        },
         {"argument": "source_label", "source": "connector_label", "key": None, "required": True, "fallback": None},
     ]
 
