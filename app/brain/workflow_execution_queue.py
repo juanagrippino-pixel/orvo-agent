@@ -14,6 +14,7 @@ from typing import Any
 
 from app.brain.action_catalog import ACTION_CATALOG, is_workflow_approval_required_action
 from app.brain.security.redaction import redact_secrets
+from app.brain.workflow_action_key_validation import validate_workflow_action_key_filter
 from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerError,
     WorkflowActionLedgerRecord,
@@ -93,16 +94,18 @@ def list_workflow_execution_queue(
     *,
     business_id: str,
     case_id: str | None = None,
+    action_key: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Project approved actions waiting for a future executor.
 
-    Only records scoped to ``business_id`` and optionally ``case_id`` with a
-    catalog-defined approval-required action key, ``approval_state=approved``,
-    ``execution_state=pending_execution``, and a matching approved approval
-    request are returned. The projection is ordered deterministically by
-    approval/update time and ledger id, redacted at the service boundary, and
-    explicitly declares that execution is disabled with zero side effects.
+    Only records scoped to ``business_id`` and optionally ``case_id`` /
+    ``action_key`` with a catalog-defined approval-required action key,
+    ``approval_state=approved``, ``execution_state=pending_execution``, and a
+    matching approved approval request are returned. The projection is ordered
+    deterministically by approval/update time and ledger id, redacted at the
+    service boundary, and explicitly declares that execution is disabled with
+    zero side effects.
     """
 
     if case_id is not None and not case_id.strip():
@@ -110,12 +113,17 @@ def list_workflow_execution_queue(
             "invalid_workflow_execution_queue_scope",
             "workflow execution queue case_id must be non-empty",
         )
+    validate_workflow_action_key_filter(action_key, require_approval_required=True)
 
     approval_requests = ledger.list_approval_requests(business_id=business_id)
+    if action_key is not None:
+        approval_requests = [request for request in approval_requests if request.action_key == action_key]
     if case_id is not None:
         approval_requests = [request for request in approval_requests if request.case_id == case_id]
     approval_requests_by_id = _approval_requests_by_id(approval_requests)
     records = ledger.list_actions(business_id=business_id)
+    if action_key is not None:
+        records = [record for record in records if record.action_key == action_key]
     if case_id is not None:
         records = [record for record in records if record.case_id == case_id]
     records = [
@@ -128,6 +136,7 @@ def list_workflow_execution_queue(
     payload = {
         "business_id": business_id,
         **({"case_id": case_id} if case_id is not None else {}),
+        **({"action_key": action_key} if action_key is not None else {}),
         "execution_enabled": False,
         "executor_state": "not_implemented",
         "side_effects_executed": 0,
