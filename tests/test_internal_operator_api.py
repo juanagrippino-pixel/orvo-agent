@@ -215,6 +215,31 @@ def test_internal_error_envelope_and_audit_reject_oversized_request_id(monkeypat
     assert oversized_request_id not in json.dumps(event, sort_keys=True)
 
 
+def test_internal_error_envelope_reuses_generated_request_id_for_audit_when_header_missing(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection())
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers={
+            "Authorization": "Bearer test-internal-token",
+            "X-Orvo-Operator": "viewer:ana",
+            "X-Orvo-Role": "viewer",
+            "X-Orvo-Businesses": "other",
+        },
+    )
+
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["redaction_applied"] is True
+    assert isinstance(body["request_id"], str)
+    assert body["request_id"].startswith("req_")
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["request_id"] == body["request_id"]
+
+
 def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     warning = _case_detection(

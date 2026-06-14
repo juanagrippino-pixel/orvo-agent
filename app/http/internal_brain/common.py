@@ -70,14 +70,23 @@ def _collapse_business_id_fields(value: Any) -> Any:
 
 
 def _internal_request_id() -> str:
+    cached = request.environ.get("orvo.internal_request_id")
+    if isinstance(cached, str) and cached:
+        return cached
+
     supplied = request.headers.get("X-Request-ID")
     if supplied is None or not supplied.strip():
-        return f"req_{uuid4().hex}"
-    candidate = supplied.strip()
-    if len(candidate) > _MAX_INTERNAL_REQUEST_ID_LENGTH:
-        return "[REDACTED]"
-    redacted = redact_text(candidate) or "[REDACTED]"
-    return redacted if redacted == candidate else "[REDACTED]"
+        resolved = f"req_{uuid4().hex}"
+    else:
+        candidate = supplied.strip()
+        if len(candidate) > _MAX_INTERNAL_REQUEST_ID_LENGTH:
+            resolved = "[REDACTED]"
+        else:
+            redacted = redact_text(candidate) or "[REDACTED]"
+            resolved = redacted if redacted == candidate else "[REDACTED]"
+
+    request.environ["orvo.internal_request_id"] = resolved
+    return resolved
 
 
 def _internal_success(business_id: str, data: dict, *, warnings: list[str] | None = None):
