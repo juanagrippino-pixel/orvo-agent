@@ -5,6 +5,7 @@ from app.brain.semantics.metric_registry import (
     CONNECTOR_FAMILY_COMPATIBILITY,
     MetricDefinition,
     MetricRegistry,
+    MetricRegistryValidationError,
     MetricValidationIssue,
     UnknownMetricError,
     default_metric_registry,
@@ -19,6 +20,7 @@ from app.brain.semantics.metric_registry import (
     find_report_allowed_violations,
     find_source_envelope_violations,
     find_value_kind_violations,
+    raise_for_metric_validation_issues,
     validate_case_metric_keys,
     validate_case_metric_objects,
     validate_freshness_envelope_metric_keys,
@@ -26,8 +28,10 @@ from app.brain.semantics.metric_registry import (
     validate_metrics,
     validate_report_metric_keys,
     validate_report_metric_objects,
+    validate_report_metric_objects_strict,
     validate_surface_metric_keys,
     validate_surface_metric_objects,
+    validate_surface_metric_objects_strict,
 )
 
 __all__ = [
@@ -35,6 +39,7 @@ __all__ = [
     "CONNECTOR_FAMILY_COMPATIBILITY",
     "MetricDefinition",
     "MetricRegistry",
+    "MetricRegistryValidationError",
     "MetricValidationIssue",
     "UnknownMetricError",
     "default_metric_registry",
@@ -49,6 +54,7 @@ __all__ = [
     "find_report_allowed_violations",
     "find_source_envelope_violations",
     "find_value_kind_violations",
+    "raise_for_metric_validation_issues",
     "validate_case_metric_keys",
     "validate_case_metric_objects",
     "validate_freshness_envelope_metric_keys",
@@ -56,6 +62,8 @@ __all__ = [
     "validate_metrics",
     "validate_report_metric_keys",
     "validate_report_metric_objects",
+    "validate_report_metric_objects_strict",
     "validate_surface_metric_keys",
     "validate_surface_metric_objects",
+    "validate_surface_metric_objects_strict",
 ]

@@ -33,7 +33,7 @@ def build_metrics_from_payload(payload: dict[str, Any]) -> list[Metric]:
     """Normalize a simple JSON-like payload into cited metrics."""
 
     source = Evidence(
-        source=str(payload.get("source") or "manual_sample"),
+        source=str(payload.get("source") or "sample"),
         label=str(payload.get("source_label") or "Carga manual Orvo Brain"),
     )
     metrics_payload = payload.get("metrics") or {}

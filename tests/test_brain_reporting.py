@@ -72,6 +72,34 @@ def test_compose_report_without_insights_says_no_critical_alerts():
     assert "Carga manual" in text
 
 
+def test_compose_daily_report_text_rejects_report_not_allowed_metrics():
+    import pytest
+
+    from app.brain.reporting import compose_daily_report_text
+    from app.brain.semantics.metric_registry import MetricRegistryValidationError
+
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 20),
+        metrics=[
+            Metric(
+                key="runtime.connector.status",
+                label="Conector",
+                value=1,
+                unit="boolean",
+                evidence=[_tn_source()],
+            )
+        ],
+        insights=[],
+    )
+
+    with pytest.raises(MetricRegistryValidationError) as excinfo:
+        compose_daily_report_text(report)
+
+    assert "report_not_allowed" in str(excinfo.value)
+    assert "runtime.connector.status" in str(excinfo.value)
+
+
 # ── new tests ────────────────────────────────────────────────────────────────
 
 def test_single_channel_tn_only_no_canales_section():
@@ -597,6 +625,26 @@ def test_owner_case_brief_renders_only_registry_allowed_case_metrics():
     assert "Stock disponible: 4 units" in text
     assert "Connector token" not in text
     assert "tn_test_token" not in text
+
+
+def test_owner_case_brief_skips_case_metrics_that_fail_surface_value_validation():
+    from app.brain.reporting import compose_owner_case_brief
+
+    case = _owner_case(case_id="case-bad-value", title="Stock crítico", metric_value=4)
+    case.evidence_snapshots[0].metrics.append(
+        OperationalCaseEvidenceMetric(
+            metric_key="commerce.inventory.available_units",
+            label="Stock textual",
+            value="not a number",
+            unit="units",
+        )
+    )
+
+    text = compose_owner_case_brief("Artemea", [case], report_date=date(2026, 5, 24))
+
+    assert "Stock disponible: 4 units" in text
+    assert "Stock textual" not in text
+    assert "not a number" not in text
 
 
 def test_owner_brief_redacts_secret_shaped_recommended_action_text():

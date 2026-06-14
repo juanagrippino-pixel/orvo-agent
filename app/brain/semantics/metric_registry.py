@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from app.brain.security.redaction import redact_text
 
@@ -31,6 +31,31 @@ class UnknownMetricError(ValueError):
     def __init__(self, key: str) -> None:
         self.key = _safe_metric_key(key)
         super().__init__(f"Metric key '{self.key}' is not registered in the semantic metric registry")
+
+
+class MetricRegistryValidationError(ValueError):
+    """Raised when a surface projection receives invalid semantic metric objects."""
+
+    def __init__(self, issues: Sequence[MetricValidationIssue]) -> None:
+        self.issues = tuple(issues)
+        fragments = [
+            f"{issue.code}@{issue.index}: {issue.message}"
+            for issue in self.issues
+        ]
+        super().__init__("; ".join(fragments))
+
+
+def raise_for_metric_validation_issues(
+    issues: Iterable[MetricValidationIssue],
+    *,
+    ignored_issue_codes: Iterable[str] | None = None,
+) -> None:
+    """Raise a single redaction-safe exception when advisory validation fails."""
+
+    ignored = set(ignored_issue_codes or ())
+    materialized = tuple(issue for issue in issues if issue.code not in ignored)
+    if materialized:
+        raise MetricRegistryValidationError(materialized)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1218,6 +1243,20 @@ def validate_report_metric_objects(
     ]
 
 
+def validate_report_metric_objects_strict(
+    metrics: Iterable[Any],
+    *,
+    registry: MetricRegistry | None = None,
+    ignored_issue_codes: Iterable[str] | None = None,
+) -> None:
+    """Validate report metric objects and raise a redaction-safe exception."""
+
+    raise_for_metric_validation_issues(
+        validate_report_metric_objects(metrics, registry=registry),
+        ignored_issue_codes=ignored_issue_codes,
+    )
+
+
 def validate_case_metric_objects(
     metrics: Iterable[Any],
     *,
@@ -1385,6 +1424,25 @@ def validate_surface_metric_objects(
         *value_kind_issues,
         *money_currency_issues,
     ]
+
+
+def validate_surface_metric_objects_strict(
+    metrics: Iterable[Any],
+    *,
+    allowed_pii_classes: Iterable[str],
+    registry: MetricRegistry | None = None,
+    ignored_issue_codes: Iterable[str] | None = None,
+) -> None:
+    """Validate surface metric objects and raise a redaction-safe exception."""
+
+    raise_for_metric_validation_issues(
+        validate_surface_metric_objects(
+            metrics,
+            allowed_pii_classes=allowed_pii_classes,
+            registry=registry,
+        ),
+        ignored_issue_codes=ignored_issue_codes,
+    )
 
 
 def validate_surface_metric_keys(
