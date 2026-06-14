@@ -1098,6 +1098,94 @@ def test_reopen_case_rejects_non_resolved_cases_and_unknown_case():
         store.reopen_case("missing-case", actor_type="operator", actor_ref="juan")
 
 
+# Audit-gap regression: when an *acknowledged* case receives a new detection
+# (within the same lifecycle, without first being resolved), the contract is
+# that the operator's ack persists AND the severity/priority/title escalate to
+# reflect the new detection. The WhatsApp owner brief relies on this so a case
+# that escalates from warning to critical still surfaces with the "✓ Visto"
+# tag instead of either (a) silently dropping the ack or (b) silently
+# suppressing the new severity. A refactor that flipped either direction would
+# slip past the open/resolved recurrence tests above.
+def test_upsert_detection_on_acknowledged_case_preserves_ack_and_reflects_escalated_detection(conn):
+    initial = OperationalCaseDetection(
+        business_id="artemea",
+        case_type="stockout_risk",
+        dedupe_key="artemea/stockout_risk/business/monitored/commerce.inventory/daily",
+        title="Stock bajo",
+        severity="warning",
+        priority_score=70,
+        entity_scope={"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
+        evidence_refs=["evidence://tn/stock/2026-05-24"],
+        run_id="run-1",
+        artifact_refs=["ledger://runs/run-1/daily-report"],
+        metadata={"recommended_action": "Vigilar stock"},
+    )
+    escalated = OperationalCaseDetection(
+        business_id="artemea",
+        case_type="stockout_risk",
+        dedupe_key="artemea/stockout_risk/business/monitored/commerce.inventory/daily",
+        title="Stock crítico",
+        severity="critical",
+        priority_score=100,
+        entity_scope={"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
+        evidence_refs=["evidence://tn/stock/2026-05-25"],
+        run_id="run-2",
+        artifact_refs=["ledger://runs/run-2/daily-report"],
+        metadata={"recommended_action": "Reponer stock ya"},
+    )
+
+    for label, store in (
+        ("memory", InMemoryOperationalCaseStore()),
+        ("sqlite", SQLiteOperationalCaseStore(conn)),
+    ):
+        opened = store.upsert_detection(initial, detected_at=utc_dt(8))
+        acked = store.transition_case(
+            opened.case_id,
+            status="acknowledged",
+            actor_type="operator",
+            actor_ref="juan",
+            reason="Lo reviso",
+            transitioned_at=utc_dt(9),
+        )
+        assert acked.acknowledged_at == utc_dt(9), (
+            f"{label}: ack must be persisted before the escalated re-detection"
+        )
+
+        escalated_case = store.upsert_detection(escalated, detected_at=utc_dt(10))
+
+        assert escalated_case.case_id == opened.case_id, (
+            f"{label}: escalated detection must reuse the same case_id, not mint a new case"
+        )
+        assert escalated_case.status == "acknowledged", (
+            f"{label}: escalated detection on an acked case must NOT silently drop the ack — the operator already saw it"
+        )
+        assert escalated_case.acknowledged_at == utc_dt(9), (
+            f"{label}: acknowledged_at must be preserved across escalation as the audit anchor"
+        )
+        assert escalated_case.resolved_at is None, (
+            f"{label}: acked-case escalation must not invent a resolved_at"
+        )
+        assert escalated_case.severity == "critical", (
+            f"{label}: severity must reflect the new detection so escalation is visible in the brief"
+        )
+        assert escalated_case.priority_score == 100, (
+            f"{label}: priority_score must reflect the new detection so the case re-ranks in the operator queue"
+        )
+        assert escalated_case.title == "Stock crítico", (
+            f"{label}: title must reflect the new detection so the brief surfaces the escalated context"
+        )
+        assert escalated_case.latest_run_id == "run-2", (
+            f"{label}: latest_run_id must advance to the escalation run"
+        )
+        assert escalated_case.source_run_ids == ["run-1", "run-2"], (
+            f"{label}: source_run_ids must accumulate both runs for audit traceability"
+        )
+        event_types = [event.event_type for event in escalated_case.timeline]
+        assert event_types == ["case_opened", "status_changed", "case_updated"], (
+            f"{label}: escalation on an acked case must append `case_updated`, not `case_reopened` (no recurrence)"
+        )
+
+
 def test_open_case_queue_orders_by_priority_then_age():
     store = InMemoryOperationalCaseStore()
     warning = make_stockout_detection(run_id="run-1")
@@ -1745,4 +1833,92 @@ def test_upsert_cases_from_report_counts_same_run_dedupe_collision_once():
     timeline_types = [event.event_type for event in case.timeline]
     assert timeline_types == ["case_opened"], (
         "duplicate same-run detections must not duplicate mutation counts or case timeline events"
+    )
+
+
+# Silent metric-drift regression: case.metadata must reflect the LATEST
+# detection's metric-registry advisory state, not accumulate stale advisory
+# fields from a prior run. If a first run carried `metric_registry_mode` /
+# `metric_registry_issues` because the report had an unregistered metric, a
+# subsequent clean re-detection of the same case family must clear those keys
+# from case.metadata. Otherwise operators see a case that looks like it still
+# has registry issues even though the latest evidence is clean — a classic
+# metric-drift silent breakage where the audit surface diverges from the
+# deterministic detection.
+def test_advisory_detection_clears_stale_metric_registry_metadata_on_clean_recurrence():
+    from app.brain.operational_cases import detect_cases_from_report
+
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    advisory_report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source]),
+            Metric(key="custom.owner_note_metric", label="Owner note", value="manual", evidence=[source]),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+    clean_report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 25),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=2, unit="units", evidence=[source]),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 2 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+    store = InMemoryOperationalCaseStore()
+
+    [advisory_detection] = detect_cases_from_report(
+        business_id="artemea",
+        report=advisory_report,
+        run_id="run-1",
+        artifact_ref="ledger://runs/run-1/daily-report",
+        metric_registry_mode="advisory",
+    )
+    case_after_advisory = store.upsert_detection(advisory_detection)
+    assert case_after_advisory.metadata["metric_registry_mode"] == "advisory", (
+        "first advisory detection must surface state when the report carries an unregistered metric"
+    )
+    assert case_after_advisory.metadata["metric_registry_issues"], (
+        "first advisory detection must surface the deterministic issue list"
+    )
+
+    [clean_detection] = detect_cases_from_report(
+        business_id="artemea",
+        report=clean_report,
+        run_id="run-2",
+        artifact_ref="ledger://runs/run-2/daily-report",
+        metric_registry_mode="advisory",
+    )
+    case_after_clean = store.upsert_detection(clean_detection)
+
+    assert case_after_clean.case_id == case_after_advisory.case_id, (
+        "same dedupe key must update the existing case rather than open a new one"
+    )
+    assert "metric_registry_mode" not in case_after_clean.metadata, (
+        "case.metadata must not retain stale 'metric_registry_mode' once the latest "
+        "detection is registry-clean — operators would otherwise see phantom advisory state"
+    )
+    assert "metric_registry_issues" not in case_after_clean.metadata, (
+        "case.metadata must not retain stale 'metric_registry_issues' once the latest "
+        "detection is registry-clean — operators would otherwise see phantom issue lists"
+    )
+    assert case_after_clean.metadata["insight_title"] == "Stock crítico", (
+        "non-advisory detection-sourced metadata must still reflect the latest detection"
     )

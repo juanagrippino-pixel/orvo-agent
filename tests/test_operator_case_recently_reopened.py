@@ -62,6 +62,7 @@ def _resolve(
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved test fixture",
         transitioned_at=resolved_at,
     )
 
@@ -171,6 +172,7 @@ def test_uses_latest_reopen_event_when_case_reopened_multiple_times():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved test fixture",
         transitioned_at=NOW - timedelta(days=3) + timedelta(hours=2),
     )
     latest_reopen_at = NOW - timedelta(hours=4)
@@ -312,6 +314,7 @@ def test_excludes_reopened_then_acknowledged_or_resolved():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved test fixture",
         transitioned_at=NOW - timedelta(hours=8),
     )
 

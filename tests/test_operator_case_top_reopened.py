@@ -63,6 +63,7 @@ def _cycle_resolve_then_reopen(
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved test fixture",
         transitioned_at=resolved_at,
     )
     store.reopen_case(
@@ -236,6 +237,7 @@ def test_excludes_terminal_resolved_and_cancelled_cases():
         status="resolved",
         actor_type="operator",
         actor_ref="operator@example.com",
+        reason="Resolved test fixture",
         transitioned_at=latest_reopen_at + timedelta(hours=2),
     )
 

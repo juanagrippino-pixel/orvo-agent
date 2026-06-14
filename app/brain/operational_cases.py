@@ -677,6 +677,16 @@ class _OperationalCaseMutations:
             if detection.priority_score != existing.priority_score:
                 event_metadata["priority_score_from"] = existing.priority_score
                 event_metadata["priority_score_to"] = detection.priority_score
+            # Detection-sourced advisory keys (`metric_registry_mode`,
+            # `metric_registry_issues`) are recomputed fresh from the report on
+            # every detection. They must NOT leak from a prior run when the
+            # latest detection is registry-clean — otherwise operators see
+            # phantom advisory state on the case after metric drift is fixed.
+            existing_metadata_carryover = {
+                key: value
+                for key, value in existing.metadata.items()
+                if key not in {"metric_registry_mode", "metric_registry_issues"}
+            }
             update: dict[str, Any] = {
                 "title": detection.title,
                 "status": "open" if is_recurrence else existing.status,
@@ -692,7 +702,7 @@ class _OperationalCaseMutations:
                 "evidence_refs": _unique([*existing.evidence_refs, *detection.evidence_refs]),
                 "artifact_refs": _unique([*existing.artifact_refs, *detection.artifact_refs]),
                 "evidence_snapshots": merged_snapshots,
-                "metadata": {**existing.metadata, **detection.metadata},
+                "metadata": {**existing_metadata_carryover, **detection.metadata},
                 "timeline": [
                     *existing.timeline,
                     OperationalCaseTimelineEvent(
