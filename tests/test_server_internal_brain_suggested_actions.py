@@ -242,6 +242,31 @@ def test_suggested_actions_rejects_unknown_action_key_without_echoing_secret(_is
     assert "raw_action_filter_secret" not in str(body)
 
 
+def test_suggested_actions_rejects_registered_manual_mutation_filter_key(_isolate_db):
+    from server import app
+
+    _seed_case(
+        _isolate_db,
+        opened_hours_ago=1,
+        run_id="run-registered-manual-filter",
+        dedupe_suffix="suggested/actions/registered-manual-filter",
+        suggested_action_keys=["confirm_stock"],
+    )
+
+    client = app.test_client()
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases/suggested-actions",
+        headers=AUTH_WITH_SCOPE,
+        query_string={"action_key": "resolve_case"},
+    )
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "unsupported_suggested_action_key"
+    assert body["redaction_applied"] is True
+
+
 def test_suggested_actions_requires_internal_auth(_isolate_db):
     from server import app
 

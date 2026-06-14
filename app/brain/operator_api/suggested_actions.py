@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.brain.action_catalog import is_supported_suggested_action_key
+
 from .common import *  # noqa: F401,F403
 from .projections import _case_suggested_action_keys, _case_suggested_actions
 
@@ -14,6 +16,12 @@ def _parse_suggested_action_key_filter(value: str | None) -> str | None:
         raise OperatorAPIError(
             "unknown_suggested_action_key",
             f"unknown suggested action_key: {candidate}",
+            status_code=400,
+        )
+    if not is_supported_suggested_action_key(candidate):
+        raise OperatorAPIError(
+            "unsupported_suggested_action_key",
+            f"unsupported suggested action_key for case projections: {candidate}",
             status_code=400,
         )
     return candidate

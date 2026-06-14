@@ -239,6 +239,20 @@ def suggested_action_keys_for_case(case: Any) -> list[str]:
     return keys
 
 
+def is_supported_suggested_action_key(action_key: str) -> bool:
+    """Return whether an action key is valid for case suggestion projections.
+
+    Internal owner/operator/report projections may surface recommendation-only
+    actions as well as manual operator-request next steps such as connector
+    recovery tasks. The canonical requirement is that the key is registered and
+    scoped to at least one case family; pure manual case mutations like
+    ``resolve_case`` are intentionally excluded from suggested-action filters.
+    """
+
+    definition = ACTION_CATALOG.get(action_key)
+    return bool(definition is not None and definition.case_families)
+
+
 def workflow_action_registry() -> dict[str, ActionDefinition]:
     """Return registered action metadata for workflow dry-run validation."""
 
