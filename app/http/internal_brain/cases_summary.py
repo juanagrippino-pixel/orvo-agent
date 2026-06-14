@@ -124,6 +124,28 @@ def register_case_summary_routes(app):
         )
 
 
+    @app.get("/internal/brain/businesses/<business_id>/cases/reopen-counts")
+    def internal_brain_cases_reopen_counts(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_reopen_counts(case_store, business_id=business_id),
+            ),
+        )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/cases/reopen-counts/by-severity")
+    def internal_brain_cases_reopen_counts_by_severity(business_id: str):
+        return _with_internal_stores(
+            business_id,
+            lambda case_store, run_ledger: _internal_success(
+                business_id,
+                summarize_case_reopen_counts_by_severity(case_store, business_id=business_id),
+            ),
+        )
+
+
     @app.get("/internal/brain/businesses/<business_id>/cases/aging")
     def internal_brain_cases_aging(business_id: str):
         return _with_internal_stores(

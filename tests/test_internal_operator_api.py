@@ -91,6 +91,36 @@ def _seed_case(db_path, detection: OperationalCaseDetection):
     return case
 
 
+def _reopen_case_n_times(db_path, case_id: str, *, times: int) -> None:
+    with sqlite3.connect(db_path) as conn:
+        init_schema(conn)
+        store = SQLiteOperationalCaseStore(conn)
+        for index in range(times):
+            base_hour = 9 + index * 3
+            store.transition_case(
+                case_id,
+                status="acknowledged",
+                actor_type="operator",
+                actor_ref="operator:juan",
+                transitioned_at=_utc(base_hour),
+            )
+            store.transition_case(
+                case_id,
+                status="resolved",
+                actor_type="operator",
+                actor_ref="operator:juan",
+                reason="Resolved before recurrence",
+                transitioned_at=_utc(base_hour + 1),
+            )
+            store.reopen_case(
+                case_id,
+                actor_type="operator",
+                actor_ref="operator:juan",
+                reason="Recurring operational signal",
+                reopened_at=_utc(base_hour + 2),
+            )
+
+
 def _seed_run(
     db_path,
     *,
@@ -1441,6 +1471,63 @@ def test_internal_case_queue_summary_by_severity_excludes_terminal_stale_cases_f
     assert summary["actionable_total"] == 1
     assert summary["actionable_by_severity"] == {"critical": 1}
     assert summary["actionable_degraded_by_severity"] == {}
+
+
+def test_internal_case_reopen_count_summaries_return_scoped_envelopes(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    critical = _seed_case(
+        db_path,
+        _case_detection(run_id="run-reopened-critical", severity="critical"),
+    )
+    warning = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            priority=70,
+            severity="warning",
+            run_id="run-reopened-warning",
+        ),
+    )
+    other = _seed_case(
+        db_path,
+        _case_detection(business_id="other", run_id="run-reopened-other", severity="critical"),
+    )
+    _reopen_case_n_times(db_path, critical.case_id, times=1)
+    _reopen_case_n_times(db_path, warning.case_id, times=2)
+    _reopen_case_n_times(db_path, other.case_id, times=5)
+
+    aggregate_response = client.get(
+        "/internal/brain/businesses/artemea/cases/reopen-counts",
+        headers=AUTH,
+    )
+    severity_response = client.get(
+        "/internal/brain/businesses/artemea/cases/reopen-counts/by-severity",
+        headers=AUTH,
+    )
+
+    assert aggregate_response.status_code == 200
+    aggregate = aggregate_response.get_json()["data"]
+    assert aggregate["business_id"] == "artemea"
+    assert aggregate["actionable_total"] == 2
+    assert aggregate["actionable_reopened_cases"] == 2
+    assert aggregate["actionable_total_reopens"] == 3
+    assert aggregate["actionable_max_reopen_count"] == 2
+    assert aggregate["by_reopen_bucket"] == {
+        "none": 0,
+        "once": 1,
+        "twice": 1,
+        "three_to_five": 0,
+        "six_plus": 0,
+    }
+
+    assert severity_response.status_code == 200
+    by_severity = severity_response.get_json()["data"]["by_severity"]
+    assert set(by_severity) == {"critical", "warning"}
+    assert by_severity["critical"]["actionable_total_reopens"] == 1
+    assert by_severity["critical"]["by_reopen_bucket"]["once"] == 1
+    assert by_severity["warning"]["actionable_total_reopens"] == 2
+    assert by_severity["warning"]["by_reopen_bucket"]["twice"] == 1
 
 
 def test_internal_case_queue_summary_by_priority_bracket_returns_scoped_envelope(monkeypatch, tmp_path):
