@@ -153,6 +153,52 @@ def test_internal_workflow_execution_queue_can_scope_to_case_and_redacts_params(
     assert "raw_approved_secret" not in str(data)
 
 
+def test_internal_workflow_queue_routes_filter_by_approval_catalog_action_key(_isolate_db):
+    from server import app
+
+    pending, approved = _seed_workflow_actions(_isolate_db)
+    assert pending.approval_request is not None
+    assert approved.approval_request is not None
+    client = app.test_client()
+
+    approval_response = client.get(
+        "/internal/brain/businesses/artemea/workflow/approval-queue?action_key=request_external_action",
+        headers=AUTH,
+    )
+
+    assert approval_response.status_code == 200
+    approval_body = approval_response.get_json()
+    approval_data = approval_body["data"]
+    assert approval_body["ok"] is True
+    assert approval_data["business_id"] == "artemea"
+    assert approval_data["action_key"] == "request_external_action"
+    assert approval_data["total"] == 1
+    assert [request["approval_request_id"] for request in approval_data["approval_requests"]] == [
+        pending.approval_request.approval_request_id
+    ]
+
+    execution_response = client.get(
+        "/internal/brain/businesses/artemea/workflow/execution-queue?action_key=request_external_action",
+        headers=AUTH,
+    )
+
+    assert execution_response.status_code == 200
+    execution_body = execution_response.get_json()
+    execution_data = execution_body["data"]
+    assert execution_body["ok"] is True
+    assert execution_data["business_id"] == "artemea"
+    assert execution_data["action_key"] == "request_external_action"
+    assert execution_data["total"] == 1
+    assert [action["ledger_id"] for action in execution_data["actions"]] == [approved.record.ledger_id]
+
+    invalid = client.get(
+        "/internal/brain/businesses/artemea/workflow/execution-queue?action_key=acknowledge_case",
+        headers=AUTH,
+    )
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_workflow_action_key"
+
+
 def test_internal_workflow_action_audit_events_validate_scope_and_return_redacted_history(_isolate_db):
     from server import app
 
