@@ -422,6 +422,7 @@ def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_act
         {
             "case_id": case.case_id,
             "case_type": "stockout_risk",
+            "evidence_snapshot_ids": [case.evidence_snapshots[0].snapshot_id],
             "suggested_action_keys": ["confirm_stock"],
             "suggested_actions": [
                 {
@@ -440,6 +441,48 @@ def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_act
             ],
         }
     ]
+
+
+def test_internal_owner_case_brief_preview_exposes_deduped_displayed_snapshot_ids(
+    monkeypatch, tmp_path
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    stored_case = case.model_copy(
+        update={"evidence_snapshots": [*case.evidence_snapshots, case.evidence_snapshots[0]]}
+    )
+    conn = sqlite3.connect(db_path)
+    store = SQLiteOperationalCaseStore(conn)
+    store.upsert_detection(
+        OperationalCaseDetection(
+            business_id=stored_case.business_id,
+            case_type=stored_case.case_type,
+            dedupe_key=stored_case.dedupe_key,
+            title=stored_case.title,
+            severity=stored_case.severity,
+            priority_score=stored_case.priority_score,
+            entity_scope=stored_case.entity_scope,
+            evidence_refs=stored_case.evidence_refs,
+            run_id=stored_case.latest_run_id,
+            artifact_refs=stored_case.artifact_refs,
+            evidence_snapshots=stored_case.evidence_snapshots,
+            metadata=stored_case.metadata,
+        ),
+        detected_at=stored_case.opened_at,
+    )
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview?business_name=Artemea&max_cases=1",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["redaction_applied"] is True
+    displayed_case = body["data"]["displayed_cases"][0]
+    assert displayed_case["evidence_snapshot_ids"] == [case.evidence_snapshots[0].snapshot_id]
+    assert len(displayed_case["evidence_snapshot_ids"]) == 1
 
 
 def test_internal_owner_case_brief_preview_requires_business_scope(monkeypatch, tmp_path):

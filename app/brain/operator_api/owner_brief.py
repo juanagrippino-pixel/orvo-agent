@@ -64,11 +64,20 @@ def _owner_brief_displayed_cases(cases: list[OperationalCase]) -> list[dict[str,
         {
             "case_id": case.case_id,
             "case_type": case.case_type,
+            "evidence_snapshot_ids": _owner_brief_evidence_snapshot_ids(case),
             "suggested_action_keys": _case_suggested_action_keys(case),
             "suggested_actions": _case_suggested_actions(case),
         }
         for case in cases
     ]
+
+
+def _owner_brief_evidence_snapshot_ids(case: OperationalCase) -> list[str]:
+    snapshot_ids: list[str] = []
+    for snapshot in case.evidence_snapshots:
+        if snapshot.snapshot_id and snapshot.snapshot_id not in snapshot_ids:
+            snapshot_ids.append(snapshot.snapshot_id)
+    return snapshot_ids
 
 
 def _owner_brief_suggested_action_keys(cases: list[OperationalCase]) -> list[str]:
