@@ -761,6 +761,46 @@ def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reop
     assert reopened.timeline[-1].event_type == "case_reopened"
 
 
+def test_recurring_detection_reopens_terminal_case_without_stale_assignment():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+    assigned = store.assign_case(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="juan",
+        assignee_ref="dueña access_token=raw_assignee_secret",
+        assigned_at=utc_dt(9),
+    )
+    acknowledged = store.transition_case(
+        assigned.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Checking supplier replenishment",
+        transitioned_at=utc_dt(9, minute=30),
+    )
+    resolved = store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Stock count completed",
+        transitioned_at=utc_dt(10),
+    )
+
+    reopened = store.upsert_detection(make_stockout_detection(run_id="run-2"), detected_at=utc_dt(12))
+
+    assert reopened.case_id == opened.case_id
+    assert reopened.status == "open"
+    assert reopened.assignee_ref is None
+    assert reopened.assigned_at is None
+    assert reopened.due_at == utc_dt(14)
+    assert reopened.timeline[-1].event_type == "case_reopened"
+    assert reopened.timeline[-1].metadata["previous_assignee_ref"] == "dueña access_token=[REDACTED]"
+    assert reopened.timeline[-1].metadata["due_at"] == utc_dt(14).isoformat()
+    assert "raw_assignee_secret" not in reopened.model_dump_json()
+
+
 # Lifecycle-contract regression: lock down the full transition_case matrix so
 # that a future refactor of `_CASE_STATUS_TRANSITIONS` (e.g. allowing operators
 # to "un-resolve" a case, skip acknowledgement, or no-op self-transitions) is
@@ -1110,10 +1150,10 @@ def test_case_update_records_severity_and_priority_change_audit_metadata():
     event = updated.timeline[-1]
     assert event.event_type == "case_updated"
     assert event.metadata["dedupe_key"] == initial.dedupe_key
-    assert event.metadata["severity_from"] == "warning"
-    assert event.metadata["severity_to"] == "critical"
-    assert event.metadata["priority_score_from"] == 70
-    assert event.metadata["priority_score_to"] == 100
+    assert event.metadata["previous_severity"] == "warning"
+    assert event.metadata["severity"] == "critical"
+    assert event.metadata["previous_priority_score"] == 70
+    assert event.metadata["priority_score"] == 100
 
     unchanged = store.upsert_detection(
         make_stockout_detection(run_id="run-3"), detected_at=utc_dt(10)
@@ -1148,10 +1188,10 @@ def test_case_recurrence_reopen_records_severity_change_audit_metadata():
 
     event = reopened.timeline[-1]
     assert event.event_type == "case_reopened"
-    assert event.metadata["severity_from"] == "warning"
-    assert event.metadata["severity_to"] == "critical"
-    assert event.metadata["priority_score_from"] == 70
-    assert event.metadata["priority_score_to"] == 100
+    assert event.metadata["previous_severity"] == "warning"
+    assert event.metadata["severity"] == "critical"
+    assert event.metadata["previous_priority_score"] == 70
+    assert event.metadata["priority_score"] == 100
 
 
 def test_operator_reopen_restores_resolved_case_and_emits_case_reopened_event(conn):
