@@ -93,6 +93,25 @@ def register_case_action_routes(app):
                     },
                 )
                 raise
+            except Exception as exc:
+                try:
+                    _append_operator_audit_event(
+                        business_id=business_id,
+                        actor_ref=actor_ref,
+                        event_type="operator.case_action.failed",
+                        target_type="operational_case",
+                        target_id=case_id,
+                        data={
+                            "action_key": str(payload.get("action_key", "")),
+                            "error_code": "internal_error",
+                            "status_code": 500,
+                            "message": str(exc),
+                            "payload": payload,
+                        },
+                    )
+                except Exception:
+                    pass
+                raise
             return _internal_success(business_id, data)
 
         return _with_internal_stores(business_id, _handle)

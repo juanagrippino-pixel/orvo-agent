@@ -284,3 +284,5 @@ def _with_internal_stores(business_id: str, handler):
             return handler(SQLiteOperationalCaseStore(conn), SQLiteRunLedger(conn))
     except OperatorAPIError as exc:
         return _internal_error(business_id, exc.code, exc.message, status_code=exc.status_code)
+    except Exception as exc:
+        return _internal_error(business_id, "internal_error", str(exc), status_code=500)

@@ -18,6 +18,7 @@ from app.brain.operator_api import (
     normalize_case_assignee,
     normalize_operator_actor,
 )
+from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.storage import init_schema
 from app.brain.workflow_action_ledger import InMemoryWorkflowActionLedgerStore
 
@@ -831,3 +832,50 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     assert reloaded.timeline[-1].actor_ref == "[REDACTED]"
     assert_no_raw_comment_secret(reloaded.model_dump_json())
     assert_no_raw_actor_secret(reloaded.model_dump_json())
+
+
+def test_internal_case_action_route_audits_unexpected_failures_with_redacted_envelope(monkeypatch, tmp_path):
+    test_client, db_path = client(monkeypatch, tmp_path)
+    case = seed_sqlite_case(db_path)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("connector retry failed api_key=raw_error_secret")
+
+    monkeypatch.setattr("app.http.internal_brain.workflow_actions.apply_case_action_with_idempotency", _boom)
+
+    response = test_client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers={
+            **AUTH,
+            "X-Orvo-Operator": "operator access_token=raw_actor_secret",
+            "X-Idempotency-Key": "case-action-unexpected-failure",
+        },
+        json={"action_key": "add_comment", "comment": "Supplier pinged"},
+    )
+
+    raw_body = response.get_data(as_text=True)
+    assert response.status_code == 500
+    assert "raw_error_secret" not in raw_body
+    assert "raw_actor_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["business_id"] == "artemea"
+    assert body["request_id"] == "req-comment-test"
+    assert body["redaction_applied"] is True
+    assert body["error"]["code"] == "internal_error"
+    assert "raw_error_secret" not in body["error"]["message"]
+
+    connection = sqlite3.connect(db_path)
+    events = SQLiteOperatorAuditStore(connection).list_events(business_id="artemea")
+    connection.close()
+    assert events
+    event = events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-comment-test"
+    assert event["data"]["action_key"] == "add_comment"
+    assert event["data"]["error_code"] == "internal_error"
+    assert event["data"]["status_code"] == 500
+    assert event["actor_ref"] == "[REDACTED]"
+    assert "raw_error_secret" not in str(event)
