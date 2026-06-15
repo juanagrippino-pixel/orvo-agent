@@ -12,6 +12,7 @@ from typing import Any, Callable, Sequence
 
 from app.brain.config import BusinessConfig
 from app.brain.connector_health import (
+    classify_connector_failure_detail,
     classify_connector_failure_health_state,
     default_connector_health_state,
 )
@@ -117,14 +118,30 @@ def _connector_contract_metadata(
     return connector_contract_metadata(spec, connector_label=connector_label)
 
 
-def _connector_emitted_events(status: str, health_state: str | None = None) -> tuple[str, ...]:
+def _connector_detailed_health_states(connector_type: str) -> tuple[str, ...]:
+    try:
+        spec = default_connector_registry().get(connector_type)
+    except UnknownConnectorError:
+        return ()
+    return tuple(spec.health.detailed_states)
+
+
+def _connector_emitted_events(
+    status: str,
+    health_state: str | None = None,
+    *,
+    health_detail: str | None = None,
+) -> tuple[str, ...]:
     if status == "succeeded":
         return ("connector.execution.succeeded", "connector.health.ok")
     if status == "skipped":
         return ("connector.execution.skipped", "connector.health.degraded")
 
     health_state = health_state or default_connector_health_state(status)
-    return ("connector.execution.failed", f"connector.health.{health_state}")
+    events: list[str] = ["connector.execution.failed", f"connector.health.{health_state}"]
+    if health_detail and health_detail != health_state:
+        events.append(f"connector.health.{health_detail}")
+    return tuple(events)
 
 
 def _event_certification_metadata(connector_type: str, events: Sequence[str]) -> dict[str, Any]:
@@ -144,34 +161,6 @@ def _event_certification_metadata(connector_type: str, events: Sequence[str]) ->
                 }
             ],
         }
-    return {
-        "status": "passed" if not issues else "warning",
-        "issue_count": len(issues),
-        "events": list(events),
-        "issues": [
-            {
-                "code": issue.code,
-                "event_type": issue.event_type,
-                "index": issue.index,
-                "message": issue.message,
-            }
-            for issue in issues
-        ],
-    }
-
-
-def _connector_emitted_events(status: str, health_state: str | None = None) -> tuple[str, ...]:
-    if status == "succeeded":
-        return ("connector.execution.succeeded", "connector.health.ok")
-    if status == "skipped":
-        return ("connector.execution.skipped", "connector.health.degraded")
-
-    health_state = health_state or default_connector_health_state(status)
-    return ("connector.execution.failed", f"connector.health.{health_state}")
-
-
-def _event_certification_metadata(connector_type: str, events: Sequence[str]) -> dict[str, Any]:
-    issues = validate_emitted_events_for_connector(connector_type, list(events))
     return {
         "status": "passed" if not issues else "warning",
         "issue_count": len(issues),
@@ -252,11 +241,20 @@ def _failed_connector_outcome(
     failed_at: datetime,
 ) -> ConnectorRunOutcome:
     health_state = classify_connector_failure_health_state(error_summary)
-    emitted_events = _connector_emitted_events("failed", health_state=health_state)
+    health_detail = classify_connector_failure_detail(
+        error_summary,
+        detailed_states=_connector_detailed_health_states(connector_type),
+    )
+    emitted_events = _connector_emitted_events(
+        "failed",
+        health_state=health_state,
+        health_detail=health_detail,
+    )
     metadata = {
         "failure_stage": "pre_dispatch",
         "emitted_events": list(emitted_events),
         "event_certification": _event_certification_metadata(connector_type, emitted_events),
+        **({"health_detail": health_detail} if health_detail else {}),
         **_connector_contract_metadata(connector_type, connector_label=connector_label),
     }
     return ConnectorRunOutcome(

@@ -98,10 +98,12 @@ def _last_health_projection(latest: tuple[str, ConnectorRunOutcome] | None) -> d
     if latest is None:
         return None
     run_id, outcome = latest
+    health_detail = outcome.metadata.get("health_detail") if isinstance(outcome.metadata, dict) else None
     return {
         "run_id": run_id,
         "status": outcome.status,
         "health_state": outcome.health_state,
+        "health_detail": health_detail if isinstance(health_detail, str) and health_detail else None,
         "started_at": _iso(outcome.started_at),
         "finished_at": _iso(outcome.finished_at),
         "duration_ms": outcome.duration_ms,

@@ -7,7 +7,7 @@ inventing ad-hoc health strings outside the registry envelope.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Sequence
 
 ConnectorHealthState = Literal[
     "ok",
@@ -78,3 +78,66 @@ def classify_connector_failure_health_state(error_summary: str) -> ConnectorHeal
     if any(marker in normalized for marker in ("stale", "too old", "outdated")):
         return "stale"
     return "failed"
+
+
+def classify_connector_failure_detail(
+    error_summary: str,
+    *,
+    detailed_states: Sequence[str] = (),
+) -> str | None:
+    """Resolve a declared connector-specific failure detail when text matches.
+
+    This never invents new detail labels: it only returns values already declared
+    by the connector registry spec passed via ``detailed_states``.
+    """
+
+    normalized = error_summary.lower()
+    declared = {state for state in detailed_states if isinstance(state, str) and state}
+    if not declared:
+        return None
+
+    if "malformed_response" in declared and any(
+        marker in normalized
+        for marker in (
+            "malformed response",
+            "unexpected response payload",
+            "invalid json",
+            "json decode",
+            "decode error",
+            "response parse error",
+        )
+    ):
+        return "malformed_response"
+
+    if "api_server_error" in declared and any(
+        marker in normalized
+        for marker in (
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "server error",
+            "upstream unavailable",
+            "service unavailable",
+        )
+    ):
+        return "api_server_error"
+
+    connection_markers = (
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "connection aborted",
+        "network error",
+        "temporary failure in name resolution",
+        "name resolution",
+        "dns",
+        "remote disconnected",
+    )
+    if "network_error" in declared and any(marker in normalized for marker in connection_markers):
+        return "network_error"
+    if "connection_error" in declared and any(marker in normalized for marker in connection_markers):
+        return "connection_error"
+
+    return None
