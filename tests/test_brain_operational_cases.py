@@ -340,6 +340,42 @@ def test_detect_cases_from_report_enforced_mode_suppresses_case_when_insight_sou
     assert enforced_detections == []
 
 
+def test_detect_cases_from_report_uses_enforced_metric_registry_gate_by_default():
+    source = Evidence(source="tiendanube", label="Tiendanube")
+    report = DailyReport(
+        business_name="Artemea",
+        report_date=date(2026, 5, 24),
+        metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source]),
+            Metric(key="custom.owner_note_metric", label="Owner note", value="manual", evidence=[source]),
+        ],
+        insights=[
+            Insight(
+                severity="critical",
+                title="Stock crítico",
+                explanation="Quedan 3 unidades disponibles.",
+                recommended_action="Reponer stock.",
+                evidence=[source],
+            )
+        ],
+    )
+
+    advisory_detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-advisory",
+        metric_registry_mode="advisory",
+    )
+    default_detections = detect_cases_from_report(
+        business_id="artemea",
+        report=report,
+        run_id="run-default",
+    )
+
+    assert [detection.case_type for detection in advisory_detections] == ["stockout_risk"]
+    assert default_detections == []
+
+
 def test_detect_cases_from_report_enforced_mode_ignores_unknown_metric_from_unrelated_source():
     case_source = Evidence(source="tiendanube", label="Tiendanube")
     unrelated_source = Evidence(source="google_sheets", label="Ventas manuales")
