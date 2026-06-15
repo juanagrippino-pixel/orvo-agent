@@ -26,12 +26,14 @@ Repo/product sources:
 - `docs/research/2026-05-30-buyer-journey-objection-playbook.md`
 - `docs/research/2026-05-30-whatsapp-first-operations.md`
 - `docs/research/2026-05-31-whatsapp-business-pricing-ops-briefs.md`
+- `docs/research/2026-06-14-manual-payment-confirmation-icp-signal.md`
 
 Assumptions and limits:
 
 - Exact competitor prices should be re-verified before publishing externally; this document uses internal Orvo pricing and source docs as sales guidance.
 - ROI examples are illustrative worksheets. Do not promise revenue lift or guaranteed savings.
 - `fulfillment_backlog`, Meta Ads, WhatsApp inbox, and autonomous external actions must be sold only behind implementation/source-truth gates.
+- Payment-friction signals can strengthen urgency and fit, but the paid pilot must not be sold as reconciliation, transfer approval, refund handling, or customer payment support.
 - Daily WhatsApp delivery should be packaged as included value, not per-message billing, because Meta utility-template COGS are low relative to Starter pricing in the current research.
 
 ## 1. Fast qualification gate
@@ -58,6 +60,7 @@ Best-fit first pilots look like this:
 - Roughly **150-1,000 orders/month** or enough SKU/ad/fulfillment complexity that missed exceptions cost money.
 - Uses WhatsApp operationally and checks it early in the day.
 - Has a concrete recent incident: stockout, stale data, delayed fulfillment, ad spend without orders, or missed follow-up.
+- If some payments still require transfer-proof or WhatsApp/manual confirmation, treats that as operational friction rather than a normal invisible task.
 - Can decide on a USD 149 pilot without procurement.
 
 ## 2. Discovery script with scoring shortcuts
@@ -82,6 +85,17 @@ con evidencia para Tiendanube. Si no hay suficiente dolor operativo, te lo digo.
 | “¿Usás el stock y estado de pedidos de Tiendanube como dato confiable?” | Data readiness. | Mostly yes; knows where cleanup is needed. |
 | “Si Orvo abre un caso a las 8 AM, ¿quién lo recibe y quién lo resuelve?” | Champion/accountability. | Named owner/operator, not “lo ve el equipo”. |
 
+### Payment-friction overlay questions
+
+Use these only after the five core questions pass. They sharpen ICP quality and future packaging, but they do **not** widen the pilot promise.
+
+| Question | What to listen for | Commercial meaning |
+|---|---|---|
+| “¿Les mandan comprobantes por WhatsApp o tienen pagos que alguien confirma a mano?” | Transfer proof, shared phone, Mercado Pago/bank checks, admin review loops. | Strong pain signal: cross-source attention tax and WhatsApp-first operations. |
+| “¿Hay pedidos que queden frenados hasta que alguien valide el cobro?” | Dispatch waits on manual payment validation or ambiguous payment state. | Strong urgency signal, but keep it as readiness/discovery unless source semantics are explicit. |
+
+If the merchant wants Orvo to approve transfers, refund payments, or reply to customers about payments, re-scope or disqualify the pilot. The safe promise is visibility into readiness and missing/ambiguous sources, not payment operations automation.
+
 ### Close-or-nurture rule
 
 Offer the paid pilot only if:
@@ -92,6 +106,12 @@ Offer the paid pilot only if:
 4. the buyer says a USD 149 pilot is within decision range.
 
 Otherwise, place into nurture with the relevant pain content rather than creating a high-touch low-fit pilot.
+
+Payment-friction rule:
+
+- Manual payment confirmation via WhatsApp/transfer proof is a **fit amplifier**, not a required gate.
+- Treat it as a reason to prioritize the lead if the merchant already passed the core gates.
+- Do not pitch payment reconciliation, treasury automation, or customer payment handling in the USD 149 pilot.
 
 ## 3. ROI worksheet for the sales call
 
