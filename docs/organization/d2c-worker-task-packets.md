@@ -2,6 +2,7 @@
 
 Status: Draft worker packet catalog
 Date: 2026-05-24
+Last reconciled: 2026-06-15
 Related: `docs/organization/d2c-autonomous-worker-addendum.md`, `docs/specs/integration-train-contract.md`
 
 ## Purpose
@@ -489,6 +490,7 @@ Current source-of-truth check:
 
 Read:
 
+- `docs/architecture-reviews/2026-06-15-work-management-jql-review.md`
 - `docs/architecture-reviews/2026-06-02-review.md`
 - `docs/roadmap/d2c-control-plane-roadmap.md`
 - `docs/specs/operational-case-engine-contract.md`
@@ -526,10 +528,11 @@ Current source-of-truth check:
 - `app/brain/operational_cases.py` keeps `detect_cases_from_report(... metric_registry_mode="advisory")` as the reusable detection primitive, but `upsert_cases_from_report(...)` calls it with `metric_registry_mode="enforced"` before persisting cases.
 - `_case_detection_allowed_by_metric_registry(...)` blocks persisted case creation when enforced mode finds invalid/unknown operational metrics for the report sources.
 - `app/brain/semantics/metric_registry.py` already exposes report/surface validation helpers such as `validate_report_metric_objects()` and `validate_surface_metric_objects()` for boundary-level diagnostics.
-- The 2026-06-13 ARB follow-up remains valid: enforcement is not yet uniformly explicit across every non-persistent preview/report/surface path, so the next packet should add targeted validation hooks rather than redesign the registry.
+- The 2026-06-15 semantic/connector ARB review keeps the same follow-up valid: enforcement is not yet uniformly explicit across every non-persistent preview/report/surface path, so the next packet should add targeted validation hooks rather than redesign the registry.
 
 Read:
 
+- `docs/architecture-reviews/2026-06-15-semantic-connector-review.md`
 - `docs/architecture-reviews/2026-06-13-arb-cron-review.md`
 - `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`
 - `docs/specs/metric-registry-contract.md`
@@ -571,6 +574,7 @@ Current source-of-truth check:
 
 Read:
 
+- `docs/architecture-reviews/2026-06-15-workflow-trust-security-review.md`
 - `docs/architecture-reviews/2026-06-01-architecture-board-review.md`
 - `docs/specs/d2c-action-key-catalog.md`
 - `docs/specs/internal-operator-api-contract.md`
@@ -648,11 +652,14 @@ Current source-of-truth check:
 - `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`, and `priority_bracket`.
-- `docs/architecture-reviews/2026-06-13-arb-cron-review.md` is the latest ARB input for this lane. It keeps WorkItem as projection-only, treats WorkItem/JQL/facet/view primitives as the canonical source for query semantics, keeps `N2-Pro/operator-surfaces` needs-work because of endpoint proliferation and direct `store.list_cases(...)` rescans, and does **not** include a fresh 2026-06-13 verdict for `N2-Pro/search-analytics`.
+- `docs/architecture-reviews/2026-06-15-work-management-jql-review.md` is the latest ARB input for this lane. It keeps WorkItem as projection-only, treats WorkItem/JQL/facet/view primitives as the canonical source for query semantics, and says current HEAD is aligned enough for the MVP control plane.
+- `docs/architecture-reviews/2026-06-15-branch-readiness-matrix.md` marks `N2-Pro/search-analytics` needs work, so broad search/operator-surface work must be rebased and narrowed before promotion.
 - Future broad search/operator-surface work must consume the WorkItem field registry and shared case-query/view primitives rather than creating local field semantics or one-off endpoint projections.
 
 Read:
 
+- `docs/architecture-reviews/2026-06-15-work-management-jql-review.md`
+- `docs/architecture-reviews/2026-06-15-branch-readiness-matrix.md`
 - `docs/architecture-reviews/2026-06-13-arb-cron-review.md`
 - `docs/architecture-reviews/2026-06-12-review.md` and `docs/architecture-reviews/2026-06-12-branch-readiness-matrix.md` — historical inputs for reconciling older verdict drift.
 - `docs/architecture-reviews/2026-06-11-arb-update-6457695.md` and `docs/architecture-reviews/2026-06-12-architecture-board-review.md` — historical context when branch-readiness notes disagree.
