@@ -231,6 +231,51 @@ def test_internal_case_queue_filters_by_owner_visible_policy(monkeypatch, tmp_pa
     assert promoted.case_id not in [case["case_id"] for case in body["data"]["cases"]]
 
 
+def test_builtin_case_views_expose_owner_facing_policy_views(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    promoted = _seed_case(db_path, _case_detection(run_id="run-owner-visible-view", priority=95))
+    hidden = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            priority=90,
+            title="Conversaciones sin responder",
+            run_id="run-owner-hidden-view",
+        ),
+    )
+
+    views_response = client.get("/internal/brain/businesses/artemea/case-views", headers=AUTH)
+
+    assert views_response.status_code == 200
+    views = {view["view_id"]: view for view in views_response.get_json()["data"]["views"]}
+    assert views["owner_visible_actionable"]["jql"] == (
+        "status IN (open, acknowledged, in_progress) AND owner_visible = true "
+        "ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert views["internal_only_actionable"]["jql"] == (
+        "status IN (open, acknowledged, in_progress) AND owner_visible = false "
+        "ORDER BY priority_score DESC, opened_at ASC"
+    )
+
+    owner_response = client.get(
+        "/internal/brain/businesses/artemea/case-views/owner_visible_actionable/cases",
+        headers=AUTH,
+    )
+    internal_response = client.get(
+        "/internal/brain/businesses/artemea/case-views/internal_only_actionable/cases",
+        headers=AUTH,
+    )
+
+    assert owner_response.status_code == 200
+    assert internal_response.status_code == 200
+    assert [case["case_id"] for case in owner_response.get_json()["data"]["cases"]] == [promoted.case_id]
+    assert owner_response.get_json()["data"]["cases"][0]["owner_visible"] is True
+    assert [case["case_id"] for case in internal_response.get_json()["data"]["cases"]] == [hidden.case_id]
+    assert internal_response.get_json()["data"]["cases"][0]["owner_visible"] is False
+
+
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
