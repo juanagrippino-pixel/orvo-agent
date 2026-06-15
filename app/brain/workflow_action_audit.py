@@ -13,9 +13,15 @@ from typing import Any
 
 from app.brain.security.redaction import redact_secrets
 from app.brain.workflow_action_ledger import (
+    WorkflowActionLedgerError,
     WorkflowActionLedgerRecord,
     WorkflowActionLedgerStore,
     WorkflowApprovalRequest,
+)
+from app.brain.workflow_action_key_validation import validate_workflow_action_key_filter
+from app.brain.workflow_projection_validation import (
+    validate_workflow_business_scope,
+    validate_workflow_projection_limit,
 )
 
 
@@ -27,6 +33,19 @@ def _records_by_ledger_id(
     records: list[WorkflowActionLedgerRecord],
 ) -> dict[str, WorkflowActionLedgerRecord]:
     return {record.ledger_id: record for record in records}
+
+
+def _approval_request_matches_record(
+    request: WorkflowApprovalRequest,
+    record: WorkflowActionLedgerRecord,
+) -> bool:
+    return (
+        request.approval_request_id == record.approval_request_id
+        and request.ledger_id == record.ledger_id
+        and request.business_id == record.business_id
+        and request.case_id == record.case_id
+        and request.action_key == record.action_key
+    )
 
 
 def _redacted_event(payload: dict[str, Any]) -> dict[str, Any]:
@@ -60,7 +79,7 @@ def _request_event(
     request: WorkflowApprovalRequest,
     record: WorkflowActionLedgerRecord | None,
 ) -> dict[str, Any] | None:
-    if record is None:
+    if record is None or not _approval_request_matches_record(request, record):
         return None
     return _redacted_event(
         {
@@ -91,7 +110,7 @@ def _decision_event(
     request: WorkflowApprovalRequest,
     record: WorkflowActionLedgerRecord | None,
 ) -> dict[str, Any] | None:
-    if record is None or request.decided_at is None:
+    if record is None or request.decided_at is None or not _approval_request_matches_record(request, record):
         return None
     event_type = "workflow_approval_cancelled" if request.status == "cancelled" else "workflow_approval_decided"
     return _redacted_event(
@@ -119,21 +138,39 @@ def list_workflow_action_audit_events(
     ledger: WorkflowActionLedgerStore,
     *,
     business_id: str,
+    case_id: str | None = None,
+    action_key: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Project workflow action audit events for one business.
 
     The projection is derived only from canonical ledger/approval records scoped
-    by ``business_id``. It emits planning, approval-request, and approval-decision
-    events in deterministic timestamp order, redacts at the service boundary, and
-    explicitly declares that no workflow action or approval side effects were
-    executed by this read path.
+    by ``business_id`` and optionally by ``case_id`` / ``action_key``. It emits
+    planning, approval-request, and approval-decision events in deterministic
+    timestamp order, redacts at the service boundary, and explicitly declares
+    that no workflow action or approval side effects were executed by this read
+    path.
     """
 
-    records = ledger.list_actions(business_id=business_id)
+    business_id = validate_workflow_business_scope(business_id)
+    if case_id is not None and not case_id.strip():
+        raise WorkflowActionLedgerError("invalid_workflow_audit_scope", "workflow audit case_id must be non-empty")
+    parsed_limit = validate_workflow_projection_limit(limit)
+    validate_workflow_action_key_filter(action_key)
+    if case_id is not None:
+        records = [record for record in ledger.list_actions(business_id=business_id) if record.case_id == case_id]
+    else:
+        records = ledger.list_actions(business_id=business_id)
+    if action_key is not None:
+        records = [record for record in records if record.action_key == action_key]
     records_by_id = _records_by_ledger_id(records)
     events: list[dict[str, Any]] = [_planned_event(record) for record in records]
-    for request in ledger.list_approval_requests(business_id=business_id):
+    approval_requests = ledger.list_approval_requests(business_id=business_id)
+    if case_id is not None:
+        approval_requests = [request for request in approval_requests if request.case_id == case_id]
+    if action_key is not None:
+        approval_requests = [request for request in approval_requests if request.action_key == action_key]
+    for request in approval_requests:
         record = records_by_id.get(request.ledger_id)
         request_event = _request_event(request, record)
         if request_event is not None:
@@ -149,9 +186,11 @@ def list_workflow_action_audit_events(
             str(event.get("event_type", "")),
         )
     )
-    selected = events if limit is None else events[: max(limit, 0)]
+    selected = events if parsed_limit is None else events[:parsed_limit]
     payload = {
         "business_id": business_id,
+        **({"case_id": case_id} if case_id is not None else {}),
+        **({"action_key": action_key} if action_key is not None else {}),
         "audit_projection_enabled": True,
         "side_effects_executed": 0,
         "total": len(events),

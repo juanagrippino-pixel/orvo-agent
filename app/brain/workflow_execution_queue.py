@@ -14,10 +14,16 @@ from typing import Any
 
 from app.brain.action_catalog import ACTION_CATALOG, is_workflow_approval_required_action
 from app.brain.security.redaction import redact_secrets
+from app.brain.workflow_action_key_validation import validate_workflow_action_key_filter
 from app.brain.workflow_action_ledger import (
+    WorkflowActionLedgerError,
     WorkflowActionLedgerRecord,
     WorkflowActionLedgerStore,
     WorkflowApprovalRequest,
+)
+from app.brain.workflow_projection_validation import (
+    validate_workflow_business_scope,
+    validate_workflow_projection_limit,
 )
 
 
@@ -91,28 +97,52 @@ def list_workflow_execution_queue(
     ledger: WorkflowActionLedgerStore,
     *,
     business_id: str,
+    case_id: str | None = None,
+    action_key: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Project approved actions waiting for a future executor.
 
-    Only records scoped to ``business_id`` with a catalog-defined
-    approval-required action key, ``approval_state=approved``,
-    ``execution_state=pending_execution``, and a matching approved approval
-    request are returned. The projection is ordered deterministically by
-    approval/update time and ledger id, redacted at the service boundary, and
-    explicitly declares that execution is disabled with zero side effects.
+    Only records scoped to ``business_id`` and optionally ``case_id`` /
+    ``action_key`` with a catalog-defined approval-required action key,
+    ``approval_state=approved``, ``execution_state=pending_execution``, and a
+    matching approved approval request are returned. The projection is ordered
+    deterministically by approval/update time and ledger id, redacted at the
+    service boundary, and explicitly declares that execution is disabled with
+    zero side effects.
     """
 
-    approval_requests = _approval_requests_by_id(ledger.list_approval_requests(business_id=business_id))
+    business_id = validate_workflow_business_scope(business_id)
+    if case_id is not None and not case_id.strip():
+        raise WorkflowActionLedgerError(
+            "invalid_workflow_execution_queue_scope",
+            "workflow execution queue case_id must be non-empty",
+        )
+    parsed_limit = validate_workflow_projection_limit(limit)
+    validate_workflow_action_key_filter(action_key, require_approval_required=True)
+
+    approval_requests = ledger.list_approval_requests(business_id=business_id)
+    if action_key is not None:
+        approval_requests = [request for request in approval_requests if request.action_key == action_key]
+    if case_id is not None:
+        approval_requests = [request for request in approval_requests if request.case_id == case_id]
+    approval_requests_by_id = _approval_requests_by_id(approval_requests)
+    records = ledger.list_actions(business_id=business_id)
+    if action_key is not None:
+        records = [record for record in records if record.action_key == action_key]
+    if case_id is not None:
+        records = [record for record in records if record.case_id == case_id]
     records = [
         record
-        for record in ledger.list_actions(business_id=business_id)
-        if _is_pending_execution(record, approval_requests.get(record.approval_request_id or ""))
+        for record in records
+        if _is_pending_execution(record, approval_requests_by_id.get(record.approval_request_id or ""))
     ]
     records.sort(key=lambda record: (record.updated_at, record.ledger_id))
-    selected = records if limit is None else records[: max(limit, 0)]
+    selected = records if parsed_limit is None else records[:parsed_limit]
     payload = {
         "business_id": business_id,
+        **({"case_id": case_id} if case_id is not None else {}),
+        **({"action_key": action_key} if action_key is not None else {}),
         "execution_enabled": False,
         "executor_state": "not_implemented",
         "side_effects_executed": 0,

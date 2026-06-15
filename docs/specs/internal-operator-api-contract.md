@@ -113,6 +113,37 @@ scoped to the route `business_id`; viewer/operator roles must receive a safe
 `retention_days` values above the configured maximum instead of allowing
 unbounded historical export.
 
+### Workflow action projections
+
+```http
+GET /internal/brain/businesses/{business_id}/workflow/approval-queue
+GET /internal/brain/businesses/{business_id}/workflow/approval-queue?limit=50
+GET /internal/brain/businesses/{business_id}/workflow/approval-queue?action_key=request_external_action&limit=50
+GET /internal/brain/businesses/{business_id}/workflow/execution-queue
+GET /internal/brain/businesses/{business_id}/workflow/execution-queue?case_id=case-123&limit=50
+GET /internal/brain/businesses/{business_id}/workflow/execution-queue?action_key=request_external_action&limit=50
+GET /internal/brain/businesses/{business_id}/workflow/action-audit-events
+GET /internal/brain/businesses/{business_id}/workflow/action-audit-events?case_id=case-123&limit=50
+```
+
+Read-only projections over the canonical workflow action ledger and approval
+request store. These surfaces are business-scoped, redacted, and explicit that
+approval/execution side effects are disabled (`approval_execution_enabled = false`,
+`execution_enabled = false`, or `side_effects_executed = 0`).
+
+- `workflow/approval-queue` returns only pending approval-required actions still
+  blocked on human approval; optional `action_key` filters must be cataloged as
+  approval-required.
+- `workflow/execution-queue` returns only approval-required actions with a
+  matching approved approval-request object and `execution_state=pending_execution`;
+  optional `action_key` filters must be cataloged as approval-required.
+- `workflow/action-audit-events` returns deterministic planned/requested/decided
+  history derived from canonical ledger rows; optional `case_id` filters must be
+  non-empty or fail with a safe `400` envelope.
+
+These endpoints are inspection surfaces only. They must not approve, reject,
+execute, mutate cases, dispatch messages, or call external systems.
+
 ## Response envelope
 
 `request_id` mirrors `X-Request-ID` only when it is a safe operational
@@ -167,6 +198,7 @@ Before exposing beyond local/dev:
 - internal envelopes and durable audit events redact secret-shaped `X-Request-ID` values;
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
+- workflow approval/execution/audit routes stay read-only, redact secret-shaped params/reasons, enforce business scope, and reject blank `case_id` filters with safe `400` envelopes;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
 - case action rejects unknown action keys;
 - responses include `redaction_applied=true`.
