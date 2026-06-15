@@ -25,7 +25,9 @@ from app.brain.work_items import (
     WorkItemQueryFieldDefinition,
     allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
+    case_evidence_snapshot_count,
     case_issue_type,
+    case_latest_evidence_at,
     case_priority_bracket,
     case_project_key,
     case_status_category,
@@ -142,6 +144,13 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "label": "High priority",
         "description": "Actionable high-priority cases ordered by priority score.",
         "jql": "status IN (open, acknowledged, in_progress) AND priority_bracket = high ORDER BY priority_score DESC",
+        "readonly": True,
+    },
+    {
+        "view_id": "evidence_backed_actionable",
+        "label": "Evidence-backed actionable",
+        "description": "Actionable cases with canonical evidence snapshots, ordered by latest evidence freshness.",
+        "jql": "status IN (open, acknowledged, in_progress) AND evidence_snapshot_count > 0 ORDER BY latest_evidence_at DESC",
         "readonly": True,
     },
     {
@@ -624,6 +633,10 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return case_status_category(case)
     if field == "priority_bracket":
         return case_priority_bracket(case)
+    if field == "evidence_snapshot_count":
+        return case_evidence_snapshot_count(case)
+    if field == "latest_evidence_at":
+        return case_latest_evidence_at(case)
     if field in {"reopen_count", "latest_reopened_at"}:
         reopen_count, latest_reopened_at = case_reopen_stats(case)
         if field == "reopen_count":
@@ -637,12 +650,19 @@ def _sort_cases(cases: list[OperationalCase], order_by: tuple[tuple[str, str], .
     # Apply stable sorts from last to first so mixed directions work.
     for field, direction in reversed(order_by + (("case_id", "ASC"),)):
         reverse = direction == "DESC"
-        result.sort(key=lambda case, sort_field=field: _sort_value(case, sort_field), reverse=reverse)
+        result.sort(
+            key=lambda case, sort_field=field, sort_direction=direction: _sort_value(
+                case, sort_field, sort_direction
+            ),
+            reverse=reverse,
+        )
     return result
 
 
-def _sort_value(case: OperationalCase, field: str) -> Any:
+def _sort_value(case: OperationalCase, field: str, direction: str) -> tuple[int, Any]:
     if field == "case_id":
-        return case.case_id
+        return (0, case.case_id)
     value = _case_field_value(case, field)
-    return (0, value) if value is not None else (1, "")
+    if value is None:
+        return (0, "") if direction == "DESC" else (1, "")
+    return (1, value) if direction == "DESC" else (0, value)

@@ -139,6 +139,18 @@ def test_parse_case_jql_supports_reopen_fields_for_recurring_case_views():
     assert exc.value.code == "unsupported_jql_value"
 
 
+def test_parse_case_jql_supports_evidence_fields_for_actionable_case_views():
+    assert parse_case_jql("evidence_snapshot_count > 0 ORDER BY latest_evidence_at DESC").normalized == (
+        "evidence_snapshot_count > 0 ORDER BY latest_evidence_at DESC"
+    )
+    assert parse_case_jql("latest_evidence_at >= 2026-05-24T10:00:00+00:00").normalized == (
+        "latest_evidence_at >= 2026-05-24T10:00:00+00:00 ORDER BY priority_score DESC, opened_at ASC"
+    )
+    with pytest.raises(OperatorAPIError) as exc:
+        parse_case_jql("evidence_snapshot_count IN (1,2)")
+    assert exc.value.code == "unsupported_jql_operator"
+
+
 def test_internal_case_view_acknowledged_cases_orders_by_acknowledged_at(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -208,6 +220,97 @@ def test_internal_case_view_acknowledged_cases_orders_by_acknowledged_at(
     assert payload["total"] == 3
     assert [case["case_id"] for case in payload["cases"]] == [new.case_id, middle.case_id, old.case_id]
     assert payload["cases"][0]["acknowledged_at"] == _utc(14).isoformat().replace("+00:00", "Z")
+
+
+def test_internal_case_view_evidence_backed_actionable_uses_evidence_fields_and_scopes_business(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    db_path = tmp_path / "operator.sqlite3"
+    old_detection = _case_detection_with_source(
+        source="tiendanube",
+        run_id="run-evidence-old",
+        priority=80,
+        dedupe_suffix="run-evidence-old/commerce.inventory/daily",
+        entity_scope={"kind": "business", "id": "run-evidence-old", "label": "Run evidence old"},
+    )
+    old = _seed_case(
+        db_path,
+        old_detection.model_copy(
+            update={
+                "evidence_snapshots": [
+                    old_detection.evidence_snapshots[0].model_copy(update={"captured_at": _utc(9)})
+                ]
+            }
+        ),
+    )
+    new_detection = _case_detection_with_source(
+        source="tiendanube",
+        run_id="run-evidence-new",
+        priority=80,
+        dedupe_suffix="run-evidence-new/commerce.inventory/daily",
+        entity_scope={"kind": "business", "id": "run-evidence-new", "label": "Run evidence new"},
+    )
+    new = _seed_case(
+        db_path,
+        new_detection.model_copy(
+            update={
+                "evidence_snapshots": [
+                    new_detection.evidence_snapshots[0].model_copy(update={"captured_at": _utc(14)}),
+                    _case_detection_with_source(
+                        source="meta_ads",
+                        run_id="run-evidence-new-2",
+                    ).evidence_snapshots[0].model_copy(update={"captured_at": _utc(12)}),
+                ]
+            }
+        ),
+    )
+    no_evidence = _seed_case(
+        db_path,
+        _case_detection(run_id="run-evidence-none").model_copy(
+            update={"evidence_refs": [], "evidence_snapshots": []}
+        ),
+    )
+    other = _seed_case(
+        db_path,
+        _case_detection_with_source(
+            source="tiendanube",
+            run_id="run-evidence-other",
+            business_id="other",
+            priority=80,
+        ).model_copy(
+            update={
+                "evidence_snapshots": [
+                    _case_detection_with_source(
+                        source="tiendanube",
+                        run_id="run-evidence-other",
+                    ).evidence_snapshots[0].model_copy(update={"captured_at": _utc(16)})
+                ]
+            }
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views/evidence_backed_actionable/cases",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["view_id"] == "evidence_backed_actionable"
+    assert payload["normalized_jql"] == (
+        "status IN (open, acknowledged, in_progress) AND evidence_snapshot_count > 0 "
+        "ORDER BY latest_evidence_at DESC"
+    )
+    assert payload["count"] == 2
+    assert payload["total"] == 2
+    assert [case["case_id"] for case in payload["cases"]] == [new.case_id, old.case_id]
+    assert no_evidence.case_id not in [case["case_id"] for case in payload["cases"]]
+    assert other.case_id not in [case["case_id"] for case in payload["cases"]]
+    assert payload["cases"][0]["latest_evidence_at"] == _utc(14).isoformat().replace("+00:00", "Z")
+    assert payload["cases"][0]["evidence_snapshot_count"] == 2
+    assert payload["cases"][1]["latest_evidence_at"] == _utc(9).isoformat().replace("+00:00", "Z")
 
 
 def test_internal_case_view_recently_resolved_orders_by_resolved_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

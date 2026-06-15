@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any, Literal, get_args
 
 from app.brain.operational_cases import (
@@ -28,6 +28,7 @@ from app.brain.operational_cases import (
     operational_case_system_status_transitions,
     operational_case_status_transitions,
 )
+from app.brain.operator_case_projections import latest_evidence_at as _latest_evidence_at
 
 _PROJECT_KEY_MAX_LENGTH = 32
 _DEFAULT_CASE_TYPE_SCHEME_ID = "d2c-default-case-types"
@@ -107,6 +108,8 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("source_connector", "string", facetable=True),
     WorkItemQueryFieldDefinition("degraded", "bool", allowed_operators=frozenset({"=", "!="}), facetable=True),
     WorkItemQueryFieldDefinition("dedupe_key", "string", allowed_operators=frozenset({"=", "!="})),
+    WorkItemQueryFieldDefinition("evidence_snapshot_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("opened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("acknowledged_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("updated_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
@@ -195,6 +198,14 @@ def priority_bracket_for_score(priority_score: int) -> str:
 
 def case_priority_bracket(case: OperationalCase) -> str:
     return priority_bracket_for_score(case.priority_score)
+
+
+def case_evidence_snapshot_count(case: OperationalCase) -> int:
+    return len(case.evidence_snapshots)
+
+
+def case_latest_evidence_at(case: OperationalCase) -> datetime | None:
+    return _latest_evidence_at(case)
 
 
 def allowed_priority_brackets() -> set[str]:

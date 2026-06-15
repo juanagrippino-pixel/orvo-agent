@@ -253,6 +253,22 @@ def test_query_field_registry_is_canonical_work_item_semantics():
     }
     assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
     assert fields["assignee_ref"]["value_type"] == "string"
+    assert fields["evidence_snapshot_count"] == {
+        "field": "evidence_snapshot_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["latest_evidence_at"] == {
+        "field": "latest_evidence_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert fields["priority_score"] == {
         "field": "priority_score",
         "value_type": "int",
@@ -299,6 +315,8 @@ def test_query_field_registry_is_canonical_work_item_semantics():
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
     assert allowed_work_item_query_sort_fields() == {
         "acknowledged_at",
+        "evidence_snapshot_count",
+        "latest_evidence_at",
         "latest_reopened_at",
         "opened_at",
         "priority_score",
