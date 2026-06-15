@@ -124,6 +124,7 @@ GET /internal/brain/businesses/{business_id}/workflow/execution-queue?case_id=ca
 GET /internal/brain/businesses/{business_id}/workflow/execution-queue?action_key=request_external_action&limit=50
 GET /internal/brain/businesses/{business_id}/workflow/action-audit-events
 GET /internal/brain/businesses/{business_id}/workflow/action-audit-events?case_id=case-123&limit=50
+GET /internal/brain/businesses/{business_id}/workflow/action-audit-events?action_key=request_external_action&limit=50
 ```
 
 Read-only projections over the canonical workflow action ledger and approval
@@ -138,8 +139,8 @@ approval/execution side effects are disabled (`approval_execution_enabled = fals
   matching approved approval-request object and `execution_state=pending_execution`;
   optional `action_key` filters must be cataloged as approval-required.
 - `workflow/action-audit-events` returns deterministic planned/requested/decided
-  history derived from canonical ledger rows; optional `case_id` filters must be
-  non-empty or fail with a safe `400` envelope.
+  history derived from canonical ledger rows; optional `case_id` and cataloged
+  `action_key` filters must be non-empty or fail with a safe `400` envelope.
 
 These endpoints are inspection surfaces only. They must not approve, reject,
 execute, mutate cases, dispatch messages, or call external systems.
