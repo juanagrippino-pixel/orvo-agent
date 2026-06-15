@@ -2312,3 +2312,33 @@ def test_workflow_projection_services_reject_invalid_limit(invalid_limit):
     with pytest.raises(WorkflowActionLedgerError) as audit_exc:
         list_workflow_action_audit_events(ledger, business_id="artemea", limit=invalid_limit)
     assert audit_exc.value.code == "invalid_workflow_projection_limit"
+
+
+@pytest.mark.parametrize(
+    ("projection", "expected_code", "expected_message"),
+    [
+        (
+            lambda ledger: list_workflow_approval_queue(ledger, business_id="   "),
+            "invalid_workflow_business_scope",
+            "workflow business_id must be non-empty",
+        ),
+        (
+            lambda ledger: list_workflow_execution_queue(ledger, business_id="   "),
+            "invalid_workflow_business_scope",
+            "workflow business_id must be non-empty",
+        ),
+        (
+            lambda ledger: list_workflow_action_audit_events(ledger, business_id="   "),
+            "invalid_workflow_business_scope",
+            "workflow business_id must be non-empty",
+        ),
+    ],
+)
+def test_workflow_projection_services_reject_blank_business_scope(projection, expected_code, expected_message):
+    ledger = InMemoryWorkflowActionLedgerStore()
+
+    with pytest.raises(WorkflowActionLedgerError) as exc:
+        projection(ledger)
+
+    assert exc.value.code == expected_code
+    assert exc.value.message == expected_message
