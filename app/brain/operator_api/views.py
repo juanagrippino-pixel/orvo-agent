@@ -44,6 +44,20 @@ def execute_builtin_case_view(
     return query_case_queue(store, business_id=business_id, jql=view["jql"], limit=limit, view=view)
 
 
+
+def list_case_query_fields(*, field: str | None) -> dict[str, Any]:
+    from app.brain.work_items import work_item_query_field_definition, work_item_query_field_definitions
+
+    requested_field = (field or "").strip()
+    if not requested_field:
+        return {"fields": work_item_query_field_definitions()}
+
+    definition = work_item_query_field_definition(requested_field)
+    if definition is None:
+        raise OperatorAPIError("unsupported_jql_field", f"Unsupported JQL field: {requested_field}", status_code=400)
+    return {"field": definition}
+
+
 def list_case_facets(
     store: OperationalCaseStore,
     *,

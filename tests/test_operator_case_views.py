@@ -9,6 +9,7 @@ from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.operator_api import OperatorAPIError
 from app.brain.operator_views import parse_case_jql
 from app.brain.storage import init_schema
+from app.brain.work_items import work_item_query_field_definitions
 from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
 
 
@@ -634,6 +635,52 @@ def test_internal_case_facets_reject_business_scope_and_redact_bad_field(monkeyp
     assert secret_field.status_code == 400
     assert secret_field.get_json()["error"]["code"] == "unsupported_facet_field"
     assert "raw_facet_secret" not in secret_field.get_data(as_text=True)
+
+
+def test_internal_case_query_fields_lists_canonical_work_item_registry(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-query-fields", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["redaction_applied"] is True
+    assert body["data"] == {"fields": work_item_query_field_definitions()}
+
+
+def test_internal_case_query_fields_require_business_scope_and_redact_unsupported_fields(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    forbidden = client.get(
+        "/internal/brain/businesses/artemea/case-query-fields",
+        headers={**AUTH, "X-Orvo-Businesses": "other"},
+    )
+    supported = client.get(
+        "/internal/brain/businesses/artemea/case-query-fields",
+        headers=AUTH,
+        query_string={"field": "priority_score"},
+    )
+    unsupported = client.get(
+        "/internal/brain/businesses/artemea/case-query-fields",
+        headers=AUTH,
+        query_string={"field": "access_token=raw_field_secret"},
+    )
+
+    assert forbidden.status_code == 403
+    assert forbidden.get_json()["error"]["code"] == "forbidden"
+
+    assert supported.status_code == 200
+    assert supported.get_json()["data"] == {
+        "field": next(
+            definition for definition in work_item_query_field_definitions() if definition["field"] == "priority_score"
+        )
+    }
+
+    assert unsupported.status_code == 400
+    assert unsupported.get_json()["error"]["code"] == "unsupported_jql_field"
+    assert "raw_field_secret" not in unsupported.get_data(as_text=True)
 
 
 def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
