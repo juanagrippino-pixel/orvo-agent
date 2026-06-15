@@ -155,6 +155,7 @@ def test_disallowed_external_action_fails_closed_before_client_call_and_audits_s
         payload={"spreadsheet_id": "abc", "api_key": "must-not-leak"},
         idempotency_key="external/artemea/sheets/delete/1",
         actor_ref="operator:juan",
+        case_id="case-1",
         workflow_action_ledger_id="workflow-action/artemea/not-real",
     )
 
@@ -185,6 +186,7 @@ def test_external_write_action_requires_durable_approved_workflow_action_before_
         payload={"subject": "Pedido demorado", "token": "crm-secret"},
         idempotency_key="external/artemea/hubspot/ticket/1",
         actor_ref="operator:juan",
+        case_id="case-1",
     )
 
     with pytest.raises(ExternalActionError) as exc:
@@ -196,6 +198,37 @@ def test_external_write_action_requires_durable_approved_workflow_action_before_
     assert outcome.status == "skipped"
     assert outcome.metadata["approval_state"] == "pending_approval"
     assert outcome.metadata["provider"] == "pipedream"
+    assert "crm-secret" not in str(outcome.model_dump(mode="json"))
+
+
+def test_pipedream_write_approval_must_match_requested_case_id():
+    client = FakeExternalActionClient()
+    provider = PipedreamProvider(client=client, allowed_actions={("hubspot", "hubspot.create_ticket")})
+    ledger = _ledger()
+    workflow_ledger = _approved_external_action_ledger(idempotency_key="external/artemea/hubspot/ticket/1")
+    approval_record = workflow_ledger.list_actions(business_id="artemea")[0]
+    request = ExternalActionRequest(
+        business_id="artemea",
+        run_id="run-ext-1",
+        toolkit="hubspot",
+        action_key="hubspot.create_ticket",
+        operation_type="write",
+        payload={"subject": "Pedido demorado", "token": "crm-secret"},
+        idempotency_key="external/artemea/hubspot/ticket/1",
+        actor_ref="operator:juan",
+        case_id="case-2",
+        workflow_action_ledger_id=approval_record.ledger_id,
+    )
+
+    with pytest.raises(ExternalActionError) as exc:
+        execute_external_action(provider, request, run_ledger=ledger, workflow_action_ledger=workflow_ledger, now=utc_dt(11, 1))
+
+    assert exc.value.code == "external_action_approval_required"
+    assert client.calls == []
+    outcome = ledger.get_run("run-ext-1").connector_outcomes[0]  # type: ignore[union-attr]
+    assert outcome.status == "skipped"
+    assert outcome.metadata["approval_state"] == "pending_approval"
+    assert outcome.metadata["workflow_action_ledger_id"] == approval_record.ledger_id
     assert "crm-secret" not in str(outcome.model_dump(mode="json"))
 
 
@@ -215,6 +248,7 @@ def test_pipedream_write_action_executes_when_workflow_approval_matches_request(
         payload={"subject": "Pedido demorado", "token": "crm-secret"},
         idempotency_key=idempotency_key,
         actor_ref="operator:juan",
+        case_id="case-1",
         workflow_action_ledger_id=approval_record.ledger_id,
     )
 

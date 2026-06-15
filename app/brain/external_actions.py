@@ -75,6 +75,7 @@ class ExternalActionRequest:
     payload: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
     actor_ref: str | None = None
+    case_id: str = ""
     workflow_action_ledger_id: str | None = None
 
 
@@ -151,6 +152,8 @@ def _validate_request(request: ExternalActionRequest) -> None:
         )
     if request.operation_type not in {"read", "write"}:
         raise ExternalActionError("external_action_invalid_request", "external action operation_type must be read or write")
+    if request.operation_type == "write" and (not isinstance(request.case_id, str) or not request.case_id.strip()):
+        raise ExternalActionError("external_action_invalid_request", "external write action requires a non-empty case_id")
     if not isinstance(request.payload, dict):
         raise ExternalActionError("external_action_invalid_request", "external action payload must be an object")
 
@@ -248,6 +251,8 @@ def _find_approved_workflow_action(
         if record.approval_state != "approved" or record.execution_state != "pending_execution":
             return None
         if record.idempotency_key != request.idempotency_key:
+            return None
+        if record.case_id != request.case_id:
             return None
         if record.action_key != "request_external_action":
             return None
