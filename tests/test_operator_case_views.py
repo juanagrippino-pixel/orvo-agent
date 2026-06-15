@@ -538,7 +538,7 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     conn.close()
 
     response = client.get(
-        "/internal/brain/businesses/artemea/cases?jql="
+        "/internal/brain/businesses/artemea/cases?as_of=2026-05-24T10:00:00Z&jql="
         "project%20%3D%20ARTEMEA%20AND%20issue_type%20%3D%20stockout_risk%20AND%20"
         "status_category%20%3D%20in_progress%20AND%20priority_bracket%20%3D%20high%20AND%20"
         "sla_status%20%3D%20breached%20AND%20assignee_ref%20%3D%20operator:juan",
@@ -562,11 +562,15 @@ def test_internal_case_queue_filters_by_work_item_fields_and_projects_work_item(
     assert case["sla_target_seconds"] == 2 * 60 * 60
     assert case["due_at"] == "2026-05-24T10:00:00+00:00"
     assert case["sla_status"] == "breached"
+    assert case["sla_elapsed_seconds"] == 2 * 60 * 60
+    assert case["sla_remaining_seconds"] == 0
     assert case["assigned_at"] == "2026-05-24T09:00:00Z"
     assert case["work_item"]["sla_target_seconds"] == 2 * 60 * 60
     assert case["work_item"]["assigned_at"] == "2026-05-24T09:00:00Z"
     assert case["work_item"]["due_at"] == "2026-05-24T10:00:00Z"
     assert case["work_item"]["sla_status"] == "breached"
+    assert case["work_item"]["sla_elapsed_seconds"] == 2 * 60 * 60
+    assert case["work_item"]["sla_remaining_seconds"] == 0
     assert all(case["business_id"] == "artemea" for case in body["data"]["cases"])
 
 
