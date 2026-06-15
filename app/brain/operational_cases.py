@@ -1207,7 +1207,7 @@ def _data_stale_detection_for_suppressed_case(
                     "suppressed_case_families": [suppressed_case_type],
                     "insight_title": insight.title,
                     "suggested_action_keys": _suggested_action_keys_for_case_type("data_stale"),
-                    **_metric_registry_metadata(report, mode=metric_registry_mode),
+                    **_metric_registry_metadata(report, mode=metric_registry_mode, sources=[source]),
                 },
                 "evidence_snapshots": [snapshot],
             },
@@ -1302,8 +1302,18 @@ def _case_detection_allowed_by_metric_registry(
     return not validate_case_metric_objects(case_metrics)
 
 
-def _metric_registry_metadata(report: DailyReport, *, mode: MetricRegistryMode = "advisory") -> dict[str, Any]:
-    issues = validate_metrics(report.metrics, strict=False)
+def _metric_registry_metadata(
+    report: DailyReport,
+    *,
+    mode: MetricRegistryMode = "advisory",
+    sources: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    metrics = (
+        report.metrics
+        if sources is None
+        else _report_metric_objects_for_sources(report=report, sources=sources)
+    )
+    issues = validate_metrics(metrics, strict=False)
     if not issues:
         return {}
     return {
@@ -1453,7 +1463,11 @@ def detect_cases_from_report(
                 "insight_explanation": insight.explanation,
                 "recommended_action": insight.recommended_action,
                 "suggested_action_keys": _suggested_action_keys_for_case_type(case_type),
-                **_metric_registry_metadata(report, mode=metric_registry_mode),
+                **_metric_registry_metadata(
+                    report,
+                    mode=metric_registry_mode,
+                    sources=[evidence.source for evidence in insight.evidence],
+                ),
             },
         )
         source_states = {evidence.source: _source_freshness_state(report, source=evidence.source) for evidence in insight.evidence}

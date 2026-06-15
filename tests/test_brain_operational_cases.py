@@ -374,6 +374,8 @@ def test_detect_cases_from_report_enforced_mode_ignores_unknown_metric_from_unre
     )
 
     assert [detection.case_type for detection in detections] == ["stockout_risk"]
+    assert "metric_registry_issues" not in detections[0].metadata
+    assert "metric_registry_mode" not in detections[0].metadata
 
 
 def test_detect_cases_from_report_enforced_mode_suppresses_case_without_registered_case_metrics():
@@ -1720,6 +1722,7 @@ def test_upsert_data_stale_cases_is_noop_when_store_or_business_missing():
 
 def test_detect_cases_from_report_suppresses_stale_stockout_source_into_data_stale_case():
     source = Evidence(source="tiendanube", label="Tiendanube")
+    unrelated_source = Evidence(source="google_sheets", label="Ventas manuales")
     report = DailyReport(
         business_name="Artemea",
         report_date=date(2026, 5, 24),
@@ -1737,6 +1740,12 @@ def test_detect_cases_from_report_suppresses_stale_stockout_source_into_data_sta
                 label="Estado Tiendanube",
                 value="stale",
                 evidence=[source],
+            ),
+            Metric(
+                key="custom.owner_note_metric",
+                label="Owner note",
+                value="manual",
+                evidence=[unrelated_source],
             ),
         ],
         insights=[
@@ -1763,6 +1772,8 @@ def test_detect_cases_from_report_suppresses_stale_stockout_source_into_data_sta
     assert stale.metadata["affected_case_families"] == ["stockout_risk"]
     assert stale.metadata["suppressed_case_families"] == ["stockout_risk"]
     assert stale.metadata["suggested_action_keys"] == ["refresh_credentials", "retry_connector"]
+    assert "metric_registry_issues" not in stale.metadata
+    assert "metric_registry_mode" not in stale.metadata
     assert len(stale.evidence_snapshots) == 1
     snapshot = stale.evidence_snapshots[0]
     assert snapshot.freshness_state == "stale"
