@@ -1021,6 +1021,13 @@ DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             ),
         ),
         scopes=ConnectorScopeMetadata(required=("orders.read", "items.read")),
+        health=ConnectorHealthMetadata(
+            detailed_states=(
+                "api_server_error",
+                "connection_error",
+                "malformed_response",
+            )
+        ),
         rate_limit=ConnectorRateLimitMetadata(default_timeout_seconds=30, requests_per_minute=60),
     ),
     ConnectorSpec(
