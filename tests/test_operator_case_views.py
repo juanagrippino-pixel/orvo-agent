@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import csv
 import sqlite3
 from contextlib import closing
@@ -107,6 +108,23 @@ def test_parse_case_jql_uses_canonical_work_item_field_registry():
     assert parse_case_jql("priority_bracket = high").normalized == (
         "priority_bracket = high ORDER BY priority_score DESC, opened_at ASC"
     )
+
+
+def test_case_queue_csv_export_wrapper_is_single_canonical_function():
+    module_path = Path(__file__).resolve().parents[1] / "app" / "brain" / "operator_api" / "views.py"
+    tree = ast.parse(module_path.read_text())
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "export_case_queue_csv"]
+
+    assert len(functions) == 1
+    assert [arg.arg for arg in functions[0].args.args] == ["store"]
+    assert [arg.arg for arg in functions[0].args.kwonlyargs] == [
+        "business_id",
+        "view_id",
+        "jql",
+        "status",
+        "limit",
+        "export_format",
+    ]
 
 
 def test_parse_case_jql_supports_resolved_at_sort_for_recently_resolved_views():
