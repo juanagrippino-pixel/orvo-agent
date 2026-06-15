@@ -131,6 +131,26 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
         "jql": "status IN (open, acknowledged, in_progress) AND degraded = true ORDER BY updated_at DESC",
         "readonly": True,
     },
+    {
+        "view_id": "owner_visible_actionable",
+        "label": "Owner-visible actionable cases",
+        "description": "Actionable Operational Cases safe to include in owner-facing briefs.",
+        "jql": (
+            "status IN (open, acknowledged, in_progress) AND owner_visible = true "
+            "ORDER BY priority_score DESC, opened_at ASC"
+        ),
+        "readonly": True,
+    },
+    {
+        "view_id": "internal_only_actionable",
+        "label": "Internal-only actionable cases",
+        "description": "Actionable Operational Cases that should stay inside the operator console.",
+        "jql": (
+            "status IN (open, acknowledged, in_progress) AND owner_visible = false "
+            "ORDER BY priority_score DESC, opened_at ASC"
+        ),
+        "readonly": True,
+    },
 )
 
 
