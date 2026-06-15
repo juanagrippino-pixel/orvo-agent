@@ -136,7 +136,8 @@ def test_connector_spec_control_plane_config_validation_does_not_emit_secret_val
             "unexpected": unexpected_secret,
         },
         secret_refs={
-            "access_token": "secret://businesses/artemea/connectors/tn-main/access_token"
+            "access_token": "secret://businesses/artemea/connectors/tn-main/access_token",
+            "refresh_token": "secret://businesses/artemea/connectors/tn-main/refresh_token",
         },
         strict=True,
     )
@@ -147,6 +148,7 @@ def test_connector_spec_control_plane_config_validation_does_not_emit_secret_val
     } >= {
         ("legacy_inline_secret", "access_token", "warning"),
         ("unknown_config_field", "unexpected", "error"),
+        ("unknown_secret_ref", "refresh_token", "error"),
     }
     rendered = repr(issues)
     assert inline_secret not in rendered

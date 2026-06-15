@@ -551,6 +551,16 @@ class ConnectorSpec:
                             message=f"{self.connector_type} connector params do not define {key}",
                         )
                     )
+            known_secret_refs = {secret.name for secret in self.required_secret_refs}
+            for key in sorted(secret_ref_values):
+                if key not in known_secret_refs:
+                    issues.append(
+                        ConnectorValidationIssue(
+                            code="unknown_secret_ref",
+                            key=key,
+                            message=f"{self.connector_type} connector secret_refs do not define {key}",
+                        )
+                    )
 
         return issues
 

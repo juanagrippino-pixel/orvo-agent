@@ -300,7 +300,9 @@ def test_control_plane_validation_returns_structured_issue_shape_for_public_fiel
 
     issues = get_connector_spec("tiendanube").validate_control_plane_config(
         params={"store_id": "", "unexpected": "value", "access_token": "legacy-token"},
-        secret_refs={},
+        secret_refs={
+            "refresh_token": "secret://businesses/artemea/connectors/tn-main/refresh_token"
+        },
         strict=True,
     )
 
@@ -309,8 +311,29 @@ def test_control_plane_validation_returns_structured_issue_shape_for_public_fiel
         ("missing_required_secret_ref", "access_token", "error"),
         ("legacy_inline_secret", "access_token", "warning"),
         ("unknown_config_field", "unexpected", "error"),
+        ("unknown_secret_ref", "refresh_token", "error"),
     ]
     assert all(issue.message for issue in issues)
+
+
+def test_control_plane_validation_rejects_unknown_secret_ref_keys_without_echoing_values():
+    from app.brain.connector_registry import get_connector_spec
+
+    unknown_secret_ref = "secret://businesses/artemea/connectors/tn-main/refresh_token?token=raw_ref_query"
+    issues = get_connector_spec("tiendanube").validate_control_plane_config(
+        params={"store_id": "123"},
+        secret_refs={
+            "access_token": "secret://businesses/artemea/connectors/tn-main/access_token",
+            "refresh_token": unknown_secret_ref,
+        },
+        strict=True,
+    )
+
+    assert [(issue.code, issue.key, issue.severity) for issue in issues] == [
+        ("unknown_secret_ref", "refresh_token", "error"),
+    ]
+    assert "refresh_token" in issues[0].message
+    assert "raw_ref_query" not in issues[0].message
 
 
 def test_control_plane_validation_rejects_inline_secret_values_in_secret_refs():

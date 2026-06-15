@@ -236,6 +236,35 @@ def test_compile_business_runtime_rejects_missing_required_connector_params():
     assert excinfo.value.errors == ["connector sheet (google_sheets) missing required params: range_name"]
 
 
+def test_compile_business_runtime_rejects_unknown_secret_ref_keys():
+    from app.brain.runtime import RuntimeCompileError, compile_business_runtime
+
+    business = make_business(
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn",
+                connector_type="tiendanube",
+                label="Tiendanube Artemea",
+                params={"store_id": "12345"},
+                secret_refs={
+                    "access_token": "secret://businesses/artemea/connectors/tn/access_token",
+                    "refresh_token": (
+                        "secret://businesses/artemea/connectors/tn/refresh_token?token=raw_ref_query"
+                    ),
+                },
+            )
+        ]
+    )
+
+    with pytest.raises(RuntimeCompileError) as excinfo:
+        compile_business_runtime(business)
+
+    assert excinfo.value.errors == [
+        "connector tn (tiendanube) has undeclared secret_refs: refresh_token"
+    ]
+    assert "raw_ref_query" not in str(excinfo.value)
+
+
 def test_compile_business_runtime_enforces_registry_supported_runtime_modes():
     from app.brain.runtime import RuntimeCompileError, compile_business_runtime
 

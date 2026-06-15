@@ -288,6 +288,7 @@ def _compile_connectors(
         missing_public = _missing_required_params(connector, spec.required_config_fields)
         missing_secret_refs = _missing_required_secret_refs(connector, spec)
         invalid_secret_refs = _invalid_required_secret_refs(connector, spec)
+        unknown_secret_refs = _unknown_secret_refs(connector, spec)
         if missing_public or missing_secret_refs:
             errors.append(
                 f"connector {connector.connector_id} ({connector.connector_type}) missing required params: "
@@ -295,7 +296,12 @@ def _compile_connectors(
             )
         if invalid_secret_refs:
             errors.extend(invalid_secret_refs)
-        if missing_public or missing_secret_refs or invalid_secret_refs:
+        if unknown_secret_refs:
+            errors.append(
+                f"connector {connector.connector_id} ({connector.connector_type}) has undeclared secret_refs: "
+                + ", ".join(unknown_secret_refs)
+            )
+        if missing_public or missing_secret_refs or invalid_secret_refs or unknown_secret_refs:
             continue
 
         secret_names = [secret.name for secret in spec.required_secret_refs]
@@ -388,6 +394,11 @@ def _invalid_required_secret_refs(connector: ConnectorConfig, spec: ConnectorSpe
                 f"secret_refs.{secret.name}; expected opaque secret:// handle"
             )
     return errors
+
+
+def _unknown_secret_refs(connector: ConnectorConfig, spec: ConnectorSpec) -> list[str]:
+    known_secret_refs = {secret.name for secret in spec.required_secret_refs}
+    return sorted(key for key in connector.secret_refs if key not in known_secret_refs)
 
 
 def _public_params(params: dict, legacy_secret_names: Sequence[str]) -> dict[str, Any]:
