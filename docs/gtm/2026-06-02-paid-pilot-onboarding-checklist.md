@@ -28,12 +28,14 @@ Repo/product sources:
 - `docs/research/2026-05-30-buyer-journey-objection-playbook.md`
 - `docs/research/2026-05-30-whatsapp-first-operations.md`
 - `docs/research/2026-06-01-agency-assisted-icp-partner-wedge.md`
+- `docs/research/2026-06-14-manual-payment-confirmation-icp-signal.md`
 
 Assumptions and limits:
 
 - No current competitor pricing is quoted here; existing pricing docs remain the pricing source of truth.
 - The pilot is merchant-led and per-store, even when an agency/freelancer is a recipient or resolver.
 - `fulfillment_backlog`, Meta Ads, WhatsApp inbox ingestion, and autonomous actions stay out of the default pilot unless implementation and truth gates are explicitly passed.
+- Payment/treasury friction can sharpen qualification and readiness, but the default pilot does not promise reconciliation, transfer approval, refunds, or customer payment replies.
 - WhatsApp is a projection surface. Operational Cases, run ledger, evidence, and lifecycle state remain the source of truth.
 
 ## 1. Pre-onboarding acceptance gate
@@ -82,6 +84,9 @@ Capture these fields before engineering/operator setup begins.
 | Active SKU/product estimate | `[count]` |
 | Current tools/apps | `[Tiendanube + ...]` |
 | Current manual-check minutes/day | `[minutes]` |
+| Payment source of truth | `[Tiendanube status / Mercado Pago / bank transfer / spreadsheet / mixed]` |
+| Payment review owner / proof via WhatsApp? | `[person + yes/no + short note]` |
+| Dispatch blocked by payment validation? | `[never / sometimes / often + note]` |
 | Paid pilot amount | `USD 149 / ARS equivalent` |
 | Invoice/payment status | `[paid/pending]` |
 
@@ -101,6 +106,7 @@ The first operator task is not “send alerts.” It is to decide which owner-fa
 | Stock tracking | Active products have usable stock values or a known upstream sync. | Enable stock cases only where fresh/mapped. |
 | Order/revenue visibility | Recent orders and timestamps are readable enough for configured sales floor. | Enable conservative `sales_drop` only if floor/baseline is agreed. |
 | Freshness policy | Last-successful source timestamp is inspectable. | Enable `data_stale`; suppress/narrow downstream advice when stale. |
+| Payment/treasury readiness | Payment source, manual-review owner, and normal confirmation delay are known well enough to describe readiness safely. | Capture as informational readiness only; do not create owner-facing payment promises by default. |
 | Fulfillment fields | Paid/unfulfilled/aging semantics are verified for this store. | Keep owner-facing fulfillment out unless this passes. |
 | Redaction | Tokens, URLs, secrets, personal data, and evidence snippets are safe for owner/operator projection. | Block external brief until safe. |
 
@@ -121,6 +127,7 @@ Primer diagnóstico de datos:
 - Lo que Orvo puede mirar con confianza: [items]
 - Lo que queda limitado o bloqueado: [items]
 - Qué pasa si el dato se vuelve stale: Orvo abre un caso de datos no confiables y no inventa stock/ventas.
+- Si parte del cobro sigue pasando por validación manual o comprobantes por WhatsApp, Orvo lo trata como una señal de readiness y no como conciliación automática.
 ```
 
 ## 4. Threshold and case-family configuration
@@ -132,6 +139,7 @@ Configure only what maps to deterministic evidence and accepted product readines
 | `data_stale` | Always enabled. | “¿Cuánto tiempo sin datos frescos ya te preocupa?” | Always allowed when source health/freshness is inspectable. |
 | `stockout_risk` | Enabled for mapped SKUs/products with fresh stock. | “¿Qué stock mínimo te preocupa para tus SKUs que venden?” | Include product/SKU, current stock, recent movement or strategic flag, evidence source. |
 | `sales_drop` | Optional, configured floor only. | “¿Cuál es el piso de pedidos/ventas que si no se cumple a las 12/18 hs querés mirar?” | Do not claim root cause; use floor/baseline language only. |
+| Payment/treasury readiness | Informational only. | “¿Qué pagos siguen dependiendo de revisión manual o comprobantes por WhatsApp?” | Use for readiness mapping and future packaging, not owner-facing payment cases in the default pilot. |
 | `fulfillment_backlog` | Internal/conditional. | “¿Cómo marca Tiendanube pagado, enviado, cancelado y reembolsado en tu tienda?” | Owner-facing only after field audit passes. |
 | `spend_without_orders` | Out of default pilot. | “¿Cuánto gastás en Meta y quién lo mira?” | Sell as Growth expansion only after Meta connector/truth gate. |
 
