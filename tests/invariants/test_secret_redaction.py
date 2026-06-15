@@ -145,3 +145,23 @@ def test_redact_text_redacts_bare_oauth_code_key_values_without_dropping_context
     assert "raw_oauth_code" not in (redacted or "")
     assert "oauth callback failed before" in (redacted or "")
     assert "after state=safe-state" in (redacted or "")
+
+
+
+def test_redact_text_removes_cookie_header_value_without_leaking_cookie_pairs():
+    from app.brain.security.redaction import redact_text
+
+    session_cookie = "session_" + "cookie_tail"
+    csrf_cookie = "csrf_" + "cookie_tail"
+    text = (
+        f"connector failed with Cookie: sessionid={session_cookie}; csrftoken={csrf_cookie} "
+        "while syncing"
+    )
+
+    redacted = redact_text(text)
+
+    assert redacted == "connector failed with Cookie: [REDACTED] while syncing"
+    assert session_cookie not in (redacted or "")
+    assert csrf_cookie not in (redacted or "")
+    assert "sessionid=" not in (redacted or "")
+    assert "csrftoken=" not in (redacted or "")

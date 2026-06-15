@@ -36,3 +36,20 @@ def test_authorization_headers_are_redacted_without_credential_tail_leaks():
     assert redacted_structured["headers"]["Authorization"] == "[REDACTED]"
     assert redacted_structured["headers"]["x-request-id"] == "req-123"
     assert '"Authorization": "[REDACTED]"' in redacted_structured["error"]
+
+
+
+def test_cookie_headers_are_redacted_without_cookie_tail_leaks():
+    session_cookie = "sess_" + "tail_12345"
+    csrf_cookie = "csrf_" + "tail_67890"
+
+    inline = (
+        f"upstream failed Cookie: sessionid={session_cookie}; csrftoken={csrf_cookie} "
+        "while syncing orders"
+    )
+    redacted_inline = redact_text(inline)
+    assert redacted_inline is not None
+
+    assert session_cookie not in redacted_inline
+    assert csrf_cookie not in redacted_inline
+    assert redacted_inline == "upstream failed Cookie: [REDACTED] while syncing orders"
