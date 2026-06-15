@@ -2,6 +2,7 @@
 
 Status: Active operating mode for current N2 Pro cron jobs
 Date: 2026-06-13
+Last reconciled: 2026-06-15
 Provider/model: OpenRouter `nex-agi/nex-n2-pro:free`
 Canonical branch: `feat/orvo-brain-control-plane`
 Canonical repo: `/root/orvo-agent`
@@ -32,12 +33,13 @@ This N2 Pro note supersedes only the provider-specific rule that normal Orvo wor
 
 ## Integration posture after latest ARB review
 
-Latest source: [`docs/architecture-reviews/2026-06-13-arb-cron-review.md`](../architecture-reviews/2026-06-13-arb-cron-review.md) and [`docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`](../architecture-reviews/2026-06-13-arb-cron-branch-readiness.md).
+Latest source: [`docs/architecture-reviews/2026-06-15-branch-readiness-matrix.md`](../architecture-reviews/2026-06-15-branch-readiness-matrix.md), [`docs/architecture-reviews/2026-06-15-work-management-jql-review.md`](../architecture-reviews/2026-06-15-work-management-jql-review.md), [`docs/architecture-reviews/2026-06-15-semantic-connector-review.md`](../architecture-reviews/2026-06-15-semantic-connector-review.md), and [`docs/architecture-reviews/2026-06-15-workflow-trust-security-review.md`](../architecture-reviews/2026-06-15-workflow-trust-security-review.md).
 
-- Merge-ready: `N2-Pro/connector-platform`.
-- Merge-ready candidates after rebase/reconciliation: `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `n2-pro-work-management`.
-- Needs work: `N2-Pro/operator-surfaces` because it is too broad and route-heavy.
-- Hold/search-analytics caveat: `N2-Pro/search-analytics` is not part of the latest 2026-06-13 ARB verdict; do not promote it from older notes until a fresh review confirms it stays inside canonical WorkItem/JQL/facet/view primitives.
+- Current HEAD was reviewed as aligned enough for the MVP control plane: `OperationalCase` remains the durable state owner, WorkItem/JQL are projection primitives, and the semantic registry is the canonical metric source.
+- `N2-Pro/connector-platform` was the only branch marked **Merge-ready** in the 2026-06-15 matrix; subsequent integration work has merged connector readiness into the canonical branch, so keep the connector-health/runtime path green rather than treating the old branch as the next merge target.
+- Needs rebase/narrowing before promotion: `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, `N2-Pro/search-analytics`, and `N2-Pro/service-management`.
+- Workflow automation stays projection-only for now: planning/idempotency/approval primitives are acceptable, but there is no real executor, durable approval state machine, or full side-effect audit integration yet.
+- Search/operator-surface work must consume WorkItem/JQL/facet/view primitives; do not promote endpoint-heavy or local-field branches until they are rebased and narrowed.
 - Not mergeable: destructive `claude/*` refactor branches.
 
 The integration train should continue to merge narrow, additive slices that strengthen registries, audit, readiness, deterministic workflow plumbing, and shared query/view primitives. It should reject wholesale merges that duplicate projection logic, weaken semantic validation, delete accepted tests, or let bespoke operator endpoints become source of truth.
