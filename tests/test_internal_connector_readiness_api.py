@@ -332,6 +332,51 @@ def test_internal_connector_readiness_projects_last_run_certification_summary(mo
     }
 
 
+def test_internal_connector_readiness_marks_warning_only_legacy_inline_secret_as_setup_required(
+    monkeypatch,
+    tmp_path,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _save_business(
+        db_path,
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn-inline-mixed",
+                    connector_type="tiendanube",
+                    label="TiendaNube mixed secret config",
+                    params={"store_id": "123", "access_token": "raw_inline_token"},
+                    secret_refs={"access_token": "secret://businesses/artemea/connectors/tn-inline-mixed/access_token"},
+                ),
+            ],
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_inline_token" not in raw_body
+    body = response.get_json()
+    connector = body["data"]["connectors"][0]
+    assert connector["readiness_state"] == "ready"
+    assert connector["setup_required"] is True
+    assert connector["setup_reason"] == "legacy_inline_secret"
+    assert connector["operator_next_step"] == "review_connector_configuration"
+    assert connector["auth_requirements"][0]["present"] is True
+    assert connector["validation"]["error_count"] == 0
+    assert connector["validation"]["warning_count"] == 1
+    assert [issue["code"] for issue in connector["validation"]["issues"]] == ["legacy_inline_secret"]
+
+
 def test_internal_connector_readiness_fails_closed_on_legacy_inline_secret(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _save_business(
