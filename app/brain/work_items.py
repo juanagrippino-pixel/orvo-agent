@@ -110,6 +110,7 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
     WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity)), facetable=True),
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("reopen_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("sla_target_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("sla_elapsed_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("sla_remaining_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
@@ -120,6 +121,7 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("evidence_source_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("comment_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("last_comment_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("latest_reopened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("timeline_event_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("last_event_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition(
@@ -357,6 +359,29 @@ def case_last_comment_at(case: OperationalCase) -> datetime | None:
     return max(comment_events)
 
 
+def case_reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
+    reopen_count = 0
+    latest_reopened_at: datetime | None = None
+    for event in case.timeline:
+        if event.event_type != "case_reopened":
+            continue
+        reopen_count += 1
+        event_at = event.created_at.astimezone(timezone.utc)
+        if latest_reopened_at is None or event_at > latest_reopened_at:
+            latest_reopened_at = event_at
+    return reopen_count, latest_reopened_at
+
+
+def case_reopen_count(case: OperationalCase) -> int:
+    reopen_count, _latest_reopened_at = case_reopen_stats(case)
+    return reopen_count
+
+
+def case_latest_reopened_at(case: OperationalCase) -> datetime | None:
+    _reopen_count, latest_reopened_at = case_reopen_stats(case)
+    return latest_reopened_at
+
+
 def _last_timeline_event(case: OperationalCase) -> OperationalCaseTimelineEvent | None:
     if not case.timeline:
         return None
@@ -403,6 +428,7 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
+        "reopen_count": case_reopen_count(case),
         "sla_target_seconds": case.sla_target_seconds,
         "sla_elapsed_seconds": case_sla_elapsed_seconds(case, now=now),
         "sla_remaining_seconds": case_sla_remaining_seconds(case, now=now),
@@ -418,6 +444,9 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "degraded": case_evidence_is_degraded(case),
         "comment_count": case_comment_count(case),
         "last_comment_at": _iso_utc(case_last_comment_at(case)) if case_last_comment_at(case) is not None else None,
+        "latest_reopened_at": (
+            _iso_utc(case_latest_reopened_at(case)) if case_latest_reopened_at(case) is not None else None
+        ),
         "timeline_event_count": case_timeline_event_count(case),
         "last_event_at": _iso_utc(case_last_event_at(case)) if case_last_event_at(case) is not None else None,
         "last_event_type": case_last_event_type(case),

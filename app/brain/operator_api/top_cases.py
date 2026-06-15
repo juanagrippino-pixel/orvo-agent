@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .common import *  # noqa: F401,F403
-from .common import _ACTIONABLE_STATUSES, _reopen_stats
+from .common import _ACTIONABLE_STATUSES, case_reopen_stats
 from .projections import *  # noqa: F401,F403
 
 
@@ -275,7 +275,7 @@ def list_top_reopened_cases(
     for case in store.list_cases(business_id=business_id, limit=None):
         if case.status not in _ACTIONABLE_STATUSES:
             continue
-        reopen_count, latest_reopen_at = _reopen_stats(case)
+        reopen_count, latest_reopen_at = case_reopen_stats(case)
         if reopen_count == 0 or latest_reopen_at is None:
             continue
         reopened.append((reopen_count, case.case_id, latest_reopen_at, case))

@@ -13,8 +13,10 @@ from app.brain.work_items import (
     allowed_status_categories,
     allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
+    case_latest_reopened_at,
     case_priority_bracket,
     case_project_key,
+    case_reopen_count,
     case_sla_elapsed_seconds,
     case_sla_remaining_seconds,
     case_sla_status,
@@ -160,6 +162,68 @@ def test_case_work_item_projection_exposes_terminal_sla_clock(tmp_path):
     assert dismissed_projection["sla_elapsed_seconds"] == 1 * 60 * 60 + 45 * 60
     assert dismissed_projection["sla_remaining_seconds"] is None
     assert dismissed_projection["sla_status"] == "not_applicable"
+
+
+def test_case_work_item_projection_exposes_reopen_stats_from_canonical_timeline(tmp_path):
+    db_path = tmp_path / "work-items-reopen-stats.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-work-item-reopen-stats", priority=90))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.transition_case(
+        case.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=datetime(2026, 5, 24, 8, 15, tzinfo=timezone.utc),
+    )
+    store.transition_case(
+        case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="fixture resolution",
+        transitioned_at=datetime(2026, 5, 24, 8, 30, tzinfo=timezone.utc),
+    )
+    reopened_once = store.reopen_case(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="Signal recurred",
+        reopened_at=datetime(2026, 5, 24, 8, 45, tzinfo=timezone.utc),
+    )
+    store.transition_case(
+        case.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=datetime(2026, 5, 24, 8, 55, tzinfo=timezone.utc),
+    )
+    store.transition_case(
+        case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="fixture resolution again",
+        transitioned_at=datetime(2026, 5, 24, 9, 0, tzinfo=timezone.utc),
+    )
+    reopened_twice = store.reopen_case(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="Signal recurred again",
+        reopened_at=datetime(2026, 5, 24, 9, 15, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    projection = case_work_item_projection(reopened_twice, now=datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc))
+
+    assert projection["reopen_count"] == 2
+    assert projection["latest_reopened_at"] == "2026-05-24T09:15:00Z"
+    assert case_reopen_count(reopened_once) == 1
+    assert case_reopen_count(reopened_twice) == 2
+    assert case_latest_reopened_at(reopened_twice) == datetime(2026, 5, 24, 9, 15, tzinfo=timezone.utc)
 
 
 def test_case_sla_status_marks_late_resolution_breached(tmp_path):
@@ -532,6 +596,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["reopen_count"] == {
+        "field": "reopen_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert fields["sla_target_seconds"] == {
         "field": "sla_target_seconds",
         "value_type": "int",
@@ -620,6 +692,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["latest_reopened_at"] == {
+        "field": "latest_reopened_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert fields["timeline_event_count"] == {
         "field": "timeline_event_count",
         "value_type": "int",
@@ -657,8 +737,10 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "evidence_snapshot_count",
         "evidence_source_count",
         "latest_evidence_at",
+        "latest_reopened_at",
         "opened_at",
         "priority_score",
+        "reopen_count",
         "sla_elapsed_seconds",
         "sla_remaining_seconds",
         "sla_target_seconds",

@@ -21,7 +21,7 @@ from app.brain.operator_case_projections import (
 )
 from app.brain.run_ledger import DispatchRunStatus, RunLedger, RunRecord, RunStatus
 from app.brain.security.redaction import redact_secrets, redact_text
-from app.brain.work_items import priority_bracket_for_score
+from app.brain.work_items import case_reopen_stats as work_item_case_reopen_stats, priority_bracket_for_score
 
 CaseActionKey = Literal[
     "acknowledge_case",
@@ -192,25 +192,10 @@ def _worst_freshness_state(case: OperationalCase) -> str | None:
     return worst
 
 
-def _reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
-    """Return total reopen count and latest reopen timestamp for a case."""
-
-    reopen_count = 0
-    latest_reopen_at: datetime | None = None
-    for event in case.timeline:
-        if event.event_type != "case_reopened":
-            continue
-        reopen_count += 1
-        event_at = event.created_at.astimezone(timezone.utc)
-        if latest_reopen_at is None or event_at > latest_reopen_at:
-            latest_reopen_at = event_at
-    return reopen_count, latest_reopen_at
-
-
 def case_reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
     """Public wrapper for case reopen statistics shared by projections."""
 
-    return _reopen_stats(case)
+    return work_item_case_reopen_stats(case)
 
 
 def _latency_summary(seconds: list[int]) -> dict[str, int]:
