@@ -1369,6 +1369,66 @@ def test_workflow_approval_cancellation_closes_pending_gate_without_side_effects
     assert "raw_cancel_second_secret" not in second_cancel.value.message
 
 
+def test_workflow_action_audit_events_can_be_filtered_by_catalog_action_key():
+    ledger = InMemoryWorkflowActionLedgerStore()
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="audit-filter-rule",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier",
+                    "reason": "Request supplier restock Authorization: Basic raw_audit_filter_secret",
+                },
+            ),
+            WorkflowAction(
+                action_key="acknowledge_case",
+                params={"reason": "Acknowledged without approval"},
+            ),
+        ],
+    )
+
+    simulate_case_workflow(rule, case, now=utc(18, 30), action_ledger=ledger, actor_ref="operator")
+
+    audit = list_workflow_action_audit_events(
+        ledger,
+        business_id="artemea",
+        case_id=case.case_id,
+        action_key="request_external_action",
+    )
+
+    assert audit["business_id"] == "artemea"
+    assert audit["action_key"] == "request_external_action"
+    assert audit["audit_projection_enabled"] is True
+    assert audit["side_effects_executed"] == 0
+    assert audit["total"] == 2
+    assert audit["returned"] == 2
+    assert [event["event_type"] for event in audit["events"]] == [
+        "workflow_action_planned",
+        "workflow_approval_requested",
+    ]
+    assert [event["action_key"] for event in audit["events"]] == [
+        "request_external_action",
+        "request_external_action",
+    ]
+    assert audit["events"][1]["approval_request_id"]
+    assert audit["events"][0]["params"]["reason"] == "Request supplier restock Authorization: [REDACTED]"
+    assert "acknowledge_case" not in str(audit)
+    assert "raw_audit_filter_secret" not in str(audit)
+
+    with pytest.raises(WorkflowActionLedgerError) as invalid_action:
+        list_workflow_action_audit_events(ledger, business_id="artemea", action_key="invented_llm_action")
+    assert invalid_action.value.code == "invalid_workflow_action_key"
+
+    with pytest.raises(WorkflowActionLedgerError) as blank_action:
+        list_workflow_action_audit_events(ledger, business_id="artemea", action_key="   ")
+    assert blank_action.value.code == "invalid_workflow_action_key"
+
+
 @pytest.mark.parametrize(
     "store_factory",
     [

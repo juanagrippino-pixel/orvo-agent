@@ -102,6 +102,7 @@ def register_workflow_action_routes(app):
                 _workflow_ledger(),
                 business_id=business_id,
                 case_id=_case_scope(),
+                action_key=_action_key_scope(),
                 limit=_read_limit(),
             )
         except Exception as exc:
