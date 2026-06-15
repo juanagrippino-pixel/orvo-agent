@@ -169,6 +169,31 @@ def test_executor_metadata_rejects_non_callable_factory_path():
         executor.load_factory()
 
 
+def test_mercadolibre_spec_certifies_connector_specific_health_events():
+    from app.brain.connector_registry import get_connector_spec
+
+    mercadolibre = get_connector_spec("mercadolibre")
+
+    assert mercadolibre.health_policy_metadata()["detailed_states"] == [
+        "api_server_error",
+        "connection_error",
+        "malformed_response",
+    ]
+    issues = mercadolibre.validate_emitted_events(
+        (
+            "connector.execution.started",
+            "connector.health.api_server_error",
+            "connector.health.connection_error",
+            "connector.health.paused",
+        )
+    )
+
+    assert [(issue.code, issue.event_type, issue.index) for issue in issues] == [
+        ("undeclared_health_state", "connector.health.paused", 3),
+    ]
+    assert all(issue.severity == "warning" for issue in issues)
+
+
 def test_registry_reports_helpful_error_for_unknown_connector_type():
     from app.brain.connector_registry import UnknownConnectorError, get_connector_spec
 
