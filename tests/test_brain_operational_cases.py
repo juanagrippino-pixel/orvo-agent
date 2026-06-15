@@ -359,6 +359,7 @@ def test_detect_cases_from_report_uses_enforced_metric_registry_gate_by_default(
         business_name="Artemea",
         report_date=date(2026, 5, 24),
         metrics=[
+            Metric(key="stock_units", label="Unidades en stock", value=3, unit="units", evidence=[source]),
             Metric(key="custom.owner_note_metric", label="Owner note", value="manual", evidence=[source]),
         ],
         insights=[
