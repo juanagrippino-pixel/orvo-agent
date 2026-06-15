@@ -15,6 +15,8 @@ from app.brain.work_items import (
     allowed_work_item_query_sort_fields,
     case_priority_bracket,
     case_project_key,
+    case_sla_elapsed_seconds,
+    case_sla_remaining_seconds,
     case_sla_status,
     case_status_category,
     case_type_release_state,
@@ -79,6 +81,8 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["priority_bracket"] == "high"
     assert projection["sla_target_seconds"] == 2 * 60 * 60
     assert projection["due_at"] == "2026-05-24T10:00:00Z"
+    assert projection["sla_elapsed_seconds"] == 1 * 60 * 60
+    assert projection["sla_remaining_seconds"] == 1 * 60 * 60
     assert projection["sla_status"] == "pending"
     assert projection["assigned_at"] is None
     assert projection["assignee_ref"] is None
@@ -98,8 +102,95 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
     assert case_priority_bracket(case) == "high"
+    assert case_sla_elapsed_seconds(case, now=now) == 1 * 60 * 60
+    assert case_sla_remaining_seconds(case, now=now) == 1 * 60 * 60
+    assert case_sla_remaining_seconds(
+        case,
+        now=datetime(2026, 5, 24, 10, 1, tzinfo=timezone.utc),
+    ) == -60
     assert case_sla_status(case, now=now) == "pending"
     assert case_sla_status(case, now=datetime(2026, 5, 24, 10, 1, tzinfo=timezone.utc)) == "breached"
+
+
+def test_case_work_item_projection_exposes_terminal_sla_clock(tmp_path):
+    db_path = tmp_path / "work-items-terminal-sla.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-terminal-sla-clock", priority=100))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.transition_case(
+        case.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=datetime(2026, 5, 24, 9, tzinfo=timezone.utc),
+    )
+    resolved = store.transition_case(
+        case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="fixture complete",
+        transitioned_at=datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+    )
+    reopened = store.reopen_case(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="Recurring operational signal",
+        reopened_at=datetime(2026, 5, 24, 9, 45, tzinfo=timezone.utc),
+    )
+    dismissed = store.transition_case(
+        reopened.case_id,
+        status="dismissed",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="Duplicate signal",
+        transitioned_at=datetime(2026, 5, 24, 9, 45, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    resolved_projection = case_work_item_projection(resolved, now=datetime(2026, 5, 24, 12, tzinfo=timezone.utc))
+    dismissed_projection = case_work_item_projection(dismissed, now=datetime(2026, 5, 24, 12, tzinfo=timezone.utc))
+
+    assert resolved_projection["sla_elapsed_seconds"] == 1 * 60 * 60 + 30 * 60
+    assert resolved_projection["sla_remaining_seconds"] == 30 * 60
+    assert resolved_projection["sla_status"] == "met"
+    assert dismissed_projection["sla_elapsed_seconds"] == 1 * 60 * 60 + 45 * 60
+    assert dismissed_projection["sla_remaining_seconds"] is None
+    assert dismissed_projection["sla_status"] == "not_applicable"
+
+
+def test_case_sla_status_marks_late_resolution_breached(tmp_path):
+    db_path = tmp_path / "work-items-late-resolution-sla.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-late-resolution-sla", priority=100))
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    store.transition_case(
+        case.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        transitioned_at=datetime(2026, 5, 24, 9, tzinfo=timezone.utc),
+    )
+    late_resolved = store.transition_case(
+        case.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="operator:juan",
+        reason="resolved after SLA",
+        transitioned_at=datetime(2026, 5, 24, 10, 30, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    projection = case_work_item_projection(late_resolved, now=datetime(2026, 5, 24, 12, tzinfo=timezone.utc))
+
+    assert projection["sla_elapsed_seconds"] == 2 * 60 * 60 + 30 * 60
+    assert projection["sla_remaining_seconds"] == -30 * 60
+    assert projection["sla_status"] == "breached"
 
 
 def test_case_work_item_projection_marks_readiness_gated_cases_operator_only(tmp_path):
@@ -449,6 +540,22 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["sla_elapsed_seconds"] == {
+        "field": "sla_elapsed_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["sla_remaining_seconds"] == {
+        "field": "sla_remaining_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert fields["assigned_at"] == {
         "field": "assigned_at",
         "value_type": "datetime",
@@ -552,6 +659,8 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "latest_evidence_at",
         "opened_at",
         "priority_score",
+        "sla_elapsed_seconds",
+        "sla_remaining_seconds",
         "sla_target_seconds",
         "timeline_event_count",
         "updated_at",

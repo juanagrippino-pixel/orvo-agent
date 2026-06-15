@@ -30,6 +30,8 @@ from app.brain.work_items import (
     case_owner_visible,
     case_priority_bracket,
     case_project_key,
+    case_sla_elapsed_seconds,
+    case_sla_remaining_seconds,
     case_sla_status,
     case_status_category,
     case_timeline_event_count,
@@ -460,6 +462,10 @@ def _case_field_value(case: OperationalCase, field: str, now: datetime | None = 
         return case_status_category(case)
     if field == "priority_bracket":
         return case_priority_bracket(case)
+    if field == "sla_elapsed_seconds":
+        return case_sla_elapsed_seconds(case, now=now)
+    if field == "sla_remaining_seconds":
+        return case_sla_remaining_seconds(case, now=now)
     if field == "sla_status":
         return case_sla_status(case, now=now)
     return getattr(case, field)
