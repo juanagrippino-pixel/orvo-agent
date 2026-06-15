@@ -33,13 +33,14 @@ This N2 Pro note supersedes only the provider-specific rule that normal Orvo wor
 
 ## Integration posture after latest ARB review
 
-Latest source: [`docs/architecture-reviews/2026-06-15-branch-readiness-matrix.md`](../architecture-reviews/2026-06-15-branch-readiness-matrix.md), [`docs/architecture-reviews/2026-06-15-work-management-jql-review.md`](../architecture-reviews/2026-06-15-work-management-jql-review.md), [`docs/architecture-reviews/2026-06-15-semantic-connector-review.md`](../architecture-reviews/2026-06-15-semantic-connector-review.md), and [`docs/architecture-reviews/2026-06-15-workflow-trust-security-review.md`](../architecture-reviews/2026-06-15-workflow-trust-security-review.md).
+Latest source: [`docs/architecture-reviews/2026-06-15-arb-architecture-alignment-review.md`](../architecture-reviews/2026-06-15-arb-architecture-alignment-review.md), [`docs/architecture-reviews/2026-06-15-work-management-jql-review.md`](../architecture-reviews/2026-06-15-work-management-jql-review.md), [`docs/architecture-reviews/2026-06-15-semantic-connector-review.md`](../architecture-reviews/2026-06-15-semantic-connector-review.md), and [`docs/architecture-reviews/2026-06-15-workflow-trust-security-review.md`](../architecture-reviews/2026-06-15-workflow-trust-security-review.md). The older branch-readiness matrix is now historical context; the consolidated alignment review is the current branch-sequencing note.
 
-- Current HEAD was reviewed as aligned enough for the MVP control plane: `OperationalCase` remains the durable state owner, WorkItem/JQL are projection primitives, and the semantic registry is the canonical metric source.
-- `N2-Pro/connector-platform` was the only branch marked **Merge-ready** in the 2026-06-15 matrix; subsequent integration work has merged connector readiness into the canonical branch, so keep the connector-health/runtime path green rather than treating the old branch as the next merge target.
-- Needs rebase/narrowing before promotion: `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, `N2-Pro/search-analytics`, and `N2-Pro/service-management`.
-- Workflow automation stays projection-only for now: planning/idempotency/approval primitives are acceptable, but there is no real executor, durable approval state machine, or full side-effect audit integration yet.
-- Search/operator-surface work must consume WorkItem/JQL/facet/view primitives; do not promote endpoint-heavy or local-field branches until they are rebased and narrowed.
+- Current HEAD (`3fd74eed`) remains aligned enough for the MVP control plane: `OperationalCase` is still the durable state owner, WorkItem/JQL/query metadata stay projection primitives, and the semantic registry remains the canonical metric source.
+- Connector-platform hardening is already on the canonical branch, so keep the connector-health/runtime path green rather than treating the old branch as the next merge target.
+- Preferred next merge lane after rebase/order: `n2-pro-work-management`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, then `N2-Pro/search-analytics` on top of the work-management field/query model.
+- Needs re-scope before promotion: `N2-Pro/operator-surfaces` and `N2-Pro/service-management`.
+- Workflow automation stays projection/governance-first for now: planning/idempotency/approval primitives are acceptable, but there is still no real executor, durable approval state machine, or full side-effect audit integration.
+- Search, operator-surface, and service-management work must consume WorkItem/JQL/built-in-view/query-field primitives; reject bespoke recent-case projections or a second search/filter model.
 - Not mergeable: destructive `claude/*` refactor branches.
 
 The integration train should continue to merge narrow, additive slices that strengthen registries, audit, readiness, deterministic workflow plumbing, and shared query/view primitives. It should reject wholesale merges that duplicate projection logic, weaken semantic validation, delete accepted tests, or let bespoke operator endpoints become source of truth.

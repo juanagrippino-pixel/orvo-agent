@@ -653,13 +653,13 @@ Current source-of-truth check:
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`, and `priority_bracket`.
 - `docs/architecture-reviews/2026-06-15-work-management-jql-review.md` is the latest ARB input for this lane. It keeps WorkItem as projection-only, treats WorkItem/JQL/facet/view primitives as the canonical source for query semantics, and says current HEAD is aligned enough for the MVP control plane.
-- `docs/architecture-reviews/2026-06-15-branch-readiness-matrix.md` marks `N2-Pro/search-analytics` needs work, so broad search/operator-surface work must be rebased and narrowed before promotion.
+- `docs/architecture-reviews/2026-06-15-arb-architecture-alignment-review.md` updates the branch sequencing for this lane: `N2-Pro/search-analytics` is architecturally aligned after `n2-pro-work-management`, while `N2-Pro/operator-surfaces` still needs re-scope onto shared query/view primitives before promotion.
 - Future broad search/operator-surface work must consume the WorkItem field registry and shared case-query/view primitives rather than creating local field semantics or one-off endpoint projections.
 
 Read:
 
 - `docs/architecture-reviews/2026-06-15-work-management-jql-review.md`
-- `docs/architecture-reviews/2026-06-15-branch-readiness-matrix.md`
+- `docs/architecture-reviews/2026-06-15-arb-architecture-alignment-review.md`
 - `docs/architecture-reviews/2026-06-13-arb-cron-review.md`
 - `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`
 - `docs/specs/integration-train-contract.md`
