@@ -274,3 +274,46 @@ def test_internal_workflow_action_audit_events_validate_scope_and_return_redacte
     assert pending.record.ledger_id not in str(data)
     assert data["events"][-1]["decision_reason"] == "Approved Authorization: [REDACTED]"
     assert "raw_decision_secret" not in str(data)
+
+
+def test_internal_workflow_action_audit_events_filter_by_catalog_action_key(_isolate_db):
+    from server import app
+
+    pending, approved = _seed_workflow_actions(_isolate_db)
+    assert pending.approval_request is not None
+    assert approved.approval_request is not None
+    client = app.test_client()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/workflow/action-audit-events?action_key=request_external_action",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["business_id"] == "artemea"
+    assert data["action_key"] == "request_external_action"
+    assert data["audit_projection_enabled"] is True
+    assert data["side_effects_executed"] == 0
+    assert data["total"] == 5
+    assert data["returned"] == 5
+    assert {event["ledger_id"] for event in data["events"]} == {
+        pending.record.ledger_id,
+        approved.record.ledger_id,
+    }
+    assert {event["event_type"] for event in data["events"]} == {
+        "workflow_action_planned",
+        "workflow_approval_requested",
+        "workflow_approval_decided",
+    }
+    assert "raw_pending_secret" not in str(data)
+    assert "raw_approved_secret" not in str(data)
+
+    invalid = client.get(
+        "/internal/brain/businesses/artemea/workflow/action-audit-events?action_key=invented_llm_action",
+        headers=AUTH,
+    )
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_workflow_action_key"
