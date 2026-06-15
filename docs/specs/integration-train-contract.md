@@ -28,7 +28,7 @@ For the D2C control-plane build, integrate in this sequence unless a later ADR c
 
 ### 2026-06-15 status checkpoint
 
-The current repository `HEAD` before this reconciliation is `52fa201d` (`feat/orvo-brain-control-plane`, `merge(N2-Pro/connector-platform): certify MercadoLibre health events`). This supersedes the 2026-06-13 checkpoint and incorporates the 2026-06-15 Architecture Review Board review set: `docs/architecture-reviews/2026-06-15-branch-readiness-matrix.md`, `docs/architecture-reviews/2026-06-15-work-management-jql-review.md`, `docs/architecture-reviews/2026-06-15-semantic-connector-review.md`, and `docs/architecture-reviews/2026-06-15-workflow-trust-security-review.md`. The 2026-06-15 matrix marked only `N2-Pro/connector-platform` merge-ready; connector readiness has since been merged into the canonical branch. The remaining broad N2 Pro lanes (`N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, `N2-Pro/operator-surfaces`, `N2-Pro/search-analytics`, and `N2-Pro/service-management`) need rebase/narrowing before promotion.
+The current repository `HEAD` before this reconciliation is `3fd74eed` (`feat/orvo-brain-control-plane`). This supersedes the 2026-06-13 checkpoint and adopts the consolidated 2026-06-15 Architecture Review Board alignment review: `docs/architecture-reviews/2026-06-15-arb-architecture-alignment-review.md`, `docs/architecture-reviews/2026-06-15-work-management-jql-review.md`, `docs/architecture-reviews/2026-06-15-semantic-connector-review.md`, and `docs/architecture-reviews/2026-06-15-workflow-trust-security-review.md`. Connector-platform hardening is already merged into the canonical branch. From this checkpoint, the preferred rebase/promote lane is `n2-pro-work-management`, then `N2-Pro/workflow-automation` and `N2-Pro/trust-admin-security`, then `N2-Pro/search-analytics` on top of the work-management query model; `N2-Pro/operator-surfaces` and `N2-Pro/service-management` still need re-scope before promotion.
 
 Recent shipped baseline facts, grounded in repo inspection:
 
@@ -50,25 +50,26 @@ Recommended order from this checkpoint:
    - Treat WorkItem/JQL as MVP-aligned projection primitives, not a full Jira clone. Any broader work-management branch must preserve `OperationalCase` as the durable state owner and avoid adding tenant-custom workflow semantics before a registry justifies them.
    - Gate: preserve recurrence/severity/priority metadata and the forbidden-transition regression; run focused WorkItem/operator-case/query tests.
 
-2. **Merge workflow automation only after canonical case/work-item semantics are clean**
+2. **After work-management, land workflow and trust/security hardening as narrow slices**
    - Treat `N2-Pro/workflow-automation` as ledger-first and projection-only until a real executor, durable approval state machine, and full side-effect audit integration exist.
-   - Gate: rebase first; run focused workflow/audit/operator tests; keep execution paths governed by the workflow action ledger and approved action keys.
+   - Treat `N2-Pro/trust-admin-security` as boundary hardening over the current internal auth model, not as permission-model expansion.
+   - Gate: rebase first; run focused workflow/audit/operator tests; keep execution paths governed by the workflow action ledger and approved action keys; preserve redaction and business-scoping invariants.
 
-3. **Hold or split operator surfaces until projection primitives lead**
-   - Keep `N2-Pro/operator-surfaces` in needs-work mode until bespoke endpoints are reduced or backed by shared query/view helpers.
-   - Gate: no new surface may duplicate `store.list_cases(...)` projection logic; use built-in views, WorkItem query fields, facets, and canonical case projections instead.
+3. **Land search/analytics on top of canonical WorkItem/JQL/facet/view primitives**
+   - `N2-Pro/search-analytics` is the right next search layer only after it sits on the work-management field/query model.
+   - Gate: rebase onto current base; reject local KPI or endpoint-local field semantics; keep built-in views, query metadata, and shared case-query helpers as the source of truth.
 
-4. **Hold search/analytics until it consumes canonical WorkItem/JQL/facet/view primitives**
-   - Do not promote `N2-Pro/search-analytics` from older notes; the 2026-06-15 matrix marks it needs work.
-   - Gate: rebase onto current base; reject local KPI or endpoint-local field semantics; keep registry metadata and shared case-query helpers as the source of truth.
+4. **Hold or split operator surfaces until projection primitives lead**
+   - Keep `N2-Pro/operator-surfaces` in needs-work mode until bespoke endpoints are reduced to thin consumers of shared query/view helpers.
+   - Gate: no new surface may duplicate `store.list_cases(...)`, recent-case projection logic, or query vocabulary; use built-in views, WorkItem query fields, facets, and canonical case projections instead.
 
 5. **Roll semantic-registry enforcement out across preview/report/surface boundaries**
    - Keep enforced case gating as the baseline, then add explicit validation hooks for report/surface preview paths.
    - Gate: deterministic metric-registry failures must block invalid owner-facing projections without letting report text or WhatsApp become case/source-of-truth state.
 
-6. **Service-management/SLA as nested projections**
-   - Integrate `codex/service-management` only as Jira Service Management-style projections over canonical cases and only when the slice is D2C-pilot useful.
-   - Gate: `waiting_owner`, `waiting_external`, SLA status, escalation reason, and service record type stay nested service/owner fields; canonical WorkItem status categories remain exactly `to_do`, `in_progress`, and `done`; deferred families such as `channel_mix_shift` remain non-owner-facing until Packet N gates pass.
+6. **Service-management/SLA as nested projections compiled to the same query/workflow contracts**
+   - Integrate `codex/service-management` only as Jira Service Management-style projections over canonical cases and WorkItem query/workflow semantics, and only when the slice is D2C-pilot useful.
+   - Gate: `waiting_owner`, `waiting_external`, SLA status, escalation reason, and service record type stay nested service/owner fields; canonical WorkItem status categories remain exactly `to_do`, `in_progress`, and `done`; there is no second search/filter language; deferred families such as `channel_mix_shift` remain non-owner-facing until Packet N gates pass.
 
 7. **Edge/developer and external-action toolkits stay contract-first**
    - Keep gateway/service-catalog/external-action toolkits internal unless they include durable idempotency, rate-limit, audit, route-coverage, provider capability, and redacted-response enforcement.
