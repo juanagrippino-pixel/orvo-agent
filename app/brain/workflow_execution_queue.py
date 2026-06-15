@@ -21,7 +21,10 @@ from app.brain.workflow_action_ledger import (
     WorkflowActionLedgerStore,
     WorkflowApprovalRequest,
 )
-from app.brain.workflow_projection_validation import validate_workflow_projection_limit
+from app.brain.workflow_projection_validation import (
+    validate_workflow_business_scope,
+    validate_workflow_projection_limit,
+)
 
 
 def _iso(value: datetime) -> str:
@@ -109,6 +112,7 @@ def list_workflow_execution_queue(
     zero side effects.
     """
 
+    business_id = validate_workflow_business_scope(business_id)
     if case_id is not None and not case_id.strip():
         raise WorkflowActionLedgerError(
             "invalid_workflow_execution_queue_scope",
