@@ -261,6 +261,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["work_item_id"] == {
+        "field": "work_item_id",
+        "value_type": "string",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+        "facetable": False,
+    }
     assert fields["latest_evidence_at"] == {
         "field": "latest_evidence_at",
         "value_type": "datetime",

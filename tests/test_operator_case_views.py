@@ -169,6 +169,18 @@ def test_parse_case_jql_supports_evidence_fields_for_actionable_case_views():
     assert exc.value.code == "unsupported_jql_operator"
 
 
+def test_parse_case_jql_supports_work_item_id_string_field():
+    assert parse_case_jql("work_item_id = ARTEMEA:case-1").normalized == (
+        "work_item_id = ARTEMEA:case-1 ORDER BY priority_score DESC, opened_at ASC"
+    )
+    assert parse_case_jql("work_item_id IN (ARTEMEA:case-1, ARTEMEA:case-2)").normalized == (
+        "work_item_id IN (ARTEMEA:case-1, ARTEMEA:case-2) ORDER BY priority_score DESC, opened_at ASC"
+    )
+    with pytest.raises(OperatorAPIError) as exc:
+        parse_case_jql("work_item_id > ARTEMEA:case-1")
+    assert exc.value.code == "unsupported_jql_operator"
+
+
 def test_internal_case_view_acknowledged_cases_orders_by_acknowledged_at(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -32,6 +32,7 @@ from app.brain.work_items import (
     case_project_key,
     case_status_category,
     case_type_release_state,
+    case_work_item_id,
     work_item_query_field_definitions,
     work_item_query_field_spec,
 )
@@ -625,6 +626,8 @@ def _case_field_value(case: OperationalCase, field: str) -> Any:
         return is_case_degraded(case)
     if field == "project":
         return case_project_key(case)
+    if field == "work_item_id":
+        return case_work_item_id(case)
     if field == "issue_type":
         return case_issue_type(case)
     if field == "release_state":

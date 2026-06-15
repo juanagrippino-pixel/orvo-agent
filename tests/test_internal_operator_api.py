@@ -18,6 +18,7 @@ from app.brain.operational_cases import (
 from app.brain.operator_audit import SQLiteOperatorAuditStore
 from app.brain.run_ledger import ArtifactRef, DispatchOutcomeRef, DispatchRunStatus, RunStatus, SQLiteRunLedger
 from app.brain.storage import init_schema
+from app.brain.work_items import case_work_item_id
 
 
 AUTH = {"Authorization": "Bearer test-internal-token", "X-Orvo-Operator": "operator:juan", "X-Request-ID": "req-test"}
@@ -298,6 +299,29 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["latest_evidence_at"] == "2026-05-24T08:00:00Z"
     assert body["data"]["cases"][0]["source_connectors"] == ["tiendanube"]
     assert body["data"]["cases"][0]["degraded"] is False
+
+
+def test_internal_case_queue_jql_can_filter_by_work_item_id(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection(run_id="run-artemea-search"))
+    _seed_case(db_path, _case_detection(run_id="run-artemea-other"))
+    _seed_case(db_path, _case_detection(business_id="other", run_id="run-other"))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        query_string={"jql": f"work_item_id = {case_work_item_id(case)}"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["cases"][0]["case_id"] == case.case_id
+    assert body["data"]["cases"][0]["work_item_id"] == f"ARTEMEA:{case.case_id}"
+    assert body["data"]["limit"] == 50
+    assert len(body["data"]["cases"]) == 1
+    assert all(item["business_id"] == "artemea" for item in body["data"]["cases"])
 
 
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
