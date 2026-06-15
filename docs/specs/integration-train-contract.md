@@ -41,7 +41,7 @@ Recent shipped baseline facts, grounded in repo inspection:
 - Manual case actions require idempotency at both the HTTP boundary and the shared helper boundary. `apply_case_action_with_idempotency()` calls `require_case_action_idempotency_key()` before validation, ledger reservation, or mutation, so non-HTTP/internal callers cannot accidentally bypass the ledgered idempotency path.
 - Connector secret-boundary hardening is baseline: `app/brain/connector_registry.py` requires secret-backed adapter kwargs to use `resolved_secret_param`, and connector contract tests assert forced/scheduled connector secrets are not satisfied from durable public `connector_param` bindings.
 - WorkItem status-category semantics remain canonical in the current branch: `OperationalCaseStatusCategory` is `to_do`, `in_progress`, `done`; branches or docs that use `todo` are non-canonical drift.
-- Semantic-registry enforcement is now present on persisted case upserts through `detect_cases_from_report(... metric_registry_mode="enforced")` in `app/brain/operational_cases.py`, but it is not yet uniformly enforced across every non-persistent preview/report/surface path.
+- Semantic-registry enforcement now defaults to `metric_registry_mode="enforced"` in `detect_cases_from_report(...)`, while persisted case upserts continue to call it explicitly with `metric_registry_mode="enforced"` before writing OperationalCase state.
 - Internal operator analytics continue to use thin route wrappers and shared service helpers. Endpoint count remains the largest Atlassian-pattern risk; future analytics/search/dashboard slices should converge on WorkItem/JQL/view/facet primitives rather than one route per card.
 
 Recommended order from this checkpoint:

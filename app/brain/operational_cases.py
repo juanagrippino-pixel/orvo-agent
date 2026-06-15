@@ -1290,14 +1290,15 @@ def _case_detection_allowed_by_metric_registry(
     if mode != "enforced":
         return True
     source_scope = [evidence.source for evidence in insight.evidence]
-    if validate_metrics(_report_metric_objects_for_sources(report=report, sources=source_scope), strict=False):
+    source_metrics = _report_metric_objects_for_sources(report=report, sources=source_scope)
+    if validate_metrics(source_metrics, strict=False):
         return False
     case_metrics = _case_metric_objects_for_sources(
         report=report,
         case_type=case_type,
         sources=source_scope,
     )
-    if not case_metrics:
+    if source_metrics and not case_metrics:
         return False
     return not validate_case_metric_objects(case_metrics)
 
@@ -1414,7 +1415,7 @@ def detect_cases_from_report(
     report: DailyReport,
     run_id: str | None = None,
     artifact_ref: str | None = None,
-    metric_registry_mode: MetricRegistryMode = "advisory",
+    metric_registry_mode: MetricRegistryMode = "enforced",
 ) -> list[OperationalCaseDetection]:
     detections: list[OperationalCaseDetection] = []
     seen_dedupe_keys: set[str] = set()
