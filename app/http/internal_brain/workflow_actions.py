@@ -112,6 +112,35 @@ def register_case_action_routes(app):
                 except Exception:
                     pass
                 raise
-            return _internal_success(business_id, data)
+            response = _internal_success(business_id, data)
+            action = data.get("action") or {}
+            execution_state = str(action.get("execution_state", "unknown"))
+            event_type = (
+                "operator.case_action.replayed"
+                if execution_state == "skipped_duplicate"
+                else "operator.case_action.executed"
+            )
+            try:
+                _append_operator_audit_event(
+                    business_id=business_id,
+                    actor_ref=actor_ref,
+                    event_type=event_type,
+                    target_type="operational_case",
+                    target_id=case_id,
+                    data={
+                        "action_key": str(payload.get("action_key", "")),
+                        "status_code": 200,
+                        "action_execution_state": execution_state,
+                        "ledger_id": action.get("ledger_id"),
+                        "idempotency_key": action.get("idempotency_key"),
+                        "payload": payload,
+                    },
+                )
+            except Exception:
+                # Case state and ledger are canonical. Audit persistence is
+                # best-effort so a temporary audit sink failure cannot roll back
+                # or replay a governed operator action.
+                pass
+            return response
 
         return _with_internal_stores(business_id, _handle)

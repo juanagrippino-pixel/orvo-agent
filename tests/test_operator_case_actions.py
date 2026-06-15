@@ -833,6 +833,22 @@ def test_internal_case_action_route_accepts_add_comment_payload_envelope_redacts
     assert_no_raw_comment_secret(reloaded.model_dump_json())
     assert_no_raw_actor_secret(reloaded.model_dump_json())
 
+    connection = sqlite3.connect(db_path)
+    events = SQLiteOperatorAuditStore(connection).list_events(business_id="artemea")
+    connection.close()
+    assert events
+    event = events[0]
+    assert event["event_type"] == "operator.case_action.executed"
+    assert event["target_type"] == "operational_case"
+    assert event["target_id"] == case.case_id
+    assert event["request_id"] == "req-comment-test"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["data"]["action_key"] == "add_comment"
+    assert event["data"]["action_execution_state"] == "executed"
+    assert event["data"]["payload"]["comment"] == "Supplier pinged api_key=[REDACTED]"
+    assert_no_raw_comment_secret(str(event))
+    assert_no_raw_actor_secret(str(event))
+
 
 def test_internal_case_action_route_audits_unexpected_failures_with_redacted_envelope(monkeypatch, tmp_path):
     test_client, db_path = client(monkeypatch, tmp_path)
