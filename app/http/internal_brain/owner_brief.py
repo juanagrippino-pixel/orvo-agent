@@ -10,6 +10,7 @@ from .common import _internal_success, _with_internal_stores
 
 def register_owner_brief_routes(app):
     @app.get("/internal/brain/businesses/<business_id>/owner-case-brief/preview")
+    @app.get("/internal/brain/businesses/<business_id>/reports/owner-case-brief/preview")
     def internal_brain_owner_case_brief_preview(business_id: str):
         business_name = redact_text(request.args.get("business_name"))
         return _with_internal_stores(
