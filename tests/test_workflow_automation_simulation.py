@@ -103,6 +103,27 @@ def test_action_catalog_is_canonical_for_workflow_and_operator_projections():
     assert actions["request_external_action"]["approval_required"] is True
 
 
+def test_approval_required_actions_are_not_api_enabled_operator_mutations():
+    """Approval-gated workflow actions must remain catalog-gated, not operator-executable.
+
+    This is a safety invariant for the approval/execution queue boundary: a future
+    executor should only see actions that are explicitly approval-required in the
+    canonical action catalog. If an API-enabled manual mutation is accidentally
+    marked approval-required, malformed ledger writes could promote ordinary
+    operator mutations into approval or execution queues.
+    """
+    projection = list_case_action_catalog(business_id="artemea")
+    actions = projection["actions"]
+    approval_required_actions = [action for action in actions if action["approval_required"]]
+    api_enabled_actions = [action for action in actions if action["api_enabled"]]
+
+    assert approval_required_actions
+    assert api_enabled_actions
+    assert all(not action["api_enabled"] for action in approval_required_actions)
+    assert all(not action["approval_required"] for action in api_enabled_actions)
+    assert {action["action_key"] for action in api_enabled_actions} <= set(API_ENABLED_CASE_ACTION_KEYS)
+
+
 def test_simulate_case_workflow_dry_run_plans_whitelisted_action_without_mutating_case():
     store, case = seed_case()
     original_status = case.status
