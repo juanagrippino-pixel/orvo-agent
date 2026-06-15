@@ -180,6 +180,7 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "run_id": "run-readiness-latest",
         "status": "failed",
         "health_state": "unauthorized",
+        "health_detail": None,
         "started_at": "2026-05-24T07:00:00Z",
         "finished_at": "2026-05-24T08:00:00Z",
         "duration_ms": 3_600_000,
@@ -219,6 +220,63 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
     assert disabled["setup_reason"] is None
     assert disabled["operator_next_step"] is None
     assert disabled["last_health"] is None
+
+
+def test_internal_connector_readiness_projects_last_health_detail_when_present(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _save_business(
+        db_path,
+        BusinessConfig(
+            business_id="artemea",
+            business_name="Artemea",
+            owner_phone="+5491100000000",
+            timezone="America/Argentina/Buenos_Aires",
+            currency="ARS",
+            connectors=[
+                ConnectorConfig(
+                    connector_id="tn-main",
+                    connector_type="tiendanube",
+                    label="TiendaNube principal",
+                    params={"store_id": "123"},
+                    secret_refs={"access_token": "secret://tenant/artemea/tiendanube/main"},
+                )
+            ],
+        ),
+    )
+    with closing(sqlite3.connect(db_path)) as conn:
+        init_schema(conn)
+        ledger = SQLiteRunLedger(conn)
+        run = ledger.create_run(
+            business_id="artemea",
+            trigger_type="forced",
+            run_id="run-health-detail-latest",
+            started_at=_utc(11),
+        )
+        ledger.append_connector_outcome(
+            run.run_id,
+            ConnectorRunOutcome(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                status="failed",
+                health_state="failed",
+                started_at=_utc(11),
+                finished_at=_utc(12),
+                error_summary="request timed out access_token=raw_runtime_token",
+                metadata={"health_detail": "network_error"},
+            ),
+        )
+        ledger.update_run(run.run_id, status="failed", finished_at=_utc(12))
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/connectors/readiness",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    connector = response.get_json()["data"]["connectors"][0]
+    assert connector["last_health"]["health_state"] == "failed"
+    assert connector["last_health"]["health_detail"] == "network_error"
+    assert connector["last_health"]["error_summary"] == "request timed out access_token=[REDACTED]"
 
 
 def test_internal_connector_readiness_does_not_borrow_same_type_health_from_other_connector(monkeypatch, tmp_path):
@@ -321,6 +379,7 @@ def test_internal_connector_readiness_projects_last_run_certification_summary(mo
         "run_id": "run-certification-latest",
         "status": "succeeded",
         "health_state": "ok",
+        "health_detail": None,
         "started_at": "2026-05-24T09:00:00Z",
         "finished_at": "2026-05-24T10:00:00Z",
         "duration_ms": 3_600_000,

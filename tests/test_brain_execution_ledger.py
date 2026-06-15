@@ -451,6 +451,65 @@ def test_record_pipeline_failure_records_event_certification_for_connector_outco
     assert outcome.metadata["emitted_event_families"] == ["connector.execution", "connector.health"]
 
 
+def test_record_pipeline_failure_records_detailed_health_event_and_metadata_when_declared():
+    class TimeoutConnectorError(RuntimeError):
+        connector_type = "tiendanube"
+        connector_id = "tn-main"
+
+    business = BusinessConfig(
+        business_id="artemea",
+        business_name="Artemea",
+        owner_phone="+5491100000000",
+        timezone="America/Argentina/Buenos_Aires",
+        currency="ARS",
+        connectors=[
+            ConnectorConfig(
+                connector_id="tn-main",
+                connector_type="tiendanube",
+                label="TN principal",
+                params={"store_id": "123", "access_token": "tn_test_token"},
+            )
+        ],
+    )
+    ledger = InMemoryRunLedger()
+    run = ledger.create_run(
+        run_id="run-failure-detailed-events",
+        business_id=business.business_id,
+        trigger_type="scheduled",
+        started_at=utc_dt(8),
+    )
+
+    record_pipeline_failure(
+        run_ledger=ledger,
+        run_id=run.run_id,
+        error=TimeoutConnectorError("request timed out while fetching orders access_token=raw_secret"),
+        business=business,
+        business_id=business.business_id,
+        connector_types=["tiendanube"],
+    )
+
+    reloaded = ledger.get_run(run.run_id)
+    assert reloaded is not None
+    [outcome] = reloaded.connector_outcomes
+    assert outcome.health_state == "failed"
+    assert outcome.metadata["health_detail"] == "network_error"
+    assert outcome.metadata["emitted_events"] == [
+        "connector.execution.failed",
+        "connector.health.failed",
+        "connector.health.network_error",
+    ]
+    assert outcome.metadata["event_certification"] == {
+        "status": "passed",
+        "issue_count": 0,
+        "events": [
+            "connector.execution.failed",
+            "connector.health.failed",
+            "connector.health.network_error",
+        ],
+        "issues": [],
+    }
+
+
 def test_record_pipeline_success_finalizes_partial_when_secondary_owner_brief_dispatcher_raises():
     business = BusinessConfig(
         business_id="artemea",
