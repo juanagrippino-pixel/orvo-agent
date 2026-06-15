@@ -317,6 +317,10 @@ def test_internal_case_queue_accepts_as_of_for_sla_status(monkeypatch, tmp_path)
     assert breached.get_json()["data"]["cases"][0]["case_id"] == case.case_id
     assert pending.get_json()["data"]["cases"][0]["sla_status"] == "pending"
     assert breached.get_json()["data"]["cases"][0]["sla_status"] == "breached"
+    assert pending.get_json()["data"]["cases"][0]["sla_elapsed_seconds"] == 1 * 60 * 60 + 30 * 60
+    assert pending.get_json()["data"]["cases"][0]["sla_remaining_seconds"] == 30 * 60
+    assert breached.get_json()["data"]["cases"][0]["sla_elapsed_seconds"] == 2 * 60 * 60 + 30 * 60
+    assert breached.get_json()["data"]["cases"][0]["sla_remaining_seconds"] == -30 * 60
 
 
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
