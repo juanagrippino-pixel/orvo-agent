@@ -39,21 +39,26 @@ def register_operator_audit_routes(app):
         raw_retention_days = request.args.get("retention_days")
 
         def _audit_read_failed(*, error_code: str, status_code: int) -> None:
-            _append_operator_audit_event(
-                business_id=business_id,
-                actor_ref=principal.actor_ref,
-                event_type="operator.operator_audit_events.read_failed",
-                target_type="operator_audit_events",
-                target_id=business_id,
-                data={
-                    "status": "failed",
-                    "scope": "business",
-                    "error_code": error_code,
-                    "status_code": status_code,
-                    "limit_present": raw_limit is not None,
-                    "retention_days_present": raw_retention_days is not None,
-                },
-            )
+            try:
+                _append_operator_audit_event(
+                    business_id=business_id,
+                    actor_ref=principal.actor_ref,
+                    event_type="operator.operator_audit_events.read_failed",
+                    target_type="operator_audit_events",
+                    target_id=business_id,
+                    data={
+                        "status": "failed",
+                        "scope": "business",
+                        "error_code": error_code,
+                        "status_code": status_code,
+                        "limit_present": raw_limit is not None,
+                        "retention_days_present": raw_retention_days is not None,
+                    },
+                )
+            except Exception:
+                # Audit failures are secondary telemetry. Never turn an export
+                # denial/failure into a generic 500 or expose sink internals.
+                return
 
         try:
             limit = parse_limit(raw_limit, default=50, max_limit=200)
@@ -74,6 +79,7 @@ def register_operator_audit_routes(app):
                     retention_days=retention_days,
                 )
         except sqlite3.Error:
+            _audit_read_failed(error_code="internal_store_unavailable", status_code=503)
             return _internal_error(
                 business_id,
                 "internal_store_unavailable",
@@ -81,20 +87,25 @@ def register_operator_audit_routes(app):
                 status_code=503,
             )
 
-        _append_operator_audit_event(
-            business_id=business_id,
-            actor_ref=principal.actor_ref,
-            event_type="operator.operator_audit_events.read",
-            target_type="operator_audit_events",
-            target_id=business_id,
-            data={
-                "status": "allowed",
-                "scope": "business",
-                "limit": limit,
-                "retention_days": retention_days,
-                "result_count": len(events),
-            },
-        )
+        try:
+            _append_operator_audit_event(
+                business_id=business_id,
+                actor_ref=principal.actor_ref,
+                event_type="operator.operator_audit_events.read",
+                target_type="operator_audit_events",
+                target_id=business_id,
+                data={
+                    "status": "allowed",
+                    "scope": "business",
+                    "limit": limit,
+                    "retention_days": retention_days,
+                    "result_count": len(events),
+                },
+            )
+        except Exception:
+            # The export result is already authorized and read. Do not fail the
+            # response because the secondary audit append failed.
+            pass
         return _internal_success(
             business_id,
             {

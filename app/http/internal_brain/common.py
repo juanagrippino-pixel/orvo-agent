@@ -267,14 +267,19 @@ def _authorization_denial_data(exc: InternalOperatorAuthorizationError) -> dict:
 
 
 def _record_internal_authorization_denial(*, business_id: str, actor_ref: str, exc: InternalOperatorAuthorizationError):
-    _append_operator_audit_event(
-        business_id=business_id,
-        actor_ref=actor_ref,
-        event_type="operator.authorization.denied",
-        target_type="internal_operator_api",
-        target_id=business_id,
-        data=_authorization_denial_data(exc),
-    )
+    try:
+        _append_operator_audit_event(
+            business_id=business_id,
+            actor_ref=actor_ref,
+            event_type="operator.authorization.denied",
+            target_type="internal_operator_api",
+            target_id=business_id,
+            data=_authorization_denial_data(exc),
+        )
+    except Exception:
+        # Authorization decisions must not depend on the audit sink being
+        # available. Keep the denial response deterministic and generic.
+        return
 
 
 def _internal_principal_or_error(
