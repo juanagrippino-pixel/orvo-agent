@@ -111,6 +111,8 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity)), facetable=True),
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("sla_target_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("sla_elapsed_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("sla_remaining_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("assigned_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
@@ -242,6 +244,8 @@ def case_sla_status(case: OperationalCase, now: datetime | None = None) -> Opera
     if case.due_at is None:
         return SLA_STATUS_NOT_CONFIGURED
     if case.status == "resolved":
+        if case.resolved_at is not None and case.resolved_at > case.due_at:
+            return SLA_STATUS_BREACHED
         return SLA_STATUS_MET
     if case.status == "dismissed":
         return SLA_STATUS_NOT_APPLICABLE
@@ -249,6 +253,32 @@ def case_sla_status(case: OperationalCase, now: datetime | None = None) -> Opera
     if now >= case.due_at:
         return SLA_STATUS_BREACHED
     return SLA_STATUS_PENDING
+
+
+def _case_sla_clock_at(case: OperationalCase, now: datetime | None = None) -> datetime | None:
+    if case.status == "resolved":
+        return case.resolved_at
+    if case.status == "dismissed":
+        return case.dismissed_at
+    return now or datetime.now(tz=timezone.utc)
+
+
+def case_sla_elapsed_seconds(case: OperationalCase, now: datetime | None = None) -> int | None:
+    if case.due_at is None:
+        return None
+    clock_at = _case_sla_clock_at(case, now=now)
+    if clock_at is None:
+        return None
+    return max(0, int((clock_at - case.opened_at).total_seconds()))
+
+
+def case_sla_remaining_seconds(case: OperationalCase, now: datetime | None = None) -> int | None:
+    if case.due_at is None or case.status == "dismissed":
+        return None
+    clock_at = _case_sla_clock_at(case, now=now)
+    if clock_at is None:
+        return None
+    return int((case.due_at - clock_at).total_seconds())
 
 
 def allowed_priority_brackets() -> set[str]:
@@ -374,6 +404,8 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
         "sla_target_seconds": case.sla_target_seconds,
+        "sla_elapsed_seconds": case_sla_elapsed_seconds(case, now=now),
+        "sla_remaining_seconds": case_sla_remaining_seconds(case, now=now),
         "assigned_at": _iso_utc(case.assigned_at) if case.assigned_at is not None else None,
         "due_at": _iso_utc(case.due_at) if case.due_at is not None else None,
         "sla_status": case_sla_status(case, now=now),
