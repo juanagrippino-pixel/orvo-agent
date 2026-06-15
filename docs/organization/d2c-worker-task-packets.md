@@ -525,7 +525,7 @@ Dependency: dispatch after Packet R connector/semantic family alignment is green
 
 Current source-of-truth check:
 
-- `app/brain/operational_cases.py` keeps `detect_cases_from_report(... metric_registry_mode="advisory")` as the reusable detection primitive, but `upsert_cases_from_report(...)` calls it with `metric_registry_mode="enforced"` before persisting cases.
+- `app/brain/operational_cases.py` now defaults `detect_cases_from_report(...)` to `metric_registry_mode="enforced"`, so reusable case detection blocks invalid report metrics unless callers explicitly opt into advisory diagnostics; `upsert_cases_from_report(...)` still calls it with `metric_registry_mode="enforced"` before persisting cases.
 - `_case_detection_allowed_by_metric_registry(...)` blocks persisted case creation when enforced mode finds invalid/unknown operational metrics for the report sources.
 - `app/brain/semantics/metric_registry.py` already exposes report/surface validation helpers such as `validate_report_metric_objects()` and `validate_surface_metric_objects()` for boundary-level diagnostics.
 - The 2026-06-15 semantic/connector ARB review keeps the same follow-up valid: enforcement is not yet uniformly explicit across every non-persistent preview/report/surface path, so the next packet should add targeted validation hooks rather than redesign the registry.
