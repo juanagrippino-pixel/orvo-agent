@@ -969,6 +969,70 @@ def default_gateway_service_catalog() -> GatewayServiceCatalog:
     )
 
 
+def _gateway_doc_bool(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def _gateway_doc_auth_schemes(value: tuple[str, ...]) -> str:
+    return ", ".join(value) if value else "none"
+
+
+def _gateway_doc_rate_limit(policy: GatewayRateLimitPolicy | None) -> str:
+    if policy is None or policy.requests_per_minute is None:
+        return "none"
+    return f"{policy.requests_per_minute} rpm / retry {policy.retry_after_seconds}s"
+
+
+def _gateway_doc_cell(value: str) -> str:
+    return value.replace("|", "\\|")
+
+
+def render_gateway_service_catalog_markdown(
+    catalog: GatewayServiceCatalog | None = None,
+) -> str:
+    """Render a stable markdown snapshot for the built-in gateway catalog."""
+
+    resolved_catalog = catalog or default_gateway_service_catalog()
+    lines = [
+        "# Gateway service catalog",
+        "",
+        "Status: generated from `app.brain.gateway_contracts.default_gateway_service_catalog()`.",
+        "",
+        "This snapshot is the developer-facing reference for the current allowlisted gateway routes. Keep edits in the Python catalog first, then refresh this document from the renderer.",
+        "",
+    ]
+    for service in resolved_catalog.services():
+        lines.extend(
+            [
+                f"## {service}",
+                "",
+                "| Method | Path pattern | Route key | Idempotency | Business scoped | Actor required | Auth schemes | Rate limit | Description |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for entry in resolved_catalog.entries_for_service(service):
+            policy = entry.policy
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        _gateway_doc_cell(policy.method),
+                        _gateway_doc_cell(entry.path_pattern or "n/a"),
+                        _gateway_doc_cell(policy.route_key),
+                        _gateway_doc_cell(policy.idempotency_mode),
+                        _gateway_doc_cell(_gateway_doc_bool(policy.requires_business_id)),
+                        _gateway_doc_cell(_gateway_doc_bool(policy.requires_actor_ref)),
+                        _gateway_doc_cell(_gateway_doc_auth_schemes(policy.allowed_auth_schemes)),
+                        _gateway_doc_cell(_gateway_doc_rate_limit(policy.rate_limit_policy)),
+                        _gateway_doc_cell(entry.description),
+                    )
+                )
+                + " |"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
 def validate_gateway_route_policy(
     policy: GatewayRoutePolicy,
     context: GatewayRequestContext,

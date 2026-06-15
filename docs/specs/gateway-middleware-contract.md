@@ -105,6 +105,9 @@ The built-in `default_gateway_service_catalog()` currently documents the
 `internal-brain` service routes that already exist in the runtime/operator
 surface, including runtime compile preview, connector readiness, run ledger,
 case action, case-view, dashboard, and redacted operator-audit projections.
+The generated snapshot in [`docs/specs/gateway-service-catalog.md`](gateway-service-catalog.md)
+is the developer-facing route inventory and must be refreshed from the Python
+catalog renderer rather than edited by hand.
 `policy_for_request_path()` / `entry_for_request_path()` prefer the most
 specific static route before dynamic placeholder segments such as
 `<business_id>` or `<case_id>`.
@@ -134,6 +137,10 @@ payload data through the existing secret redaction layer.
 
 - `tests/contracts/test_gateway_contracts.py`
 - `tests/contracts/test_gateway_service_catalog.py`
+
+The service-catalog contract test also snapshots the generated developer-facing
+inventory in `docs/specs/gateway-service-catalog.md` so the docs cannot drift
+silently from the allowlisted Python route registry.
 
 The test suite verifies:
 

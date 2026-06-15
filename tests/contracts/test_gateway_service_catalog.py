@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from app.brain.gateway_contracts import (
@@ -8,6 +10,7 @@ from app.brain.gateway_contracts import (
     GatewayServiceCatalogEntry,
     build_gateway_context,
     default_gateway_service_catalog,
+    render_gateway_service_catalog_markdown,
     validate_gateway_route_policy,
 )
 
@@ -136,3 +139,23 @@ def test_gateway_service_catalog_request_path_lookup_fails_closed_without_echoin
 
     assert exc.value.code == "unknown_gateway_service_route"
     assert "raw_path_secret" not in str(exc.value)
+
+
+def test_render_gateway_service_catalog_markdown_lists_core_internal_brain_routes():
+    markdown = render_gateway_service_catalog_markdown(default_gateway_service_catalog())
+
+    assert markdown.startswith("# Gateway service catalog\n")
+    assert "## internal-brain" in markdown
+    assert "| POST | /internal/brain/businesses/<business_id>/runtime/compile-preview | internal.brain.runtime.compile_preview |" in markdown
+    assert "| POST | /internal/brain/businesses/<business_id>/cases/<case_id>/actions | internal.brain.cases.action |" in markdown
+    assert "30 rpm / retry 60s" in markdown
+    assert "optional" in markdown
+    assert "required" in markdown
+
+
+def test_committed_gateway_service_catalog_doc_matches_default_catalog_snapshot():
+    doc_path = Path(__file__).parents[2] / "docs" / "specs" / "gateway-service-catalog.md"
+
+    assert doc_path.read_text(encoding="utf-8") == render_gateway_service_catalog_markdown(
+        default_gateway_service_catalog()
+    )
