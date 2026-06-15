@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from flask import request
+from flask import Response, request
 
 from app.brain.operator_api import *  # noqa: F401,F403
 from app.brain.operator_auth import CASE_ACTION_PERMISSION, safe_internal_operator_actor_ref
@@ -98,6 +98,30 @@ def register_dashboard_view_routes(app):
                 ),
             ),
         )
+
+
+    @app.get("/internal/brain/businesses/<business_id>/case-views/<view_id>/export")
+    def internal_brain_case_view_export(business_id: str, view_id: str):
+        def handler(case_store, run_ledger):
+            export = export_case_queue_csv(
+                case_store,
+                business_id=business_id,
+                view_id=view_id,
+                limit=request.args.get("limit"),
+                export_format=request.args.get("format", "csv"),
+            )
+            return (
+                Response(
+                    export["body"],
+                    content_type=export["content_type"],
+                    headers={
+                        "Content-Disposition": f"attachment; filename={export['filename']}",
+                    },
+                ),
+                200,
+            )
+
+        return _with_internal_stores(business_id, handler)
 
 
     @app.get("/internal/brain/businesses/<business_id>/cases/facets")

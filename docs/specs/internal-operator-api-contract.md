@@ -83,6 +83,7 @@ GET /internal/brain/businesses/{business_id}/cases/export
 GET /internal/brain/businesses/{business_id}/cases/{case_id}
 GET /internal/brain/businesses/{business_id}/cases/facets
 GET /internal/brain/businesses/{business_id}/case-views/{view_id}
+GET /internal/brain/businesses/{business_id}/case-views/{view_id}/export
 GET /internal/brain/businesses/{business_id}/case-query-fields
 GET /internal/brain/businesses/{business_id}/case-query-fields?field={field}
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
@@ -110,6 +111,12 @@ same canonical case-view registry used by `/cases` and `/cases/export`,
 including the stable JQL string plus normalized filter/sort metadata for UI
 selection. Unknown view IDs fail with the same stable redacted
 `case_view_not_found` envelope used by other case-view selectors.
+
+`/case-views/{view_id}/export` is a thin read-only CSV wrapper over the same
+canonical built-in view registry and `OperationalCase` export helper used by
+`/cases/export?view_id=...`. It accepts the same allowlisted `limit` and
+`format` guards, inherits route business scope, and returns the same redacted
+attachment body rather than creating a second export code path.
 
 Case facets accept allowlisted filters such as `status`, `status_category`,
 and `work_item_id`. JQL-lite and case facets are read-only, route-scoped
@@ -203,5 +210,6 @@ Before exposing beyond local/dev:
 - dry run creates ledger entries but does not dispatch externally;
 - run detail cannot cross business scope;
 - internal business endpoints deny operators whose explicit business grant header excludes the route business and audit the denial without persisting raw grant/header secrets;
+- case-view export reuses the canonical built-in view/export helper, preserves route scope, and redacts invalid format errors;
 - case action rejects unknown action keys;
 - responses include `redaction_applied=true`.

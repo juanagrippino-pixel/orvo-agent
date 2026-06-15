@@ -1593,6 +1593,88 @@ def test_internal_case_view_unknown_view_returns_enveloped_404(monkeypatch, tmp_
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_view_export_uses_canonical_builtin_view_scope(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    critical = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-export-view-route-critical",
+            priority=95,
+            title="Critical export route access_token=raw_view_route_secret",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            case_type="sales_drop",
+            dedupe_suffix="sales_drop/channel/all/commerce.revenue/daily",
+            severity="warning",
+            priority=80,
+            title="Warning export route case",
+            run_id="run-export-view-route-warning",
+        ),
+    )
+    _seed_case(
+        db_path,
+        _case_detection(
+            business_id="other",
+            run_id="run-export-view-route-other",
+            priority=99,
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-views/critical_open/export",
+        headers=AUTH,
+        query_string={"limit": "10"},
+    )
+    generic = client.get(
+        "/internal/brain/businesses/artemea/cases/export",
+        headers=AUTH,
+        query_string={"view_id": "critical_open", "limit": "10"},
+    )
+
+    assert response.status_code == 200
+    assert generic.status_code == 200
+    assert response.content_type.startswith("text/csv")
+    assert response.headers["Content-Disposition"] == "attachment; filename=artemea_cases.csv"
+    raw_body = response.get_data(as_text=True)
+    assert raw_body == generic.get_data(as_text=True)
+    assert critical.case_id in raw_body
+    assert "Warning export route case" not in raw_body
+    assert "run-export-view-route-other" not in raw_body
+    assert "raw_view_route_secret" not in raw_body
+    assert "Critical export route access_token=[REDACTED]" in raw_body
+
+
+def test_internal_case_view_export_rejects_unknown_view_and_invalid_format_without_secret_echo(
+    monkeypatch,
+    tmp_path,
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(db_path, _case_detection(run_id="run-export-view-route-invalid"))
+
+    missing_view = client.get(
+        "/internal/brain/businesses/artemea/case-views/missing/export",
+        headers=AUTH,
+    )
+    invalid_format = client.get(
+        "/internal/brain/businesses/artemea/case-views/critical_open/export",
+        headers=AUTH,
+        query_string={"format": "access_token=raw_view_export_secret"},
+    )
+
+    assert missing_view.status_code == 404
+    assert missing_view.get_json()["error"]["code"] == "case_view_not_found"
+    assert invalid_format.status_code == 400
+    invalid_raw_body = invalid_format.get_data(as_text=True)
+    assert "raw_view_export_secret" not in invalid_raw_body
+    invalid_body = invalid_format.get_json()
+    assert invalid_body["ok"] is False
+    assert invalid_body["error"]["code"] == "invalid_export_format"
+    assert invalid_body["error"]["message"] == "Unsupported export format: access_token=[REDACTED]"
+
+
 def test_case_queue_csv_export_uses_jql_scope_and_redacts_projection(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _seed_case(
