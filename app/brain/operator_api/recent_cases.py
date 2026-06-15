@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .common import *  # noqa: F401,F403
-from .common import _reopen_stats
+from .common import case_reopen_stats
 from .projections import *  # noqa: F401,F403
 
 
@@ -175,7 +175,7 @@ def list_recently_reopened_cases(
     parsed_limit = parse_limit(limit)
     reopened: list[tuple[datetime, str, OperationalCase]] = []
     for case in store.list_cases(business_id=business_id, status="open", limit=None):
-        _reopen_count, latest_reopen_at = _reopen_stats(case)
+        _reopen_count, latest_reopen_at = case_reopen_stats(case)
         if latest_reopen_at is None:
             continue
         reopened.append((latest_reopen_at, case.case_id, case))

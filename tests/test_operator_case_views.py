@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -146,6 +146,12 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql(
         "latest_evidence_at >= 2026-05-24T08:00:00Z ORDER BY latest_evidence_at DESC"
     ).normalized == "latest_evidence_at >= 2026-05-24T08:00:00+00:00 ORDER BY latest_evidence_at DESC"
+    assert parse_case_jql("reopen_count >= 2 ORDER BY reopen_count DESC").normalized == (
+        "reopen_count >= 2 ORDER BY reopen_count DESC"
+    )
+    assert parse_case_jql("latest_reopened_at >= 2026-05-24T09:00:00Z ORDER BY latest_reopened_at DESC").normalized == (
+        "latest_reopened_at >= 2026-05-24T09:00:00+00:00 ORDER BY latest_reopened_at DESC"
+    )
     assert parse_case_jql("sla_status = breached").normalized == (
         "sla_status = breached ORDER BY priority_score DESC, opened_at ASC"
     )
@@ -166,6 +172,100 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     with pytest.raises(OperatorAPIError) as unsupported_release_state:
         parse_case_jql("release_state = experimental")
     assert unsupported_release_state.value.code == "unsupported_jql_value"
+
+
+def test_internal_case_queue_filters_and_sorts_by_reopen_stats(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    recurring = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-recurring-top",
+            priority=95,
+            dedupe_suffix="stockout_risk/business/monitored/commerce.inventory/recurring-top",
+        ),
+    )
+    single = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-recurring-single",
+            priority=80,
+            dedupe_suffix="stockout_risk/business/monitored/commerce.inventory/recurring-single",
+        ),
+    )
+    untouched = _seed_case(
+        db_path,
+        _case_detection(
+            run_id="run-recurring-none",
+            priority=70,
+            dedupe_suffix="stockout_risk/business/monitored/commerce.inventory/recurring-none",
+        ),
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+
+    def reopen(case_id: str, *, reopened_at: datetime) -> None:
+        store.transition_case(
+            case_id,
+            status="in_progress",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            transitioned_at=reopened_at - timedelta(minutes=30),
+        )
+        store.transition_case(
+            case_id,
+            status="resolved",
+            actor_type="operator",
+            actor_ref="operator:juan",
+            reason="fixture resolution",
+            transitioned_at=reopened_at - timedelta(minutes=15),
+        )
+        store.reopen_case(
+            case_id,
+            actor_type="operator",
+            actor_ref="operator:juan",
+            reason="fixture recurrence",
+            reopened_at=reopened_at,
+        )
+
+    reopen(recurring.case_id, reopened_at=datetime(2026, 5, 24, 9, 0, tzinfo=timezone.utc))
+    reopen(recurring.case_id, reopened_at=datetime(2026, 5, 24, 11, 0, tzinfo=timezone.utc))
+    reopen(single.case_id, reopened_at=datetime(2026, 5, 24, 10, 0, tzinfo=timezone.utc))
+    conn.close()
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "reopen_count >= 1 ORDER BY latest_reopened_at DESC"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "reopen_count >= 1 ORDER BY latest_reopened_at DESC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [recurring.case_id, single.case_id]
+    assert untouched.case_id not in [case["case_id"] for case in body["data"]["cases"]]
+    assert body["data"]["cases"][0]["work_item"]["reopen_count"] == 2
+    assert body["data"]["cases"][0]["work_item"]["latest_reopened_at"] == "2026-05-24T11:00:00Z"
+    assert body["data"]["cases"][1]["work_item"]["reopen_count"] == 1
+    assert body["data"]["cases"][1]["work_item"]["latest_reopened_at"] == "2026-05-24T10:00:00Z"
+
+    mixed_sort = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "status = open ORDER BY latest_reopened_at DESC"},
+    )
+
+    assert mixed_sort.status_code == 200
+    mixed_body = mixed_sort.get_json()
+    assert mixed_body["ok"] is True
+    assert [case["case_id"] for case in mixed_body["data"]["cases"][:3]] == [
+        recurring.case_id,
+        single.case_id,
+        untouched.case_id,
+    ]
+    assert mixed_body["data"]["cases"][2]["work_item"]["latest_reopened_at"] is None
 
 
 def test_internal_case_queue_filters_by_release_state(monkeypatch, tmp_path):

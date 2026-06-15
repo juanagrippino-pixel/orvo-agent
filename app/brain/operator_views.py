@@ -27,9 +27,11 @@ from app.brain.work_items import (
     case_last_comment_at,
     case_last_event_at,
     case_last_event_type,
+    case_latest_reopened_at,
     case_owner_visible,
     case_priority_bracket,
     case_project_key,
+    case_reopen_count,
     case_sla_elapsed_seconds,
     case_sla_remaining_seconds,
     case_sla_status,
@@ -462,8 +464,12 @@ def _case_field_value(case: OperationalCase, field: str, now: datetime | None = 
         return len(_case_source_connectors(case))
     if field == "comment_count":
         return case_comment_count(case)
+    if field == "reopen_count":
+        return case_reopen_count(case)
     if field == "last_comment_at":
         return case_last_comment_at(case)
+    if field == "latest_reopened_at":
+        return case_latest_reopened_at(case)
     if field == "timeline_event_count":
         return case_timeline_event_count(case)
     if field == "last_event_at":
@@ -494,9 +500,19 @@ def _case_field_value(case: OperationalCase, field: str, now: datetime | None = 
 def _sort_cases(cases: list[OperationalCase], order_by: tuple[tuple[str, str], ...], now: datetime | None = None) -> list[OperationalCase]:
     result = list(cases)
     # Apply stable sorts from last to first so mixed directions work.
+    # Missing values stay at the end for both ASC and DESC sorts.
     for field, direction in reversed(order_by + (("case_id", "ASC"),)):
         reverse = direction == "DESC"
-        result.sort(key=lambda case, sort_field=field: _sort_value(case, sort_field, now=now), reverse=reverse)
+        present: list[tuple[Any, OperationalCase]] = []
+        missing: list[OperationalCase] = []
+        for case in result:
+            value = _sort_value(case, field, now=now)
+            if value is None:
+                missing.append(case)
+            else:
+                present.append((value, case))
+        present.sort(key=lambda item: item[0], reverse=reverse)
+        result = [case for _value, case in present] + missing
     return result
 
 
