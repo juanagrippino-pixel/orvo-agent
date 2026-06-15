@@ -1,5 +1,65 @@
 # N2 Pro Integration Train Note — 2026-06-12
 
+## Release integration update — 2026-06-15
+
+**Integration branch:** `feat/orvo-brain-control-plane`
+**Current integration HEAD after update:** `bd968605`
+**Merged branch:** `N2-Pro/connector-platform` at `44d4739b`
+**Merge commit:** `bd968605` (`merge: integrate N2-Pro connector readiness secret cleanup`)
+**Worker root inspected:** `/root/orvo-agent-worktrees`
+**Run mode:** safe integration; one verified branch merged.
+
+### Inventory summary
+
+- `git fetch --all --prune`: completed.
+- Canonical worktree: clean on `feat/orvo-brain-control-plane` before merge.
+- Local unmerged branches against integration branch after merge: **138**.
+- Git worktrees total: **227**.
+- Worker worktrees under `/root/orvo-agent-worktrees`: **226**.
+- Dirty worker worktrees: **0**.
+- Missing worker worktrees: **0**.
+
+### Candidate review
+
+#### `N2-Pro/connector-platform` at `44d4739b`
+
+This branch was the current top connector-platform slice in the integration train and was verified as a narrow additive readiness update:
+
+- Touches only:
+  - `app/brain/operator_api/connectors.py`
+  - `tests/test_internal_connector_readiness_api.py`
+- Adds setup-required visibility for non-blocking legacy inline secret warnings when a valid `secret_ref` is already present.
+- Keeps readiness `ready` for warning-only legacy inline secret cleanup.
+- Preserves fail-closed behavior for missing `secret_ref`.
+- Adds regression coverage for redaction of inline secret-like values in the readiness response.
+- `git diff --check feat/orvo-brain-control-plane...N2-Pro/connector-platform`: passed.
+- Focused branch test before merge: `pytest tests/test_internal_connector_readiness_api.py -q` in `/root/orvo-agent-worktrees/N2 Pro-connector-platform` -> **7 passed**.
+
+### Merge decision
+
+**Merged `N2-Pro/connector-platform` into `feat/orvo-brain-control-plane`.**
+
+Post-merge verification:
+
+- Focused tests: `pytest tests/test_internal_connector_readiness_api.py -q` -> **7 passed**.
+- Broader regression suite: `pytest -q` -> **1592 passed**.
+- `git diff --check`: passed.
+- `git status --short`: clean.
+- Push: `git push origin feat/orvo-brain-control-plane` succeeded (`f9b137cf..bd968605`).
+
+### Blockers
+
+- No blockers for this merge.
+- Broad operator/search/workflow/work-management branches remain deferred until rebased/split into additive slices that preserve accepted regression coverage and avoid endpoint-local source-of-truth logic.
+
+### Next integration order
+
+1. Rebase/verify `N2-Pro/trust-admin-security` around audit/operator hardening only; run focused audit/security/operator tests.
+2. Rebase/split `n2-pro-work-management` around WorkItem/SLA projection primitives while preserving current recurrence, severity, priority, and metric-registry tests.
+3. Rebase/split `N2-Pro/workflow-automation` or `n2/workflow-approval-queue-case-scope-20260614` around approval/action-key filters and queue scoping only.
+4. Hold `N2-Pro/operator-surfaces` and `N2-Pro/search-analytics` until they converge on WorkItem/JQL/facet/view primitives instead of bespoke endpoint bundles.
+5. Preserve current integration branch as source of truth until each next branch passes focused tests and full `pytest -q` without deleting accepted coverage or durable docs.
+
 ## Release integration update — 2026-06-14
 
 **Integration branch:** `feat/orvo-brain-control-plane`
