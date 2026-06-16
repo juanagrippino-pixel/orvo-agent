@@ -164,6 +164,9 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("owner_visible = true").normalized == (
         "owner_visible = true ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("issue_security_level = owner").normalized == (
+        "issue_security_level = owner ORDER BY priority_score DESC, opened_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
@@ -328,6 +331,37 @@ def test_internal_case_queue_filters_by_owner_visible_policy(monkeypatch, tmp_pa
     assert [case["case_id"] for case in body["data"]["cases"]] == [readiness_gated.case_id]
     assert body["data"]["cases"][0]["owner_visible"] is False
     assert body["data"]["cases"][0]["work_item"]["owner_visible"] is False
+    assert promoted.case_id not in [case["case_id"] for case in body["data"]["cases"]]
+
+
+def test_internal_case_queue_filters_by_issue_security_level(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    promoted = _seed_case(db_path, _case_detection(run_id="run-owner-visible-security", priority=95))
+    readiness_gated = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            priority=70,
+            title="Conversaciones sin responder",
+            run_id="run-owner-hidden-security",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "issue_security_level = internal"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["data"]["normalized_jql"] == "issue_security_level = internal ORDER BY priority_score DESC, opened_at ASC"
+    assert [case["case_id"] for case in body["data"]["cases"]] == [readiness_gated.case_id]
+    assert body["data"]["cases"][0]["issue_security_level"] == "internal"
+    assert body["data"]["cases"][0]["work_item"]["issue_security_level"] == "internal"
     assert promoted.case_id not in [case["case_id"] for case in body["data"]["cases"]]
 
 

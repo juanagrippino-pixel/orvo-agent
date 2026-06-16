@@ -53,6 +53,7 @@ class WorkItemPriorityDefinition:
 
 
 WorkItemQueryFieldValueType = Literal["bool", "enum", "int", "string", "datetime"]
+WorkItemIssueSecurityLevel = Literal["internal", "owner"]
 OperationalCaseSlaStatus = Literal["not_configured", "not_applicable", "pending", "breached", "met"]
 OperationalCaseIssueTypeReleaseState = Literal[
     "promoted", "readiness_gated", "deferred", "internal_only"
@@ -103,6 +104,13 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition(
         "owner_visible",
         "bool",
+        allowed_operators=frozenset({"=", "!="}),
+        facetable=True,
+    ),
+    WorkItemQueryFieldDefinition(
+        "issue_security_level",
+        "enum",
+        frozenset({"internal", "owner"}),
         allowed_operators=frozenset({"=", "!="}),
         facetable=True,
     ),
@@ -225,6 +233,12 @@ def case_owner_visible(case: OperationalCase) -> bool:
     """Return whether a case instance can appear in owner-facing surfaces."""
 
     return is_owner_facing_operational_case(case)
+
+
+def case_issue_security_level(case: OperationalCase) -> WorkItemIssueSecurityLevel:
+    """Return the Jira-like issue security level for the owner-facing policy."""
+
+    return "owner" if case_owner_visible(case) else "internal"
 
 
 def priority_bracket_for_score(priority_score: int) -> str:
@@ -424,6 +438,7 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "issue_type": case_issue_type(case),
         "release_state": case_type_release_state(case.case_type),
         "owner_visible": case_owner_visible(case),
+        "issue_security_level": case_issue_security_level(case),
         "status": case.status,
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,

@@ -13,6 +13,7 @@ from app.brain.work_items import (
     allowed_status_categories,
     allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
+    case_issue_security_level,
     case_latest_reopened_at,
     case_priority_bracket,
     case_project_key,
@@ -77,6 +78,7 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["issue_type"] == "stockout_risk"
     assert projection["release_state"] == "promoted"
     assert projection["owner_visible"] is True
+    assert projection["issue_security_level"] == "owner"
     assert projection["status"] == "open"
     assert projection["status_category"] == "to_do"
     assert projection["priority_score"] == 87
@@ -103,6 +105,7 @@ def test_case_work_item_projection_wraps_operational_case_without_changing_sourc
     assert projection["updated_at"].endswith("Z")
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
+    assert case_issue_security_level(case) == "owner"
     assert case_priority_bracket(case) == "high"
     assert case_sla_elapsed_seconds(case, now=now) == 1 * 60 * 60
     assert case_sla_remaining_seconds(case, now=now) == 1 * 60 * 60
@@ -275,6 +278,7 @@ def test_case_work_item_projection_marks_readiness_gated_cases_operator_only(tmp
 
     assert projection["release_state"] == "readiness_gated"
     assert projection["owner_visible"] is False
+    assert projection["issue_security_level"] == "internal"
 
 
 def test_case_work_item_projection_exposes_evidence_lineage(tmp_path):
@@ -586,6 +590,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": False,
         "facetable": True,
     }
+    assert fields["issue_security_level"] == {
+        "field": "issue_security_level",
+        "value_type": "enum",
+        "allowed_values": ["internal", "owner"],
+        "allowed_operators": ["!=", "="],
+        "sortable": False,
+        "facetable": True,
+    }
     assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
     assert fields["assignee_ref"]["value_type"] == "string"
     assert fields["priority_score"] == {
@@ -758,6 +770,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "project",
         "release_state",
         "owner_visible",
+        "issue_security_level",
         "severity",
         "sla_status",
         "source_connector",
