@@ -516,6 +516,50 @@ def test_sqlite_run_ledger_records_failed_secondary_dispatch_as_terminal_partial
         )
 
 
+def test_run_ledger_list_runs_scopes_to_business_id_for_memory_and_sqlite(conn):
+    """Tenant scoping is a hard boundary for run-ledger projections.
+
+    The in-memory ledger is used by tests and early integrations, while the
+    SQLite ledger backs internal operator surfaces. This locks the same contract
+    for both implementations so a future route or helper cannot accidentally
+    expose another business's run ledger through an unfiltered query.
+    """
+
+    for label, ledger in (
+        ("memory", InMemoryRunLedger()),
+        ("sqlite", SQLiteRunLedger(conn)),
+    ):
+        ledger.create_run(
+            run_id=f"run-artemea-old-{label}",
+            business_id="artemea",
+            trigger_type="scheduled",
+            started_at=utc_dt(8),
+        )
+        ledger.create_run(
+            run_id=f"run-other-{label}",
+            business_id="other-business",
+            trigger_type="forced",
+            started_at=utc_dt(9),
+        )
+        ledger.create_run(
+            run_id=f"run-artemea-new-{label}",
+            business_id="artemea",
+            trigger_type="manual",
+            started_at=utc_dt(10),
+        )
+
+        artemea_runs = ledger.list_runs(business_id="artemea")
+
+        assert [run.run_id for run in artemea_runs] == [
+            f"run-artemea-new-{label}",
+            f"run-artemea-old-{label}",
+        ]
+        assert {run.business_id for run in artemea_runs} == {"artemea"}
+        other_runs = ledger.list_runs(business_id="other-business")
+        assert [run.run_id for run in other_runs] == [f"run-other-{label}"]
+        assert {run.business_id for run in other_runs} == {"other-business"}
+
+
 def test_sqlite_run_ledger_list_runs_can_filter_by_status(conn):
     ledger = SQLiteRunLedger(conn)
     ledger.create_run(run_id="run-ok", business_id="artemea", trigger_type="scheduled", started_at=utc_dt(8))
