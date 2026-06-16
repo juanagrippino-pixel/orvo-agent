@@ -755,6 +755,10 @@ class _OperationalCaseMutations:
             else:
                 sla_target_seconds, due_at = _merge_sla_for_open_case(existing, detection, detected_at, sla_target_seconds)
             metadata = _detection_update_metadata(existing, detection)
+            existing_metadata_carryover = dict(existing.metadata)
+            if "metric_registry_mode" not in detection.metadata:
+                existing_metadata_carryover.pop("metric_registry_mode", None)
+                existing_metadata_carryover.pop("metric_registry_issues", None)
             if existing.sla_target_seconds != sla_target_seconds:
                 metadata.update({
                     "previous_sla_target_seconds": existing.sla_target_seconds,

@@ -296,6 +296,7 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["latest_evidence_at"] == "2026-05-24T08:00:00Z"
     assert body["data"]["cases"][0]["source_connectors"] == ["tiendanube"]
     assert body["data"]["cases"][0]["degraded"] is False
+    assert body["data"]["cases"][0]["issue_security_level"] == "owner"
 
 
 def test_internal_case_queue_accepts_as_of_for_sla_status(monkeypatch, tmp_path):
@@ -335,6 +336,7 @@ def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(
     body = response.get_json()
     detail = body["data"]["case"]
     assert detail["case_id"] == case.case_id
+    assert detail["issue_security_level"] == "owner"
     assert detail["evidence_snapshot_count"] == 1
     assert detail["evidence_snapshots"][0]["source"] == "tiendanube"
     assert detail["evidence_snapshots"][0]["freshness_state"] == "fresh"

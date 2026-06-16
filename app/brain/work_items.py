@@ -57,6 +57,7 @@ OperationalCaseSlaStatus = Literal["not_configured", "not_applicable", "pending"
 OperationalCaseIssueTypeReleaseState = Literal[
     "promoted", "readiness_gated", "deferred", "internal_only"
 ]
+WorkItemIssueSecurityLevel = Literal["internal", "owner"]
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,10 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("case_type", "enum", frozenset(get_args(OperationalCaseType)), facetable=True),
     WorkItemQueryFieldDefinition("severity", "enum", frozenset(get_args(OperationalCaseSeverity)), facetable=True),
     WorkItemQueryFieldDefinition("priority_score", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("reopen_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("sla_target_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("sla_elapsed_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("sla_remaining_seconds", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("assigned_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("due_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("latest_evidence_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
@@ -118,12 +122,20 @@ _WORK_ITEM_QUERY_FIELD_DEFINITIONS: tuple[WorkItemQueryFieldDefinition, ...] = (
     WorkItemQueryFieldDefinition("evidence_source_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("comment_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("last_comment_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
+    WorkItemQueryFieldDefinition("latest_reopened_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("timeline_event_count", "int", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition("last_event_at", "datetime", allowed_operators=_RANGE_OPERATORS, sortable=True),
     WorkItemQueryFieldDefinition(
         "last_event_type",
         "enum",
         frozenset(get_args(TimelineEventType)),
+        facetable=True,
+    ),
+    WorkItemQueryFieldDefinition(
+        "issue_security_level",
+        "enum",
+        frozenset({"internal", "owner"}),
+        allowed_operators=frozenset({"=", "!="}),
         facetable=True,
     ),
     WorkItemQueryFieldDefinition(
@@ -223,6 +235,12 @@ def case_owner_visible(case: OperationalCase) -> bool:
     return is_owner_facing_operational_case(case)
 
 
+def case_issue_security_level(case: OperationalCase) -> WorkItemIssueSecurityLevel:
+    """Return the Jira-like issue security level for owner-facing policy."""
+
+    return "owner" if case_owner_visible(case) else "internal"
+
+
 def priority_bracket_for_score(priority_score: int) -> str:
     """Return the canonical WorkItem priority bracket for a 0..100 score."""
 
@@ -249,6 +267,32 @@ def case_sla_status(case: OperationalCase, now: datetime | None = None) -> Opera
     if now >= case.due_at:
         return SLA_STATUS_BREACHED
     return SLA_STATUS_PENDING
+
+
+def _case_sla_clock_at(case: OperationalCase, now: datetime | None = None) -> datetime | None:
+    if case.status == "resolved":
+        return case.resolved_at
+    if case.status == "dismissed":
+        return case.dismissed_at
+    return now or datetime.now(tz=timezone.utc)
+
+
+def case_sla_elapsed_seconds(case: OperationalCase, now: datetime | None = None) -> int | None:
+    if case.due_at is None:
+        return None
+    clock_at = _case_sla_clock_at(case, now=now)
+    if clock_at is None:
+        return None
+    return max(0, int((clock_at - case.opened_at).total_seconds()))
+
+
+def case_sla_remaining_seconds(case: OperationalCase, now: datetime | None = None) -> int | None:
+    if case.due_at is None or case.status == "dismissed":
+        return None
+    clock_at = _case_sla_clock_at(case, now=now)
+    if clock_at is None:
+        return None
+    return int((case.due_at - clock_at).total_seconds())
 
 
 def allowed_priority_brackets() -> set[str]:
@@ -328,15 +372,47 @@ def case_last_comment_at(case: OperationalCase) -> datetime | None:
 
 
 def case_last_event_at(case: OperationalCase) -> datetime | None:
-    if not case.timeline:
+    event = _last_timeline_event(case)
+    if event is None:
         return None
-    return max(event.created_at for event in case.timeline)
+    return event.created_at
 
 
 def case_last_event_type(case: OperationalCase) -> str | None:
+    event = _last_timeline_event(case)
+    if event is None:
+        return None
+    return event.event_type
+
+
+def _last_timeline_event(case: OperationalCase) -> OperationalCaseTimelineEvent | None:
     if not case.timeline:
         return None
-    return max(case.timeline, key=lambda event: event.created_at).event_type
+    _, event = max(enumerate(case.timeline), key=lambda item: (item[1].created_at, item[0]))
+    return event
+
+
+def case_reopen_stats(case: OperationalCase) -> tuple[int, datetime | None]:
+    reopen_count = 0
+    latest_reopened_at: datetime | None = None
+    for event in case.timeline:
+        if event.event_type != "case_reopened":
+            continue
+        reopen_count += 1
+        event_at = event.created_at.astimezone(timezone.utc)
+        if latest_reopened_at is None or event_at > latest_reopened_at:
+            latest_reopened_at = event_at
+    return reopen_count, latest_reopened_at
+
+
+def case_reopen_count(case: OperationalCase) -> int:
+    reopen_count, _latest_reopened_at = case_reopen_stats(case)
+    return reopen_count
+
+
+def case_latest_reopened_at(case: OperationalCase) -> datetime | None:
+    _reopen_count, latest_reopened_at = case_reopen_stats(case)
+    return latest_reopened_at
 
 
 def case_source_connectors(case: OperationalCase) -> list[str]:
@@ -354,21 +430,30 @@ def case_evidence_is_degraded(case: OperationalCase) -> bool:
 def case_work_item_projection(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
     """Project an OperationalCase as a WorkItem-shaped API object."""
 
+    reopen_count, latest_reopened_at = case_reopen_stats(case)
     return {
-        "work_item_id": case_work_item_id(case),
+        "case_id": case.case_id,
+        "work_item_id": f"{case_project_key(case)}:{case.case_id}",
         "project_key": case_project_key(case),
+        "project": case.business_id,
+        "case_type": case.case_type,
         "issue_type": case_issue_type(case),
         "release_state": case_type_release_state(case.case_type),
         "owner_visible": case_owner_visible(case),
+        "issue_security_level": case_issue_security_level(case),
         "status": case.status,
         "status_category": case_status_category(case),
         "priority_score": case.priority_score,
         "priority_bracket": case_priority_bracket(case),
         "sla_target_seconds": case.sla_target_seconds,
+        "sla_elapsed_seconds": case_sla_elapsed_seconds(case, now=now),
+        "sla_remaining_seconds": case_sla_remaining_seconds(case, now=now),
         "assigned_at": _iso_utc(case.assigned_at) if case.assigned_at is not None else None,
         "due_at": _iso_utc(case.due_at) if case.due_at is not None else None,
         "sla_status": case_sla_status(case, now=now),
         "assignee_ref": case.assignee_ref,
+        "reopen_count": reopen_count,
+        "latest_reopened_at": _iso_utc(latest_reopened_at) if latest_reopened_at is not None else None,
         "evidence_snapshot_ids": case_evidence_snapshot_ids(case),
         "evidence_snapshot_count": len(case.evidence_snapshots),
         "evidence_source_count": case_evidence_source_count(case),
@@ -382,7 +467,6 @@ def case_work_item_projection(case: OperationalCase, now: datetime | None = None
         "last_event_type": case_last_event_type(case),
         "created_at": _iso_utc(case.opened_at),
         "updated_at": _iso_utc(case.updated_at),
-        "case_id": case.case_id,
     }
 
 
