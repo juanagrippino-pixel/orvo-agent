@@ -78,6 +78,7 @@ def test_operator_audit_export_store_failure_writes_failed_audit_event_best_effo
         "scope": "business",
         "error_code": "internal_store_unavailable",
         "status_code": 503,
+        "method": "GET",
         "limit_present": True,
         "retention_days_present": True,
     }

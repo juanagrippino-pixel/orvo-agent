@@ -51,6 +51,7 @@ def register_operator_audit_routes(app):
                         "scope": "business",
                         "error_code": error_code,
                         "status_code": status_code,
+                        "method": request.method,
                         "limit_present": raw_limit is not None,
                         "retention_days_present": raw_retention_days is not None,
                     },

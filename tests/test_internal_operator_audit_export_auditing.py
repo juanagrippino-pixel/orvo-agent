@@ -99,6 +99,7 @@ def test_operator_audit_export_validation_failure_writes_failed_audit_event(monk
         "scope": "business",
         "error_code": "invalid_retention_days",
         "status_code": 400,
+        "method": "GET",
         "limit_present": False,
         "retention_days_present": True,
     }

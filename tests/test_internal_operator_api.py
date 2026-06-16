@@ -4597,6 +4597,49 @@ def test_internal_operator_audit_export_rejects_retention_abuse(monkeypatch, tmp
     assert body["redaction_applied"] is True
 
 
+def test_internal_operator_audit_export_validation_failures_are_audited_and_redacted(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/operator-audit-events?retention_days=3650",
+        headers={
+            **AUTH,
+            "X-Orvo-Role": "admin",
+            "X-Orvo-Operator": "admin:sol access_token=raw_audit_export_actor_secret",
+            "X-Request-ID": "req-audit-export-retention-abuse",
+        },
+    )
+
+    assert response.status_code == 400
+    raw_body = response.get_data(as_text=True)
+    assert "raw_audit_export_actor_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "invalid_retention_days"
+    assert body["redaction_applied"] is True
+
+    events = _audit_events(db_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event["business_id"] == "artemea"
+    assert event["actor_ref"] == "[REDACTED]"
+    assert event["event_type"] == "operator.operator_audit_events.read_failed"
+    assert event["target_type"] == "operator_audit_events"
+    assert event["target_id"] == "artemea"
+    assert event["request_id"] == "req-audit-export-retention-abuse"
+    assert event["data"] == {
+        "status": "failed",
+        "scope": "business",
+        "error_code": "invalid_retention_days",
+        "status_code": 400,
+        "method": "GET",
+        "limit_present": False,
+        "retention_days_present": True,
+    }
+    serialized = json.dumps(event, sort_keys=True)
+    assert "raw_audit_export_actor_secret" not in serialized
+
+
 def test_internal_operator_audit_export_collapses_secret_shaped_nested_business_ids(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     conn = sqlite3.connect(db_path)
