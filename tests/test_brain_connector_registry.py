@@ -370,6 +370,7 @@ def test_connector_contract_metadata_is_registry_service_projection():
             "runtime.data_quality",
         ],
         "emitted_event_families": ["connector.execution", "connector.health"],
+        "required_secret_refs": [],
         "required_scopes": ["spreadsheets.readonly"],
         "health_policy": {
             "readiness_check": "metadata_only",
