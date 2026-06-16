@@ -607,6 +607,89 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert body["redaction_applied"] is True
 
 
+def test_internal_case_query_fields_expose_canonical_metadata(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get("/internal/brain/businesses/artemea/case-query-fields", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"]["readonly"] is True
+    assert "business_id" not in body["data"]["fields_by_name"]
+    assert "business_id" not in body["data"]["sort_fields"]
+    assert "business_id" not in body["data"]["facet_fields"]
+    assert body["data"]["fields_by_name"]["priority_score"] == {
+        "field": "priority_score",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert body["data"]["fields_by_name"]["source_connector"] == {
+        "field": "source_connector",
+        "value_type": "string",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+        "facetable": True,
+    }
+    assert body["data"]["fields_by_name"]["degraded"]["value_type"] == "bool"
+    assert "priority_score" in body["data"]["sort_fields"]
+    assert "updated_at" in body["data"]["sort_fields"]
+    assert "source_connector" in body["data"]["facet_fields"]
+    assert "degraded" in body["data"]["facet_fields"]
+    assert body["redaction_applied"] is True
+
+
+
+def test_internal_case_query_fields_can_return_single_field(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-query-fields",
+        headers=AUTH,
+        query_string={"field": "priority_score"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    assert body["business_id"] == "artemea"
+    assert body["data"] == {
+        "field": "priority_score",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert body["redaction_applied"] is True
+
+
+
+def test_internal_case_query_fields_rejects_unsupported_field_without_secret_echo(monkeypatch, tmp_path):
+    client, _db_path = _client(monkeypatch, tmp_path)
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/case-query-fields",
+        headers=AUTH,
+        query_string={"field": "access_token=raw_query_field_secret"},
+    )
+
+    raw_body = response.get_data(as_text=True)
+    assert response.status_code == 400
+    assert "raw_query_field_secret" not in raw_body
+    body = response.get_json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "unsupported_jql_field"
+    assert body["error"]["message"] == "Unsupported case query field: access_token=[REDACTED]"
+    assert body["redaction_applied"] is True
+
+
+
 def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     critical = _seed_case(db_path, _case_detection(run_id="run-critical"))

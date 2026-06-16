@@ -15,6 +15,31 @@ def list_builtin_case_views() -> dict[str, Any]:
 
     return {"views": builtin_case_views()}
 
+
+def list_case_query_fields(field: str | None = None) -> dict[str, Any]:
+    from app.brain.work_items import (
+        allowed_work_item_facet_fields,
+        allowed_work_item_query_sort_fields,
+        work_item_query_field_definition,
+        work_item_query_field_definitions,
+    )
+
+    if field is not None and field.strip():
+        definition = work_item_query_field_definition(field.strip())
+        if definition is None:
+            label = field.strip() or "[missing]"
+            raise OperatorAPIError("unsupported_jql_field", f"Unsupported case query field: {label}", status_code=400)
+        return definition
+
+    definitions = work_item_query_field_definitions()
+    return {
+        "readonly": True,
+        "fields": definitions,
+        "fields_by_name": {definition["field"]: definition for definition in definitions},
+        "sort_fields": sorted(allowed_work_item_query_sort_fields()),
+        "facet_fields": sorted(allowed_work_item_facet_fields()),
+    }
+
 def execute_builtin_case_view(
     store: OperationalCaseStore,
     *,
