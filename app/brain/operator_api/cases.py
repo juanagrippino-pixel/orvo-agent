@@ -21,8 +21,16 @@ def list_case_queue(
 
     parsed_status = parse_case_status(status)
     parsed_limit = parse_limit(limit)
-    cases = store.list_cases(business_id=business_id, status=parsed_status, limit=parsed_limit)
-    return {"cases": [case_queue_item(case) for case in cases], "limit": parsed_limit}
+    cases = store.list_cases(business_id=business_id, status=parsed_status, limit=None)
+    total = len(cases)
+    limited = cases[:parsed_limit]
+    return {
+        "cases": [case_queue_item(case) for case in limited],
+        "limit": parsed_limit,
+        "count": len(limited),
+        "total": total,
+        "truncated": total > len(limited),
+    }
 
 def get_scoped_case(store: OperationalCaseStore, *, business_id: str, case_id: str) -> OperationalCase:
     case = store.get_case(case_id)

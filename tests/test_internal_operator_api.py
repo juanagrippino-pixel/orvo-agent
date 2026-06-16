@@ -256,6 +256,33 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["degraded"] is False
 
 
+def test_internal_case_queue_status_filter_reports_total_count_and_truncation(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    low = _seed_case(
+        db_path,
+        _case_detection(priority=30, dedupe_suffix="priority/low", run_id="run-artemea-low"),
+    )
+    medium = _seed_case(
+        db_path,
+        _case_detection(priority=50, dedupe_suffix="priority/medium", run_id="run-artemea-medium"),
+    )
+    high = _seed_case(
+        db_path,
+        _case_detection(priority=100, dedupe_suffix="priority/high", run_id="run-artemea-high"),
+    )
+
+    response = client.get("/internal/brain/businesses/artemea/cases?status=open&limit=2", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.get_json()
+    data = body["data"]
+    assert [item["case_id"] for item in data["cases"]] == [high.case_id, medium.case_id]
+    assert data["limit"] == 2
+    assert data["count"] == 2
+    assert data["total"] == 3
+    assert data["truncated"] is True
+
+
 def test_internal_owner_case_brief_preview_is_read_only_scoped_and_redacted(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     warning_case = _seed_case(
