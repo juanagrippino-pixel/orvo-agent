@@ -103,6 +103,99 @@ def test_action_catalog_is_canonical_for_workflow_and_operator_projections():
     assert actions["request_external_action"]["approval_required"] is True
 
 
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_action_ledger_rejects_reused_idempotency_key_for_different_case(tmp_path, store_factory):
+    """Workflow idempotency keys must replay the same action identity."""
+
+    ledger = store_factory(tmp_path)
+    first = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-one",
+        action_key="request_external_action",
+        idempotency_key="workflow/replay/identity",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator@example.com",
+        params={"reason": "same request"},
+        rule_id="replay-identity",
+    )
+
+    with pytest.raises(WorkflowActionLedgerError) as exc:
+        ledger.record_planned_action(
+            business_id="artemea",
+            case_id="case-two",
+            action_key="request_external_action",
+            idempotency_key=first.record.idempotency_key,
+            execution_state="blocked_approval_required",
+            approval_required=True,
+            source="workflow",
+            actor_ref="operator@example.com",
+            params={"reason": "same request"},
+            rule_id="replay-identity",
+        )
+
+    assert exc.value.code == "workflow_idempotency_key_conflict"
+    assert "case_id" in str(exc.value)
+    assert "case-two" not in str(exc.value)
+    actions = ledger.list_actions(business_id="artemea")
+    assert len(actions) == 1
+    assert actions[0].case_id == "case-one"
+
+
+@pytest.mark.parametrize(
+    "store_factory",
+    [
+        lambda tmp_path: InMemoryWorkflowActionLedgerStore(),
+        lambda tmp_path: SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3")),
+    ],
+)
+def test_workflow_action_ledger_rejects_reused_idempotency_key_for_different_params(tmp_path, store_factory):
+    """Workflow idempotency keys must not mask redacted payload drift."""
+
+    ledger = store_factory(tmp_path)
+    first = ledger.record_planned_action(
+        business_id="artemea",
+        case_id="case-one",
+        action_key="request_external_action",
+        idempotency_key="workflow/replay/params",
+        execution_state="blocked_approval_required",
+        approval_required=True,
+        source="workflow",
+        actor_ref="operator@example.com",
+        params={"reason": "first safe request"},
+        rule_id="replay-params",
+    )
+
+    with pytest.raises(WorkflowActionLedgerError) as exc:
+        ledger.record_planned_action(
+            business_id="artemea",
+            case_id="case-one",
+            action_key="request_external_action",
+            idempotency_key=first.record.idempotency_key,
+            execution_state="blocked_approval_required",
+            approval_required=True,
+            source="workflow",
+            actor_ref="operator@example.com",
+            params={"reason": "second safe request"},
+            rule_id="replay-params",
+        )
+
+    assert exc.value.code == "workflow_idempotency_key_conflict"
+    assert "params" in str(exc.value)
+    assert "first safe request" not in str(exc.value)
+    assert "second safe request" not in str(exc.value)
+    actions = ledger.list_actions(business_id="artemea")
+    assert len(actions) == 1
+    assert actions[0].params["reason"] == "first safe request"
+
+
 def test_simulate_case_workflow_dry_run_plans_whitelisted_action_without_mutating_case():
     store, case = seed_case()
     original_status = case.status

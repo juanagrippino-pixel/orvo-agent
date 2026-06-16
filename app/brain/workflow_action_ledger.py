@@ -178,6 +178,47 @@ def _redacted_params(params: dict[str, Any] | None) -> dict[str, Any]:
     return redacted if isinstance(redacted, dict) else {}
 
 
+def _record_replay_mismatch(
+    existing: WorkflowActionLedgerRecord,
+    *,
+    case_id: str,
+    action_key: str,
+    source: ActionSource,
+    params: dict[str, Any] | None,
+    rule_id: str | None,
+    approval_required: bool,
+    check_params: bool = True,
+) -> str | None:
+    immutable_identity = {
+        "case_id": case_id,
+        "action_key": action_key,
+        "source": source,
+        "rule_id": rule_id,
+    }
+    for field, expected_value in immutable_identity.items():
+        if getattr(existing, field) != expected_value:
+            return field
+    expected_approval_state: ApprovalState = "pending" if approval_required else "not_required"
+    if existing.approval_state != expected_approval_state:
+        return "approval_required"
+    if check_params and existing.params != _redacted_params(params):
+        return "params"
+    return None
+
+
+def _raise_idempotency_replay_conflict(field: str) -> None:
+    raise WorkflowActionLedgerError(
+        "workflow_idempotency_key_conflict",
+        f"workflow idempotency key replay mismatch for {field}",
+    )
+
+
+def _should_check_replay_params(existing: WorkflowActionLedgerRecord, source: ActionSource) -> bool:
+    if existing.execution_state in {"dry_run", "suggestion_only", "blocked_approval_required"}:
+        return True
+    return existing.execution_state == "pending_execution" and source == "workflow"
+
+
 def _stable_id(prefix: str, *, business_id: str, idempotency_key: str) -> str:
     digest = hashlib.sha256(f"{business_id}:{idempotency_key}".encode("utf-8")).hexdigest()[:16]
     return f"{prefix}/{business_id}/{digest}"
@@ -337,6 +378,18 @@ class InMemoryWorkflowActionLedgerStore:
         key = (business_id, idempotency_key)
         existing = self._actions.get(key)
         if existing is not None:
+            mismatch = _record_replay_mismatch(
+                existing,
+                case_id=case_id,
+                action_key=action_key,
+                source=source,
+                params=params,
+                rule_id=rule_id,
+                approval_required=approval_required,
+                check_params=_should_check_replay_params(existing, source),
+            )
+            if mismatch is not None:
+                _raise_idempotency_replay_conflict(mismatch)
             return WorkflowActionLedgerWrite(record=existing, created=False)
         timestamp = _coerce_utc(now)
         approval_state: ApprovalState = "pending" if approval_required else "not_required"
@@ -638,6 +691,18 @@ class SQLiteWorkflowActionLedgerStore:
                 )
             except sqlite3.IntegrityError:
                 record = self._get_action_by_idempotency_key(conn, business_id, idempotency_key)
+                mismatch = _record_replay_mismatch(
+                    record,
+                    case_id=case_id,
+                    action_key=action_key,
+                    source=source,
+                    params=params,
+                    rule_id=rule_id,
+                    approval_required=approval_required,
+                    check_params=_should_check_replay_params(record, source),
+                )
+                if mismatch is not None:
+                    _raise_idempotency_replay_conflict(mismatch)
                 return WorkflowActionLedgerWrite(record=record, created=False)
             approval = None
             if approval_request_id is not None:
