@@ -2,12 +2,16 @@
 
 Status: Draft worker packet catalog
 Date: 2026-05-24
-Last reconciled: 2026-06-15
+Last reconciled: 2026-06-16
 Related: `docs/organization/d2c-autonomous-worker-addendum.md`, `docs/specs/integration-train-contract.md`
 
 ## Purpose
 
 These packets are ready-to-dispatch autonomous worker scopes. Each packet is bounded, has source docs, and avoids overlapping edits where possible.
+
+## Current shape guardrail
+
+The operator API surface now lives under `app/brain/operator_api/` and route wiring under `app/http/internal_brain/`. Packets must not revive the deleted monolithic `app/brain/operator_api.py`; update current package modules or add a narrow new module inside the existing package.
 
 ## Common preamble
 
@@ -225,7 +229,7 @@ Read:
 Likely files:
 
 - `app/brain/operational_cases.py`
-- `app/brain/operator_api.py`
+- `app/brain/operator_api/cases.py`, `app/brain/operator_api/actions.py`, and `app/brain/operator_api/projections.py`
 - `tests/test_brain_operational_cases.py`
 - `tests/test_internal_operator_api.py`
 
@@ -250,7 +254,7 @@ Read:
 Likely files:
 
 - `app/brain/reporting.py`
-- `app/brain/operator_api.py`
+- `app/brain/operator_api/cases.py`, `app/brain/operator_api/projections.py`, and `app/brain/operator_api/common.py`
 - `tests/test_brain_reporting.py`
 - `tests/test_internal_operator_api.py`
 
@@ -273,7 +277,7 @@ Read:
 Likely files:
 
 - `app/brain/operator_views.py`
-- `app/brain/operator_api.py`
+- `app/brain/operator_api/views.py`, `app/brain/operator_api/common.py`, and `app/http/internal_brain/*`
 - `server.py`
 - `tests/test_operator_case_views.py`
 - `tests/test_internal_operator_api.py`
@@ -362,9 +366,11 @@ Read:
 Likely files:
 
 - `server.py`
-- `app/brain/operator_api.py`
+- `app/http/internal_brain/common.py`
+- `app/brain/operator_api/actions.py`
 - `app/brain/storage.py`
 - `tests/test_internal_operator_api.py`
+- `tests/test_operator_audit_store.py`
 
 Acceptance:
 

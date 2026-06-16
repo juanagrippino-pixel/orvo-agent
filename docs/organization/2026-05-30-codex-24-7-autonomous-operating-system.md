@@ -64,7 +64,7 @@ The organization is split by bounded ownership, not by random feature generation
 3. **No recursive cron changes**: cron-run agents must not create/update/pause/resume/remove/schedule cron jobs unless their explicit charter is Orvo ops under controller supervision.
 4. **External worktrees only**: implementation jobs create/edit `/root/orvo-agent-worktrees/<lane>`; parent repo stays clean unless an integration controller is explicitly committing verified docs/integrations.
 5. **One bounded slice per implementation run**: TDD first, focused tests, then broader `pytest -q` when feasible.
-6. **No overlapping central edits**: central files like `app/brain/models.py`, `operator_api.py`, registry modules, and stores require explicit ownership and review before parallel edits.
+6. **No overlapping central edits**: central files like `app/brain/models.py`, current package modules such as `app/brain/operator_api/*`, registry modules, and stores require explicit ownership and review before parallel edits.
 7. **Worker handoff manifest required**: every implementation branch reports branch, worktree, commit SHA, files, tests, risks, secret check, and integration recommendation.
 8. **Integration is sequential**: one branch at a time, tests after each merge, stop on first failure.
 9. **Surfaces never become source of truth**: WhatsApp/reports/API/timeline project canonical cases/workflows; they do not own lifecycle state.
