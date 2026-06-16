@@ -361,6 +361,15 @@ def test_connector_contract_metadata_is_registry_service_projection():
         "label": "Sheet Artemea",
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
         "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+        "executor_factory_params": [
+            {"argument": "business_name", "source": "business_attr", "key": "business_name", "required": True, "fallback": None},
+            {"argument": "report_date", "source": "report_date", "key": None, "required": True, "fallback": None},
+            {"argument": "spreadsheet_id", "source": "connector_param", "key": "spreadsheet_id", "required": True, "fallback": None},
+            {"argument": "range_name", "source": "connector_param", "key": "range_name", "required": True, "fallback": None},
+            {"argument": "source_label", "source": "connector_label", "key": None, "required": True, "fallback": None},
+            {"argument": "service", "source": "service_binding", "key": "sheets_service", "required": False, "fallback": None},
+            {"argument": "insight_thresholds", "source": "insight_thresholds", "key": None, "required": True, "fallback": None},
+        ],
         "capabilities": ["daily_report", "sheet_import"],
         "emitted_metric_families": [
             "commerce.orders",
@@ -396,6 +405,31 @@ def test_connector_contract_metadata_is_registry_service_projection():
             "version": "phase-a",
         },
     }
+
+
+def test_connector_contract_metadata_includes_executor_factory_param_metadata():
+    from app.brain.connector_registry import connector_contract_metadata, get_connector_spec
+
+    metadata = connector_contract_metadata(
+        get_connector_spec("tiendanube"),
+        connector_label="TN Artemea",
+    )
+
+    assert metadata["executor_factory_params"] == [
+        {"argument": "business_name", "source": "business_attr", "key": "business_name", "required": True, "fallback": None},
+        {"argument": "store_id", "source": "connector_param", "key": "store_id", "required": True, "fallback": None},
+        {"argument": "access_token", "source": "resolved_secret_param", "key": "access_token", "required": True, "fallback": None},
+        {"argument": "report_date", "source": "report_date", "key": None, "required": True, "fallback": None},
+        {
+            "argument": "http_client",
+            "source": "service_binding",
+            "key": "tiendanube_http_client",
+            "required": False,
+            "fallback": None,
+        },
+        {"argument": "include_stock", "source": "connector_param_bool", "key": "include_stock", "required": False, "fallback": False},
+        {"argument": "source_label", "source": "connector_label", "key": None, "required": True, "fallback": None},
+    ]
 
 
 def test_default_specs_separate_public_required_fields_from_secret_refs():

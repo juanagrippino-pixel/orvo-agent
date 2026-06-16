@@ -255,6 +255,15 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
         },
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
         "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+        "executor_factory_params": [
+            {"argument": "business_name", "source": "business_attr", "key": "business_name", "required": True, "fallback": None},
+            {"argument": "report_date", "source": "report_date", "key": None, "required": True, "fallback": None},
+            {"argument": "spreadsheet_id", "source": "connector_param", "key": "spreadsheet_id", "required": True, "fallback": None},
+            {"argument": "range_name", "source": "connector_param", "key": "range_name", "required": True, "fallback": None},
+            {"argument": "source_label", "source": "connector_label", "key": None, "required": True, "fallback": None},
+            {"argument": "service", "source": "service_binding", "key": "sheets_service", "required": False, "fallback": None},
+            {"argument": "insight_thresholds", "source": "insight_thresholds", "key": None, "required": True, "fallback": None},
+        ],
         "capabilities": ["daily_report", "sheet_import"],
         "emitted_metric_families": [
             "commerce.orders",
@@ -382,6 +391,15 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
         "label": "Sheet Artemea",
         "executor_factory_path": "app.brain.adapters.google_sheets.build_daily_report_from_sheet",
         "supported_runtime_modes": ["preview", "forced", "scheduled", "operator_triggered"],
+        "executor_factory_params": [
+            {"argument": "business_name", "source": "business_attr", "key": "business_name", "required": True, "fallback": None},
+            {"argument": "report_date", "source": "report_date", "key": None, "required": True, "fallback": None},
+            {"argument": "spreadsheet_id", "source": "connector_param", "key": "spreadsheet_id", "required": True, "fallback": None},
+            {"argument": "range_name", "source": "connector_param", "key": "range_name", "required": True, "fallback": None},
+            {"argument": "source_label", "source": "connector_label", "key": None, "required": True, "fallback": None},
+            {"argument": "service", "source": "service_binding", "key": "sheets_service", "required": False, "fallback": None},
+            {"argument": "insight_thresholds", "source": "insight_thresholds", "key": None, "required": True, "fallback": None},
+        ],
         "capabilities": ["daily_report", "sheet_import"],
         "emitted_metric_families": [
             "commerce.orders",

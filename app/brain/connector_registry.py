@@ -976,6 +976,16 @@ def _secret_requirement_metadata(requirement: SecretRequirement) -> dict[str, An
     }
 
 
+def _factory_param_metadata(param) -> dict[str, Any]:
+    return {
+        "argument": param.argument,
+        "source": param.source,
+        "key": param.key,
+        "required": param.required,
+        "fallback": param.fallback,
+    }
+
+
 def connector_contract_metadata(
     spec: ConnectorSpec,
     *,
@@ -991,6 +1001,9 @@ def connector_contract_metadata(
         {
             "executor_factory_path": spec.factory_path,
             "supported_runtime_modes": list(spec.executor.supported_runtime_modes),
+            "executor_factory_params": [
+                _factory_param_metadata(param) for param in spec.executor.factory_params
+            ],
             "capabilities": list(spec.capabilities),
             "emitted_metric_families": list(spec.emitted_metric_families),
             "emitted_event_families": list(spec.emitted_event_families),
