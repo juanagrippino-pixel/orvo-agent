@@ -23,13 +23,18 @@ from app.brain.work_items import (
     allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
     case_comment_count,
+    case_issue_security_level,
     case_issue_type,
     case_last_comment_at,
     case_last_event_at,
     case_last_event_type,
+    case_latest_reopened_at,
     case_owner_visible,
     case_priority_bracket,
     case_project_key,
+    case_reopen_count,
+    case_sla_elapsed_seconds,
+    case_sla_remaining_seconds,
     case_sla_status,
     case_status_category,
     case_timeline_event_count,
@@ -463,6 +468,16 @@ def _case_field_value(case: OperationalCase, field: str, now: datetime | None = 
         return case_priority_bracket(case)
     if field == "sla_status":
         return case_sla_status(case)
+    if field == "sla_elapsed_seconds":
+        return case_sla_elapsed_seconds(case, now=now)
+    if field == "sla_remaining_seconds":
+        return case_sla_remaining_seconds(case, now=now)
+    if field == "reopen_count":
+        return case_reopen_count(case)
+    if field == "latest_reopened_at":
+        return case_latest_reopened_at(case)
+    if field == "issue_security_level":
+        return case_issue_security_level(case)
     return getattr(case, field)
 
 

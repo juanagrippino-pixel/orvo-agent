@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -139,6 +139,9 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     assert parse_case_jql("owner_visible = true").normalized == (
         "owner_visible = true ORDER BY priority_score DESC, opened_at ASC"
     )
+    assert parse_case_jql("issue_security_level = internal").normalized == (
+        "issue_security_level = internal ORDER BY priority_score DESC, opened_at ASC"
+    )
 
     with pytest.raises(OperatorAPIError) as unsupported_category:
         parse_case_jql("status_category = waiting")
@@ -147,6 +150,10 @@ def test_parse_case_jql_supports_work_item_projection_fields():
     with pytest.raises(OperatorAPIError) as unsupported_release_state:
         parse_case_jql("release_state = experimental")
     assert unsupported_release_state.value.code == "unsupported_jql_value"
+
+    with pytest.raises(OperatorAPIError) as unsupported_security_level:
+        parse_case_jql("issue_security_level = public")
+    assert unsupported_security_level.value.code == "unsupported_jql_value"
 
 
 def test_internal_case_queue_filters_and_sorts_by_reopen_stats(monkeypatch, tmp_path):

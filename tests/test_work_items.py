@@ -431,6 +431,46 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": False,
         "facetable": True,
     }
+    assert fields["issue_security_level"] == {
+        "field": "issue_security_level",
+        "value_type": "enum",
+        "allowed_values": ["internal", "owner"],
+        "allowed_operators": ["!=", "="],
+        "sortable": False,
+        "facetable": True,
+    }
+    assert fields["reopen_count"] == {
+        "field": "reopen_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["latest_reopened_at"] == {
+        "field": "latest_reopened_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["sla_elapsed_seconds"] == {
+        "field": "sla_elapsed_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["sla_remaining_seconds"] == {
+        "field": "sla_remaining_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
     assert fields["latest_evidence_at"] == {
         "field": "latest_evidence_at",
         "value_type": "datetime",
@@ -508,8 +548,12 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "evidence_snapshot_count",
         "evidence_source_count",
         "latest_evidence_at",
+        "latest_reopened_at",
         "opened_at",
         "priority_score",
+        "reopen_count",
+        "sla_elapsed_seconds",
+        "sla_remaining_seconds",
         "sla_target_seconds",
         "timeline_event_count",
         "updated_at",
@@ -520,6 +564,7 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "degraded",
         "entity.kind",
         "issue_type",
+        "issue_security_level",
         "last_event_type",
         "priority_bracket",
         "project",
