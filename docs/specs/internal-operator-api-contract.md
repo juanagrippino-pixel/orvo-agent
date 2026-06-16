@@ -123,7 +123,14 @@ GET /internal/brain/businesses/{business_id}/case-query-fields
 GET /internal/brain/businesses/{business_id}/cases/facets
 POST /internal/brain/businesses/{business_id}/cases/{case_id}/actions
 GET /internal/brain/businesses/{business_id}/owner-case-brief/preview
+GET /internal/brain/businesses/{business_id}/reports/owner-case-brief/preview
 ```
+
+The `reports/owner-case-brief/preview` path is a compatibility alias for report
+projection callers that already group owner-facing WhatsApp previews under the
+legacy report namespace. Both aliases call the same read-only owner brief
+projection helper and must preserve the same tenant scope, redaction, action-key
+filtering, freshness metadata, and non-dispatch semantics.
 
 Case queue and detail projections include WorkItem envelope fields derived from
 `OperationalCase`, including `project_key`, `issue_type`, `release_state`,
