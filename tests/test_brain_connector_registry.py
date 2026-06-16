@@ -85,6 +85,127 @@ def test_all_default_specs_expose_importable_factory_paths_and_executor_metadata
         assert isinstance(spec.scopes.required, tuple)
 
 
+def test_all_default_specs_satisfy_registry_invariants():
+    from app.brain.connector_registry import (
+        CONNECTOR_HEALTH_STATES,
+        RUNTIME_MODE_FORCED,
+        RUNTIME_MODE_HEALTH_CHECK,
+        RUNTIME_MODE_MANUAL,
+        RUNTIME_MODE_OPERATOR_TRIGGERED,
+        RUNTIME_MODE_PREVIEW,
+        RUNTIME_MODE_SCHEDULED,
+        list_connector_specs,
+    )
+
+    allowed_runtime_modes = {
+        RUNTIME_MODE_PREVIEW,
+        RUNTIME_MODE_MANUAL,
+        RUNTIME_MODE_FORCED,
+        RUNTIME_MODE_SCHEDULED,
+        RUNTIME_MODE_OPERATOR_TRIGGERED,
+        RUNTIME_MODE_HEALTH_CHECK,
+    }
+
+    for spec in list_connector_specs():
+        assert spec.connector_type
+        assert spec.adapter_module
+        assert spec.report_factory
+        assert spec.capabilities
+        assert spec.emitted_metric_families
+        assert spec.emitted_event_families
+        assert spec.executor is not None
+        assert spec.executor.adapter_module == spec.adapter_module
+        assert spec.executor.report_factory == spec.report_factory
+        assert spec.executor.supported_runtime_modes
+        assert set(spec.executor.supported_runtime_modes).issubset(allowed_runtime_modes)
+        assert spec.health.degraded_state in spec.health.allowed_states
+        assert set(spec.health.allowed_states).issubset(CONNECTOR_HEALTH_STATES)
+        assert set(spec.health.detailed_states).isdisjoint(CONNECTOR_HEALTH_STATES)
+        assert spec.rate_limit.default_timeout_seconds > 0
+        assert spec.lifecycle.status
+        assert spec.lifecycle.owner
+        assert spec.lifecycle.version
+
+        legacy_secret_fields = set(spec.legacy_secret_config_fields)
+        declared_secret_fields = set(spec.secret_config_fields)
+        assert legacy_secret_fields == declared_secret_fields
+        assert set(spec.required_config_fields).isdisjoint(legacy_secret_fields)
+        assert set(spec.optional_config_fields).isdisjoint(spec.required_config_fields)
+        assert set(spec.optional_config_fields).isdisjoint(legacy_secret_fields)
+
+        secret_ref_names = {secret.name for secret in spec.required_secret_refs}
+        secret_ref_legacy_fields = {
+            secret.legacy_config_field
+            for secret in spec.required_secret_refs
+            if secret.legacy_config_field
+        }
+        assert secret_ref_names.isdisjoint(spec.required_config_fields)
+        assert secret_ref_names.isdisjoint(spec.optional_config_fields)
+        assert secret_ref_legacy_fields.issubset(legacy_secret_fields)
+
+        resolved_secret_params = {
+            param.key or param.argument
+            for param in spec.executor.factory_params
+            if param.source == "resolved_secret_param"
+        }
+        assert resolved_secret_params.issubset(legacy_secret_fields)
+
+
+def test_connector_spec_rejects_mismatched_executor_factory_path():
+    from app.brain.connector_registry import ConnectorExecutorMetadata, ConnectorSpec
+
+    with pytest.raises(ValueError, match="executor factory path"):
+        ConnectorSpec(
+            connector_type="bad",
+            display_name="Bad",
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="build_daily_report_from_csv_file",
+            capabilities=("daily_report",),
+            emitted_metric_families=("manual.payload",),
+            emitted_event_families=("connector.execution", "connector.health"),
+            executor=ConnectorExecutorMetadata(
+                adapter_module="app.brain.adapters.google_sheets",
+                report_factory="build_daily_report_from_sheet",
+            ),
+        )
+
+
+def test_connector_spec_rejects_undeclared_secret_executor_param():
+    from app.brain.connector_registry import ConnectorFactoryParam, ConnectorExecutorMetadata, ConnectorSpec
+
+    with pytest.raises(ValueError, match="resolved_secret_param.*access_token"):
+        ConnectorSpec(
+            connector_type="bad",
+            display_name="Bad",
+            adapter_module="app.brain.adapters.mercadolibre",
+            report_factory="build_daily_report_from_mercadolibre",
+            capabilities=("daily_report",),
+            emitted_metric_families=("manual.payload",),
+            emitted_event_families=("connector.execution", "connector.health"),
+            executor=ConnectorExecutorMetadata(
+                adapter_module="app.brain.adapters.mercadolibre",
+                report_factory="build_daily_report_from_mercadolibre",
+                factory_params=(ConnectorFactoryParam("access_token", "resolved_secret_param"),),
+            ),
+        )
+
+
+def test_connector_spec_rejects_invalid_health_state():
+    from app.brain.connector_registry import ConnectorHealthMetadata, ConnectorSpec
+
+    with pytest.raises(ValueError, match="degraded_state"):
+        ConnectorSpec(
+            connector_type="bad",
+            display_name="Bad",
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="build_daily_report_from_csv_file",
+            capabilities=("daily_report",),
+            emitted_metric_families=("manual.payload",),
+            emitted_event_families=("connector.execution", "connector.health"),
+            health=ConnectorHealthMetadata(degraded_state="paused"),
+        )
+
+
 def test_executor_metadata_builds_adapter_kwargs_without_connector_branching():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import get_connector_spec
