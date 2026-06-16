@@ -204,6 +204,22 @@ def work_item_query_field_spec(field: str) -> WorkItemQueryFieldDefinition | Non
     return _WORK_ITEM_QUERY_FIELD_BY_KEY.get(field)
 
 
+def work_item_query_field_definition(field: str) -> dict[str, Any] | None:
+    """Expose one canonical query-field definition for operator/query surfaces."""
+
+    definition = work_item_query_field_spec(field)
+    if definition is None:
+        return None
+    return {
+        "field": definition.field,
+        "value_type": definition.value_type,
+        "allowed_values": sorted(definition.allowed_values) if definition.allowed_values is not None else None,
+        "allowed_operators": sorted(definition.allowed_operators),
+        "sortable": definition.sortable,
+        "facetable": definition.facetable,
+    }
+
+
 def allowed_work_item_query_sort_fields() -> set[str]:
     """Return canonical fields allowed in JQL-lite ORDER BY clauses."""
 
@@ -219,17 +235,12 @@ def allowed_work_item_facet_fields() -> set[str]:
 def work_item_query_field_definitions() -> list[dict[str, Any]]:
     """Expose canonical query-field metadata for tests/docs/operator surfaces."""
 
-    return [
-        {
-            "field": definition.field,
-            "value_type": definition.value_type,
-            "allowed_values": sorted(definition.allowed_values) if definition.allowed_values is not None else None,
-            "allowed_operators": sorted(definition.allowed_operators),
-            "sortable": definition.sortable,
-            "facetable": definition.facetable,
-        }
-        for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS
-    ]
+    definitions: list[dict[str, Any]] = []
+    for definition in _WORK_ITEM_QUERY_FIELD_DEFINITIONS:
+        serialized = work_item_query_field_definition(definition.field)
+        if serialized is not None:
+            definitions.append(serialized)
+    return definitions
 
 
 def case_work_item_id(case: OperationalCase) -> str:
