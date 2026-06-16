@@ -126,14 +126,33 @@ _BUILTIN_CASE_VIEWS: tuple[dict[str, Any], ...] = (
 
 
 def builtin_case_views() -> list[dict[str, Any]]:
+    validate_builtin_case_views()
     return redact_secrets([dict(view) for view in _BUILTIN_CASE_VIEWS])
 
 
 def get_builtin_case_view(view_id: str) -> dict[str, Any]:
+    validate_builtin_case_views()
     for view in _BUILTIN_CASE_VIEWS:
         if view["view_id"] == view_id:
             return redact_secrets(dict(view))
     raise OperatorAPIError("case_view_not_found", "case view not found", status_code=404)
+
+
+def validate_builtin_case_views() -> tuple[str, ...]:
+    """Validate built-in views against the canonical WorkItem JQL contract."""
+
+    view_ids: tuple[str, ...] = ()
+    for view in _BUILTIN_CASE_VIEWS:
+        view_id = view.get("view_id")
+        if not isinstance(view_id, str) or not view_id:
+            raise OperatorAPIError("invalid_builtin_case_view", "built-in case view is missing view_id")
+        if view_id in view_ids:
+            raise OperatorAPIError("duplicate_builtin_case_view", f"Duplicate built-in case view: {view_id}")
+        if view.get("readonly") is not True:
+            raise OperatorAPIError("builtin_case_view_not_readonly", f"Built-in case view must be readonly: {view_id}")
+        parse_case_jql(view.get("jql", ""))
+        view_ids = view_ids + (view_id,)
+    return view_ids
 
 
 def parse_case_jql(jql: str | None) -> ParsedCaseJQL:

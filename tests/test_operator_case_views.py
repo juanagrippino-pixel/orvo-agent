@@ -41,6 +41,25 @@ def test_parse_case_jql_uses_canonical_work_item_field_registry():
     )
 
 
+def test_builtin_case_views_parse_against_canonical_jql_contract():
+    assert operator_views.validate_builtin_case_views() == tuple(
+        view["view_id"] for view in operator_views.builtin_case_views()
+    )
+
+
+def test_builtin_case_views_reject_projection_contract_drift(monkeypatch):
+    drifted_view = dict(operator_views._BUILTIN_CASE_VIEWS[0])
+    drifted_view["jql"] = "business_id = other"
+
+    monkeypatch.setattr(operator_views, "_BUILTIN_CASE_VIEWS", (drifted_view,))
+
+    with pytest.raises(OperatorAPIError) as exc:
+        operator_views.validate_builtin_case_views()
+
+    assert exc.value.code == "unsupported_jql_field"
+    assert exc.value.message == "Unsupported JQL field: business_id"
+
+
 def test_parse_case_jql_rejects_business_scope_and_unsupported_values():
     with pytest.raises(OperatorAPIError) as business_scope:
         parse_case_jql("business_id = other")
