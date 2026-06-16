@@ -1379,14 +1379,12 @@ def _case_detection_allowed_by_metric_registry(
         return True
     source_scope = [evidence.source for evidence in insight.evidence]
     source_metrics = _report_metric_objects_for_sources(report=report, sources=source_scope)
-    if validate_metrics(source_metrics, strict=False):
-        return False
     case_metrics = _case_metric_objects_for_sources(
         report=report,
         case_type=case_type,
         sources=source_scope,
     )
-    if source_metrics and not case_metrics:
+    if not case_metrics and source_metrics:
         return False
     return not validate_case_metric_objects(case_metrics)
 
