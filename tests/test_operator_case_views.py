@@ -7,7 +7,7 @@ import pytest
 from app.brain import operator_views
 from app.brain.operational_cases import SQLiteOperationalCaseStore
 from app.brain.operator_api import OperatorAPIError
-from app.brain.operator_views import parse_case_jql
+from app.brain.operator_views import parse_case_jql, validate_builtin_case_views
 from app.brain.storage import init_schema
 from tests.test_internal_operator_api import AUTH, _case_detection, _client, _seed_case
 
@@ -605,6 +605,37 @@ def test_internal_case_views_list_readonly_builtin_views(monkeypatch, tmp_path):
     assert all(view["readonly"] is True for view in views.values())
     assert "business_id" not in " ".join(view["jql"] for view in views.values())
     assert body["redaction_applied"] is True
+
+
+def test_builtin_case_views_validate_against_canonical_query_contract():
+    validated = validate_builtin_case_views()
+
+    assert {view["view_id"] for view in validated} == {
+        "open_cases",
+        "acknowledged_cases",
+        "in_progress_cases",
+        "resolved_cases",
+        "critical_open",
+        "data_stale",
+        "stockout_risk",
+        "connector_degraded",
+    }
+    assert all("normalized_jql" in view for view in validated)
+
+
+def test_builtin_case_view_validation_rejects_non_sortable_order_field(monkeypatch):
+    broken = tuple(
+        {**view, "jql": "status = open ORDER BY title ASC"}
+        if view["view_id"] == "open_cases"
+        else view
+        for view in operator_views._BUILTIN_CASE_VIEWS
+    )
+    monkeypatch.setattr(operator_views, "_BUILTIN_CASE_VIEWS", broken)
+
+    with pytest.raises(OperatorAPIError) as exc_info:
+        validate_builtin_case_views()
+
+    assert exc_info.value.code == "unsupported_jql_field"
 
 
 def test_internal_case_view_execution_matches_equivalent_jql(monkeypatch, tmp_path):

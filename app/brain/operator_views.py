@@ -136,6 +136,23 @@ def get_builtin_case_view(view_id: str) -> dict[str, Any]:
     raise OperatorAPIError("case_view_not_found", "case view not found", status_code=404)
 
 
+def validate_builtin_case_views() -> tuple[dict[str, Any], ...]:
+    """Validate built-in read-only case views against the canonical JQL contract."""
+
+    return tuple(_validate_builtin_case_view(view) for view in _BUILTIN_CASE_VIEWS)
+
+
+def _validate_builtin_case_view(view: dict[str, Any]) -> dict[str, Any]:
+    if view.get("readonly") is not True:
+        raise OperatorAPIError(
+            "case_view_invalid",
+            f"Built-in case view must be readonly: {view.get('view_id')}",
+            status_code=500,
+        )
+    parsed = parse_case_jql(view["jql"])
+    return {"view_id": view["view_id"], "normalized_jql": parsed.normalized}
+
+
 def parse_case_jql(jql: str | None) -> ParsedCaseJQL:
     raw = (jql or "").strip()
     if not raw:
