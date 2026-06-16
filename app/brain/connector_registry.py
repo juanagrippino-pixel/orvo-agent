@@ -976,7 +976,7 @@ def _secret_requirement_metadata(requirement: SecretRequirement) -> dict[str, An
     }
 
 
-def _factory_param_metadata(param) -> dict[str, Any]:
+def _factory_param_metadata(param: ConnectorFactoryParam) -> dict[str, Any]:
     return {
         "argument": param.argument,
         "source": param.source,
