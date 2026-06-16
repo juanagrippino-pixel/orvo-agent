@@ -792,6 +792,111 @@ def _common_daily_params() -> tuple[ConnectorFactoryParam, ConnectorFactoryParam
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ConnectorCertification:
+    """Safe provisioning metadata for connector onboarding and certification."""
+
+    connector_type: str
+    display_name: str
+    status: str
+    owner: str
+    version: str
+    capabilities: tuple[str, ...]
+    scopes: tuple[str, ...]
+    secret_refs: tuple[str, ...]
+    rate_limit: dict[str, Any]
+    health_states: tuple[str, ...]
+    emitted_metric_families: tuple[str, ...]
+    runtime_modes: tuple[str, ...]
+    required_config_fields: tuple[str, ...]
+    optional_config_fields: tuple[str, ...]
+
+
+def connector_certification_for_spec(spec: ConnectorSpec) -> ConnectorCertification:
+    """Return safe, serializable certification metadata for one connector spec."""
+
+    return ConnectorCertification(
+        connector_type=spec.connector_type,
+        display_name=spec.display_name,
+        status=spec.lifecycle.status,
+        owner=spec.lifecycle.owner,
+        version=spec.lifecycle.version,
+        capabilities=spec.capabilities,
+        scopes=spec.scopes.required,
+        secret_refs=tuple(ref.name for ref in spec.required_secret_refs),
+        rate_limit=spec.rate_limit_policy_metadata(),
+        health_states=spec.health.allowed_states,
+        emitted_metric_families=spec.emitted_metric_families,
+        runtime_modes=spec.executor.supported_runtime_modes if spec.executor else (),
+        required_config_fields=spec.required_config_fields,
+        optional_config_fields=spec.optional_config_fields,
+    )
+
+
+def _connector_doc_join(values: Iterable[str]) -> str:
+    values = tuple(values)
+    return ", ".join(values) if values else "none"
+
+
+def _connector_doc_rate_limit(value: dict[str, Any]) -> str:
+    rpm = value.get("requests_per_minute")
+    retry_policy = value.get("retry_policy", "none")
+    if rpm is None:
+        return f"retry {retry_policy}"
+    return f"{rpm} rpm / retry {retry_policy}"
+
+
+def _connector_doc_cell(value: str) -> str:
+    return value.replace("|", "\\|")
+
+
+def render_connector_certification_markdown(
+    specs: Iterable[ConnectorSpec] | None = None,
+) -> str:
+    """Render a stable markdown snapshot for connector certification."""
+
+    resolved_specs = tuple(specs) if specs is not None else default_connector_registry().specs()
+    lines = [
+        "# Connector certification snapshot",
+        "",
+        "Status: generated from `app.brain.connector_registry.default_connector_registry()`.",
+        "",
+        "This snapshot is the developer-facing connector onboarding reference. Keep connector metadata in `ConnectorSpec` first, then refresh this document from the renderer.",
+        "",
+        "| Connector type | Display name | Status | Owner | Version | Capabilities | Scopes | Secret refs | Rate limit | Health states | Runtime modes | Config fields | Metric families |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for spec in resolved_specs:
+        certification = connector_certification_for_spec(spec)
+        config_fields = (
+            _connector_doc_join(certification.required_config_fields)
+            if certification.optional_config_fields == ()
+            else f"required: {_connector_doc_join(certification.required_config_fields)}; optional: {_connector_doc_join(certification.optional_config_fields)}"
+        )
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    f"`{_connector_doc_cell(certification.connector_type)}`",
+                    _connector_doc_cell(certification.display_name),
+                    _connector_doc_cell(certification.status),
+                    _connector_doc_cell(certification.owner),
+                    _connector_doc_cell(certification.version),
+                    _connector_doc_cell(_connector_doc_join(certification.capabilities)),
+                    _connector_doc_cell(_connector_doc_join(certification.scopes)),
+                    _connector_doc_cell(_connector_doc_join(certification.secret_refs)),
+                    _connector_doc_cell(_connector_doc_rate_limit(certification.rate_limit)),
+                    _connector_doc_cell(_connector_doc_join(certification.health_states)),
+                    _connector_doc_cell(_connector_doc_join(certification.runtime_modes)),
+                    _connector_doc_cell(config_fields),
+                    _connector_doc_cell(_connector_doc_join(certification.emitted_metric_families)),
+                )
+            )
+            + " |"
+        )
+    return "\n".join(lines)
+
+
 DEFAULT_CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
     ConnectorSpec(
         connector_type=CONNECTOR_TYPE_CSV,
