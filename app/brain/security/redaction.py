@@ -24,7 +24,7 @@ _SECRET_KEY_PARTS = (
     "secret",
     "token",
 )
-_SAFE_SECRET_CONTRACT_KEYS = {"secret_param_names", "legacy_secret_param_names"}
+_SAFE_SECRET_CONTRACT_KEYS = {"secret_param_names", "legacy_secret_param_names", "required_secret_refs"}
 _SAFE_SECRET_REF_KEYS = {"secret_refs"}
 _SAFE_OPERATIONAL_SECRET_NAMED_KEYS = {"legacy_token_scoped"}
 

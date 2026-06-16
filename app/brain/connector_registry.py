@@ -966,6 +966,16 @@ class ConnectorRegistry:
         )
 
 
+def _secret_requirement_metadata(requirement: SecretRequirement) -> dict[str, Any]:
+    return {
+        "name": requirement.name,
+        "provider": requirement.provider,
+        "description": requirement.description,
+        "scopes": list(requirement.scopes),
+        "legacy_config_field": requirement.legacy_config_field,
+    }
+
+
 def connector_contract_metadata(
     spec: ConnectorSpec,
     *,
@@ -984,6 +994,10 @@ def connector_contract_metadata(
             "capabilities": list(spec.capabilities),
             "emitted_metric_families": list(spec.emitted_metric_families),
             "emitted_event_families": list(spec.emitted_event_families),
+            "required_secret_refs": [
+                _secret_requirement_metadata(requirement)
+                for requirement in spec.required_secret_refs
+            ],
             "required_scopes": list(spec.scopes.required),
             "health_policy": spec.health_policy_metadata(),
             "rate_limit_policy": spec.rate_limit_policy_metadata(),

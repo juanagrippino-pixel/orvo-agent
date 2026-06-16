@@ -84,6 +84,27 @@ def test_validate_emitted_events_for_connector_module_function_matches_spec_meth
     ).validate_emitted_events(events)
 
 
+def test_connector_contract_metadata_exposes_required_secret_refs_without_secret_values():
+    from app.brain.connector_registry import CONNECTOR_TYPE_TIENDANUBE, connector_contract_metadata, get_connector_spec
+
+    tiendanube = get_connector_spec(CONNECTOR_TYPE_TIENDANUBE)
+
+    metadata = connector_contract_metadata(tiendanube)
+
+    assert metadata["required_secret_refs"] == [
+        {
+            "name": "access_token",
+            "provider": "tiendanube_oauth",
+            "description": "Tiendanube API bearer token reference.",
+            "scopes": ["orders.read", "products.read"],
+            "legacy_config_field": "access_token",
+        }
+    ]
+    rendered = repr(metadata)
+    assert "tn_test_token" not in rendered
+    assert "secret://" not in rendered
+
+
 def test_runtime_compiler_uses_connector_registry_contract_not_private_duplicate_descriptors():
     from app.brain.config import BusinessConfig, ConnectorConfig
     from app.brain.connector_registry import CAPABILITY_COMMERCE_METRICS

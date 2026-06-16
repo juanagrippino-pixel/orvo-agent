@@ -13,6 +13,7 @@ from plugins.orvo_control_plane.runtime import (
     ConnectorRunLedger,
     compile_connector_call,
 )
+from app.brain.security.redaction import redact_secrets
 
 
 def test_compile_connector_call_uses_registry_contract_and_preserves_secret_refs_only():
@@ -531,6 +532,27 @@ def test_connector_run_ledger_redacts_structured_sensitive_fields_and_secret_ref
     assert raw_opaque not in replay_json
     assert secret_ref not in replay_json
     assert "***" in replay_json
+
+
+def test_redaction_preserves_contractual_required_secret_refs_without_secret_values():
+    payload = {
+        "connector": {
+            "required_secret_refs": [
+                {
+                    "name": "admin_token",
+                    "provider": "tenant",
+                    "description": "Token reference.",
+                    "scopes": ["orders.read"],
+                    "legacy_config_field": "admin_token",
+                }
+            ]
+        }
+    }
+    redacted = redact_secrets(payload)
+
+    assert redacted["connector"]["required_secret_refs"][0]["name"] == "admin_token"
+    assert redacted["connector"]["required_secret_refs"][0]["legacy_config_field"] == "admin_token"
+    assert redacted["connector"]["required_secret_refs"][0]["scopes"] == ["orders.read"]
 
 
 def test_connector_executor_records_failed_transition_when_adapter_is_missing():
