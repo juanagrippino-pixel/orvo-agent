@@ -58,6 +58,16 @@ RUNTIME_MODE_HEALTH_CHECK = "health_check"
 
 EVENT_FAMILY_CONNECTOR_EXECUTION = "connector.execution"
 EVENT_FAMILY_CONNECTOR_HEALTH = "connector.health"
+RUNTIME_MODES = frozenset(
+    {
+        RUNTIME_MODE_PREVIEW,
+        RUNTIME_MODE_MANUAL,
+        RUNTIME_MODE_FORCED,
+        RUNTIME_MODE_SCHEDULED,
+        RUNTIME_MODE_OPERATOR_TRIGGERED,
+        RUNTIME_MODE_HEALTH_CHECK,
+    }
+)
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
@@ -297,6 +307,19 @@ class ConnectorSpec:
     lifecycle: ConnectorLifecycleMetadata = ConnectorLifecycleMetadata()
 
     def __post_init__(self) -> None:
+        if not self.connector_type:
+            raise ValueError("connector_type must not be empty")
+        if not self.adapter_module:
+            raise ValueError("adapter_module must not be empty")
+        if not self.report_factory:
+            raise ValueError("report_factory must not be empty")
+        if not self.capabilities:
+            raise ValueError("capabilities must not be empty")
+        if not self.emitted_metric_families:
+            raise ValueError("emitted_metric_families must not be empty")
+        if not self.emitted_event_families:
+            raise ValueError("emitted_event_families must not be empty")
+
         if self.executor is None:
             object.__setattr__(
                 self,
@@ -306,10 +329,114 @@ class ConnectorSpec:
                     report_factory=self.report_factory,
                 ),
             )
-        if not self.legacy_secret_config_fields and self.secret_config_fields:
-            object.__setattr__(self, "legacy_secret_config_fields", self.secret_config_fields)
-        if not self.secret_config_fields and self.legacy_secret_config_fields:
-            object.__setattr__(self, "secret_config_fields", self.legacy_secret_config_fields)
+        assert self.executor is not None
+
+        if self.executor.adapter_module != self.adapter_module:
+            raise ValueError(
+                f"connector {self.connector_type} executor factory path adapter_module "
+                f"{self.executor.adapter_module!r} does not match spec {self.adapter_module!r}"
+            )
+        if self.executor.report_factory != self.report_factory:
+            raise ValueError(
+                f"connector {self.connector_type} executor factory path report_factory "
+                f"{self.executor.report_factory!r} does not match spec {self.report_factory!r}"
+            )
+        if not self.executor.supported_runtime_modes:
+            raise ValueError(f"connector {self.connector_type} supported_runtime_modes must not be empty")
+        unsupported_modes = set(self.executor.supported_runtime_modes) - RUNTIME_MODES
+        if unsupported_modes:
+            raise ValueError(
+                f"connector {self.connector_type} has unsupported runtime modes: "
+                + ", ".join(sorted(unsupported_modes))
+            )
+
+        if self.health.degraded_state not in self.health.allowed_states:
+            raise ValueError(
+                f"connector {self.connector_type} degraded_state {self.health.degraded_state!r} "
+                f"is not in allowed health states: {', '.join(self.health.allowed_states)}"
+            )
+        invalid_health_states = set(self.health.allowed_states) - set(CONNECTOR_HEALTH_STATES)
+        if invalid_health_states:
+            raise ValueError(
+                f"connector {self.connector_type} has invalid health states: "
+                + ", ".join(sorted(invalid_health_states))
+            )
+        detailed_state_overlap = set(self.health.detailed_states) & set(CONNECTOR_HEALTH_STATES)
+        if detailed_state_overlap:
+            raise ValueError(
+                f"connector {self.connector_type} detailed health states must not reuse canonical states: "
+                + ", ".join(sorted(detailed_state_overlap))
+            )
+
+        if self.rate_limit.default_timeout_seconds <= 0:
+            raise ValueError(f"connector {self.connector_type} default_timeout_seconds must be positive")
+        if not self.lifecycle.status or not self.lifecycle.owner or not self.lifecycle.version:
+            raise ValueError(f"connector {self.connector_type} lifecycle metadata must be complete")
+
+        legacy_secret_fields = set(self.legacy_secret_config_fields)
+        declared_secret_fields = set(self.secret_config_fields)
+        if legacy_secret_fields and not declared_secret_fields:
+            declared_secret_fields = set(legacy_secret_fields)
+        elif declared_secret_fields and not legacy_secret_fields:
+            legacy_secret_fields = set(declared_secret_fields)
+        if legacy_secret_fields != declared_secret_fields:
+            raise ValueError(
+                f"connector {self.connector_type} legacy_secret_config_fields and secret_config_fields differ"
+            )
+        if legacy_secret_fields:
+            object.__setattr__(self, "legacy_secret_config_fields", tuple(sorted(legacy_secret_fields)))
+            object.__setattr__(self, "secret_config_fields", tuple(sorted(declared_secret_fields)))
+        required_config_fields = set(self.required_config_fields)
+        optional_config_fields = set(self.optional_config_fields)
+        if required_config_fields & legacy_secret_fields:
+            raise ValueError(
+                f"connector {self.connector_type} required_config_fields overlap secret fields: "
+                + ", ".join(sorted(required_config_fields & legacy_secret_fields))
+            )
+        if optional_config_fields & required_config_fields:
+            raise ValueError(
+                f"connector {self.connector_type} optional_config_fields overlap required fields: "
+                + ", ".join(sorted(optional_config_fields & required_config_fields))
+            )
+        if optional_config_fields & legacy_secret_fields:
+            raise ValueError(
+                f"connector {self.connector_type} optional_config_fields overlap secret fields: "
+                + ", ".join(sorted(optional_config_fields & legacy_secret_fields))
+            )
+
+        secret_ref_names = {secret.name for secret in self.required_secret_refs}
+        secret_ref_legacy_fields = {
+            secret.legacy_config_field
+            for secret in self.required_secret_refs
+            if secret.legacy_config_field
+        }
+        if secret_ref_names & required_config_fields:
+            raise ValueError(
+                f"connector {self.connector_type} required_secret_refs overlap required_config_fields: "
+                + ", ".join(sorted(secret_ref_names & required_config_fields))
+            )
+        if secret_ref_names & optional_config_fields:
+            raise ValueError(
+                f"connector {self.connector_type} required_secret_refs overlap optional_config_fields: "
+                + ", ".join(sorted(secret_ref_names & optional_config_fields))
+            )
+        if not secret_ref_legacy_fields.issubset(legacy_secret_fields):
+            raise ValueError(
+                f"connector {self.connector_type} required_secret_refs legacy_config_field values "
+                "must be declared in legacy_secret_config_fields"
+            )
+
+        resolved_secret_params = {
+            param.key or param.argument
+            for param in self.executor.factory_params
+            if param.source == "resolved_secret_param"
+        }
+        if not resolved_secret_params.issubset(legacy_secret_fields):
+            raise ValueError(
+                f"connector {self.connector_type} resolved_secret_param values must be declared "
+                "in legacy_secret_config_fields: "
+                + ", ".join(sorted(resolved_secret_params - legacy_secret_fields))
+            )
 
     @property
     def factory_path(self) -> str:

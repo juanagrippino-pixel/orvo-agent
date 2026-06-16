@@ -86,6 +86,8 @@ def test_enabled_daily_connector_types_are_discovered_from_registry_metadata(mon
                 adapter_module="app.brain.adapters.csv_file",
                 report_factory="build_daily_report_from_csv_file",
                 capabilities=(CAPABILITY_DAILY_REPORT,),
+                emitted_metric_families=("manual.payload",),
+                emitted_event_families=("connector.execution", "connector.health"),
                 required_config_fields=("shop_id",),
             ),
             ConnectorSpec(
@@ -94,6 +96,8 @@ def test_enabled_daily_connector_types_are_discovered_from_registry_metadata(mon
                 adapter_module="app.brain.adapters.sample",
                 report_factory="build_daily_report_from_payload",
                 capabilities=("manual_payload",),
+                emitted_metric_families=("manual.payload",),
+                emitted_event_families=("connector.execution", "connector.health"),
             ),
         )
     )
