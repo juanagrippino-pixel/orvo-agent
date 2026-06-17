@@ -349,6 +349,33 @@ def test_registry_as_mapping_is_read_only():
         mutable_mapping["new"] = mapping["csv"]
 
 
+def test_connector_contract_metadata_exposes_scope_notes():
+    from app.brain.connector_registry import (
+        ConnectorScopeMetadata,
+        ConnectorSpec,
+        connector_contract_metadata,
+    )
+
+    metadata = connector_contract_metadata(
+        ConnectorSpec(
+            connector_type="bad",
+            display_name="Bad",
+            adapter_module="app.brain.adapters.csv_file",
+            report_factory="build_daily_report_from_csv_file",
+            capabilities=("daily_report",),
+            emitted_metric_families=("manual.payload",),
+            emitted_event_families=("connector.execution", "connector.health"),
+            scopes=ConnectorScopeMetadata(
+                required=("orders.read",),
+                notes="Read orders and stock for daily operating cases.",
+            ),
+        )
+    )
+
+    assert metadata["required_scopes"] == ["orders.read"]
+    assert metadata["scope_notes"] == "Read orders and stock for daily operating cases."
+
+
 def test_connector_contract_metadata_is_registry_service_projection():
     from app.brain.connector_registry import connector_contract_metadata, get_connector_spec
 
@@ -381,6 +408,7 @@ def test_connector_contract_metadata_is_registry_service_projection():
         "emitted_event_families": ["connector.execution", "connector.health"],
         "required_secret_refs": [],
         "required_scopes": ["spreadsheets.readonly"],
+        "scope_notes": "",
         "health_policy": {
             "readiness_check": "metadata_only",
             "supports_health_check": False,

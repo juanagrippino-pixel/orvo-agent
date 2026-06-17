@@ -219,6 +219,7 @@ def _connector_projection(
         lifecycle: dict[str, Any] | None = None
         capabilities: list[str] = []
         required_scopes: list[str] = []
+        scope_notes: str = ""
         emitted_metric_families: list[str] = []
         emitted_event_families: list[str] = []
         supported_runtime_modes: list[str] = []
@@ -230,16 +231,17 @@ def _connector_projection(
             strict=True,
         )
         auth_requirements = _auth_requirements_projection(spec, connector)
-        health_policy = spec.health_policy_metadata()
-        rate_limit_policy = spec.rate_limit_policy_metadata()
-        lifecycle = spec.lifecycle_metadata()
-        capabilities = list(spec.capabilities)
-        required_scopes = list(spec.scopes.required)
-        emitted_metric_families = list(spec.emitted_metric_families)
-        emitted_event_families = list(spec.emitted_event_families)
-        assert spec.executor is not None
-        supported_runtime_modes = list(spec.executor.supported_runtime_modes)
-        executor_factory_path = spec.factory_path
+        contract_metadata = connector_contract_metadata(spec, connector_label=connector.label)
+        health_policy = contract_metadata["health_policy"]
+        rate_limit_policy = contract_metadata["rate_limit_policy"]
+        lifecycle = contract_metadata["lifecycle"]
+        capabilities = contract_metadata["capabilities"]
+        required_scopes = contract_metadata["required_scopes"]
+        scope_notes = contract_metadata["scope_notes"]
+        emitted_metric_families = contract_metadata["emitted_metric_families"]
+        emitted_event_families = contract_metadata["emitted_event_families"]
+        supported_runtime_modes = contract_metadata["supported_runtime_modes"]
+        executor_factory_path = contract_metadata["executor_factory_path"]
 
     latest = latest_outcomes.get(f"id:{connector.connector_id}")
     if latest is None and connector_type_counts.get(connector.connector_type, 0) == 1:
@@ -271,6 +273,7 @@ def _connector_projection(
         **setup,
         "capabilities": capabilities,
         "required_scopes": required_scopes,
+        "scope_notes": scope_notes,
         "supported_runtime_modes": supported_runtime_modes,
         "executor_factory_path": executor_factory_path,
         "emitted_metric_families": emitted_metric_families,

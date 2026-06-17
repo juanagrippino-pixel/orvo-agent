@@ -195,6 +195,7 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "stale_success",
     ]
     assert tiendanube["required_scopes"] == ["orders.read", "products.read"]
+    assert tiendanube["scope_notes"] == ""
     assert tiendanube["supported_runtime_modes"] == [
         "preview",
         "forced",

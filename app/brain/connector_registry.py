@@ -1012,6 +1012,7 @@ def connector_contract_metadata(
                 for requirement in spec.required_secret_refs
             ],
             "required_scopes": list(spec.scopes.required),
+            "scope_notes": spec.scopes.notes,
             "health_policy": spec.health_policy_metadata(),
             "rate_limit_policy": spec.rate_limit_policy_metadata(),
             "lifecycle": spec.lifecycle_metadata(),
