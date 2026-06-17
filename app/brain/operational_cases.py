@@ -11,7 +11,7 @@ import json
 import re
 import sqlite3
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Literal, Protocol
 from uuid import uuid4
 
@@ -91,6 +91,28 @@ _SYSTEM_CASE_STATUS_TRANSITIONS: dict[OperationalCaseStatus, set[OperationalCase
 _SAFE_CONNECTOR_IDENTIFIER_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 
 
+TERMINAL_STATUSES: frozenset[str] = frozenset({"resolved", "dismissed"})
+SLA_STATUS_NOT_CONFIGURED = "not_configured"
+SLA_STATUS_NOT_APPLICABLE = "not_applicable"
+SLA_STATUS_PENDING = "pending"
+SLA_STATUS_BREACHED = "breached"
+SLA_STATUS_MET = "met"
+
+DEFAULT_SLA_SECONDS_BY_SEVERITY: dict[OperationalCaseSeverity, int] = {
+    "critical": 2 * 60 * 60,
+    "warning": 24 * 60 * 60,
+    "info": 72 * 60 * 60,
+}
+
+
+def default_sla_target_seconds(severity: OperationalCaseSeverity) -> int:
+    return DEFAULT_SLA_SECONDS_BY_SEVERITY[severity]
+
+
+def default_due_at(detected_at: datetime, severity: OperationalCaseSeverity) -> datetime:
+    return detected_at + timedelta(seconds=default_sla_target_seconds(severity))
+
+
 class OperationalCaseStatusError(ValueError):
     """Raised when a case lifecycle transition is invalid."""
 
@@ -128,6 +150,34 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("operational case timestamps must be timezone-aware")
     return value.astimezone(timezone.utc)
+
+
+def _detection_sla_target_seconds(detection: OperationalCaseDetection) -> int:
+    return detection.sla_target_seconds or default_sla_target_seconds(detection.severity)
+
+
+def _detection_due_at(detection: OperationalCaseDetection, detected_at: datetime, sla_target_seconds: int) -> datetime:
+    return detected_at + timedelta(seconds=sla_target_seconds)
+
+
+def _merge_sla_for_open_case(
+    existing_case: OperationalCase,
+    detection: OperationalCaseDetection,
+    detected_at: datetime,
+    sla_target_seconds: int,
+) -> tuple[int, datetime | None]:
+    due_at = _detection_due_at(detection, detected_at, sla_target_seconds)
+    if existing_case.due_at is None or due_at < existing_case.due_at:
+        return sla_target_seconds, due_at
+    return sla_target_seconds, existing_case.due_at
+
+
+def _merge_sla_for_new_or_reopened_case(
+    detection: OperationalCaseDetection,
+    detected_at: datetime,
+    sla_target_seconds: int,
+) -> tuple[int, datetime]:
+    return sla_target_seconds, _detection_due_at(detection, detected_at, sla_target_seconds)
 
 
 def _unique(values: list[str]) -> list[str]:
@@ -323,6 +373,7 @@ class OperationalCaseDetection(BaseModel):
     title: str = Field(..., min_length=1)
     severity: OperationalCaseSeverity
     priority_score: int = Field(..., ge=0, le=100)
+    sla_target_seconds: int | None = Field(default=None, ge=0)
     entity_scope: dict[str, Any] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(default_factory=list)
     run_id: str | None = None
@@ -355,6 +406,8 @@ class OperationalCase(BaseModel):
     status: OperationalCaseStatus = "open"
     severity: OperationalCaseSeverity
     priority_score: int = Field(..., ge=0, le=100)
+    sla_target_seconds: int | None = Field(default=None, ge=0)
+    due_at: datetime | None = None
     entity_scope: dict[str, Any] = Field(default_factory=dict)
     opened_at: datetime = Field(default_factory=_now_utc)
     updated_at: datetime = Field(default_factory=_now_utc)
@@ -376,10 +429,16 @@ class OperationalCase(BaseModel):
     def redact_title(cls, value: str) -> str:
         return redact_text(value) or "[REDACTED]"
 
-    @field_validator("opened_at", "updated_at", "acknowledged_at", "assigned_at", "resolved_at", "dismissed_at")
+    @field_validator("opened_at", "updated_at", "acknowledged_at", "assigned_at", "resolved_at", "dismissed_at", "due_at")
     @classmethod
     def normalize_timestamps(cls, value: datetime | None) -> datetime | None:
         return _as_utc(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_due_at_after_opened(self) -> OperationalCase:
+        if self.due_at is not None and self.due_at < self.opened_at:
+            raise ValueError("due_at must be after opened_at")
+        return self
 
     @field_validator("assignee_ref", mode="before")
     @classmethod
@@ -463,9 +522,26 @@ def _canonical_snapshot_ids(
         snapshot_id = by_key.get(key)
         if snapshot_id is None or snapshot_id in seen:
             continue
-        seen.add(snapshot_id)
         ids.append(snapshot_id)
+        seen.add(snapshot_id)
     return ids
+
+
+def _detection_update_metadata(existing: OperationalCase, detection: OperationalCaseDetection) -> dict[str, Any]:
+    """Return deterministic audit metadata for a recurring detection update."""
+
+    metadata: dict[str, Any] = {"dedupe_key": detection.dedupe_key}
+    if existing.priority_score != detection.priority_score:
+        metadata.update({
+            "previous_priority_score": existing.priority_score,
+            "priority_score": detection.priority_score,
+        })
+    if existing.severity != detection.severity:
+        metadata.update({
+            "previous_severity": existing.severity,
+            "severity": detection.severity,
+        })
+    return metadata
 
 
 def _source_from_evidence_ref(evidence_ref: str) -> str:
@@ -630,7 +706,9 @@ class _OperationalCaseMutations:
         detection_snapshot_keys = [snapshot.snapshot_key for snapshot in detection_snapshots]
         detection_artifact_ref = detection.artifact_refs[0] if detection.artifact_refs else None
         existing = self.find_by_dedupe_key(detection.business_id, detection.dedupe_key)  # type: ignore[attr-defined]
+        sla_target_seconds = _detection_sla_target_seconds(detection)
         if existing is None:
+            sla_target_seconds, due_at = _merge_sla_for_new_or_reopened_case(detection, detected_at, sla_target_seconds)
             case_id = str(uuid4())
             case = OperationalCase(
                 case_id=case_id,
@@ -641,6 +719,8 @@ class _OperationalCaseMutations:
                 status="open",
                 severity=detection.severity,
                 priority_score=detection.priority_score,
+                sla_target_seconds=sla_target_seconds,
+                due_at=due_at,
                 entity_scope=detection.entity_scope,
                 opened_at=detected_at,
                 updated_at=detected_at,
@@ -670,28 +750,34 @@ class _OperationalCaseMutations:
             event_type: TimelineEventType = "case_reopened" if is_recurrence else "case_updated"
             event_verb = "Reopened" if is_recurrence else "Updated"
             merged_snapshots = _unique_snapshots([*existing.evidence_snapshots, *detection_snapshots])
-            event_metadata: dict[str, Any] = {"dedupe_key": detection.dedupe_key}
-            if detection.severity != existing.severity:
-                event_metadata["severity_from"] = existing.severity
-                event_metadata["severity_to"] = detection.severity
-            if detection.priority_score != existing.priority_score:
-                event_metadata["priority_score_from"] = existing.priority_score
-                event_metadata["priority_score_to"] = detection.priority_score
-            # Detection-sourced advisory keys (`metric_registry_mode`,
-            # `metric_registry_issues`) are recomputed fresh from the report on
-            # every detection. They must NOT leak from a prior run when the
-            # latest detection is registry-clean — otherwise operators see
-            # phantom advisory state on the case after metric drift is fixed.
-            existing_metadata_carryover = {
-                key: value
-                for key, value in existing.metadata.items()
-                if key not in {"metric_registry_mode", "metric_registry_issues"}
-            }
+            if is_recurrence:
+                sla_target_seconds, due_at = _merge_sla_for_new_or_reopened_case(detection, detected_at, sla_target_seconds)
+            else:
+                sla_target_seconds, due_at = _merge_sla_for_open_case(existing, detection, detected_at, sla_target_seconds)
+            metadata = _detection_update_metadata(existing, detection)
+            existing_metadata_carryover = dict(existing.metadata)
+            if "metric_registry_mode" not in detection.metadata:
+                existing_metadata_carryover.pop("metric_registry_mode", None)
+                existing_metadata_carryover.pop("metric_registry_issues", None)
+            if existing.sla_target_seconds != sla_target_seconds:
+                metadata.update({
+                    "previous_sla_target_seconds": existing.sla_target_seconds,
+                    "sla_target_seconds": sla_target_seconds,
+                })
+            if existing.due_at != due_at:
+                metadata.update({
+                    "previous_due_at": existing.due_at.isoformat() if existing.due_at is not None else None,
+                    "due_at": due_at.isoformat(),
+                })
+            if is_recurrence and existing.assignee_ref is not None:
+                metadata["previous_assignee_ref"] = existing.assignee_ref
             update: dict[str, Any] = {
                 "title": detection.title,
                 "status": "open" if is_recurrence else existing.status,
                 "severity": detection.severity,
                 "priority_score": detection.priority_score,
+                "sla_target_seconds": sla_target_seconds,
+                "due_at": due_at,
                 "entity_scope": detection.entity_scope or existing.entity_scope,
                 "updated_at": detected_at,
                 "latest_run_id": detection.run_id or existing.latest_run_id,
@@ -708,14 +794,13 @@ class _OperationalCaseMutations:
                     OperationalCaseTimelineEvent(
                         event_type=event_type,
                         actor_type="system",
-                        actor_ref="orvo_runtime",
-                        run_id=detection.run_id,
+                        actor_ref="operational-case-engine",
                         case_id=existing.case_id,
                         artifact_ref=detection_artifact_ref,
                         evidence_snapshot_ids=_canonical_snapshot_ids(merged_snapshots, detection_snapshot_keys),
                         created_at=detected_at,
                         summary=f"{event_verb} {detection.case_type} case from deterministic detection.",
-                        metadata=event_metadata,
+                        metadata=metadata,
                     ),
                 ],
             }
@@ -723,6 +808,9 @@ class _OperationalCaseMutations:
                 update["resolved_at"] = None
                 update["dismissed_at"] = None
                 update["acknowledged_at"] = None
+                if existing.assignee_ref is not None:
+                    update["assignee_ref"] = None
+                    update["assigned_at"] = None
             case = existing.model_copy(update=update, deep=True)
             case = OperationalCase.model_validate(case.model_dump())
         self._persist(case)

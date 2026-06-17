@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import get_args
 
 import sqlite3
 
-from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCaseStore
+from app.brain.operational_cases import OperationalCaseType, SQLiteOperationalCaseStore, TimelineEventType
 from app.brain.semantics import CASE_FAMILY_METRICS
 from app.brain.storage import init_schema
 from app.brain.work_items import (
@@ -12,8 +13,11 @@ from app.brain.work_items import (
     allowed_status_categories,
     allowed_work_item_facet_fields,
     allowed_work_item_query_sort_fields,
+    case_issue_security_level,
+    case_latest_reopened_at,
     case_priority_bracket,
     case_project_key,
+    case_sla_status,
     case_status_category,
     case_type_release_state,
     case_work_item_projection,
@@ -61,24 +65,150 @@ def test_project_key_for_business_avoids_truncation_collisions():
 def test_case_work_item_projection_wraps_operational_case_without_changing_source_of_truth(tmp_path):
     db_path = tmp_path / "work-items.sqlite3"
     case = _seed_case(db_path, _case_detection(run_id="run-work-item", priority=87))
+    now = datetime(2026, 5, 24, 9, tzinfo=timezone.utc)
 
-    projection = case_work_item_projection(case)
+    projection = case_work_item_projection(case, now=now)
 
     assert projection["case_id"] == case.case_id
     assert projection["work_item_id"] == f"ARTEMEA:{case.case_id}"
     assert projection["project_key"] == "ARTEMEA"
     assert projection["issue_type"] == "stockout_risk"
     assert projection["release_state"] == "promoted"
+    assert projection["owner_visible"] is True
     assert projection["status"] == "open"
     assert projection["status_category"] == "to_do"
     assert projection["priority_score"] == 87
     assert projection["priority_bracket"] == "high"
+    assert projection["sla_target_seconds"] == 2 * 60 * 60
+    assert projection["due_at"] == "2026-05-24T10:00:00Z"
+    assert projection["sla_status"] == "pending"
+    assert projection["assigned_at"] is None
     assert projection["assignee_ref"] is None
+    assert projection["evidence_snapshot_ids"] == [case.evidence_snapshots[0].snapshot_id]
+    assert projection["evidence_snapshot_count"] == 1
+    assert projection["evidence_source_count"] == 1
+    assert projection["source_connectors"] == ["tiendanube"]
+    assert projection["latest_evidence_at"] == "2026-05-24T08:00:00Z"
+    assert projection["comment_count"] == 0
+    assert projection["last_comment_at"] is None
+    assert projection["timeline_event_count"] == 1
+    assert projection["last_event_at"] == "2026-05-24T08:00:00Z"
+    assert projection["last_event_type"] == "case_opened"
+    assert projection["degraded"] is False
     assert projection["created_at"].endswith("Z")
     assert projection["updated_at"].endswith("Z")
     assert case_project_key(case) == "ARTEMEA"
     assert case_status_category(case) == "to_do"
+    assert case_issue_security_level(case) == "owner"
     assert case_priority_bracket(case) == "high"
+    assert case_sla_status(case, now=now) == "pending"
+    assert case_sla_status(case, now=datetime(2026, 5, 24, 10, 1, tzinfo=timezone.utc)) == "breached"
+
+
+def test_case_work_item_projection_marks_readiness_gated_cases_operator_only(tmp_path):
+    db_path = tmp_path / "work-items-readiness-gated.sqlite3"
+    case = _seed_case(
+        db_path,
+        _case_detection(
+            case_type="unanswered_conversations",
+            dedupe_suffix="unanswered_conversations/channel/whatsapp/support.conversations/daily",
+            severity="warning",
+            priority=70,
+            title="Conversaciones sin responder",
+            run_id="run-readiness-gated-owner-visible",
+        ),
+    )
+
+    projection = case_work_item_projection(case, now=datetime(2026, 5, 24, 9, tzinfo=timezone.utc))
+
+    assert projection["release_state"] == "readiness_gated"
+    assert projection["owner_visible"] is False
+
+
+def test_case_work_item_projection_exposes_evidence_lineage(tmp_path):
+    db_path = tmp_path / "work-item-evidence-lineage.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-evidence-lineage", priority=87))
+    first_snapshot_id = case.evidence_snapshots[0].snapshot_id
+    later_snapshot = case.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_id": "snapshot-later-evidence",
+            "snapshot_key": "run-evidence-lineage-google/evidence://artemea/run-evidence-lineage-google/stockout_risk/stockout_risk/business/monitored",
+            "captured_at": datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+            "run_id": "run-evidence-lineage-google",
+            "artifact_ref": "ledger://runs/run-evidence-lineage-google/daily-report",
+            "evidence_ref": "evidence://artemea/run-evidence-lineage-google/stockout_risk",
+            "source": "google_sheets",
+            "source_label": "Google Sheets",
+            "summary": "Stock snapshot from Google Sheets.",
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    case = store.attach_evidence(
+        case.case_id,
+        snapshots=[later_snapshot],
+        run_id="run-evidence-lineage-google",
+        artifact_ref="ledger://runs/run-evidence-lineage-google/daily-report",
+        summary="Attached Google Sheets evidence.",
+    )
+    conn.close()
+
+    projection = case_work_item_projection(case, now=datetime(2026, 5, 24, 9, tzinfo=timezone.utc))
+
+    assert projection["evidence_snapshot_ids"] == [first_snapshot_id, "snapshot-later-evidence"]
+    assert projection["evidence_snapshot_count"] == 2
+    assert projection["evidence_source_count"] == 2
+    assert projection["source_connectors"] == ["google_sheets", "tiendanube"]
+    assert projection["latest_evidence_at"] == "2026-05-24T09:30:00Z"
+
+
+def test_case_work_item_projection_tracks_comment_activity_separately_from_last_event(tmp_path):
+    db_path = tmp_path / "work-item-comment-activity.sqlite3"
+    case = _seed_case(db_path, _case_detection(run_id="run-comment-activity", priority=87))
+    later_snapshot = case.evidence_snapshots[0].model_copy(
+        update={
+            "snapshot_id": "snapshot-comment-activity-google",
+            "snapshot_key": "run-comment-activity-google/evidence://artemea/run-comment-activity-google/stockout_risk/stockout_risk/business/monitored",
+            "captured_at": datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+            "run_id": "run-comment-activity-google",
+            "artifact_ref": "ledger://runs/run-comment-activity-google/daily-report",
+            "evidence_ref": "evidence://artemea/run-comment-activity-google/stockout_risk",
+            "source": "google_sheets",
+            "source_label": "Google Sheets",
+            "summary": "Stock snapshot from Google Sheets.",
+        }
+    )
+
+    conn = sqlite3.connect(db_path)
+    init_schema(conn)
+    store = SQLiteOperationalCaseStore(conn)
+    case = store.add_comment(
+        case.case_id,
+        actor_type="operator",
+        actor_ref="operator:ana",
+        comment="Necesita seguimiento manual.",
+        commented_at=datetime(2026, 5, 24, 9, 15, tzinfo=timezone.utc),
+    )
+    case = store.attach_evidence(
+        case.case_id,
+        snapshots=[later_snapshot],
+        run_id="run-comment-activity-google",
+        artifact_ref="ledger://runs/run-comment-activity-google/daily-report",
+        summary="Attached Google Sheets evidence.",
+        attached_at=datetime(2026, 5, 24, 9, 30, tzinfo=timezone.utc),
+    )
+    conn.close()
+
+    projection = case_work_item_projection(case, now=datetime(2026, 5, 24, 10, tzinfo=timezone.utc))
+
+    assert projection["comment_count"] == 1
+    assert projection["last_comment_at"] == "2026-05-24T09:15:00Z"
+    assert projection["timeline_event_count"] == 3
+    assert projection["last_event_at"] == "2026-05-24T09:30:00Z"
+    assert projection["last_event_type"] == "evidence_attached"
+    assert projection["latest_evidence_at"] == "2026-05-24T09:30:00Z"
 
 
 def test_issue_type_definitions_expose_release_state_from_semantic_registry():
@@ -251,6 +381,14 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": False,
         "facetable": True,
     }
+    assert fields["owner_visible"] == {
+        "field": "owner_visible",
+        "value_type": "bool",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "="],
+        "sortable": False,
+        "facetable": True,
+    }
     assert fields["status_category"]["allowed_values"] == sorted(allowed_status_categories())
     assert fields["assignee_ref"]["value_type"] == "string"
     assert fields["priority_score"] == {
@@ -261,21 +399,179 @@ def test_query_field_registry_is_canonical_work_item_semantics():
         "sortable": True,
         "facetable": False,
     }
+    assert fields["sla_target_seconds"] == {
+        "field": "sla_target_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["assigned_at"] == {
+        "field": "assigned_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["due_at"] == {
+        "field": "due_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["sla_status"] == {
+        "field": "sla_status",
+        "value_type": "enum",
+        "allowed_values": ["breached", "met", "not_applicable", "not_configured", "pending"],
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+        "facetable": True,
+    }
+    assert fields["issue_security_level"] == {
+        "field": "issue_security_level",
+        "value_type": "enum",
+        "allowed_values": ["internal", "owner"],
+        "allowed_operators": ["!=", "="],
+        "sortable": False,
+        "facetable": True,
+    }
+    assert fields["reopen_count"] == {
+        "field": "reopen_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["latest_reopened_at"] == {
+        "field": "latest_reopened_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["sla_elapsed_seconds"] == {
+        "field": "sla_elapsed_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["sla_remaining_seconds"] == {
+        "field": "sla_remaining_seconds",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["latest_evidence_at"] == {
+        "field": "latest_evidence_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["evidence_snapshot_count"] == {
+        "field": "evidence_snapshot_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["evidence_source_count"] == {
+        "field": "evidence_source_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["comment_count"] == {
+        "field": "comment_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["last_comment_at"] == {
+        "field": "last_comment_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["timeline_event_count"] == {
+        "field": "timeline_event_count",
+        "value_type": "int",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["last_event_at"] == {
+        "field": "last_event_at",
+        "value_type": "datetime",
+        "allowed_values": None,
+        "allowed_operators": ["!=", "<", "<=", "=", ">", ">="],
+        "sortable": True,
+        "facetable": False,
+    }
+    assert fields["last_event_type"] == {
+        "field": "last_event_type",
+        "value_type": "enum",
+        "allowed_values": sorted(get_args(TimelineEventType)),
+        "allowed_operators": ["!=", "=", "IN"],
+        "sortable": False,
+        "facetable": True,
+    }
 
     priority_spec = work_item_query_field_spec("priority_score")
     assert priority_spec.value_type == "int"
     assert priority_spec.allowed_operators == frozenset({"=", "!=", ">", ">=", "<", "<="})
-    assert allowed_work_item_query_sort_fields() == {"opened_at", "priority_score", "updated_at"}
+    assert allowed_work_item_query_sort_fields() == {
+        "assigned_at",
+        "comment_count",
+        "last_event_at",
+        "last_comment_at",
+        "due_at",
+        "evidence_snapshot_count",
+        "evidence_source_count",
+        "latest_evidence_at",
+        "latest_reopened_at",
+        "opened_at",
+        "priority_score",
+        "reopen_count",
+        "sla_elapsed_seconds",
+        "sla_remaining_seconds",
+        "sla_target_seconds",
+        "timeline_event_count",
+        "updated_at",
+    }
     assert allowed_work_item_facet_fields() == {
         "assignee_ref",
         "case_type",
         "degraded",
         "entity.kind",
         "issue_type",
+        "issue_security_level",
+        "last_event_type",
         "priority_bracket",
         "project",
         "release_state",
+        "owner_visible",
         "severity",
+        "sla_status",
         "source_connector",
         "status",
         "status_category",

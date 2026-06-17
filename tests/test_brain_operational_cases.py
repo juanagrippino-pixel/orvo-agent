@@ -41,14 +41,28 @@ def conn():
     c.close()
 
 
-def make_stockout_detection(*, run_id: str = "run-1", evidence_ref: str = "evidence://tn/stock/2026-05-24", snapshots=None):
+@pytest.fixture(params=["memory", "sqlite"])
+def case_store(request, conn):
+    if request.param == "memory":
+        return "memory", InMemoryOperationalCaseStore()
+    return "sqlite", SQLiteOperationalCaseStore(conn)
+
+
+def make_stockout_detection(
+    *,
+    run_id: str = "run-1",
+    evidence_ref: str = "evidence://tn/stock/2026-05-24",
+    snapshots=None,
+    severity="critical",
+    priority_score=100,
+):
     return OperationalCaseDetection(
         business_id="artemea",
         case_type="stockout_risk",
         dedupe_key="artemea/stockout_risk/business/monitored/commerce.inventory/daily",
         title="Stock crítico",
-        severity="critical",
-        priority_score=100,
+        severity=severity,
+        priority_score=priority_score,
         entity_scope={"kind": "business", "id": "monitored", "label": "Productos monitoreados"},
         evidence_refs=[evidence_ref],
         run_id=run_id,
@@ -785,6 +799,46 @@ def test_operational_case_supports_in_progress_and_dismissed_lifecycle_with_reop
     assert reopened.timeline[-1].event_type == "case_reopened"
 
 
+def test_recurring_detection_reopens_terminal_case_without_stale_assignment():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+    assigned = store.assign_case(
+        opened.case_id,
+        actor_type="operator",
+        actor_ref="juan",
+        assignee_ref="dueña access_token=raw_assignee_secret",
+        assigned_at=utc_dt(9),
+    )
+    acknowledged = store.transition_case(
+        assigned.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Checking supplier replenishment",
+        transitioned_at=utc_dt(9, minute=30),
+    )
+    resolved = store.transition_case(
+        acknowledged.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Stock count completed",
+        transitioned_at=utc_dt(10),
+    )
+
+    reopened = store.upsert_detection(make_stockout_detection(run_id="run-2"), detected_at=utc_dt(12))
+
+    assert reopened.case_id == opened.case_id
+    assert reopened.status == "open"
+    assert reopened.assignee_ref is None
+    assert reopened.assigned_at is None
+    assert reopened.due_at == utc_dt(14)
+    assert reopened.timeline[-1].event_type == "case_reopened"
+    assert reopened.timeline[-1].metadata["previous_assignee_ref"] == "dueña access_token=[REDACTED]"
+    assert reopened.timeline[-1].metadata["due_at"] == utc_dt(14).isoformat()
+    assert "raw_assignee_secret" not in reopened.model_dump_json()
+
+
 # Lifecycle-contract regression: lock down the full transition_case matrix so
 # that a future refactor of `_CASE_STATUS_TRANSITIONS` (e.g. allowing operators
 # to "un-resolve" a case, skip acknowledgement, or no-op self-transitions) is
@@ -848,6 +902,89 @@ def test_transition_case_rejects_every_forbidden_status_transition(from_status, 
     )
 
 
+def test_upsert_priority_and_severity_changes_are_auditable(case_store):
+    label, store = case_store
+    opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run-1"), detected_at=utc_dt(8))
+    lower_priority = make_stockout_detection(
+        run_id=f"{label}-run-2",
+        evidence_ref="evidence://tn/stock/2026-05-25",
+        severity="warning",
+        priority_score=80,
+    )
+
+    updated = store.upsert_detection(lower_priority, detected_at=utc_dt(9))
+
+    assert updated.case_id == opened.case_id
+    assert updated.priority_score == 80
+    assert updated.severity == "warning"
+    assert updated.timeline[-1].event_type == "case_updated"
+    assert updated.timeline[-1].metadata == {
+        "dedupe_key": opened.dedupe_key,
+        "previous_priority_score": 100,
+        "priority_score": 80,
+        "previous_severity": "critical",
+        "severity": "warning",
+        "previous_sla_target_seconds": 2 * 60 * 60,
+        "sla_target_seconds": 24 * 60 * 60,
+    }
+
+
+def test_upsert_detection_sets_and_preserves_sla_due_at(case_store):
+    label, store = case_store
+    opened_at = utc_dt(8)
+    opened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run-1"), detected_at=opened_at)
+
+    assert opened.sla_target_seconds == 2 * 60 * 60
+    assert opened.due_at == utc_dt(10)
+
+    de_escalated = store.upsert_detection(
+        make_stockout_detection(run_id=f"{label}-run-2", severity="warning"),
+        detected_at=utc_dt(9),
+    )
+
+    assert de_escalated.sla_target_seconds == 24 * 60 * 60
+    assert de_escalated.due_at == utc_dt(10)
+    assert de_escalated.timeline[-1].event_type == "case_updated"
+    assert de_escalated.timeline[-1].metadata == {
+        "dedupe_key": opened.dedupe_key,
+        "previous_sla_target_seconds": 2 * 60 * 60,
+        "sla_target_seconds": 24 * 60 * 60,
+        "previous_severity": "critical",
+        "severity": "warning",
+    }
+
+    store.transition_case(
+        de_escalated.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="juan",
+        transitioned_at=utc_dt(10, 30),
+    )
+    store.transition_case(
+        de_escalated.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Fixed",
+        transitioned_at=utc_dt(11),
+    )
+    reopened = store.upsert_detection(make_stockout_detection(run_id=f"{label}-run-3"), detected_at=utc_dt(12))
+
+    assert reopened.status == "open"
+    assert reopened.sla_target_seconds == 2 * 60 * 60
+    assert reopened.due_at == utc_dt(14)
+    assert reopened.timeline[-1].event_type == "case_reopened"
+    assert reopened.timeline[-1].metadata == {
+        "dedupe_key": reopened.dedupe_key,
+        "previous_sla_target_seconds": 24 * 60 * 60,
+        "sla_target_seconds": 2 * 60 * 60,
+        "previous_due_at": "2026-05-24T10:00:00+00:00",
+        "due_at": "2026-05-24T14:00:00+00:00",
+        "previous_severity": "warning",
+        "severity": "critical",
+    }
+
+
 def test_sqlite_operational_case_store_persists_and_filters_by_status(conn):
     store = SQLiteOperationalCaseStore(conn)
     opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
@@ -898,6 +1035,44 @@ def test_resolved_case_reopens_when_same_dedupe_key_recurs():
     assert reopened.resolved_at is None
     assert reopened.latest_run_id == "run-2"
     assert reopened.timeline[-1].event_type == "case_reopened"
+    assert reopened.timeline[-1].metadata == {
+        "dedupe_key": opened.dedupe_key,
+        "previous_due_at": "2026-05-24T10:00:00+00:00",
+        "due_at": "2026-05-24T13:00:00+00:00",
+    }
+
+
+def test_resolved_case_reopens_and_records_priority_change_metadata():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-1"), detected_at=utc_dt(8))
+    store.transition_case(opened.case_id, status="acknowledged", actor_type="operator", actor_ref="juan", transitioned_at=utc_dt(9))
+    store.transition_case(opened.case_id, status="resolved", actor_type="operator", actor_ref="juan", reason="Fixed", transitioned_at=utc_dt(10))
+
+    reopened = store.upsert_detection(
+        make_stockout_detection(
+            run_id="run-2",
+            severity="warning",
+            priority_score=80,
+        ),
+        detected_at=utc_dt(10),
+    )
+
+    assert reopened.case_id == opened.case_id
+    assert reopened.status == "open"
+    assert reopened.resolved_at is None
+    assert reopened.latest_run_id == "run-2"
+    assert reopened.timeline[-1].event_type == "case_reopened"
+    assert reopened.timeline[-1].metadata == {
+        "dedupe_key": opened.dedupe_key,
+        "previous_priority_score": 100,
+        "priority_score": 80,
+        "previous_severity": "critical",
+        "severity": "warning",
+        "previous_sla_target_seconds": 2 * 60 * 60,
+        "sla_target_seconds": 24 * 60 * 60,
+        "previous_due_at": "2026-05-24T10:00:00+00:00",
+        "due_at": "2026-05-25T10:00:00+00:00",
+    }
 
 
 # Audit-gap regression: recurrence on a resolved case must preserve the prior
@@ -1013,10 +1188,10 @@ def test_case_update_records_severity_and_priority_change_audit_metadata():
     event = updated.timeline[-1]
     assert event.event_type == "case_updated"
     assert event.metadata["dedupe_key"] == initial.dedupe_key
-    assert event.metadata["severity_from"] == "warning"
-    assert event.metadata["severity_to"] == "critical"
-    assert event.metadata["priority_score_from"] == 70
-    assert event.metadata["priority_score_to"] == 100
+    assert event.metadata["previous_severity"] == "warning"
+    assert event.metadata["severity"] == "critical"
+    assert event.metadata["previous_priority_score"] == 70
+    assert event.metadata["priority_score"] == 100
 
     unchanged = store.upsert_detection(
         make_stockout_detection(run_id="run-3"), detected_at=utc_dt(10)
@@ -1051,10 +1226,10 @@ def test_case_recurrence_reopen_records_severity_change_audit_metadata():
 
     event = reopened.timeline[-1]
     assert event.event_type == "case_reopened"
-    assert event.metadata["severity_from"] == "warning"
-    assert event.metadata["severity_to"] == "critical"
-    assert event.metadata["priority_score_from"] == 70
-    assert event.metadata["priority_score_to"] == 100
+    assert event.metadata["previous_severity"] == "warning"
+    assert event.metadata["severity"] == "critical"
+    assert event.metadata["previous_priority_score"] == 70
+    assert event.metadata["priority_score"] == 100
 
 
 def test_operator_reopen_restores_resolved_case_and_emits_case_reopened_event(conn):

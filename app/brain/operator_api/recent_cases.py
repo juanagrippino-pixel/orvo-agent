@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .common import *  # noqa: F401,F403
-from .common import _reopen_stats
+from .common import case_reopen_stats
 from .projections import *  # noqa: F401,F403
 
 
@@ -55,6 +55,57 @@ def list_recently_resolved_cases(
             "count": len(cases_payload),
         }
     )
+
+
+def list_recently_dismissed_cases(
+    store: OperationalCaseStore,
+    *,
+    business_id: str,
+    limit: str | None = None,
+) -> dict[str, Any]:
+    """Top-N most-recently-dismissed cases for a business.
+
+    Complements :func:`list_recently_resolved_cases` for the other terminal
+    workflow exit. Only cases whose current canonical status is ``dismissed``
+    are included; recurrences reopened by deterministic detection fall back into
+    the open/reopened projections. Ordered by ``dismissed_at`` DESC with
+    ``case_id`` ASC as a deterministic tie-breaker. Each row includes
+    ``dismissal_seconds`` (opened_at -> dismissed_at) for post-mortem queue
+    reviews without extra lookups.
+    """
+
+    parsed_limit = parse_limit(limit)
+    dismissed: list[tuple[datetime, str, OperationalCase]] = []
+    for case in store.list_cases(business_id=business_id, status="dismissed", limit=None):
+        if case.dismissed_at is None:
+            continue
+        dismissed.append((case.dismissed_at.astimezone(timezone.utc), case.case_id, case))
+
+    dismissed.sort(key=lambda item: (-item[0].timestamp(), item[1]))
+    limited = dismissed[:parsed_limit]
+    cases_payload = [
+        {
+            "case_id": case.case_id,
+            "case_type": case.case_type,
+            "status": case.status,
+            "severity": case.severity,
+            "priority_score": case.priority_score,
+            "opened_at": case.opened_at.isoformat(),
+            "dismissed_at": dismissed_at.isoformat(),
+            "dismissal_seconds": int((dismissed_at - case.opened_at).total_seconds()),
+        }
+        for dismissed_at, _case_id, case in limited
+    ]
+    return redact_secrets(
+        {
+            "business_id": business_id,
+            "dismissed_total": len(dismissed),
+            "cases": cases_payload,
+            "limit": parsed_limit,
+            "count": len(cases_payload),
+        }
+    )
+
 
 def list_recently_opened_cases(
     store: OperationalCaseStore,
@@ -124,7 +175,7 @@ def list_recently_reopened_cases(
     parsed_limit = parse_limit(limit)
     reopened: list[tuple[datetime, str, OperationalCase]] = []
     for case in store.list_cases(business_id=business_id, status="open", limit=None):
-        _reopen_count, latest_reopen_at = _reopen_stats(case)
+        _reopen_count, latest_reopen_at = case_reopen_stats(case)
         if latest_reopen_at is None:
             continue
         reopened.append((latest_reopen_at, case.case_id, case))

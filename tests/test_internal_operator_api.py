@@ -296,6 +296,32 @@ def test_internal_case_queue_returns_envelope_scoped_and_priority_ordered(monkey
     assert body["data"]["cases"][0]["latest_evidence_at"] == "2026-05-24T08:00:00Z"
     assert body["data"]["cases"][0]["source_connectors"] == ["tiendanube"]
     assert body["data"]["cases"][0]["degraded"] is False
+    assert body["data"]["cases"][0]["issue_security_level"] == "owner"
+
+
+def test_internal_case_queue_accepts_as_of_for_sla_status(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection(run_id="run-artemea-as-of"))
+
+    pending = client.get(
+        "/internal/brain/businesses/artemea/cases?as_of=2026-05-24T09:30:00Z",
+        headers=AUTH,
+    )
+    breached = client.get(
+        "/internal/brain/businesses/artemea/cases?as_of=2026-05-24T10:30:00Z",
+        headers=AUTH,
+    )
+
+    assert pending.status_code == 200
+    assert breached.status_code == 200
+    assert pending.get_json()["data"]["cases"][0]["case_id"] == case.case_id
+    assert breached.get_json()["data"]["cases"][0]["case_id"] == case.case_id
+    assert pending.get_json()["data"]["cases"][0]["sla_status"] == "pending"
+    assert breached.get_json()["data"]["cases"][0]["sla_status"] == "breached"
+    assert pending.get_json()["data"]["cases"][0]["sla_elapsed_seconds"] == 1 * 60 * 60 + 30 * 60
+    assert pending.get_json()["data"]["cases"][0]["sla_remaining_seconds"] == 30 * 60
+    assert breached.get_json()["data"]["cases"][0]["sla_elapsed_seconds"] == 2 * 60 * 60 + 30 * 60
+    assert breached.get_json()["data"]["cases"][0]["sla_remaining_seconds"] == -30 * 60
 
 
 def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(monkeypatch, tmp_path):
@@ -310,6 +336,7 @@ def test_internal_case_detail_returns_explicit_evidence_and_timeline_projection(
     body = response.get_json()
     detail = body["data"]["case"]
     assert detail["case_id"] == case.case_id
+    assert detail["issue_security_level"] == "owner"
     assert detail["evidence_snapshot_count"] == 1
     assert detail["evidence_snapshots"][0]["source"] == "tiendanube"
     assert detail["evidence_snapshots"][0]["freshness_state"] == "fresh"

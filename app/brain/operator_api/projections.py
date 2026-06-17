@@ -8,8 +8,8 @@ from .common import *  # noqa: F401,F403
 from .projections import *  # noqa: F401,F403
 
 
-def case_queue_item(case: OperationalCase) -> dict[str, Any]:
-    work_item = case_work_item_projection(case)
+def case_queue_item(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
+    work_item = case_work_item_projection(case, now=now)
     return redact_secrets(
         {
             "case_id": case.case_id,
@@ -21,10 +21,17 @@ def case_queue_item(case: OperationalCase) -> dict[str, Any]:
             "project_key": work_item["project_key"],
             "issue_type": work_item["issue_type"],
             "release_state": work_item["release_state"],
+            "owner_visible": work_item["owner_visible"],
+            "issue_security_level": work_item["issue_security_level"],
             "work_item_id": work_item["work_item_id"],
             "work_item": work_item,
             "severity": case.severity,
             "priority_score": case.priority_score,
+            "sla_target_seconds": case.sla_target_seconds,
+            "sla_elapsed_seconds": work_item["sla_elapsed_seconds"],
+            "sla_remaining_seconds": work_item["sla_remaining_seconds"],
+            "due_at": case.due_at.isoformat() if case.due_at is not None else None,
+            "sla_status": work_item["sla_status"],
             "entity_scope": case.entity_scope,
             "opened_at": case.opened_at.isoformat(),
             "updated_at": case.updated_at.isoformat(),
@@ -108,8 +115,8 @@ def _case_suggested_actions(case: OperationalCase) -> list[dict[str, Any]]:
         for action_key in _case_suggested_action_keys(case)
     ]
 
-def case_detail(case: OperationalCase) -> dict[str, Any]:
-    work_item = case_work_item_projection(case)
+def case_detail(case: OperationalCase, now: datetime | None = None) -> dict[str, Any]:
+    work_item = case_work_item_projection(case, now=now)
     return redact_secrets(
         {
             "case_id": case.case_id,
@@ -122,10 +129,17 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "project_key": work_item["project_key"],
             "issue_type": work_item["issue_type"],
             "release_state": work_item["release_state"],
+            "owner_visible": work_item["owner_visible"],
+            "issue_security_level": work_item["issue_security_level"],
             "work_item_id": work_item["work_item_id"],
             "work_item": work_item,
             "severity": case.severity,
             "priority_score": case.priority_score,
+            "sla_target_seconds": case.sla_target_seconds,
+            "sla_elapsed_seconds": work_item["sla_elapsed_seconds"],
+            "sla_remaining_seconds": work_item["sla_remaining_seconds"],
+            "due_at": case.due_at.isoformat() if case.due_at is not None else None,
+            "sla_status": work_item["sla_status"],
             "entity_scope": case.entity_scope,
             "opened_at": _iso(case.opened_at),
             "updated_at": _iso(case.updated_at),
