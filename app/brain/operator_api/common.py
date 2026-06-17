@@ -49,10 +49,18 @@ RunDispatchStatusFilter = DispatchRunStatus | Literal["none"]
 class OperatorAPIError(Exception):
     """Safe error intended for API envelopes."""
 
-    def __init__(self, code: str, message: str, *, status_code: int = 400) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 400,
+        audit_data: dict[str, Any] | None = None,
+    ) -> None:
         self.code = code
         self.message = redact_text(message) or "Operator API error"
         self.status_code = status_code
+        self.audit_data = audit_data
         super().__init__(self.message)
 
 def _iso(value: datetime | None) -> str | None:

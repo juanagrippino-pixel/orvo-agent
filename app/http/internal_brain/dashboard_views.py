@@ -197,6 +197,7 @@ def register_dashboard_view_routes(app):
                     owner_ref=payload.get("owner_ref"),
                 )
             except OperatorAPIError as exc:
+                audit_data = exc.audit_data or {}
                 _append_operator_audit_event(
                     business_id=business_id,
                     actor_ref=actor_ref,
@@ -204,6 +205,7 @@ def register_dashboard_view_routes(app):
                     target_type="operational_case",
                     target_id=case_id,
                     data={
+                        **audit_data,
                         "action_key": str(payload.get("action_key", "")),
                         "error_code": exc.code,
                         "status_code": exc.status_code,

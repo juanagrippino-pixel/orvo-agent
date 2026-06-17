@@ -717,6 +717,56 @@ def test_internal_case_action_existing_pending_idempotency_key_blocks_duplicate_
     assert len(reloaded.timeline) == len(case.timeline)
 
 
+def test_internal_case_action_failure_marks_ledger_and_audit(monkeypatch, tmp_path):
+    from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
+
+    client, db_path = _client(monkeypatch, tmp_path)
+    case = _seed_case(db_path, _case_detection())
+    headers = {
+        **AUTH,
+        "X-Idempotency-Key": "case-action-failed-transition-1",
+        "X-Request-ID": "req-case-action-failure-ledger",
+    }
+
+    failed = client.post(
+        f"/internal/brain/businesses/artemea/cases/{case.case_id}/actions",
+        headers=headers,
+        json={"action_key": "resolve_case", "reason": "No fue vendido"},
+    )
+
+    assert failed.status_code == 409
+    assert failed.get_json()["error"]["code"] == "invalid_case_transition"
+
+    actions = SQLiteWorkflowActionLedgerStore(str(db_path)).list_actions(business_id="artemea")
+    assert len(actions) == 1
+    [record] = actions
+    assert record.case_id == case.case_id
+    assert record.action_key == "resolve_case"
+    assert record.idempotency_key == "case-action-failed-transition-1"
+    assert record.execution_state == "failed"
+    assert record.approval_state == "not_required"
+    assert record.params["reason"] == "No fue vendido"
+
+    matching_events = [
+        event for event in _audit_events(db_path) if event["request_id"] == "req-case-action-failure-ledger"
+    ]
+    assert len(matching_events) == 1
+    event = matching_events[0]
+    assert event["event_type"] == "operator.case_action.failed"
+    assert event["data"]["action_key"] == "resolve_case"
+    assert event["data"]["error_code"] == "invalid_case_transition"
+    assert event["data"]["status_code"] == 409
+    assert event["data"]["idempotency_key"] == "case-action-failed-transition-1"
+    assert event["data"]["execution_state"] == "failed"
+
+    conn = sqlite3.connect(db_path)
+    reloaded = SQLiteOperationalCaseStore(conn).get_case(case.case_id)
+    conn.close()
+    assert reloaded is not None
+    assert reloaded.status == "open"
+    assert len(reloaded.timeline) == len(case.timeline)
+
+
 def test_internal_case_action_failed_validation_does_not_consume_idempotency_key(monkeypatch, tmp_path):
     from app.brain.workflow_action_ledger import SQLiteWorkflowActionLedgerStore
 

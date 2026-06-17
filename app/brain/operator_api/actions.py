@@ -341,12 +341,18 @@ def apply_case_action_with_idempotency(
             assignee_ref=assignee_ref,
             owner_ref=owner_ref,
         )
-    except Exception:
-        action_ledger.update_action_execution_state(
+    except Exception as exc:
+        failed_record = action_ledger.update_action_execution_state(
             business_id=business_id,
             ledger_id=write.record.ledger_id,
             execution_state="failed",
         )
+        if isinstance(exc, OperatorAPIError):
+            exc.audit_data = {
+                "ledger_id": failed_record.ledger_id,
+                "idempotency_key": failed_record.idempotency_key,
+                "execution_state": failed_record.execution_state,
+            }
         raise
     executed_record = action_ledger.update_action_execution_state(
         business_id=business_id,
