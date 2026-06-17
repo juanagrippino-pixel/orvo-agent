@@ -190,12 +190,13 @@ exposing unredacted assignee values. The owner-case-brief preview endpoint is a
 read-only WhatsApp projection over canonical actionable cases; it returns the
 composed, redacted text plus projection metadata (`total_actionable_cases`,
 `displayed_case_count`, `truncated`, displayed `case_ids`, displayed
-`evidence_snapshot_ids` for each shown case, truthful freshness totals, and
-registered `suggested_action_keys`/action catalog projections for the displayed
-cases only). Unknown, wrong-family, duplicate, or secret-shaped action keys from
-case metadata must be dropped at the service layer before the API envelope is
-returned; when registered displayed action keys exist, brief text must render
-those catalog-backed action labels instead of raw `recommended_action` metadata.
+`source_connectors`, displayed `evidence_snapshot_ids` for each shown case,
+truthful freshness totals, and registered `suggested_action_keys`/action catalog
+projections for the displayed cases only). Unknown, wrong-family, duplicate, or
+secret-shaped action keys from case metadata must be dropped at the service
+layer before the API envelope is returned; when registered displayed action keys
+exist, brief text must render those catalog-backed action labels instead of raw
+`recommended_action` metadata.
 The endpoint must not dispatch, mutate cases, or treat brief text as state.
 
 ### Operator audit events

@@ -472,6 +472,7 @@ def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_act
         {
             "case_id": case.case_id,
             "case_type": "stockout_risk",
+            "source_connectors": ["tiendanube"],
             "evidence_snapshot_ids": [case.evidence_snapshots[0].snapshot_id],
             "suggested_action_keys": ["confirm_stock"],
             "suggested_actions": [
@@ -490,6 +491,32 @@ def test_internal_owner_case_brief_preview_exposes_only_registered_displayed_act
                 }
             ],
         }
+    ]
+
+
+def test_internal_owner_case_brief_preview_exposes_redacted_displayed_source_connectors(
+    monkeypatch, tmp_path
+):
+    client, db_path = _client(monkeypatch, tmp_path)
+    _seed_case(
+        db_path,
+        _case_detection(
+            source="mercadopago access_token=raw_owner_source_secret",
+        ),
+    )
+
+    response = client.get(
+        "/internal/brain/businesses/artemea/owner-case-brief/preview",
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    raw_body = response.get_data(as_text=True)
+    assert "raw_owner_source_secret" not in raw_body
+    body = response.get_json()
+    assert body["redaction_applied"] is True
+    assert body["data"]["displayed_cases"][0]["source_connectors"] == [
+        "mercadopago access_token=[REDACTED]"
     ]
 
 

@@ -12,7 +12,12 @@ from app.brain.operational_cases import (
 from app.brain.reporting import compose_owner_case_brief, order_owner_case_brief_cases
 from app.brain.security.redaction import redact_secrets, redact_text
 
-from .common import OperatorAPIError, _worst_freshness_state, parse_limit
+from .common import (
+    OperatorAPIError,
+    _source_connectors,
+    _worst_freshness_state,
+    parse_limit,
+)
 from .projections import _case_suggested_action_keys, _case_suggested_actions
 
 
@@ -60,6 +65,7 @@ def _owner_brief_displayed_cases(cases: list[OperationalCase]) -> list[dict[str,
         {
             "case_id": case.case_id,
             "case_type": case.case_type,
+            "source_connectors": _source_connectors(case),
             "evidence_snapshot_ids": _owner_brief_evidence_snapshot_ids(case),
             "suggested_action_keys": _case_suggested_action_keys(case),
             "suggested_actions": _case_suggested_actions(case),
