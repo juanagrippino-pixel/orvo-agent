@@ -219,6 +219,7 @@ def _connector_projection(
         lifecycle: dict[str, Any] | None = None
         capabilities: list[str] = []
         required_scopes: list[str] = []
+        required_secret_refs: list[dict[str, Any]] = []
         scope_notes: str = ""
         emitted_metric_families: list[str] = []
         emitted_event_families: list[str] = []
@@ -238,6 +239,7 @@ def _connector_projection(
         lifecycle = contract_metadata["lifecycle"]
         capabilities = contract_metadata["capabilities"]
         required_scopes = contract_metadata["required_scopes"]
+        required_secret_refs = contract_metadata["required_secret_refs"]
         scope_notes = contract_metadata["scope_notes"]
         emitted_metric_families = contract_metadata["emitted_metric_families"]
         emitted_event_families = contract_metadata["emitted_event_families"]
@@ -275,6 +277,7 @@ def _connector_projection(
         **setup,
         "capabilities": capabilities,
         "required_scopes": required_scopes,
+        "required_secret_refs": required_secret_refs,
         "scope_notes": scope_notes,
         "supported_runtime_modes": supported_runtime_modes,
         "executor_factory_path": executor_factory_path,

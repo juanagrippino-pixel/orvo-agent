@@ -195,7 +195,27 @@ def test_internal_connector_readiness_projects_config_validation_and_last_health
         "stale_success",
     ]
     assert tiendanube["required_scopes"] == ["orders.read", "products.read"]
+    assert tiendanube["required_secret_refs"] == [
+        {
+            "name": "access_token",
+            "provider": "tiendanube_oauth",
+            "description": "Tiendanube API Bearer [REDACTED] reference.",
+            "scopes": ["orders.read", "products.read"],
+            "legacy_config_field": "access_token",
+        }
+    ]
     assert tiendanube["scope_notes"] == ""
+    assert tiendanube["emitted_metric_families"] == [
+        "commerce.orders",
+        "commerce.revenue",
+        "commerce.inventory",
+        "runtime.freshness",
+        "runtime.data_quality",
+    ]
+    assert tiendanube["emitted_event_families"] == [
+        "connector.execution",
+        "connector.health",
+    ]
     assert tiendanube["supported_runtime_modes"] == [
         "preview",
         "forced",
