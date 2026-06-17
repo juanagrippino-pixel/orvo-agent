@@ -858,7 +858,7 @@ class _OperationalCaseMutations:
                 ),
             ],
         }
-        if status in {"acknowledged", "in_progress"}:
+        if status in {"acknowledged", "in_progress"} and record.acknowledged_at is None:
             update["acknowledged_at"] = transitioned_at
         if status == "resolved":
             update["resolved_at"] = transitioned_at

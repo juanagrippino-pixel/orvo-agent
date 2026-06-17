@@ -697,6 +697,43 @@ def test_operational_case_requires_acknowledged_before_resolved():
         )
 
 
+def test_in_progress_transition_preserves_first_acknowledged_at_timestamp():
+    store = InMemoryOperationalCaseStore()
+    opened = store.upsert_detection(make_stockout_detection(run_id="run-ack-preserved"), detected_at=utc_dt(8))
+
+    acknowledged = store.transition_case(
+        opened.case_id,
+        status="acknowledged",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Tomo el caso",
+        transitioned_at=utc_dt(9),
+    )
+    in_progress = store.transition_case(
+        opened.case_id,
+        status="in_progress",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Trabajando el caso",
+        transitioned_at=utc_dt(10),
+    )
+    resolved = store.transition_case(
+        opened.case_id,
+        status="resolved",
+        actor_type="operator",
+        actor_ref="juan",
+        reason="Caso resuelto",
+        transitioned_at=utc_dt(12),
+    )
+
+    assert acknowledged.acknowledged_at == utc_dt(9)
+    assert in_progress.status == "in_progress"
+    assert in_progress.acknowledged_at == utc_dt(9)
+    assert resolved.status == "resolved"
+    assert resolved.acknowledged_at == utc_dt(9)
+    assert resolved.resolved_at == utc_dt(12)
+
+
 @pytest.mark.parametrize("bad_comment", [None, "", "   "])
 def test_add_comment_requires_non_empty_comment_without_mutation(conn, bad_comment):
     for label, store in (
