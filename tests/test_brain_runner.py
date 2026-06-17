@@ -275,6 +275,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
         "emitted_event_families": ["connector.execution", "connector.health"],
         "required_secret_refs": [],
         "required_scopes": ["spreadsheets.readonly"],
+        "scope_notes": "",
         "health_policy": {
             "readiness_check": "metadata_only",
             "supports_health_check": False,
@@ -411,6 +412,7 @@ def test_run_due_daily_reports_records_failed_connector_outcome_on_scheduled_fai
         "emitted_event_families": ["connector.execution", "connector.health"],
         "required_secret_refs": [],
         "required_scopes": ["spreadsheets.readonly"],
+        "scope_notes": "",
         "health_policy": {
             "readiness_check": "metadata_only",
             "supports_health_check": False,
