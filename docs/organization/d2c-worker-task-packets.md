@@ -2,7 +2,7 @@
 
 Status: Draft worker packet catalog
 Date: 2026-05-24
-Last reconciled: 2026-06-16
+Last reconciled: 2026-06-17
 Related: `docs/organization/d2c-autonomous-worker-addendum.md`, `docs/specs/integration-train-contract.md`
 
 ## Purpose
@@ -534,7 +534,7 @@ Current source-of-truth check:
 - `app/brain/operational_cases.py` now defaults `detect_cases_from_report(...)` to `metric_registry_mode="enforced"`, so reusable case detection blocks invalid report metrics unless callers explicitly opt into advisory diagnostics; `upsert_cases_from_report(...)` still calls it with `metric_registry_mode="enforced"` before persisting cases.
 - `_case_detection_allowed_by_metric_registry(...)` blocks persisted case creation when enforced mode finds invalid/unknown operational metrics for the report sources.
 - `app/brain/semantics/metric_registry.py` already exposes report/surface validation helpers such as `validate_report_metric_objects()` and `validate_surface_metric_objects()` for boundary-level diagnostics.
-- The 2026-06-15 semantic/connector ARB review keeps the same follow-up valid: enforcement is not yet uniformly explicit across every non-persistent preview/report/surface path, so the next packet should add targeted validation hooks rather than redesign the registry.
+- The 2026-06-17 ARB review keeps the same follow-up valid: enforcement is not yet uniformly explicit across every non-persistent preview/report/surface path, so the next packet should add targeted validation hooks rather than redesign the registry.
 
 Read:
 
@@ -658,14 +658,16 @@ Current source-of-truth check:
 - `app/brain/work_items.py` owns project, issue-type, status-category, workflow/status, priority-bracket projection helpers, and the `WorkItemQueryFieldDefinition` registry (`work_item_query_field_spec()`, `work_item_query_field_definitions()`, `allowed_work_item_query_sort_fields()`).
 - `app/brain/operator_views.py` imports the WorkItem query-field registry and allowed sort fields; it no longer owns a divergent `_FIELD_SPECS` allowlist.
 - `tests/test_work_items.py` pins the canonical query-field registry, and `tests/test_operator_case_views.py` proves JQL-lite supports WorkItem projection fields including `project`, `issue_type`, `release_state`, `status_category`, `assignee_ref`, and `priority_bracket`.
-- `docs/architecture-reviews/2026-06-15-work-management-jql-review.md` is the latest ARB input for this lane. It keeps WorkItem as projection-only, treats WorkItem/JQL/facet/view primitives as the canonical source for query semantics, and says current HEAD is aligned enough for the MVP control plane.
-- `docs/architecture-reviews/2026-06-15-arb-architecture-alignment-review.md` updates the branch sequencing for this lane: `N2-Pro/search-analytics` is architecturally aligned after `n2-pro-work-management`, while `N2-Pro/operator-surfaces` still needs re-scope onto shared query/view primitives before promotion.
+- `docs/architecture-reviews/2026-06-17-architecture-alignment-review.md` is the latest ARB input for this lane. It keeps WorkItem as projection-only, treats WorkItem/JQL-like/facet/view primitives as the canonical source for query semantics, and says current HEAD is aligned enough for the MVP control plane with follow-up contracts.
+- `docs/architecture-reviews/2026-06-17-branch-readiness-matrix.md` updates the branch sequencing for this lane: `N2-Pro/search-analytics` is already integrated into the canonical branch, while `N2-Pro/operator-surfaces` still needs rebase/review for duplicated operator surfaces and projection boundaries.
 - Future broad search/operator-surface work must consume the WorkItem field registry and shared case-query/view primitives rather than creating local field semantics or one-off endpoint projections.
+- The 2026-06-17 review recommends documenting/testing follow-up contracts before the next major merge: workflow schemes, semantic manifest, connector adapter protocol, workflow simulation, and trust/admin contract.
 
 Read:
 
 - `docs/architecture-reviews/2026-06-15-work-management-jql-review.md`
-- `docs/architecture-reviews/2026-06-15-arb-architecture-alignment-review.md`
+- `docs/architecture-reviews/2026-06-17-architecture-alignment-review.md`
+- `docs/architecture-reviews/2026-06-17-branch-readiness-matrix.md`
 - `docs/architecture-reviews/2026-06-13-arb-cron-review.md`
 - `docs/architecture-reviews/2026-06-13-arb-cron-branch-readiness.md`
 - `docs/specs/integration-train-contract.md`
