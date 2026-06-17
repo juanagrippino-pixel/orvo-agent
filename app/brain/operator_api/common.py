@@ -61,6 +61,19 @@ def _iso(value: datetime | None) -> str | None:
         return None
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
+
+def ordered_timeline_events(case: OperationalCase) -> list[Any]:
+    """Return timeline events in canonical chronological order.
+
+    The case store generally appends events chronologically, but projections
+    should not depend on the underlying list order. Sorting by ``created_at``
+    keeps timeline/detail surfaces stable even if a persisted record was
+    reordered during migrations, fixture setup, or manual repair. Python's sort
+    is stable, so equal timestamps preserve the stored relative order.
+    """
+
+    return sorted(case.timeline, key=lambda event: event.created_at.astimezone(timezone.utc))
+
 def parse_limit(
     value: str | None,
     *,

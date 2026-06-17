@@ -202,6 +202,25 @@ def test_list_case_timeline_limits_to_most_recent_events_in_chronological_order(
     assert [event["event_type"] for event in result["events"]] == ["status_changed", "status_changed"]
 
 
+def test_list_case_timeline_reorders_out_of_order_events_before_limiting():
+    store, case_id = _seed_full_lifecycle()
+    store._cases[case_id].timeline = [
+        store._cases[case_id].timeline[2],
+        store._cases[case_id].timeline[0],
+        store._cases[case_id].timeline[4],
+        store._cases[case_id].timeline[1],
+        store._cases[case_id].timeline[3],
+    ]
+
+    result = list_case_timeline(store, business_id="artemea", case_id=case_id, limit="2")
+
+    assert [event["created_at"] for event in result["events"]] == [
+        _utc(11).isoformat().replace("+00:00", "Z"),
+        _utc(12).isoformat().replace("+00:00", "Z"),
+    ]
+    assert [event["event_type"] for event in result["events"]] == ["status_changed", "status_changed"]
+
+
 def test_list_case_timeline_rejects_invalid_event_type():
     store, case_id = _seed_full_lifecycle()
 

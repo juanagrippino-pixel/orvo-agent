@@ -154,6 +154,45 @@ def test_list_recently_resolved_cases_projects_redacted_terminal_reason():
     assert "[REDACTED]" in result["cases"][0]["terminal_reason"]
 
 
+def test_list_recently_resolved_cases_uses_latest_terminal_transition_even_if_timeline_is_unsorted():
+    store = InMemoryOperationalCaseStore()
+    case = store.upsert_detection(
+        _detection(run_id="run-unsorted-terminal-reason"),
+        detected_at=NOW - timedelta(days=1),
+    )
+    _resolve(
+        store,
+        case.case_id,
+        acknowledged_at=NOW - timedelta(hours=20),
+        resolved_at=NOW - timedelta(hours=10),
+        reason="Older resolved reason",
+    )
+    reopened = store.upsert_detection(
+        _detection(run_id="run-unsorted-terminal-reason-2"),
+        detected_at=NOW - timedelta(hours=8),
+    )
+    _resolve(
+        store,
+        reopened.case_id,
+        acknowledged_at=NOW - timedelta(hours=7),
+        resolved_at=NOW - timedelta(hours=1),
+        reason="Latest resolved reason",
+    )
+    store._cases[case.case_id].timeline = [
+        store._cases[case.case_id].timeline[0],
+        store._cases[case.case_id].timeline[5],
+        store._cases[case.case_id].timeline[4],
+        store._cases[case.case_id].timeline[3],
+        store._cases[case.case_id].timeline[2],
+        store._cases[case.case_id].timeline[1],
+    ]
+
+    result = list_recently_resolved_cases(store, business_id="artemea")
+
+    assert result["cases"][0]["case_id"] == case.case_id
+    assert result["cases"][0]["terminal_reason"] == "Latest resolved reason"
+
+
 def test_list_recently_resolved_cases_respects_limit():
     store = InMemoryOperationalCaseStore()
 

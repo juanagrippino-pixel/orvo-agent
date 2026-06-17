@@ -66,7 +66,7 @@ def list_case_timeline(
     parsed_actor_ref = parse_timeline_actor_ref(actor_ref)
     parsed_limit = parse_limit(limit)
     case = get_scoped_case(store, business_id=business_id, case_id=case_id)
-    timeline_events = list(case.timeline)
+    timeline_events = ordered_timeline_events(case)
     timeline_total = len(timeline_events)
     totals_by_event_type = _timeline_counts(timeline_events, "event_type")
     totals_by_actor_type = _timeline_counts(timeline_events, "actor_type")

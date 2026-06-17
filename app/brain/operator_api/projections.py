@@ -128,7 +128,7 @@ def case_detail(case: OperationalCase) -> dict[str, Any]:
             "artifact_refs": case.artifact_refs,
             "evidence_snapshot_count": len(case.evidence_snapshots),
             "evidence_snapshots": [evidence_snapshot_projection(snapshot) for snapshot in case.evidence_snapshots],
-            "timeline": [timeline_event_projection(case, event) for event in case.timeline],
+            "timeline": [timeline_event_projection(case, event) for event in ordered_timeline_events(case)],
             "suggested_action_keys": _case_suggested_action_keys(case),
             "suggested_actions": _case_suggested_actions(case),
             "metadata": case.metadata,

@@ -7,7 +7,7 @@ from .projections import *  # noqa: F401,F403
 def _case_terminal_reason(case: OperationalCase, terminal_status: str) -> str | None:
     """Return the redacted reason summary for a terminal status transition."""
 
-    for event in reversed(case.timeline):
+    for event in reversed(ordered_timeline_events(case)):
         if event.event_type != "status_changed":
             continue
         if event.metadata.get("to_status") != terminal_status:
