@@ -103,6 +103,32 @@ def test_action_catalog_is_canonical_for_workflow_and_operator_projections():
     assert actions["request_external_action"]["approval_required"] is True
 
 
+def test_simulate_case_workflow_enforces_action_catalog_case_family_scope():
+    """Workflow actions cannot be projected for incompatible OperationalCase types.
+
+    The action catalog is the source of truth for workflow action metadata. A
+    suggestion-only action like ``check_storefront`` may be valid for sales or
+    ad-spend cases, but it must not become a reusable per-rule action for
+    stockout cases just because the rule conditions match.
+    """
+    _, case = seed_case()
+    rule = WorkflowRule(
+        rule_id="stockout-check-storefront",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="case_type", value="stockout_risk")],
+        actions=[WorkflowAction(action_key="check_storefront")],
+    )
+
+    with pytest.raises(WorkflowAutomationError) as error:
+        simulate_case_workflow(rule, case, now=utc(10))
+
+    assert error.value.code == "action_not_allowed_for_case_type"
+    assert "check_storefront" in str(error.value)
+    assert "stockout_risk" in str(error.value)
+
+
+
 def test_simulate_case_workflow_dry_run_plans_whitelisted_action_without_mutating_case():
     store, case = seed_case()
     original_status = case.status
