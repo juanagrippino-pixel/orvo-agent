@@ -28,3 +28,37 @@ def test_external_side_effect_actions_remain_approval_gated_and_api_disabled():
         definition.operator_projection(can_execute_case_actions=True)["operator_executable"] is False
         for definition in external_actions
     )
+
+
+
+def test_owner_facing_case_families_always_have_catalog_backed_non_external_next_steps():
+    """Promoted owner-facing cases must retain at least one safe registered action.
+
+    WhatsApp/operator owner surfaces are allowed to project catalog action keys,
+    but they must not promote a case family whose only next step is an external,
+    approval-gated write. This contract catches catalog drift when a case family
+    becomes owner-facing or action metadata changes.
+    """
+
+    from app.brain.operational_cases import OWNER_FACING_OPERATIONAL_CASE_TYPES
+
+    actions_by_family = {
+        case_family: [
+            definition
+            for definition in ACTION_CATALOG.values()
+            if case_family in definition.case_families
+        ]
+        for case_family in OWNER_FACING_OPERATIONAL_CASE_TYPES
+    }
+
+    missing_families = sorted(
+        case_family for case_family, definitions in actions_by_family.items() if not definitions
+    )
+    families_with_only_external_actions = sorted(
+        case_family
+        for case_family, definitions in actions_by_family.items()
+        if not any(definition.side_effect != "external" for definition in definitions)
+    )
+
+    assert missing_families == []
+    assert families_with_only_external_actions == []
