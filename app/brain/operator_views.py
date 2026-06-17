@@ -486,7 +486,7 @@ def _case_field_value(case: OperationalCase, field: str, now: datetime | None = 
     if field == "priority_bracket":
         return case_priority_bracket(case)
     if field == "sla_status":
-        return case_sla_status(case)
+        return case_sla_status(case, now=now)
     if field == "sla_elapsed_seconds":
         return case_sla_elapsed_seconds(case, now=now)
     if field == "sla_remaining_seconds":
