@@ -1139,6 +1139,193 @@ def test_workflow_action_ledger_enforces_duplicate_idempotency_keys_across_store
     assert "raw_durable_duplicate" not in str(second)
 
 
+def test_workflow_side_effect_simulation_replays_idempotently_after_approval_denial_and_terminal_states(tmp_path):
+    _, case = seed_case()
+    ledger = SQLiteWorkflowActionLedgerStore(str(tmp_path / "workflow-actions.sqlite3"))
+    rule = WorkflowRule(
+        rule_id="external-side-effect-simulation",
+        business_id="artemea",
+        trigger="case_updated",
+        conditions=[CaseWorkflowCondition(field="status", value="open")],
+        actions=[
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier-success",
+                    "reason": "Restock approved Authorization: Basic " + "raw_approved_success_secret",
+                    "Authorization": "Basic " + "raw_approved_success_header_secret",
+                },
+            ),
+            WorkflowAction(
+                action_key="request_external_action",
+                params={
+                    "target": "supplier-failure",
+                    "reason": "Restock failed Authorization: Basic " + "raw_failed_secret",
+                    "Authorization": "Basic " + "raw_failed_header_secret",
+                },
+            ),
+            WorkflowAction(
+                action_key="pause_promotion",
+                params={
+                    "target": "campaign-denied",
+                    "reason": "Pause denied Authorization: Basic " + "raw_denied_secret",
+                },
+            ),
+        ],
+    )
+
+    planned = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(20),
+        action_ledger=ledger,
+        actor_ref="operator token=raw_operator_secret",
+    )
+
+    assert planned["matched"] is True
+    assert planned["side_effects_executed"] == 0
+    assert [action["action_key"] for action in planned["actions"]] == [
+        "request_external_action",
+        "request_external_action",
+        "pause_promotion",
+    ]
+    assert [action["execution_status"] for action in planned["actions"]] == [
+        "blocked_approval_required",
+        "blocked_approval_required",
+        "blocked_approval_required",
+    ]
+    assert [action["params"].get("Authorization") for action in planned["actions"]] == ["[REDACTED]", "[REDACTED]", None]
+    assert len(ledger.list_actions(business_id="artemea")) == 3
+    assert len(ledger.list_approval_requests(business_id="artemea")) == 3
+
+    replay_before_decisions = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(20, 1),
+        action_ledger=ledger,
+        actor_ref="operator token=raw_operator_secret",
+    )
+    assert replay_before_decisions["actions"] == []
+    assert len(replay_before_decisions["skipped_actions"]) == 3
+    assert [action["reason"] for action in replay_before_decisions["skipped_actions"]] == [
+        "duplicate_idempotency_key",
+        "duplicate_idempotency_key",
+        "duplicate_idempotency_key",
+    ]
+    assert len(ledger.list_actions(business_id="artemea")) == 3
+    assert len(ledger.list_approval_requests(business_id="artemea")) == 3
+
+    denied_decision = ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=planned["actions"][2]["approval_request_id"],
+        decision="rejected",
+        actor_ref="manager token=raw_manager_secret",
+        reason="Do not pause campaign Authorization: Basic " + "raw_denial_reason_secret",
+        now=utc(20, 10),
+    )
+    approved_success = ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=planned["actions"][0]["approval_request_id"],
+        decision="approved",
+        actor_ref="manager token=raw_manager_secret",
+        reason="Approved restock Authorization: Basic " + "raw_approval_reason_secret",
+        now=utc(20, 15),
+    )
+    approved_failure = ledger.decide_approval_request(
+        business_id="artemea",
+        approval_request_id=planned["actions"][1]["approval_request_id"],
+        decision="approved",
+        actor_ref="manager token=raw_manager_secret",
+        reason="Approved failed restock Authorization: Basic " + "raw_approval_reason_secret",
+        now=utc(20, 16),
+    )
+
+    assert denied_decision.record.execution_state == "failed"
+    assert denied_decision.side_effects_executed == 0
+    assert approved_success.record.execution_state == "pending_execution"
+    assert approved_failure.record.execution_state == "pending_execution"
+
+    pending_queue = list_workflow_execution_queue(ledger, business_id="artemea")
+    assert pending_queue["total"] == 2
+    assert [action["ledger_id"] for action in pending_queue["actions"]] == [
+        approved_success.record.ledger_id,
+        approved_failure.record.ledger_id,
+    ]
+    assert pending_queue["side_effects_executed"] == 0
+
+    replay_after_decisions = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(20, 20),
+        action_ledger=ledger,
+        actor_ref="operator token=raw_operator_secret",
+    )
+    assert replay_after_decisions["actions"] == []
+    assert len(replay_after_decisions["skipped_actions"]) == 3
+    assert list_workflow_execution_queue(ledger, business_id="artemea")["total"] == 2
+
+    executed = ledger.update_action_execution_state(
+        business_id="artemea",
+        ledger_id=approved_success.record.ledger_id,
+        execution_state="executed",
+        now=utc(20, 30),
+    )
+    failed = ledger.update_action_execution_state(
+        business_id="artemea",
+        ledger_id=approved_failure.record.ledger_id,
+        execution_state="failed",
+        now=utc(20, 35),
+    )
+
+    assert executed.execution_state == "executed"
+    assert failed.execution_state == "failed"
+    terminal_queue = list_workflow_execution_queue(ledger, business_id="artemea")
+    assert terminal_queue["total"] == 0
+    assert terminal_queue["returned"] == 0
+    assert terminal_queue["side_effects_executed"] == 0
+
+    replay_after_terminal_states = simulate_case_workflow(
+        rule,
+        case,
+        now=utc(20, 40),
+        action_ledger=ledger,
+        actor_ref="operator token=raw_operator_secret",
+    )
+    assert replay_after_terminal_states["actions"] == []
+    assert len(replay_after_terminal_states["skipped_actions"]) == 3
+    assert list_workflow_execution_queue(ledger, business_id="artemea")["total"] == 0
+    assert len(ledger.list_actions(business_id="artemea")) == 3
+    assert len(ledger.list_approval_requests(business_id="artemea")) == 3
+
+    serialized = json.dumps(
+        [
+            planned,
+            replay_before_decisions,
+            denied_decision,
+            approved_success,
+            approved_failure,
+            pending_queue,
+            replay_after_decisions,
+            terminal_queue,
+            replay_after_terminal_states,
+        ],
+        sort_keys=True,
+        default=str,
+    )
+    for secret in (
+        "raw_operator_secret",
+        "raw_manager_secret",
+        "raw_approved_success_secret",
+        "raw_approved_success_header_secret",
+        "raw_failed_secret",
+        "raw_failed_header_secret",
+        "raw_denied_secret",
+        "raw_denial_reason_secret",
+        "raw_approval_reason_secret",
+    ):
+        assert secret not in serialized
+
+
 @pytest.mark.parametrize(
     "store_factory",
     [
