@@ -81,6 +81,7 @@ def test_compile_business_runtime_normalizes_business_connectors_schedule_and_se
         ],
     }
     assert runtime.connectors[1].required_scopes == ["orders.read", "products.read"]
+    assert runtime.connectors[1].scope_notes == ""
     assert runtime.connectors[1].rate_limit_policy == {
         "default_timeout_seconds": 30,
         "requests_per_minute": 120,
@@ -137,6 +138,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 ],
             },
             "required_scopes": ["spreadsheets.readonly"],
+            "scope_notes": "",
             "rate_limit_policy": {
                 "default_timeout_seconds": 30,
                 "requests_per_minute": None,
@@ -189,6 +191,7 @@ def test_runtime_run_metadata_exposes_registry_connector_refs_without_public_par
                 ],
             },
             "required_scopes": ["orders.read", "products.read"],
+            "scope_notes": "",
             "rate_limit_policy": {
                 "default_timeout_seconds": 30,
                 "requests_per_minute": 120,

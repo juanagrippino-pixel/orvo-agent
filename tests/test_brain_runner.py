@@ -222,6 +222,7 @@ def test_run_due_daily_reports_records_scheduled_run_in_ledger():
                 ],
             },
             "required_scopes": ["spreadsheets.readonly"],
+            "scope_notes": "",
             "rate_limit_policy": {
                 "default_timeout_seconds": 30,
                 "requests_per_minute": None,

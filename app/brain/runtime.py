@@ -57,6 +57,7 @@ class CompiledConnectorRuntime(BaseModel):
     executor_factory_path: str
     health_policy: dict[str, Any] = Field(default_factory=dict)
     required_scopes: list[str] = Field(default_factory=list)
+    scope_notes: str = ""
     rate_limit_policy: dict[str, Any] = Field(default_factory=dict)
     lifecycle: dict[str, str] = Field(default_factory=dict)
 
@@ -182,6 +183,7 @@ def _connector_run_metadata(connector: CompiledConnectorRuntime) -> dict[str, An
         "executor_factory_path": connector.executor_factory_path,
         "health_policy": dict(connector.health_policy),
         "required_scopes": list(connector.required_scopes),
+        "scope_notes": connector.scope_notes,
         "rate_limit_policy": dict(connector.rate_limit_policy),
         "lifecycle": dict(connector.lifecycle),
         "emitted_event_families": list(connector.emitted_event_families),
@@ -325,6 +327,7 @@ def _compile_connectors(
                 executor_factory_path=spec.factory_path,
                 health_policy=spec.health_policy_metadata(),
                 required_scopes=list(spec.scopes.required),
+                scope_notes=spec.scopes.notes,
                 rate_limit_policy=spec.rate_limit_policy_metadata(),
                 lifecycle=spec.lifecycle_metadata(),
             )
