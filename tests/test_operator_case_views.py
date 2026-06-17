@@ -332,6 +332,27 @@ def test_internal_case_queue_filters_by_owner_visible_policy(monkeypatch, tmp_pa
     assert promoted.case_id not in [case["case_id"] for case in body["data"]["cases"]]
 
 
+def test_internal_case_queue_sla_status_respects_as_of_clock(monkeypatch, tmp_path):
+    client, db_path = _client(monkeypatch, tmp_path)
+    due_soon = _seed_case(db_path, _case_detection(run_id="run-sla-due-soon", priority=95))
+
+    before_due = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "sla_status = breached", "as_of": "2026-05-24T09:30:00Z"},
+    )
+    assert before_due.status_code == 200
+    assert before_due.get_json()["data"]["cases"] == []
+
+    after_due = client.get(
+        "/internal/brain/businesses/artemea/cases",
+        headers=AUTH,
+        query_string={"jql": "sla_status = breached", "as_of": "2026-05-24T10:01:00Z"},
+    )
+    assert after_due.status_code == 200
+    assert [case["case_id"] for case in after_due.get_json()["data"]["cases"]] == [due_soon.case_id]
+
+
 def test_internal_case_queue_filters_by_source_connector_and_keeps_business_scope(monkeypatch, tmp_path):
     client, db_path = _client(monkeypatch, tmp_path)
     _seed_case(db_path, _case_detection_with_source(source="tiendanube", run_id="run-tn"))
