@@ -2,7 +2,7 @@
 
 Status: Active operating mode for current N2 Pro cron jobs
 Date: 2026-06-13
-Last reconciled: 2026-06-15
+Last reconciled: 2026-06-17
 Provider/model: OpenRouter `nex-agi/nex-n2-pro:free`
 Canonical branch: `feat/orvo-brain-control-plane`
 Canonical repo: `/root/orvo-agent`
@@ -33,15 +33,15 @@ This N2 Pro note supersedes only the provider-specific rule that normal Orvo wor
 
 ## Integration posture after latest ARB review
 
-Latest source: [`docs/architecture-reviews/2026-06-15-arb-architecture-alignment-review.md`](../architecture-reviews/2026-06-15-arb-architecture-alignment-review.md), [`docs/architecture-reviews/2026-06-15-work-management-jql-review.md`](../architecture-reviews/2026-06-15-work-management-jql-review.md), [`docs/architecture-reviews/2026-06-15-semantic-connector-review.md`](../architecture-reviews/2026-06-15-semantic-connector-review.md), and [`docs/architecture-reviews/2026-06-15-workflow-trust-security-review.md`](../architecture-reviews/2026-06-15-workflow-trust-security-review.md). The older branch-readiness matrix is now historical context; the consolidated alignment review is the current branch-sequencing note.
+Latest source: [`docs/architecture-reviews/2026-06-17-architecture-alignment-review.md`](../architecture-reviews/2026-06-17-architecture-alignment-review.md) and [`docs/architecture-reviews/2026-06-17-branch-readiness-matrix.md`](../architecture-reviews/2026-06-17-branch-readiness-matrix.md). The 2026-06-15 review is historical context; the 2026-06-17 ARB reports are the current branch-sequencing note.
 
-- Current HEAD (`3fd74eed`) remains aligned enough for the MVP control plane: `OperationalCase` is still the durable state owner, WorkItem/JQL/query metadata stay projection primitives, and the semantic registry remains the canonical metric source.
-- Connector-platform hardening is already on the canonical branch, so keep the connector-health/runtime path green rather than treating the old branch as the next merge target.
-- Preferred next merge lane after rebase/order: `n2-pro-work-management`, `N2-Pro/workflow-automation`, `N2-Pro/trust-admin-security`, then `N2-Pro/search-analytics` on top of the work-management field/query model.
-- Needs re-scope before promotion: `N2-Pro/operator-surfaces` and `N2-Pro/service-management`.
+- Current HEAD (`f293c028`) remains aligned enough for the MVP control plane: `OperationalCase` is still the durable state owner, WorkItem/JQL-like/query metadata stay projection primitives, and the semantic registry remains the canonical metric source. The ARB reviewed the same canonical branch at `8a0b7c66`; current HEAD only adds the 2026-06-17 review reports.
+- Connector-platform, workflow-automation, work-management, and search-analytics directions are already represented in the canonical branch. Keep their runtime/query/registry paths green rather than treating old branches as the next merge target.
+- Before the next major merge, document/test follow-up contracts for workflow schemes, semantic manifest governance, connector adapter protocols, workflow simulation, and trust/admin boundaries.
+- Needs rebase/focused review before promotion: `N2-Pro/operator-surfaces`, `N2-Pro/trust-admin-security`, `N2-Pro/edge-developer-platform`, `N2-Pro/service-management`, `qa/2026-06-17-control-plane-safety`, and `n2/build-loop-20260617035630`.
 - Workflow automation stays projection/governance-first for now: planning/idempotency/approval primitives are acceptable, but there is still no real executor, durable approval state machine, or full side-effect audit integration.
-- Search, operator-surface, and service-management work must consume WorkItem/JQL/built-in-view/query-field primitives; reject bespoke recent-case projections or a second search/filter model.
-- Not mergeable: destructive `claude/*` refactor branches.
+- Search, operator-surface, and service-management work must consume WorkItem/JQL-like/built-in-view/query-field primitives; reject bespoke recent-case projections or a second search/filter model.
+- Not mergeable as-is: destructive `claude/*` refactor branches.
 
 The integration train should continue to merge narrow, additive slices that strengthen registries, audit, readiness, deterministic workflow plumbing, and shared query/view primitives. It should reject wholesale merges that duplicate projection logic, weaken semantic validation, delete accepted tests, or let bespoke operator endpoints become source of truth.
 
