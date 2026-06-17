@@ -53,3 +53,45 @@ def test_cookie_headers_are_redacted_without_cookie_tail_leaks():
     assert session_cookie not in redacted_inline
     assert csrf_cookie not in redacted_inline
     assert redacted_inline == "upstream failed Cookie: [REDACTED] while syncing orders"
+
+
+def test_api_key_headers_are_redacted_without_header_tail_leaks():
+    header_secret = "api_key_" + "header_tail_12345"
+    compact_secret = "api_key_" + "compact_tail_67890"
+    json_secret = "api_key_" + "json_tail_24680"
+
+    inline = (
+        f"upstream failed X-API-Key: {header_secret}; "
+        f"retry with api-key={compact_secret} while syncing orders"
+    )
+    redacted_inline = redact_text(inline)
+    assert redacted_inline is not None
+
+    assert header_secret not in redacted_inline
+    assert compact_secret not in redacted_inline
+    assert "X-API-Key: [REDACTED]" in redacted_inline
+    assert "api-key=[REDACTED]" in redacted_inline
+
+    json_inline = f'connector payload {{"x-api-key": "{json_secret}"}}'
+    redacted_json_inline = redact_text(json_inline)
+    assert redacted_json_inline is not None
+    assert json_secret not in redacted_json_inline
+    assert '"x-api-key": "[REDACTED]"' in redacted_json_inline
+
+    structured = {
+        "headers": {
+            "X-API-Key": header_secret,
+            "x_api_key": compact_secret,
+            "x-request-id": "req-123",
+        },
+        "error": json.dumps({"X-API-Key": header_secret}),
+    }
+    redacted_structured = redact_secrets(structured)
+    encoded = json.dumps(redacted_structured, sort_keys=True)
+
+    assert header_secret not in encoded
+    assert compact_secret not in encoded
+    assert redacted_structured["headers"]["X-API-Key"] == "[REDACTED]"
+    assert redacted_structured["headers"]["x_api_key"] == "[REDACTED]"
+    assert redacted_structured["headers"]["x-request-id"] == "req-123"
+    assert '"X-API-Key": "[REDACTED]"' in redacted_structured["error"]

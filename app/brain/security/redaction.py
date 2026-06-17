@@ -36,8 +36,11 @@ _COOKIE_HEADER_RE = re.compile(
 _AUTH_SCHEME_HEADER_RE = re.compile(
     r"(?i)([\"']?\bauthorization\b[\"']?\s*[:=]\s*)(?:Basic|Token|ApiKey|Api-Key)\s+[^\s,;]+"
 )
+_API_KEY_HEADER_RE = re.compile(
+    r"(?i)([\"']?\b(?:x[-_])?api[-_]?key\b[\"']?\s*[:=]\s*)[^\s,;\r\n]+"
+)
 _SECRET_KEY_PATTERN = (
-    r"access_token|refresh_token|api_key|apikey|authorization_code|oauth_code|authorization|auth_header|password|"
+    r"access_token|refresh_token|api[-_]?key|authorization_code|oauth_code|authorization|auth_header|password|"
     r"private_key|credential|cookie|session|signature|secret|token"
 )
 _QUOTED_KEY_VALUE_SECRET_RE = re.compile(
