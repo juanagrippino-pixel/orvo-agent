@@ -4,15 +4,120 @@ import pytest
 
 from app.brain.gateway_contracts import (
     GatewayContractError,
+    GatewayPathIdentity,
     GatewayRateLimitPolicy,
+    GatewayRouteIdentity,
     GatewayRoutePolicy,
     GatewayServiceCatalog,
+    GatewayServiceCatalogDiff,
     GatewayServiceCatalogEntry,
     build_gateway_context,
     default_gateway_service_catalog,
     render_gateway_service_catalog_markdown,
     validate_gateway_route_policy,
 )
+
+
+def test_gateway_service_catalog_diff_reports_added_and_removed_routes():
+    base = GatewayServiceCatalog(
+        (
+            GatewayServiceCatalogEntry(
+                service="internal-brain",
+                description="Read one route.",
+                path_pattern="/internal/brain/businesses/<business_id>/runs/<run_id>",
+                policy=GatewayRoutePolicy(
+                    route_key="internal.brain.runs.detail",
+                    method="GET",
+                ),
+            ),
+            GatewayServiceCatalogEntry(
+                service="internal-brain",
+                description="Compile runtime.",
+                path_pattern="/internal/brain/businesses/<business_id>/runtime/compile-preview",
+                policy=GatewayRoutePolicy(
+                    route_key="internal.brain.runtime.compile_preview",
+                    method="POST",
+                ),
+            ),
+        )
+    )
+    other = GatewayServiceCatalog(
+        (
+            GatewayServiceCatalogEntry(
+                service="internal-brain",
+                description="Read one route.",
+                path_pattern="/internal/brain/businesses/<business_id>/runs/<run_id>",
+                policy=GatewayRoutePolicy(
+                    route_key="internal.brain.runs.detail",
+                    method="GET",
+                ),
+            ),
+            GatewayServiceCatalogEntry(
+                service="internal-brain",
+                description="Read connector readiness.",
+                path_pattern="/internal/brain/businesses/<business_id>/connectors/readiness",
+                policy=GatewayRoutePolicy(
+                    route_key="internal.brain.connectors.readiness",
+                    method="GET",
+                ),
+            ),
+        )
+    )
+
+    diff = base.diff(other)
+
+    assert diff == GatewayServiceCatalogDiff(
+        added=(
+            GatewayRouteIdentity(
+                service="internal-brain",
+                route_key="internal.brain.connectors.readiness",
+                method="GET",
+                path_pattern="/internal/brain/businesses/<business_id>/connectors/readiness",
+            ),
+        ),
+        removed=(
+            GatewayRouteIdentity(
+                service="internal-brain",
+                route_key="internal.brain.runtime.compile_preview",
+                method="POST",
+                path_pattern="/internal/brain/businesses/<business_id>/runtime/compile-preview",
+            ),
+        ),
+    )
+    assert diff.is_empty is False
+    assert base.diff(base).is_empty is True
+
+
+def test_gateway_service_catalog_path_diff_ignores_route_key_for_coverage_checks():
+    catalog = GatewayServiceCatalog(
+        (
+            GatewayServiceCatalogEntry(
+                service="internal-brain",
+                description="Read one route.",
+                path_pattern="/internal/brain/businesses/<business_id>/runs/<run_id>",
+                policy=GatewayRoutePolicy(
+                    route_key="internal.brain.runs.detail",
+                    method="GET",
+                ),
+            ),
+        )
+    )
+    actual_routes = GatewayServiceCatalog(
+        (
+            GatewayServiceCatalogEntry(
+                service="internal-brain",
+                description="internal_brain_run_detail",
+                path_pattern="/internal/brain/businesses/<business_id>/runs/<run_id>",
+                policy=GatewayRoutePolicy(
+                    route_key="internal_brain_run_detail",
+                    method="GET",
+                ),
+            ),
+        )
+    )
+
+    assert catalog.path_diff(actual_routes) == GatewayServiceCatalogDiff()
+    assert catalog.path_diff(actual_routes).path_added == ()
 
 
 def test_gateway_service_catalog_rejects_duplicate_route_method():

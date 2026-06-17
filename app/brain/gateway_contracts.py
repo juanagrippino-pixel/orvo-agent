@@ -280,6 +280,36 @@ class GatewayServiceCatalog:
 
         return tuple(entry for entry in self.entries if entry.service == service)
 
+    def route_identities(self) -> tuple[GatewayRouteIdentity, ...]:
+        """Return stable route identities for catalog comparison."""
+
+        return tuple(sorted(_gateway_route_identity(entry) for entry in self.entries))
+
+    def path_identities(self) -> tuple[GatewayPathIdentity, ...]:
+        """Return stable path/method identities for coverage comparison."""
+
+        return tuple(sorted(_gateway_path_identity(entry) for entry in self.entries))
+
+    def diff(self, other: "GatewayServiceCatalog") -> GatewayServiceCatalogDiff:
+        """Return route-key-aware additions and removals relative to this catalog."""
+
+        self_routes = set(self.route_identities())
+        other_routes = set(other.route_identities())
+        return GatewayServiceCatalogDiff(
+            added=tuple(sorted(other_routes - self_routes)),
+            removed=tuple(sorted(self_routes - other_routes)),
+        )
+
+    def path_diff(self, other: "GatewayServiceCatalog") -> GatewayServiceCatalogDiff:
+        """Return path/method additions and removals, ignoring route keys."""
+
+        self_paths = set(self.path_identities())
+        other_paths = set(other.path_identities())
+        return GatewayServiceCatalogDiff(
+            path_added=tuple(sorted(other_paths - self_paths)),
+            path_removed=tuple(sorted(self_paths - other_paths)),
+        )
+
 
 @dataclass(frozen=True)
 class GatewayRouteDecision:
@@ -288,6 +318,65 @@ class GatewayRouteDecision:
     allowed: bool
     reason: str | None = None
     retry_after_seconds: int | None = None
+
+
+@dataclass(frozen=True, order=True)
+class GatewayRouteIdentity:
+    """Stable identity for one catalogued gateway route."""
+
+    service: str
+    route_key: RouteKey
+    method: Method
+    path_pattern: str | None = None
+
+
+@dataclass(frozen=True, order=True)
+class GatewayPathIdentity:
+    """Stable identity for route coverage checks that ignore route keys."""
+
+    service: str
+    method: Method
+    path_pattern: str | None = None
+
+
+@dataclass(frozen=True)
+class GatewayServiceCatalogDiff:
+    """Difference between two gateway service catalogs."""
+
+    added: tuple[GatewayRouteIdentity, ...] = ()
+    removed: tuple[GatewayRouteIdentity, ...] = ()
+    path_added: tuple[GatewayPathIdentity, ...] = ()
+    path_removed: tuple[GatewayPathIdentity, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        """Return true when both route and path comparisons are empty."""
+
+        return not any(
+            (
+                self.added,
+                self.removed,
+                self.path_added,
+                self.path_removed,
+            )
+        )
+
+
+def _gateway_route_identity(entry: GatewayServiceCatalogEntry) -> GatewayRouteIdentity:
+    return GatewayRouteIdentity(
+        service=entry.service,
+        route_key=entry.route_key,
+        method=entry.method,
+        path_pattern=entry.path_pattern,
+    )
+
+
+def _gateway_path_identity(entry: GatewayServiceCatalogEntry) -> GatewayPathIdentity:
+    return GatewayPathIdentity(
+        service=entry.service,
+        method=entry.method,
+        path_pattern=entry.path_pattern,
+    )
 
 
 def normalize_request_id(value: str | None) -> RequestId:
