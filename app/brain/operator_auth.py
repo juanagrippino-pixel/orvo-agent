@@ -8,6 +8,7 @@ inspect internal surfaces without mutating case workflow state.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Final
 
@@ -24,6 +25,9 @@ _ROLE_PERMISSIONS: Final[dict[str, frozenset[str]]] = {
     "admin": frozenset({INTERNAL_READ_PERMISSION, CASE_ACTION_PERMISSION, OPERATOR_AUDIT_READ_PERMISSION}),
 }
 _DEFAULT_OPERATOR_ROLE: Final[str] = "operator"
+_SECRET_SHAPED_GRANT_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)\b(access_token|refresh_token|api[_-]?key|authorization|auth_header|password|private_key|credential|cookie|session|signature|secret|token)\b\s*[:=]"
+)
 
 
 @dataclass(frozen=True)
@@ -206,7 +210,10 @@ def audit_safe_business_values(values: tuple[str, ...] | None) -> list[str] | No
     safe_values: list[str] = []
     for value in values:
         redacted = redact_text(value) or "[REDACTED]"
-        safe_values.append(redacted if redacted == value else "[REDACTED]")
+        if redacted != value or _SECRET_SHAPED_GRANT_RE.search(value):
+            safe_values.append("[REDACTED]")
+            continue
+        safe_values.append(value)
     return safe_values
 
 

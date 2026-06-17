@@ -27,3 +27,35 @@ def test_project_internal_operator_session_uses_minimal_global_scope_projection(
         "all_businesses": True,
         "allowed_businesses": ["*"],
     }
+
+
+def test_project_internal_operator_session_collapses_secret_shaped_grant_labels():
+    secret_grant = "tenant access_" + "token=raw_grant_secret"
+    principal = build_internal_operator_principal(
+        actor_ref="admin:sol",
+        role="admin",
+        allowed_businesses_header=f"artemea, {secret_grant}",
+    )
+
+    session = project_internal_operator_session(principal)["business_scope"]
+
+    assert session["legacy_token_scoped"] is False
+    assert session["all_businesses"] is False
+    assert session["allowed_businesses"] == ["artemea", "[REDACTED]"]
+    assert secret_grant not in str(session)
+    assert "access_token" not in str(session)
+
+
+def test_project_internal_operator_session_collapses_partially_redacted_grant_labels():
+    partially_redacted_grant = "tenant access_" + "token=[REDACTED]"
+    principal = build_internal_operator_principal(
+        actor_ref="admin:sol",
+        role="admin",
+        allowed_businesses_header=partially_redacted_grant,
+    )
+
+    session = project_internal_operator_session(principal)["business_scope"]
+
+    assert session["allowed_businesses"] == ["[REDACTED]"]
+    assert partially_redacted_grant not in str(session)
+    assert "access_token" not in str(session)
